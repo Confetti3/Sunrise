@@ -129,3 +129,17 @@ rows in this run; it does not establish the missing wire fields or authorize wri
 source object. Evidence is retained under
 `analysis/script-host-runtime/20260815-034100-activity-state-source-homecoming/`; the exercised DLL
 SHA-256 is `D5714B55317EB4FAE657876BB6E0D2769A3EFCF92B6413A8DE8C14A616D1DAED`.
+
+Tracing the rebuild's arguments corrects the source ownership boundary. `+0x5084C0` obtains the
+source passed through `+0x54D730` to the category dispatcher from activity-owner virtual method
+`+0x18`, not method `+0x38`. The concrete owner vtable is at `+0x1C35DC8`; its `+0x18` method
+(`+0x15A3C10`) returns owner field `+0x18`, which initialization at `+0xFA7600` fills from the
+registry path rooted at `+0xBE1CB0`.
+
+A follow-up bounded identity snapshot reached real orbit and observed the same raw source prefix
+at both dispatcher callers: `00100101,9EAA3001,00010000,00000000`. Its first pointer-sized value
+is not a main-image vtable, and the full 16-byte prefix is not present literally in the
+reconstructed executable. The structure is therefore consistent with decoded/runtime state, not
+a polymorphic object or a static package record. Both row counts remained zero. Evidence is in
+`analysis/script-host-runtime/20260815-040931-activity-state-source-identity-orbit/`; the exact DLL
+SHA-256 is `FB5882E6F2C30360BC9E7E2FBD4E648A256200965C0F75801DC556D73489A5EA`.

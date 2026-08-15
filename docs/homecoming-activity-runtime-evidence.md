@@ -226,3 +226,19 @@ be identified before `objective.set` can be implemented. The retained log, probe
 checkpoint, and exact DLL are in
 `analysis/script-host-runtime/20260815-034100-activity-state-source-homecoming/`; the DLL SHA-256 is
 `D5714B55317EB4FAE657876BB6E0D2769A3EFCF92B6413A8DE8C14A616D1DAED`.
+
+The `DestinyResearch` objective payloads also close one tempting but incorrect static route. Each
+Homecoming objective has a six-entry pointer array, but `obj_ghaul`'s entries resolve internally to
+payload offsets `+0xA0`, `+0xB8`, `+0xF8`, `+0x110`, `+0x170`, and `+0x1D0`; the other four
+objectives share the same structural pattern. These are component payloads, not verified external
+trigger/action edges. The archive's name-affinity arrows remain heuristic and cannot supply an
+`objective.set` transition.
+
+Static tracing also identifies the retained source more precisely. The activity-state rebuild at
+`+0x5084C0` passes the value returned by activity-owner virtual method `+0x18` through `+0x54D730`
+to `+0x540320`. A real-orbit identity control saw the same non-polymorphic prefix
+`00100101,9EAA3001,00010000,00000000` at callers `+0x5492F1` and `+0x54DA47`, with both explicit
+row counts still zero. The prefix has no literal match in the reconstructed executable, which
+points toward a decoded/runtime producer. The exact log and DLL are retained in
+`analysis/script-host-runtime/20260815-040931-activity-state-source-identity-orbit/`; DLL SHA-256
+`FB5882E6F2C30360BC9E7E2FBD4E648A256200965C0F75801DC556D73489A5EA`.

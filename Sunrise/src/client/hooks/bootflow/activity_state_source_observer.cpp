@@ -71,6 +71,8 @@ struct ProgressRow {
 };
 
 struct SourceSnapshot {
+    std::array<std::uint32_t, 4> prefixWords{};
+    std::uintptr_t vtableRva{};
     std::int32_t switchCount{};
     std::int32_t progressCount{};
     std::size_t capturedSwitches{};
@@ -79,6 +81,30 @@ struct SourceSnapshot {
     std::array<ProgressRow, kProgressCaptureCapacity> progressions{};
 };
 
+/** Returns a stable main-image-relative value when one copied pointer identifies a client vtable.
+ */
+[[nodiscard]] std::uintptr_t main_image_rva(std::uintptr_t value) noexcept {
+    const auto* const image =
+        static_cast<const std::byte*>(static_cast<const void*>(GetModuleHandleW(nullptr)));
+    if (image == nullptr || value < reinterpret_cast<std::uintptr_t>(image)) {
+        return 0;
+    }
+    __try {
+        const auto* const dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(image);
+        if (dos->e_magic != IMAGE_DOS_SIGNATURE) {
+            return 0;
+        }
+        const auto* const nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(image + dos->e_lfanew);
+        if (nt->Signature != IMAGE_NT_SIGNATURE) {
+            return 0;
+        }
+        const std::uintptr_t delta = value - reinterpret_cast<std::uintptr_t>(image);
+        return delta < nt->OptionalHeader.SizeOfImage ? delta : 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;
+    }
+}
+
 /** Copies bounded scalar rows before the native dispatcher consumes the retained source object. */
 [[nodiscard]] bool snapshot_source(const void* source, SourceSnapshot& output) noexcept {
     if (source == nullptr) {
@@ -86,6 +112,10 @@ struct SourceSnapshot {
     }
     __try {
         const auto* const bytes = static_cast<const std::byte*>(source);
+        std::memcpy(output.prefixWords.data(), bytes, sizeof output.prefixWords);
+        std::uintptr_t possibleVtable{};
+        std::memcpy(&possibleVtable, bytes, sizeof possibleVtable);
+        output.vtableRva = main_image_rva(possibleVtable);
         std::memcpy(&output.switchCount, bytes + kSwitchCountOffset, sizeof output.switchCount);
         std::memcpy(
             &output.progressCount, bytes + kProgressCountOffset, sizeof output.progressCount);
@@ -110,6 +140,34 @@ struct SourceSnapshot {
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
+    }
+}
+
+void write_identity_line(std::uintptr_t callerRva, const SourceSnapshot& snapshot) noexcept {
+    if (g_reports.load(std::memory_order_relaxed) >= kReportCapacity) {
+        return;
+    }
+    const std::uint32_t sequence = g_reports.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (sequence > kReportCapacity) {
+        return;
+    }
+    std::array<char, kLineCapacity> line{};
+    const int written = std::snprintf(line.data(),
+                                      line.size(),
+                                      "ev=activity_state_source stage=identity n=%u caller=+0x%llX "
+                                      "vtable=+0x%llX head=%08X,%08X,%08X,%08X",
+                                      sequence,
+                                      static_cast<unsigned long long>(callerRva),
+                                      static_cast<unsigned long long>(snapshot.vtableRva),
+                                      snapshot.prefixWords[0],
+                                      snapshot.prefixWords[1],
+                                      snapshot.prefixWords[2],
+                                      snapshot.prefixWords[3]);
+    if (written > 0) {
+        const auto length = static_cast<std::size_t>(written) < line.size()
+                                ? static_cast<std::size_t>(written)
+                                : line.size() - 1;
+        core::log::write(core::log::Channel::client, core::log::Level::info, {line.data(), length});
     }
 }
 
@@ -185,6 +243,14 @@ void write_line(const char* format,
 
 void report(std::uintptr_t callerRva, bool enabled, const SourceSnapshot& snapshot) noexcept {
     constexpr std::uint64_t kOffset = 14'695'981'039'346'656'037ULL;
+    std::uint64_t identityKey = mix(kOffset, callerRva);
+    identityKey = mix(identityKey, snapshot.vtableRva);
+    for (const std::uint32_t word : snapshot.prefixWords) {
+        identityKey = mix(identityKey, word);
+    }
+    if (claim(identityKey)) {
+        write_identity_line(callerRva, snapshot);
+    }
     std::uint64_t summaryKey = mix(kOffset, callerRva);
     summaryKey = mix(summaryKey, static_cast<std::uint32_t>(snapshot.switchCount));
     summaryKey = mix(summaryKey, static_cast<std::uint32_t>(snapshot.progressCount));

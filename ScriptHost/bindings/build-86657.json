@@ -45,7 +45,7 @@
       "id": "objective.set",
       "status": "wireAdapterRequired",
       "owner": "activity-host",
-      "evidence": "Definition, completion, progress, and retained-row application consumers are localized. Orbit and authoritative Homecoming controls observed enabled category-zero dispatches with zero explicit rows; no source wire schema, Homecoming index mapping, or verified host mutation exists."
+      "evidence": "Definition, completion, progress, and retained-row application consumers are localized. Orbit and authoritative Homecoming controls observed enabled category-zero dispatches with zero explicit rows. The retained source comes from activity-owner virtual method +0x18 and has a stable non-polymorphic runtime prefix, but no source wire schema, Homecoming index mapping, or verified host mutation exists."
     },
     {
       "id": "gameplay-switch.set",
