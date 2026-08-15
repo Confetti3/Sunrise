@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 
 namespace Sunrise.ScriptHost.Runtime;
@@ -249,6 +250,12 @@ public sealed class MissionRuntime
             "immediate" => true,
             "delay" => DateTimeOffset.UtcNow - nodeEnteredAtUtc
                 >= TimeSpan.FromMilliseconds(trigger.Milliseconds ?? 0),
+            "activity.incident" => string.Equals(
+                    hostEvent.Type,
+                    "activity.incident",
+                    StringComparison.Ordinal)
+                && hostEvent.Fields.TryGetValue("primaryTarget", out string? primaryTarget)
+                && IncidentTargetMatches(primaryTarget, trigger.Value),
             "signal" => string.Equals(hostEvent.Type, "signal", StringComparison.Ordinal)
                 && hostEvent.Fields.TryGetValue("name", out string? name)
                 && string.Equals(name, trigger.Value, StringComparison.Ordinal),
@@ -257,6 +264,13 @@ public sealed class MissionRuntime
                 && string.Equals(phase, trigger.Value, StringComparison.Ordinal),
             _ => false,
         };
+    }
+
+    private static bool IncidentTargetMatches(string observed, string? authored)
+    {
+        return uint.TryParse(observed, NumberStyles.None, CultureInfo.InvariantCulture, out uint observedTarget)
+            && uint.TryParse(authored, NumberStyles.None, CultureInfo.InvariantCulture, out uint authoredTarget)
+            && observedTarget == authoredTarget;
     }
 
     private async Task SaveAsync(CancellationToken cancellationToken)

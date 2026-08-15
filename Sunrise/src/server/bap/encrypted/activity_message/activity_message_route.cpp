@@ -17,6 +17,7 @@
 #include "../../../../middleware/bap/activity_message/entity_authority.h"
 #include "../../../../middleware/bap/activity_message/entity_slots.h"
 #include "../../../../middleware/bap/activity_message/incident.h"
+#include "../../../../state/activity/incidents/runtime.h"
 #include "../../../../state/activity/runtime.h"
 #include "membership/activity_membership_route.h"
 #include "middleware/bap/activity_message/activity_entity_slot_request_parser.h"
@@ -95,21 +96,34 @@ void report_accepted(std::uint32_t messageType,
     }
 }
 
-/**
- * Checks one incident and reports its verdict. Nothing relays msg 19 yet, so a pass changes
- * nothing. A failure is named because a bad target index would crash the Client if it were sent on.
- * @param request Validated owned svc8 envelope.
- */
-void report_incident(const service::Request& request) noexcept {
+// Checks one incident, publishes a pointer-free observation, and reports its verdict. A bad target
+// index would crash the Client if it were sent on, so failures are named in the log.
+void report_incident(std::uint64_t boundSessionId, const service::Request& request) noexcept {
     namespace incident = service::incident;
     incident::Incident parsed;
     const incident::Verdict verdict = incident::validate(request.payload, parsed);
+    const char* relay = "rejected";
+    if (verdict == incident::Verdict::accepted) {
+        state::activity::incidents::Observation observation{};
+        observation.sessionId = boundSessionId;
+        observation.accountHandle = request.accountHandle;
+        observation.primaryTarget = parsed.primaryTarget;
+        observation.extraTargetCount = parsed.extraTargetCount;
+        std::copy_n(parsed.extraTargets, parsed.extraTargetCount, observation.extraTargets.begin());
+        observation.payloadLength = parsed.payloadLength;
+        observation.hasCompressedSelector = parsed.hasCompressedSelector;
+        observation.hasPayload = parsed.hasPayload;
+        relay = state::activity::incidents::publish(observation) ? "queued" : "dropped";
+    }
     std::array<char, core::log::kLineCapacity> line{};
     const int written = std::snprintf(line.data(),
                                       line.size(),
-                                      "ev=activity stage=incident result=%s target=%u extra=%u "
-                                      "selector=%u payload=%u",
+                                      "ev=activity stage=incident result=%s relay=%s session=%llu "
+                                      "handle=0x%llX target=%u extra=%u selector=%u payload=%u",
                                       incident::verdict_name(verdict),
+                                      relay,
+                                      static_cast<unsigned long long>(boundSessionId),
+                                      static_cast<unsigned long long>(request.accountHandle),
                                       parsed.primaryTarget,
                                       parsed.extraTargetCount,
                                       static_cast<unsigned>(parsed.hasCompressedSelector),
@@ -359,7 +373,7 @@ bool process(std::uint64_t boundSessionId,
         }
         return true;
     } else if (request.messageType == service::incident::kMessageType) {
-        report_incident(request);
+        report_incident(boundSessionId, request);
         return true;
     } else if (request.messageType == authority::kRequestPurgeMessageType) {
         if (!report_request_purge(request)) {

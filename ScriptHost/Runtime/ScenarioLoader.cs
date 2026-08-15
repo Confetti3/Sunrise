@@ -9,6 +9,7 @@ public static class ScenarioLoader
         "delay",
         "host.start",
         "immediate",
+        "activity.incident",
         "signal",
         "world.phase",
     };
@@ -84,7 +85,9 @@ public static class ScenarioLoader
                 throw new InvalidDataException($"Delay node '{node.Id}' needs a nonnegative milliseconds value.");
             }
 
-            if ((node.Trigger.Type == "signal" || node.Trigger.Type == "world.phase")
+            if ((node.Trigger.Type == "activity.incident"
+                    || node.Trigger.Type == "signal"
+                    || node.Trigger.Type == "world.phase")
                 && string.IsNullOrWhiteSpace(node.Trigger.Value))
             {
                 throw new InvalidDataException($"Trigger '{node.Trigger.Type}' in node '{node.Id}' needs a value.");

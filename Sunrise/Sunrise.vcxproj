@@ -334,6 +334,7 @@
     <ClCompile Include="src\state\runtime\state_runtime.cpp" />
     <ClCompile Include="src\state\activity\activity_session_lookup.cpp" />
     <ClCompile Include="src\state\activity\activity_world_arrival.cpp" />
+    <ClCompile Include="src\state\activity\incidents\activity_incident_queue.cpp" />
     <ClCompile Include="src\state\activity\membership\activity_membership_query.cpp" />
     <ClCompile Include="src\state\unlocks\unlocks_runtime.cpp" />
     <ClCompile Include="src\state\entitlements\entitlement_defaults.cpp" />
@@ -781,6 +782,7 @@
     <ClInclude Include="src\state\activity\membership\definition.h" />
     <ClInclude Include="src\state\activity\membership\activity_membership_query.h" />
     <ClInclude Include="src\state\activity\membership\transactions\internal.h" />
+    <ClInclude Include="src\state\activity\incidents\runtime.h" />
     <ClInclude Include="src\state\activity\runtime.h" />
     <ClInclude Include="src\state\activity\transactions\internal.h" />
     <ClInclude Include="src\state\matchmaking\definition.h" />

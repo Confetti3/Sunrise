@@ -1,6 +1,7 @@
 using System.IO.Pipes;
 using System.Text;
 using System.Text.Json;
+using Sunrise.ScriptHost.Runtime;
 
 namespace Sunrise.ScriptHost.Protocol;
 

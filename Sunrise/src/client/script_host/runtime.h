@@ -14,6 +14,7 @@
 #include <string_view>
 
 #include "../../core/logging/log.h"
+#include "../../state/activity/incidents/runtime.h"
 #include "../../state/activity/runtime.h"
 
 namespace sunrise::client::script_host {
@@ -34,12 +35,12 @@ inline HANDLE g_thread{};
 
 [[nodiscard]] inline const char* phase_name(state::activity::WorldPhase phase) noexcept {
     switch (phase) {
-        case state::activity::WorldPhase::idle:
-            return "idle";
-        case state::activity::WorldPhase::transitioning:
-            return "transitioning";
-        case state::activity::WorldPhase::arrived:
-            return "arrived";
+    case state::activity::WorldPhase::idle:
+        return "idle";
+    case state::activity::WorldPhase::transitioning:
+        return "transitioning";
+    case state::activity::WorldPhase::arrived:
+        return "arrived";
     }
     return "unknown";
 }
@@ -58,9 +59,8 @@ inline void report(core::log::Level level, std::string_view message) noexcept {
 inline void pipe_path(std::array<wchar_t, kPipePathCapacity>& output) noexcept {
     output.fill(L'\0');
     std::array<wchar_t, kPipePathCapacity> configured{};
-    const DWORD length = GetEnvironmentVariableW(L"SUNRISE_SCRIPT_HOST_PIPE",
-                                                  configured.data(),
-                                                  static_cast<DWORD>(configured.size()));
+    const DWORD length = GetEnvironmentVariableW(
+        L"SUNRISE_SCRIPT_HOST_PIPE", configured.data(), static_cast<DWORD>(configured.size()));
     if (length == 0 || length >= configured.size()) {
         (void)wcscpy_s(output.data(), output.size(), kDefaultPipePath);
         return;
@@ -105,20 +105,92 @@ inline void pipe_path(std::array<wchar_t, kPipePathCapacity>& output) noexcept {
 
 [[nodiscard]] inline bool write_hello(HANDLE pipe) noexcept {
     constexpr std::string_view hello =
-        R"({"protocol":1,"type":"bridge.hello","bridge":"sunrise-native","build":"Sunrise 0.2.1 / Destiny 2 build 86657","capabilities":["host.ping","world.phase.observe"],"limitations":["no activity-session snapshot","no incident encoder","no objective adapter","no actor lifecycle adapter","no AI policy"]})";
+        R"({"protocol":1,"type":"bridge.hello","bridge":"sunrise-native","build":"Sunrise 0.2.1 / Destiny 2 build 86657","capabilities":["host.ping","world.phase.observe"],"limitations":["no activity-session snapshot","incident observation is unprobed","no incident encoder","no objective adapter","no actor lifecycle adapter","no AI policy"]})";
     return write_line(pipe, hello);
 }
 
-[[nodiscard]] inline bool write_world_phase(HANDLE pipe, state::activity::WorldPhase phase) noexcept {
+[[nodiscard]] inline bool write_world_phase(HANDLE pipe,
+                                            state::activity::WorldPhase phase) noexcept {
     std::array<char, 192> line{};
-    const int written = std::snprintf(line.data(),
-                                      line.size(),
-                                      R"({"protocol":1,"type":"world.phase","phase":"%s","transitionAgeMs":%llu})",
-                                      phase_name(phase),
-                                      static_cast<unsigned long long>(
-                                          state::activity::world_transition_age()));
+    const int written =
+        std::snprintf(line.data(),
+                      line.size(),
+                      R"({"protocol":1,"type":"world.phase","phase":"%s","transitionAgeMs":%llu})",
+                      phase_name(phase),
+                      static_cast<unsigned long long>(state::activity::world_transition_age()));
     return written > 0 && static_cast<std::size_t>(written) < line.size()
            && write_line(pipe, std::string_view(line.data(), static_cast<std::size_t>(written)));
+}
+
+template <std::size_t Capacity, typename... Arguments>
+[[nodiscard]] inline bool append_format(std::array<char, Capacity>& output,
+                                        std::size_t& length,
+                                        const char* format,
+                                        Arguments... arguments) noexcept {
+    if (length >= output.size()) {
+        return false;
+    }
+    const std::size_t remaining = output.size() - length;
+    const int written = std::snprintf(output.data() + length, remaining, format, arguments...);
+    if (written <= 0 || static_cast<std::size_t>(written) >= remaining) {
+        return false;
+    }
+    length += static_cast<std::size_t>(written);
+    return true;
+}
+
+[[nodiscard]] inline bool
+write_activity_incident(HANDLE pipe,
+                        const state::activity::incidents::Observation& observation) noexcept {
+    std::array<char, 1024> line{};
+    std::size_t length = 0;
+    if (!append_format(
+            line,
+            length,
+            R"({"protocol":1,"type":"activity.incident","sequence":%llu,"observedAtTickMs":%llu,"sessionId":"%llu","accountHandle":"0x%llX","primaryTarget":%u,"extraTargetCount":%u,"extraTargets":[)",
+            static_cast<unsigned long long>(observation.sequence),
+            static_cast<unsigned long long>(observation.observedAtTickMs),
+            static_cast<unsigned long long>(observation.sessionId),
+            static_cast<unsigned long long>(observation.accountHandle),
+            observation.primaryTarget,
+            observation.extraTargetCount)) {
+        return false;
+    }
+    for (std::uint32_t index = 0; index < observation.extraTargetCount; ++index) {
+        if (!append_format(
+                line, length, index == 0 ? "%u" : ",%u", observation.extraTargets[index])) {
+            return false;
+        }
+    }
+    if (!append_format(
+            line,
+            length,
+            R"(],"payloadLength":%u,"hasCompressedSelector":%s,"hasPayload":%s,"droppedBefore":%llu})",
+            observation.payloadLength,
+            observation.hasCompressedSelector ? "true" : "false",
+            observation.hasPayload ? "true" : "false",
+            static_cast<unsigned long long>(observation.droppedBefore))) {
+        return false;
+    }
+    return write_line(pipe, std::string_view(line.data(), length));
+}
+
+inline void report_stale_incidents(std::size_t discarded) noexcept {
+    if (discarded == 0) {
+        return;
+    }
+    std::array<char, 192> line{};
+    const int written =
+        std::snprintf(line.data(),
+                      line.size(),
+                      "ev=script_host stage=incident_relay result=drop "
+                      "reason=reconnect count=%zu total=%llu",
+                      discarded,
+                      static_cast<unsigned long long>(state::activity::incidents::dropped_count()));
+    if (written > 0 && static_cast<std::size_t>(written) < line.size()) {
+        report(core::log::Level::info,
+               std::string_view(line.data(), static_cast<std::size_t>(written)));
+    }
 }
 
 [[nodiscard]] inline bool extract_json_string(std::string_view line,
@@ -133,13 +205,14 @@ inline void pipe_path(std::array<wchar_t, kPipePathCapacity>& output) noexcept {
     if (tokenLength <= 0 || static_cast<std::size_t>(tokenLength) >= token.size()) {
         return false;
     }
-    const std::size_t keyPosition = line.find(std::string_view(token.data(), static_cast<std::size_t>(tokenLength)));
+    const std::size_t keyPosition =
+        line.find(std::string_view(token.data(), static_cast<std::size_t>(tokenLength)));
     if (keyPosition == std::string_view::npos) {
         return false;
     }
     const std::size_t colon = line.find(':', keyPosition + static_cast<std::size_t>(tokenLength));
-    const std::size_t firstQuote = colon == std::string_view::npos ? std::string_view::npos
-                                                                   : line.find('"', colon + 1);
+    const std::size_t firstQuote =
+        colon == std::string_view::npos ? std::string_view::npos : line.find('"', colon + 1);
     const std::size_t lastQuote = firstQuote == std::string_view::npos
                                       ? std::string_view::npos
                                       : line.find('"', firstQuote + 1);
@@ -177,7 +250,8 @@ inline void pipe_path(std::array<wchar_t, kPipePathCapacity>& output) noexcept {
         static_cast<int>(capabilityLength),
         capability.data());
     return written > 0 && static_cast<std::size_t>(written) < response.size()
-           && write_line(pipe, std::string_view(response.data(), static_cast<std::size_t>(written)));
+           && write_line(pipe,
+                         std::string_view(response.data(), static_cast<std::size_t>(written)));
 }
 
 [[nodiscard]] inline bool process_line(HANDLE pipe, std::string_view line) noexcept {
@@ -208,9 +282,11 @@ inline void pipe_path(std::array<wchar_t, kPipePathCapacity>& output) noexcept {
     }
 
     const std::size_t capacity = inbound.size() - inboundSize;
-    const DWORD requested = static_cast<DWORD>((std::min)(capacity, static_cast<std::size_t>(available)));
+    const DWORD requested =
+        static_cast<DWORD>((std::min)(capacity, static_cast<std::size_t>(available)));
     DWORD read = 0;
-    if (requested == 0 || ReadFile(pipe, inbound.data() + inboundSize, requested, &read, nullptr) == FALSE) {
+    if (requested == 0
+        || ReadFile(pipe, inbound.data() + inboundSize, requested, &read, nullptr) == FALSE) {
         return false;
     }
     inboundSize += read;
@@ -227,7 +303,8 @@ inline void pipe_path(std::array<wchar_t, kPipePathCapacity>& output) noexcept {
         if (length != 0 && start[length - 1] == '\r') {
             --length;
         }
-        if (length != 0 && length < kLineCapacity && !process_line(pipe, std::string_view(start, length))) {
+        if (length != 0 && length < kLineCapacity
+            && !process_line(pipe, std::string_view(start, length))) {
             return false;
         }
         consumed += static_cast<std::size_t>(newline - start) + 1;
@@ -277,6 +354,7 @@ inline DWORD WINAPI worker(void*) noexcept {
 
         g_connected.store(true, std::memory_order_release);
         report(core::log::Level::info, "ev=script_host stage=connect result=ok");
+        report_stale_incidents(state::activity::incidents::discard_pending());
         bool alive = write_hello(pipe);
         state::activity::WorldPhase lastPhase = state::activity::world_phase();
         alive = alive && write_world_phase(pipe, lastPhase);
@@ -288,6 +366,10 @@ inline DWORD WINAPI worker(void*) noexcept {
             if (phase != lastPhase) {
                 alive = write_world_phase(pipe, phase);
                 lastPhase = phase;
+            }
+            state::activity::incidents::Observation incident{};
+            while (alive && state::activity::incidents::try_pop(incident)) {
+                alive = write_activity_incident(pipe, incident);
             }
             if (alive) {
                 alive = receive_available(pipe, inbound, inboundSize);

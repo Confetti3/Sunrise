@@ -20,7 +20,14 @@ public static class SelfTest
               "id": "start",
               "trigger": { "type": "host.start" },
               "actions": [
-                { "type": "set", "name": "copy", "value": "${value}" },
+                { "type": "set", "name": "copy", "value": "${value}" }
+              ],
+              "next": "incident"
+            },
+            {
+              "id": "incident",
+              "trigger": { "type": "activity.incident", "value": "42" },
+              "actions": [
                 { "type": "command", "capability": "test.echo", "payload": { "value": "${copy}" } }
               ]
             }
@@ -58,6 +65,32 @@ public static class SelfTest
 
             await runtime.InitializeAsync(CancellationToken.None).ConfigureAwait(false);
             await runtime.PublishEventAsync(HostEvent.Start, CancellationToken.None).ConfigureAwait(false);
+            if (runtime.IsCompleted || dispatcher.LastValue is not null)
+            {
+                throw new InvalidOperationException("Incident trigger ran before an incident was published.");
+            }
+
+            await runtime.PublishEventAsync(
+                new HostEvent(
+                    "activity.incident",
+                    new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["primaryTarget"] = "41",
+                    }),
+                CancellationToken.None).ConfigureAwait(false);
+            if (runtime.IsCompleted || dispatcher.LastValue is not null)
+            {
+                throw new InvalidOperationException("Incident trigger accepted a nonmatching primary target.");
+            }
+
+            await runtime.PublishEventAsync(
+                new HostEvent(
+                    "activity.incident",
+                    new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["primaryTarget"] = "042",
+                    }),
+                CancellationToken.None).ConfigureAwait(false);
             if (!runtime.IsCompleted || dispatcher.LastValue != "ready")
             {
                 throw new InvalidOperationException("Mission runtime did not complete the deterministic self-test.");

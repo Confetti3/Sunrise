@@ -48,23 +48,18 @@ public sealed class ScriptHostService
         }
     }
 
-    private async Task OnConnectionChangedAsync(bool connected, CancellationToken cancellationToken)
+    private Task OnConnectionChangedAsync(bool connected, CancellationToken cancellationToken)
     {
         if (!connected)
         {
             _capabilities.ReplaceBridgeCapabilities(Array.Empty<string>());
             _dispatcher.FailPending("The Sunrise native bridge disconnected.");
             Console.WriteLine("Sunrise native bridge disconnected.");
-            return;
+            return Task.CompletedTask;
         }
 
         Console.WriteLine("Sunrise native bridge connected.");
-        await _bridge.SendAsync(
-            new { protocol = 1, type = "host.capabilities" },
-            cancellationToken).ConfigureAwait(false);
-        await _bridge.SendAsync(
-            new { protocol = 1, type = "host.ping" },
-            cancellationToken).ConfigureAwait(false);
+        return Task.CompletedTask;
     }
 
     private async Task OnMessageAsync(JsonElement message, CancellationToken cancellationToken)
@@ -84,6 +79,9 @@ public sealed class ScriptHostService
                 break;
             case "world.phase":
                 await HandleWorldPhaseAsync(message, cancellationToken).ConfigureAwait(false);
+                break;
+            case "activity.incident":
+                await HandleActivityIncidentAsync(message, cancellationToken).ConfigureAwait(false);
                 break;
             case "command.result":
                 _dispatcher.Complete(message);
@@ -146,7 +144,65 @@ public sealed class ScriptHostService
             ["phase"] = phase,
             ["transitionAgeMs"] = transitionAge,
         };
+        Console.WriteLine($"World phase observed: phase={phase} transitionAgeMs={transitionAge}");
         await _runtime.PublishEventAsync(new HostEvent("world.phase", fields), cancellationToken)
             .ConfigureAwait(false);
+    }
+
+    private async Task HandleActivityIncidentAsync(
+        JsonElement message,
+        CancellationToken cancellationToken)
+    {
+        if (!message.TryGetProperty("primaryTarget", out JsonElement targetElement)
+            || targetElement.ValueKind != JsonValueKind.Number
+            || !targetElement.TryGetUInt32(out uint primaryTarget))
+        {
+            Console.Error.WriteLine("Ignored malformed activity.incident without a uint primaryTarget.");
+            return;
+        }
+
+        var fields = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["primaryTarget"] = primaryTarget.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        };
+        CopyScalarField(message, fields, "sequence");
+        CopyScalarField(message, fields, "observedAtTickMs");
+        CopyScalarField(message, fields, "sessionId");
+        CopyScalarField(message, fields, "accountHandle");
+        CopyScalarField(message, fields, "extraTargetCount");
+        CopyScalarField(message, fields, "payloadLength");
+        CopyScalarField(message, fields, "hasCompressedSelector");
+        CopyScalarField(message, fields, "hasPayload");
+        CopyScalarField(message, fields, "droppedBefore");
+
+        Console.WriteLine(
+            $"Activity incident observed: target={fields["primaryTarget"]} sequence={fields.GetValueOrDefault("sequence", "unknown")}");
+        await _runtime.PublishEventAsync(
+                new HostEvent("activity.incident", fields, message.Clone()),
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private static void CopyScalarField(
+        JsonElement message,
+        IDictionary<string, string> fields,
+        string name)
+    {
+        if (!message.TryGetProperty(name, out JsonElement value))
+        {
+            return;
+        }
+
+        switch (value.ValueKind)
+        {
+            case JsonValueKind.String when value.GetString() is { } text:
+                fields[name] = text;
+                break;
+            case JsonValueKind.Number:
+            case JsonValueKind.True:
+            case JsonValueKind.False:
+                fields[name] = value.GetRawText();
+                break;
+        }
     }
 }

@@ -43,6 +43,7 @@ The pipe uses one UTF-8 JSON object per line. Current messages:
 
 - `bridge.hello`: bridge/build identity and actually available capabilities;
 - `world.phase`: `idle`, `transitioning`, or `arrived`, plus transition age;
+- `activity.incident`: copied scalars from one validated client msg-19 incident;
 - `host.capabilities`: asks the bridge to repeat its hello;
 - `host.ping` / `bridge.pong`: liveness;
 - `command.request`: request id, capability id, and JSON payload;
@@ -50,6 +51,15 @@ The pipe uses one UTF-8 JSON object per line. Current messages:
 
 The bridge currently advertises only `host.ping` and `world.phase.observe`. It returns
 `unsupported` for every mutation request. This is intentional and testable.
+
+The managed server reads the native hello and initial phase before it writes anything. Windows
+zero-buffer named pipes can otherwise deadlock when both peers synchronously write their startup
+messages before either peer reads.
+
+Incident observations use a fixed 64-row native queue. The activity-message route uses a
+nonblocking lock attempt and never waits for C#. Overflow drops the oldest copy. Reconnect discards
+pre-connection rows so an old incident cannot advance a newly restarted mission. This path remains
+`probeRequired` and is not advertised until an event is observed end to end in build 86657.
 
 ## AI spawning decomposition
 
@@ -93,14 +103,16 @@ PR #8 noclip module.
 
 ## Recommended recovery order
 
-1. Add a copied, read-only activity/session snapshot to the bridge.
-2. Capture and replay one harmless typed incident in a loaded destination.
-3. Verify one objective or gameplay-switch state transition.
-4. Prove placed-content authority for one known local object.
-5. Recover entity allocation plus a no-AI static actor baseline and clean removal.
-6. Add health/death state and a deterministic stationary target.
-7. Add navigation/combat policy as authored host behavior.
-8. Bind dialogue and mission transitions only after the underlying event/state adapters are stable.
+1. Exercise the copied activity-incident observation probe in a loaded destination and identify a
+   stable target.
+2. Trace one client-visible objective consumer backward to a verified host message/state change.
+3. Add a copied, read-only activity/session snapshot to associate later events with a destination.
+4. Capture and replay one harmless typed incident only after its target/payload semantics are known.
+5. Prove placed-content authority for one known local object.
+6. Recover entity allocation plus a no-AI static actor baseline and clean removal.
+7. Add health/death state and a deterministic stationary target.
+8. Add navigation/combat policy as authored host behavior.
+9. Bind dialogue and mission transitions only after the underlying event/state adapters are stable.
 
 Each step should add one capability to the hello only after runtime validation on the target build.
 
