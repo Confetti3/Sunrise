@@ -32,6 +32,13 @@ constexpr std::string_view kWriterSignatureText =
 constexpr auto kWriterSignature =
     signature<signature_length(kWriterSignatureText)>(kWriterSignatureText);
 
+/** Build-86657 scenario-state list applier that owns a valid writer owner on its calling thread. */
+constexpr std::string_view kApplyListsSignatureText =
+    "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 48 89 7C 24 20 41 56 48 83 "
+    "EC 20 33 F6 4D 8B F0 48 8B EA 48 8B D9 8B FE 48 39 32 7E 29";
+constexpr auto kApplyListsSignature =
+    signature<signature_length(kApplyListsSignatureText)>(kApplyListsSignatureText);
+
 constexpr std::size_t kSwitchCountOffset = 0xB3F4;
 constexpr std::size_t kSwitchRowsOffset = 0xB3F8;
 constexpr std::size_t kSwitchRowStride = 4;
@@ -63,12 +70,15 @@ using ApplyCategory = void(__fastcall*)(void*,
                                         void*,
                                         void*) noexcept;
 using WriteSwitch = void(__fastcall*)(void*, std::uint16_t, std::int32_t) noexcept;
+using ApplyLists = void(__fastcall*)(void*, const void*, const void*) noexcept;
 using StateGetter = void*(__fastcall*)(void*) noexcept;
 
 hooking::detour::Handle g_applyHandle{};
 hooking::detour::Handle g_writerHandle{};
+hooking::detour::Handle g_applyListsHandle{};
 std::atomic<ApplyCategory> g_original{nullptr};
 std::atomic<WriteSwitch> g_originalWriter{nullptr};
+std::atomic<ApplyLists> g_originalApplyLists{nullptr};
 std::array<std::atomic<std::uint64_t>, kSeenCapacity> g_seen{};
 std::atomic<std::uint32_t> g_reports{};
 
@@ -82,6 +92,13 @@ struct ProgressRow {
     std::int16_t index{};
     std::uint16_t auxiliary{};
     std::uint32_t value{};
+};
+
+struct SwitchListSnapshot {
+    std::uintptr_t ownerVtableRva{};
+    std::int32_t count{};
+    std::size_t captured{};
+    std::array<SwitchRow, kSwitchCapacity> rows{};
 };
 
 struct SourceSnapshot {
@@ -150,6 +167,35 @@ struct SourceSnapshot {
                             bytes + kProgressRowsOffset + row * kProgressRowStride,
                             sizeof output.progressions[row]);
             }
+        }
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+/** Copies the transient scalar list consumed directly by the definition-backed writer. */
+[[nodiscard]] bool snapshot_switch_list(void* owner,
+                                        const void* list,
+                                        SwitchListSnapshot& output) noexcept {
+    if (owner == nullptr || list == nullptr) {
+        return false;
+    }
+    __try {
+        const auto* const bytes = static_cast<const std::byte*>(list);
+        const auto possibleVtable = reinterpret_cast<std::uintptr_t>(*static_cast<void***>(owner));
+        output.ownerVtableRva = main_image_rva(possibleVtable);
+        std::memcpy(&output.count, bytes, sizeof output.count);
+        if (output.count < 0 || output.count > 0x10000) {
+            return false;
+        }
+        std::int64_t relative{};
+        std::memcpy(&relative, bytes + 8, sizeof relative);
+        const auto* const rows = bytes + 0x18 + relative;
+        output.captured = std::min<std::size_t>(static_cast<std::size_t>(output.count),
+                                                output.rows.size());
+        for (std::size_t row = 0; row < output.captured; ++row) {
+            std::memcpy(&output.rows[row], rows + row * sizeof(SwitchRow), sizeof(SwitchRow));
         }
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -366,6 +412,43 @@ void report_switch_write(std::uintptr_t callerRva,
     }
 }
 
+/** Reports one transient native switch list without preserving its owner or storage pointers. */
+void report_switch_list(std::uintptr_t callerRva, const SwitchListSnapshot& snapshot) noexcept {
+    constexpr std::uint64_t kOffset = 14'695'981'039'346'656'037ULL;
+    std::uint64_t summaryKey = mix(kOffset, 4);
+    summaryKey = mix(summaryKey, callerRva);
+    summaryKey = mix(summaryKey, snapshot.ownerVtableRva);
+    summaryKey = mix(summaryKey, static_cast<std::uint32_t>(snapshot.count));
+    if (claim(summaryKey)) {
+        write_line("ev=activity_state_source stage=%s n=%u caller=+0x%llX owner_vtable=+0x%X "
+                   "switches=%u truncated=%u",
+                   "apply_lists",
+                   callerRva,
+                   static_cast<std::uint32_t>(snapshot.ownerVtableRva),
+                   static_cast<std::uint32_t>(snapshot.count),
+                   snapshot.captured < static_cast<std::size_t>(snapshot.count) ? 1U : 0U,
+                   0U);
+    }
+    for (const SwitchRow& row : std::span(snapshot.rows).first(snapshot.captured)) {
+        std::uint64_t key = mix(kOffset, 5);
+        key = mix(key, callerRva);
+        key = mix(key, snapshot.ownerVtableRva);
+        key = mix(key, static_cast<std::uint16_t>(row.index));
+        key = mix(key, row.value);
+        key = mix(key, row.auxiliary);
+        if (claim(key)) {
+            write_line("ev=activity_state_source stage=%s n=%u caller=+0x%llX definition=%u "
+                       "value=%u auxiliary=%u owner_vtable=+0x%X",
+                       "apply_lists_switch",
+                       callerRva,
+                       static_cast<std::uint16_t>(row.index),
+                       row.value,
+                       row.auxiliary,
+                       static_cast<std::uint32_t>(snapshot.ownerVtableRva));
+        }
+    }
+}
+
 /** Obtains the index-1 retained state through the same owner getter the native writer uses. */
 [[nodiscard]] void* persistent_state(void* owner) noexcept {
     if (owner == nullptr) {
@@ -475,13 +558,30 @@ __declspec(noinline) void __fastcall write_switch(void* owner,
         callerRva, definition, requested, changedIndex, oldValue, newValue, changes);
 }
 
+/** Mirrors the native list applier and observes its pointer-free scalar input before consumption. */
+__declspec(noinline) void __fastcall apply_lists(void* owner,
+                                                 const void* switchList,
+                                                 const void* progressionList) noexcept {
+    SwitchListSnapshot snapshot{};
+    const bool captured = snapshot_switch_list(owner, switchList, snapshot);
+    const std::uintptr_t callerRva = captured ? caller_rva(_ReturnAddress()) : 0;
+    if (captured) {
+        report_switch_list(callerRva, snapshot);
+    }
+    const ApplyLists original = g_originalApplyLists.load(std::memory_order_acquire);
+    if (original != nullptr) {
+        original(owner, switchList, progressionList);
+    }
+}
+
 void log_install(const char* result, const char* reason = nullptr) noexcept {
     std::array<char, 144> line{};
     const int written = reason == nullptr
                             ? std::snprintf(line.data(),
                                             line.size(),
                                             "ev=activity_state_source stage=install result=%s "
-                                            "dispatcher=+0x540320 writer=+0x555EC0",
+                                            "dispatcher=+0x540320 apply_lists=+0x52FD60 "
+                                            "writer=+0x555EC0",
                                             result)
                             : std::snprintf(line.data(),
                                             line.size(),
@@ -503,15 +603,20 @@ void log_install(const char* result, const char* reason = nullptr) noexcept {
 
 /** Attaches the read-only observer for explicit retained activity-state source rows. */
 bool install_activity_state_source_observer() noexcept {
-    if (g_applyHandle.attached && g_writerHandle.attached) {
+    if (g_applyHandle.attached && g_applyListsHandle.attached && g_writerHandle.attached) {
         return true;
     }
     std::byte* const applyTarget =
         scan_main_image_unique(kApplySignature, "activity_state_category_dispatcher");
     std::byte* const writerTarget =
         scan_main_image_unique(kWriterSignature, "activity_state_switch_writer");
-    if (applyTarget == nullptr || writerTarget == nullptr) {
-        log_install("fail", applyTarget == nullptr ? "apply_target" : "writer_target");
+    std::byte* const applyListsTarget =
+        scan_main_image_unique(kApplyListsSignature, "activity_state_apply_lists");
+    if (applyTarget == nullptr || applyListsTarget == nullptr || writerTarget == nullptr) {
+        log_install("fail",
+                    applyTarget == nullptr        ? "apply_target"
+                    : applyListsTarget == nullptr ? "apply_lists_target"
+                                                  : "writer_target");
         return false;
     }
     if (!hooking::detour::install({applyTarget, reinterpret_cast<void*>(&apply_category)},
@@ -521,9 +626,20 @@ bool install_activity_state_source_observer() noexcept {
     }
     g_original.store(reinterpret_cast<ApplyCategory>(g_applyHandle.original),
                      std::memory_order_release);
+    if (!hooking::detour::install({applyListsTarget, reinterpret_cast<void*>(&apply_lists)},
+                                  g_applyListsHandle)) {
+        (void)hooking::detour::uninstall(g_applyHandle);
+        g_original.store(nullptr, std::memory_order_release);
+        log_install("fail", "apply_lists_attach");
+        return false;
+    }
+    g_originalApplyLists.store(reinterpret_cast<ApplyLists>(g_applyListsHandle.original),
+                               std::memory_order_release);
     if (!hooking::detour::install({writerTarget, reinterpret_cast<void*>(&write_switch)},
                                   g_writerHandle)) {
+        (void)hooking::detour::uninstall(g_applyListsHandle);
         (void)hooking::detour::uninstall(g_applyHandle);
+        g_originalApplyLists.store(nullptr, std::memory_order_release);
         g_original.store(nullptr, std::memory_order_release);
         log_install("fail", "writer_attach");
         return false;
@@ -539,10 +655,14 @@ void uninstall_activity_state_source_observer() noexcept {
     if (g_writerHandle.attached) {
         (void)hooking::detour::uninstall(g_writerHandle);
     }
+    if (g_applyListsHandle.attached) {
+        (void)hooking::detour::uninstall(g_applyListsHandle);
+    }
     if (g_applyHandle.attached) {
         (void)hooking::detour::uninstall(g_applyHandle);
     }
     g_originalWriter.store(nullptr, std::memory_order_release);
+    g_originalApplyLists.store(nullptr, std::memory_order_release);
     g_original.store(nullptr, std::memory_order_release);
     g_reports.store(0, std::memory_order_release);
     for (auto& entry : g_seen) {

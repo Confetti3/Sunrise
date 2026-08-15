@@ -292,3 +292,32 @@ index-1 `+0x9348` switch bank during the same original-activity run. It produced
 launch through arrival. That negative control leaves `objective.set` and `gameplay-switch.set` at
 `wireAdapterRequired`: the correct activity now loads, but no genuine write transition has yet
 been correlated.
+
+## Definition-backed list-applier control
+
+Tracing every direct caller of `+0x555EC0` localized a native scalar-list applier at `+0x52FD60`.
+It receives the valid state owner in `rcx`, a switch list in `rdx`, and a progression list in `r8`.
+Each switch row is four bytes (`uint16 definition`, `int8 requested`, `uint8 auxiliary`), and the
+routine forwards the first two fields to `+0x555EC0` on its existing game thread. This is a real
+writer call context, but it is event driven: the owner is only valid for the native call and must
+not be retained.
+
+A read-only detour copied at most 20 scalar rows before passing the call through unchanged. The
+exact DLL then completed a fresh original-Homecoming launch: the server selected
+`mission_towerfall`, the client changed world to it, initial slice set `0xF28FC859` loaded, boot
+step 38 reached `phase=arrived`, and the host advanced to `open-objective`. The list applier and
+definition-backed writer both recorded zero calls from process start through arrival and an
+additional 15-second in-world control. This excludes `+0x52FD60` as the missing mission-startup
+producer and as an unconditional bridge-command drain point. Evidence is retained in
+`analysis/script-host-runtime/20260815-060353-apply-lists-towerfall-runtime/`; exercised DLL
+SHA-256 `BA0768FEA0BF909338DB2E499F68F3E3A8A3AE7E1E5DC7FDE65178C5996F172B`.
+
+The activity-logic archive supplies a related static discriminator without closing the write
+mapping. Original `mission_towerfall` resource `80B508F4` contains `obj_damaged` (`80B510D6`),
+`obj_deck` (`80B510D9`), `obj_deck_ultra` (`80B510DC`), and `obj_ghaul` (`80B510DF`). Their
+serialized secondary packed fields contain low values `0..3`; the later arcade copy remaps its
+five objective groups to `0x3D..0x41`. Identical original/arcade `obj_ghaul` payloads also remap a
+secondary scalar from `0x1A2` to `0x193`. The archive labels these locations only as packed/scalar
+storage, so neither value family is promoted to a gameplay-switch definition. The six trailing
+relative pointers resolve internally to component offsets `+0xA0`, `+0xB8`, `+0xF8`, `+0x110`,
+`+0x170`, and `+0x1D0`; they are not external trigger/action edges.
