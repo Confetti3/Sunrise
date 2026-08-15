@@ -4,6 +4,8 @@
 #include "../../core/logging/log.h"
 #include "../bap/runtime.h"
 #include "../http/server_http.h"
+#include "../script_host/runtime.h"
+#include "../script_host/runtime.inl"
 #include "../transport/bap_listener.h"
 #include "../ui/runtime/server_ui_module_runtime.h"
 
@@ -22,6 +24,13 @@ bool initialize() noexcept {
                              "ev=transport stage=listen result=fail");
         }
         if (ui::runtime::initialize()) {
+            // The script host is optional. It may connect later, and its failure must not disable
+            // the local HTTP/BAP server or the existing UI.
+            if (!script_host::initialize()) {
+                core::log::write(core::log::Channel::server,
+                                 core::log::Level::warn,
+                                 "ev=script_host stage=initialize result=fail");
+            }
             return true;
         }
         transport::shutdown();
@@ -35,10 +44,12 @@ bool initialize() noexcept {
 /** Runs one bounded server service slice. @param now Monotonic tick count. */
 void service(std::uint64_t now) noexcept {
     transport::service(now);
+    script_host::service(now);
 }
 
 /** Unregisters Server consumers in reverse registration order. */
 void shutdown() noexcept {
+    script_host::shutdown();
     ui::runtime::shutdown();
     transport::shutdown();
     client::network::unregister_bap_consumer(&bap::consume);

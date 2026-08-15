@@ -7,6 +7,8 @@ namespace Sunrise.ScriptHost.Protocol;
 
 public sealed class NamedPipeBridge : IAsyncDisposable
 {
+    private const int MaximumLineBytes = 2_048;
+
     private readonly string _pipeName;
     private readonly object _connectionLock = new();
     private readonly SemaphoreSlim _writeGate = new(1, 1);
@@ -77,8 +79,14 @@ public sealed class NamedPipeBridge : IAsyncDisposable
             return false;
         }
 
-        // This is a newline-delimited transport: one logical message must occupy one physical line.
         string json = JsonSerializer.Serialize(message, Json.ProtocolOptions);
+        if (Encoding.UTF8.GetByteCount(json) > MaximumLineBytes
+            || json.Contains('\r') || json.Contains('\n'))
+        {
+            throw new InvalidOperationException(
+                $"Bridge messages must be one line and at most {MaximumLineBytes:N0} UTF-8 bytes.");
+        }
+
         await _writeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -131,14 +139,10 @@ public sealed class NamedPipeBridge : IAsyncDisposable
         _writeGate.Dispose();
     }
 
-    private async Task HandleConnectionAsync(NamedPipeServerStream pipe, CancellationToken cancellationToken)
+    private async Task HandleConnectionAsync(
+        NamedPipeServerStream pipe,
+        CancellationToken cancellationToken)
     {
-        using var reader = new StreamReader(
-            pipe,
-            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true),
-            detectEncodingFromByteOrderMarks: false,
-            bufferSize: 4096,
-            leaveOpen: true);
         await using var writer = new StreamWriter(
             pipe,
             new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
@@ -156,37 +160,62 @@ public sealed class NamedPipeBridge : IAsyncDisposable
 
         await RaiseConnectionChangedAsync(connected: true, cancellationToken).ConfigureAwait(false);
 
+        var lineBuffer = new BoundedUtf8LineBuffer(MaximumLineBytes);
+        var chunk = new byte[4096];
+
         while (pipe.IsConnected && !cancellationToken.IsCancellationRequested)
         {
-            string? line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
-            if (line is null)
+            int read = await pipe.ReadAsync(chunk, cancellationToken).ConfigureAwait(false);
+            if (read == 0)
             {
                 break;
             }
 
-            if (line.Length == 0)
+            for (int index = 0; index < read; ++index)
             {
-                continue;
-            }
-
-            try
-            {
-                using JsonDocument document = JsonDocument.Parse(line);
-                JsonElement root = document.RootElement.Clone();
-                Func<JsonElement, CancellationToken, Task>? handler = MessageReceived;
-                if (handler is not null)
+                switch (lineBuffer.Push(chunk[index], out string? line))
                 {
-                    await handler(root, cancellationToken).ConfigureAwait(false);
+                    case BoundedLineResult.Pending:
+                        break;
+                    case BoundedLineResult.Complete:
+                        if (line is { Length: > 0 })
+                        {
+                            await DispatchLineAsync(line, cancellationToken).ConfigureAwait(false);
+                        }
+                        break;
+                    case BoundedLineResult.InvalidUtf8:
+                        Console.Error.WriteLine("Rejected invalid UTF-8 bridge line.");
+                        break;
+                    case BoundedLineResult.Oversized:
+                        Console.Error.WriteLine(
+                            $"Rejected bridge line longer than {MaximumLineBytes:N0} bytes.");
+                        return;
                 }
-            }
-            catch (JsonException exception)
-            {
-                Console.Error.WriteLine($"Rejected malformed bridge JSON: {exception.Message}");
             }
         }
     }
 
-    private async Task ClearConnectionAsync(NamedPipeServerStream pipe, CancellationToken cancellationToken)
+    private async Task DispatchLineAsync(string line, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(line);
+            JsonElement root = document.RootElement.Clone();
+            Func<JsonElement, CancellationToken, Task>? handler = MessageReceived;
+            if (handler is not null)
+            {
+                await handler(root, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (JsonException exception)
+        {
+            Console.Error.WriteLine($"Rejected malformed bridge JSON: {exception.Message}");
+        }
+    }
+
+    private async Task ClearConnectionAsync(
+        NamedPipeServerStream pipe,
+        CancellationToken cancellationToken)
     {
         bool changed = false;
         lock (_connectionLock)
@@ -201,11 +230,14 @@ public sealed class NamedPipeBridge : IAsyncDisposable
 
         if (changed)
         {
-            await RaiseConnectionChangedAsync(connected: false, cancellationToken).ConfigureAwait(false);
+            await RaiseConnectionChangedAsync(connected: false, cancellationToken)
+                .ConfigureAwait(false);
         }
     }
 
-    private async Task RaiseConnectionChangedAsync(bool connected, CancellationToken cancellationToken)
+    private async Task RaiseConnectionChangedAsync(
+        bool connected,
+        CancellationToken cancellationToken)
     {
         Func<bool, CancellationToken, Task>? handler = ConnectionChanged;
         if (handler is not null)

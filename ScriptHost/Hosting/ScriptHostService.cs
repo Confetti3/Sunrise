@@ -100,6 +100,9 @@ public sealed class ScriptHostService
             case "activity.incident":
                 await HandleActivityIncidentAsync(message, cancellationToken).ConfigureAwait(false);
                 break;
+            case "placed-content.authority":
+                HandlePlacedContentAuthority(message);
+                break;
             case "command.result":
                 _dispatcher.Complete(message);
                 break;
@@ -198,6 +201,23 @@ public sealed class ScriptHostService
                 new HostEvent("activity.incident", fields, message.Clone()),
                 cancellationToken)
             .ConfigureAwait(false);
+    }
+
+    private static void HandlePlacedContentAuthority(JsonElement message)
+    {
+        if (!PlacedContentAuthorityObservation.TryParse(message, out var observation)
+            || observation is null)
+        {
+            Console.Error.WriteLine("Rejected malformed placed-content.authority observation.");
+            return;
+        }
+
+        Console.WriteLine(
+            $"Placed-content authority: decodes={observation.DecodeCount}, "
+            + $"forced-reads={observation.ForcedReadCount}, "
+            + $"last-forced-reads={observation.LastDecoderForcedReads}, "
+            + $"dropped={observation.DroppedCount}, "
+            + $"last-decoder-succeeded={(observation.LastDecoderSucceeded ? "true" : "false")}.");
     }
 
     private static void CopyScalarField(

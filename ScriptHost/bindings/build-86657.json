@@ -15,6 +15,12 @@
       "evidence": "state::activity::world_phase and world_transition_age are public, atomic observations."
     },
     {
+      "id": "placed-content.authority.observe",
+      "status": "available",
+      "owner": "sunrise-native-bridge",
+      "evidence": "The scoped message-5 decoder/getter detour publishes copied pointer-free authority counters; observation is read-only telemetry, not a remote authority API."
+    },
+    {
       "id": "activity.session.observe",
       "status": "probeRequired",
       "owner": "sunrise-state",
@@ -50,7 +56,7 @@
     },
     {
       "id": "gameplay-switch.set",
-      "status": "available",
+      "status": "probeRequired",
       "owner": "sunrise-native-bridge",
       "evidence": "The native expression consumer reads one of 0x5BCC activity-state bytes and treats value 2 as true. Build-86657 runtime evidence proves concrete activity-owner update +0xFA6CD0 recurs in idle, transitioning, and arrived phases with validated vtable +0x1C35DC8 and retained source identity 0x00100101. A first guarded command correctly reported rejection after an invalid source-pointer call left bank 1 unchanged at zero.",
       "notes": "The bridge now passes the validated activity owner to writer +0x555EC0 and verifies the retained byte afterward, but that correction is compiled only and not runtime-verified. Keep this capability unadvertised until a fresh run proves the mutation and a client-visible effect."
