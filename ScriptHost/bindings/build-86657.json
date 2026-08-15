@@ -1,0 +1,98 @@
+{
+  "schema": 1,
+  "build": "Sunrise 0.2.1 / Destiny 2 build 86657",
+  "capabilities": [
+    {
+      "id": "host.ping",
+      "status": "available",
+      "owner": "sunrise-native-bridge",
+      "evidence": "Implemented by the independent named-pipe bridge."
+    },
+    {
+      "id": "world.phase.observe",
+      "status": "available",
+      "owner": "sunrise-state",
+      "evidence": "state::activity::world_phase and world_transition_age are public, atomic observations."
+    },
+    {
+      "id": "activity.session.observe",
+      "status": "probeRequired",
+      "owner": "sunrise-state",
+      "evidence": "Session state exists, but this draft does not expose a stable read-only snapshot ABI.",
+      "notes": "Add a copied snapshot rather than exporting pointers into State storage."
+    },
+    {
+      "id": "activity.incident.emit",
+      "status": "wireAdapterRequired",
+      "owner": "activity-host",
+      "evidence": "Activity message 19 is a typed event carrier, but definition-index schemas and target ordering are not yet bound."
+    },
+    {
+      "id": "objective.set",
+      "status": "wireAdapterRequired",
+      "owner": "activity-host",
+      "evidence": "Objective and progression consumers exist; no verified host-side encoder/state transition is implemented."
+    },
+    {
+      "id": "gameplay-switch.set",
+      "status": "wireAdapterRequired",
+      "owner": "activity-host",
+      "evidence": "Gameplay-switch state exists, but its mission-safe mutation path is not verified."
+    },
+    {
+      "id": "entity.allocate",
+      "status": "probeRequired",
+      "owner": "activity-host",
+      "evidence": "Entity-slot leases exist in activity State; actor allocation and creation ownership are not recovered."
+    },
+    {
+      "id": "entity.spawn",
+      "status": "probeRequired",
+      "owner": "activity-host",
+      "evidence": "Spawn-set catalogs describe points and bubbles, not the host actor-creation funnel or AI identity baseline.",
+      "notes": "Require a verified entity lease, creation packet/baseline, SObject binding, and teardown path."
+    },
+    {
+      "id": "entity.update",
+      "status": "probeRequired",
+      "owner": "activity-host",
+      "evidence": "No verified authoritative actor update adapter is present."
+    },
+    {
+      "id": "entity.destroy",
+      "status": "probeRequired",
+      "owner": "activity-host",
+      "evidence": "No verified actor removal and slot-return adapter is present."
+    },
+    {
+      "id": "placed-content.authority",
+      "status": "clientPatchRequired",
+      "owner": "sunrise-client",
+      "evidence": "Placed-content activation remains gated by client-side bubble authority."
+    },
+    {
+      "id": "dialogue.play",
+      "status": "probeRequired",
+      "owner": "scenario-host",
+      "evidence": "Client dialogue components exist, but their static scenario binding and host invocation are not recovered."
+    },
+    {
+      "id": "cinematic.play",
+      "status": "probeRequired",
+      "owner": "scenario-host",
+      "evidence": "Client cinematic consumers exist, but no verified host command binding is available."
+    },
+    {
+      "id": "mission.sequence",
+      "status": "authoredPolicyRequired",
+      "owner": "csharp-script-host",
+      "evidence": "The shipped client does not contain Bungie's host-side mission policy; scenarios must remain labeled authored prototypes."
+    },
+    {
+      "id": "enemy.ai-policy",
+      "status": "authoredPolicyRequired",
+      "owner": "csharp-script-host",
+      "evidence": "Enemy population budgets, navigation policy, combat decisions, and encounter adjudication are not distributed with the client."
+    }
+  ]
+}

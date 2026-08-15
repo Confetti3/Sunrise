@@ -12,6 +12,7 @@
 #include "../hooks/queuez/queuez_hook_lifecycle.h"
 #include "../hooks/retail_log/retail_log_lifecycle.h"
 #include "../hooks/teleport/runtime.h"
+#include "../script_host/runtime.h"
 #include "../targets/game.h"
 #include "../targets/steam_targets.h"
 #include "../teleport/teleport_settings_store.h"
@@ -25,11 +26,18 @@ namespace sunrise::client {
 bool initialize(void* module) noexcept {
     // Loaded before the pages register, so the teleport page draws saved values on its first frame.
     teleport::initialize(module);
-    return ui::runtime::initialize();
+    const bool uiReady = ui::runtime::initialize();
+    if (uiReady) {
+        // The bridge is optional and owns no game hooks. A missing C# host never demotes boot.
+        (void)script_host::start();
+    }
+    return uiReady;
 }
 
 /** Detaches Client hooks before clearing their resolved target entries. */
 bool shutdown() noexcept {
+    // Stop the out-of-process observer before State and target teardown begins.
+    script_host::stop();
     AcquireSRWLockExclusive(&runtime::g_lock);
     if (!hooks::graphics::uninstall()) {
         core::log::write(core::log::Channel::client,

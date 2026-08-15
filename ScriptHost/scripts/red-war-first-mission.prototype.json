@@ -1,0 +1,94 @@
+{
+  "schema": 1,
+  "id": "red-war-first-mission.prototype",
+  "title": "Red War first mission host-capability prototype",
+  "provenance": "authored-prototype",
+  "start": "wait-for-destination",
+  "parameters": {
+    "activityPackage": "SET_ME_FROM_RUNTIME_EXTRACTION",
+    "arrivalBubbleHash": "0x00000000",
+    "spawnSetHash": "0x00000000",
+    "objectiveDefinitionHash": "0x00000000",
+    "enemyActorDefinitionHash": "0x00000000",
+    "enemyCount": "3"
+  },
+  "nodes": [
+    {
+      "id": "wait-for-destination",
+      "trigger": {
+        "type": "world.phase",
+        "value": "arrived"
+      },
+      "actions": [
+        {
+          "type": "log",
+          "message": "Destination arrived. Beginning the authored Red War capability probe."
+        }
+      ],
+      "next": "open-objective"
+    },
+    {
+      "id": "open-objective",
+      "trigger": {
+        "type": "delay",
+        "milliseconds": 500
+      },
+      "actions": [
+        {
+          "type": "command",
+          "capability": "objective.set",
+          "payload": {
+            "definitionHash": "${objectiveDefinitionHash}",
+            "state": "active",
+            "progress": 0
+          }
+        }
+      ],
+      "next": "spawn-first-wave"
+    },
+    {
+      "id": "spawn-first-wave",
+      "trigger": {
+        "type": "immediate"
+      },
+      "actions": [
+        {
+          "type": "command",
+          "capability": "entity.spawn",
+          "payload": {
+            "activityPackage": "${activityPackage}",
+            "arrivalBubbleHash": "${arrivalBubbleHash}",
+            "spawnSetHash": "${spawnSetHash}",
+            "actorDefinitionHash": "${enemyActorDefinitionHash}",
+            "count": "${enemyCount}",
+            "ownership": "activity-host",
+            "despawnPolicy": "on-node-exit"
+          }
+        }
+      ],
+      "next": "wait-for-wave-clear"
+    },
+    {
+      "id": "wait-for-wave-clear",
+      "trigger": {
+        "type": "signal",
+        "value": "wave.cleared"
+      },
+      "actions": [
+        {
+          "type": "command",
+          "capability": "objective.set",
+          "payload": {
+            "definitionHash": "${objectiveDefinitionHash}",
+            "state": "complete",
+            "progress": 1
+          }
+        },
+        {
+          "type": "log",
+          "message": "Prototype encounter complete. Add the next verified mission node rather than guessing hidden host policy."
+        }
+      ]
+    }
+  ]
+}

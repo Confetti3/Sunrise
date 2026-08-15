@@ -1,0 +1,5 @@
+bin/
+obj/
+state/
+plugins/*.dll
+plugins/*.pdb
