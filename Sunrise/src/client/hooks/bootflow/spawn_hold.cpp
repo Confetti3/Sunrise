@@ -48,11 +48,6 @@ __declspec(noinline) bool __fastcall spawn_gate(std::int32_t datum) noexcept {
     const core::settings::client::Settings& client = core::settings::get().client;
     const bool gaveUp = age >= client.spawnHoldMs;
     const bool loading = transitioning && !gaveUp && client.holdSpawn;
-    // Release only on arrival. The step-37 exit re-arms the fade unless one is already up, and
-    // nothing polls this gate after the spawn, so an early release leaves a fade nobody clears.
-    if (phase == state::activity::WorldPhase::arrived) {
-        release_world_fade();
-    }
     return allowed && loading ? kHeld : allowed;
 }
 

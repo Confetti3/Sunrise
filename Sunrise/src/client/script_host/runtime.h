@@ -105,7 +105,7 @@ inline void pipe_path(std::array<wchar_t, kPipePathCapacity>& output) noexcept {
 
 [[nodiscard]] inline bool write_hello(HANDLE pipe) noexcept {
     constexpr std::string_view hello =
-        R"({"protocol":1,"type":"bridge.hello","bridge":"sunrise-native","build":"Sunrise 0.2.1 / Destiny 2 build 86657","capabilities":["host.ping","world.phase.observe"],"limitations":["no activity-session snapshot","incident observation is unprobed","no incident encoder","no objective adapter","no actor lifecycle adapter","no AI policy"]})";
+        R"({"protocol":1,"type":"bridge.hello","bridge":"sunrise-native","build":"Sunrise 0.2.1 / Destiny 2 build 86657","capabilities":["host.ping","world.phase.observe","activity.incident.observe"],"limitations":["no activity-session snapshot","no incident encoder","no objective adapter","no actor lifecycle adapter","no AI policy"]})";
     return write_line(pipe, hello);
 }
 

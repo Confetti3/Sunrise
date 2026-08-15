@@ -9,9 +9,9 @@ client’s `WorldPhase`, answers pings, and rejects unimplemented mutation comma
 scenario state, checkpoints, directory probes, managed plugins, and command dispatch.
 
 The current runtime branch also contains a bounded `activity.incident` observation probe. It copies
-validated client msg-19 scalars to C# without retaining packet or game pointers. The build manifest
-keeps this capability at `probeRequired`, and the native hello does not advertise it until an
-end-to-end target-build exercise succeeds.
+validated client msg-19 scalars to C# without retaining packet or game pointers. A fresh build-86657
+Tower session exercised the native producer, pipe relay, and managed consumer end to end, so the
+native hello advertises `activity.incident.observe`.
 
 ## Build
 
@@ -48,7 +48,8 @@ set `SUNRISE_SCRIPT_HOST_PIPE` to a different full pipe path or leaf name.
 ## What works in this draft
 
 - deterministic JSON scenario graph with checkpoints;
-- world arrival/transition observation from Sunrise;
+- target-tested world arrival/transition observation from Sunrise's boot-step boundary;
+- verified Tower arrival with one-shot release of the client's world-transition fade;
 - versioned newline-delimited JSON named-pipe protocol;
 - explicit build capability manifest;
 - managed plugin loading without third-party packages;

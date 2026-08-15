@@ -23,10 +23,10 @@
     },
     {
       "id": "activity.incident.observe",
-      "status": "probeRequired",
+      "status": "available",
       "owner": "sunrise-native-bridge",
-      "evidence": "Validated client msg-19 incidents are copied into a bounded nonblocking queue and published as activity.incident events.",
-      "notes": "The bridge deliberately does not advertise this capability until the target client has emitted and the C# host has consumed an event in-game."
+      "evidence": "Build 86657 emitted Tower target 1121 through the bounded native queue and the live C# host consumed sequence 2 in the same fresh session.",
+      "notes": "Reconnect discards stale rows; queue overflow and lock contention are bounded and counted."
     },
     {
       "id": "activity.incident.emit",

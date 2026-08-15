@@ -49,8 +49,15 @@ The pipe uses one UTF-8 JSON object per line. Current messages:
 - `command.request`: request id, capability id, and JSON payload;
 - `command.result`: `ok`, `unsupported`, `error`, or another explicit status.
 
-The bridge currently advertises only `host.ping` and `world.phase.observe`. It returns
-`unsupported` for every mutation request. This is intentional and testable.
+The bridge currently advertises `host.ping`, `world.phase.observe`, and
+`activity.incident.observe`. It returns `unsupported` for every mutation request. This is
+intentional and testable.
+
+World phase comes from the client’s build-specific boot-step accessor. The native detour copies the
+returned integer on the engine call path, maps loading steps 33-37 and in-world step 38, and stores
+only an atomic enum plus transition tick. This avoids retaining the decrypted boot-flow manager.
+The first step-38 edge also invokes the already-localized world-transition fade channel once; the
+operation is re-armed only after the client leaves a destination.
 
 The managed server reads the native hello and initial phase before it writes anything. Windows
 zero-buffer named pipes can otherwise deadlock when both peers synchronously write their startup
@@ -58,8 +65,8 @@ messages before either peer reads.
 
 Incident observations use a fixed 64-row native queue. The activity-message route uses a
 nonblocking lock attempt and never waits for C#. Overflow drops the oldest copy. Reconnect discards
-pre-connection rows so an old incident cannot advance a newly restarted mission. This path remains
-`probeRequired` and is not advertised until an event is observed end to end in build 86657.
+pre-connection rows so an old incident cannot advance a newly restarted mission. Build 86657
+exercised a fresh Tower target-1121 event from the native route through managed consumption.
 
 ## AI spawning decomposition
 

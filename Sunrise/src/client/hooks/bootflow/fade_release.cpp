@@ -64,24 +64,24 @@ void rearm_fade_release() noexcept {
     g_logged.store(false, std::memory_order_release);
 }
 
-/** Releases the world-transition fade channel. The spawn gate decides when. */
+/** Releases the world-transition fade channel once for the current destination load. */
 void release_world_fade() noexcept {
     const ReleaseChannel release = g_release.load(std::memory_order_acquire);
     if (release == nullptr || g_manager == nullptr || !core::settings::get().client.fadeRelease) {
         return;
     }
-    std::uint32_t channel = kWorldTransitionChannel;
-    std::array<float, 4> colour = kOpaqueBlack;
-    (void)release(g_manager, &channel, colour.data(), kFadeInSeconds);
     if (g_logged.exchange(true, std::memory_order_relaxed)) {
         return;
     }
+    std::uint32_t channel = kWorldTransitionChannel;
+    std::array<float, 4> colour = kOpaqueBlack;
+    (void)release(g_manager, &channel, colour.data(), kFadeInSeconds);
     std::array<char, kLineCapacity> line{};
     const int written = std::snprintf(line.data(),
                                       line.size(),
                                       "ev=bootflow stage=fade_release result=issued channel=0x%X",
                                       kWorldTransitionChannel);
-    if (written > 0) {
+    if (written > 0 && static_cast<std::size_t>(written) < line.size()) {
         core::log::write(core::log::Channel::client,
                          core::log::Level::info,
                          {line.data(), static_cast<std::size_t>(written)});
