@@ -164,3 +164,37 @@ not map extraction order `0..4` or Homecoming tags `80F02150..80F0215C` to runti
 empty Quests page proves that definition lookup alone is not active objective state. Consequently
 this narrows the next work to the already-ported completion/progress readers and their state input;
 it does not yet justify advertising `objective.set`.
+
+## Objective state read/application path
+
+The build-87221 completion reader at `+0x524E30` and progress reader at `+0x522390` port with
+instruction-identical bodies (apart from relative calls) to build-86657 RVAs `+0x5269D0` and
+`+0x523F30`. Unique long signatures match each new entry exactly once. The progress ABI includes a
+fifth stack argument: output, owner, definition, context, and activity state. Its returned output's
+first dword is current progress; definition `+0x30` is the maximum. Completion additionally reads
+definition flags at `+0x28/+0x2C` and an expression at `+0x38`.
+
+Both values are expression-derived. Inner evaluator `+0x554310` dispatches literals, nested
+definitions, gameplay switches, progression values, boolean/comparison/arithmetic operators, and
+FNV operations. Switch leaf `+0x5549C0` bounds its 16-bit index below `0x5BCC` and returns true when
+the corresponding activity-state byte equals `2`. Progression leaf `+0x554B90` bounds its index
+below `0x3C8C` and reads the bank following those switch bytes; observed rows are eight bytes with
+a present byte and value dword at `+4`.
+
+The matching application side is definition-driven. `+0x540C90` writes one progression row and
+uses a definition type to select set/min/max/add behavior. `+0x54BDF0` resolves definition-backed
+source rows and applies associated switches as state `2`; `+0x54BEE0` applies their direct and
+derived progression targets, including a call to `+0x548980`; `+0x54D730` runs both paths for three
+source sets. This is evidence for an activity/global-state source-row adapter, not permission to
+invent one. No source wire shape or Homecoming objective-to-bank mapping is yet verified.
+
+The paired observer then completed a fresh build-86657 runtime control. Both signatures attached,
+the Hunter reached stable orbit, Director opened, and Quests visibly rendered `0 / 0` with the
+empty-page message. Completion caller return RVA `+0xFA0F68` evaluated five definitions:
+`6C1733AB` and `2F76637B` with maximum `1`, plus `93CDAE72`, `93CDAE71`, and `93CDAE70` with
+maximum `1000`. All returned false with a non-null context. No progress invocation occurred during
+the empty Quests control. This is positive ABI/consumer evidence and negative active-state
+evidence; it neither identifies the Homecoming definitions nor supplies a mutation adapter.
+The exact deployed DLL and retained log are in
+`analysis/script-host-runtime/20260815-031801-objective-state-consumer/`; the DLL SHA-256 is
+`33022AE70972726E6529591842A721E55F78AB3671D90811DA2BFF27E6F72CA9`.

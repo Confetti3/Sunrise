@@ -117,6 +117,16 @@ void uninstall_activity_definition_observer() noexcept;
 /** Detaches the objective-definition resolver observer. */
 void uninstall_objective_definition_observer() noexcept;
 
+/**
+ * Observes the paired build-86657 objective completion/progress readers ported from the build-87221
+ * quest diagnostic. The observer copies only definition scalars and the returned state value.
+ * @return True when both unique reader entries are found and attached.
+ */
+[[nodiscard]] bool install_objective_state_observer() noexcept;
+
+/** Detaches the objective completion/progress observers. */
+void uninstall_objective_state_observer() noexcept;
+
 /** @return True and copies the graph-resolved Homecoming activity index after its native scan. */
 [[nodiscard]] bool homecoming_activity_index(std::uint16_t& output) noexcept;
 

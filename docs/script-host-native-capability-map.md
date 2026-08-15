@@ -11,8 +11,8 @@ Destiny 2 build 86657. No row infers Bungie's absent host policy from client pac
 | `activity.session.observe` | four copied `SessionRecord` values exist behind the State lock | none | `state/activity/activity_session_lookup.cpp` only exposes `contains` and `is_joined` | No stable copied session snapshot ABI | high / probe required |
 | `activity.incident.observe` | bounded 64-row pointer-free queue; each row copies session/account scalars, target indices, flags, and payload length | client svc8 activity message type 19 -> native queue -> pipe `activity.incident` | build-86657 source `+0xD82730` -> retail encoder -> `activity_message_route.cpp` -> `incident::validate` -> `state::activity::incidents` -> script-host worker | A Tower control correlated one client source call containing target 1121 plus five ordered extras with the immediately accepted server incident. | high / available |
 | `activity.incident.emit` | none | generic service-9 notification framing exists, but msg-19 selector/payload semantics and ordering are not recovered | client msg-19 handler table is only indirectly identified by the validator artifacts | No harmless target/payload has been replayed | low / wire adapter required |
-| `objective.set` | no objective-specific Sunrise State found | generic service-9 notification framing and progression banks are not an objective binding | build-86657 definition resolver `+0xC923A0` is observed read-only; setter/producer remains unknown | Quests/Director resolved real 16-bit definition indices and stable definition hashes, but no mutation or Homecoming index mapping is verified | medium for definition consumer; low / wire adapter required |
-| `gameplay-switch.set` | no gameplay-switch-specific Sunrise State found | unknown | no consumer localized | No wire or runtime evidence | low / wire adapter required |
+| `objective.set` | native objective expressions consume an activity-state switch bank followed by progression rows; no writable Sunrise mirror exists | generic service-9 notification framing and progression banks are not yet a verified objective binding | definition resolver `+0xC923A0`, completion reader `+0x5269D0`, and progress reader `+0x523F30` are localized; application helpers remain unwired | An empty Quests control exercised five completion reads with maxima 1/1/1000/1000/1000, all false; no Homecoming index/bank mapping or mutation is verified | high for read path; low / wire adapter required |
+| `gameplay-switch.set` | native activity state begins with `0x5BCC` one-byte switch states; no writable Sunrise mirror exists | unknown | expression leaf `+0x5549C0` treats state value `2` as true; helper `+0x54BDF0` applies switches from definition-backed source rows | Static instruction-level evidence only; no wire producer or harmless state transition is verified | medium for consumer; low / wire adapter required |
 | `entity.allocate` | 8192-bit lease mask per joined activity session | svc8 slot request -> svc9 slot notification | `state/activity/entity_slots` transaction code | Lease lifecycle is implemented, but it does not identify an actor or object | high for leases; low for actors / probe required |
 | `entity.spawn` / `entity.update` / `entity.destroy` | no actor lifecycle State | unknown create/baseline/update/remove messages | no SObject, actor baseline, health, damage, death, or removal funnel localized | Spawn-set catalogs contain placement/package provenance only | low / probe required |
 | `placed-content.authority` | bubble-authority tokens and membership state | svc9 roster/sensor-authority pushes | client bubble-authority decoder patch | Authority grant exists; placed-object activation has not been demonstrated for this feature | medium / client patch required |
@@ -85,8 +85,29 @@ pointers or changing the output pair. Account/orbit consumers at callers `+0xFA0
 consumer at `+0xDDD4DA` resolved `2914`, `2915..2917`, `2920..2922`, and `2929..2933`. Quests
 visibly contained `0 / 0`, so these are definition queries, not proof of active quest state.
 
-This localizes the first objective-specific client consumer and its 16-bit namespace, but not the
-state writer, completion/progress producer, or the five Homecoming definitions' runtime indices.
-The next experiment should follow the known build-86657 completion/progress readers from those
-callers and correlate a real state change before adding a narrow host-side adapter. Until then,
-`objective.set` stays unavailable.
+The corresponding build-87221 completion and progress readers also port exactly to build 86657 at
+`+0x5269D0` and `+0x523F30`. The progress call has five arguments: output, owner, definition,
+context, and activity state. Both readers evaluate the objective definition rather than reading a
+standalone objective value. Their shared expression evaluator at `+0x554310` can consume literals,
+nested expressions, gameplay switches, and progression values. Switch leaf `+0x5549C0` reads one
+of `0x5BCC` state bytes and considers value `2` true. Progression leaf `+0x554B90` reads from the
+following bank of `0x3C8C` rows, whose observed layout is a present byte plus a dword at `+4` in an
+eight-byte row. Completion also consumes definition flags at `+0x28/+0x2C`, while progress returns
+the current scalar and the definition stores its maximum at `+0x30`.
+
+Static application helpers narrow the write side without proving a transport. `+0x540C90` applies
+one progression row using definition-selected set/min/max/add behavior; `+0x54BDF0` applies switch
+state `2` from definition-backed source rows; `+0x54BEE0` applies their progression indices; and
+`+0x54D730` invokes the two application paths for three source sets. This makes an activity/global
+state update the leading adapter boundary, but its source-row wire schema, Homecoming indices, and
+safe host transition remain unverified. A real state change must be correlated before any narrow
+writer is added, so `objective.set` stays unavailable.
+
+A paired read-only detour subsequently attached to both build-86657 readers and survived sign-in,
+orbit, Director, and the visibly empty Quests page. Quests invoked the completion reader five times
+from return RVA `+0xFA0F68`, producing definition hashes `6C1733AB`, `2F76637B`, and
+`93CDAE72..93CDAE70`. Their maxima were `1`, `1`, and `1000` for the remaining three; every
+expression evaluated false with a non-null context. No progress read fired in the empty-page
+control. This validates the completion ABI and expression-state consumer without manufacturing a
+state transition. The Homecoming definition/bank mapping and write-side source remain unknown, so
+the capability status does not change.
