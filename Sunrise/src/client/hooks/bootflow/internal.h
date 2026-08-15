@@ -107,6 +107,16 @@ void uninstall_activity_descriptor_observer() noexcept;
 /** Detaches the activity-definition lookup observer. */
 void uninstall_activity_definition_observer() noexcept;
 
+/**
+ * Observes the build-86657 objective-definition resolver ported from the build-87221 quest reader.
+ * The detour records the 16-bit objective index, caller RVA, and bounded output prefixes only.
+ * @return True when the unique resolver entry is found and the observer attaches.
+ */
+[[nodiscard]] bool install_objective_definition_observer() noexcept;
+
+/** Detaches the objective-definition resolver observer. */
+void uninstall_objective_definition_observer() noexcept;
+
 /** @return True and copies the graph-resolved Homecoming activity index after its native scan. */
 [[nodiscard]] bool homecoming_activity_index(std::uint16_t& output) noexcept;
 

@@ -137,3 +137,30 @@ server parser now retains four decoded application-payload prefix words for boun
 a follow-up Tower run proved its first decoded word exactly equals the client source-body first
 word. This establishes the source-to-wire payload boundary, but the payload's semantics remain
 unresolved.
+
+## Objective-definition consumer
+
+The old build-87221 diagnostic quest reader at `+0x1058690` provided a concrete dependency chain,
+not merely an objective-named string. Its objective-definition resolver at `+0xC90980` ports
+instruction-for-instruction to build-86657 RVA `+0xC923A0`; the only byte differences are relative
+call displacements. The build-86657 resolver takes a manager, a two-pointer output pair, and a
+16-bit objective index. Its validated long signature matches the reconstructed executable once.
+
+A bounded read-only observer at that resolver completed a fresh runtime control without modifying
+the output. Orbit/account UI resolved indices `1163`, `1193`, and `1361..1363` from three callers.
+Opening the visibly empty Quests page (`0 / 0`), then Director, resolved this separate set from
+caller `+0xDDD4DA`: `2914`, `2915..2917`, `2920..2922`, and `2929..2933`. Each index returned stable
+primary and secondary definition prefixes. The same process then launched Tower with a genuine
+hold and rendered Courtyard normally, showing the observer is compatible with the complete load.
+The retained log is
+`analysis/script-host-runtime/20260815-025700-objective-definition-consumer/sunrise.log`.
+After repeated Director polling exhausted the first run's row budget, the observer was tightened to
+emit each caller/index pair once. An exact-final-binary smoke run reached orbit and the empty
+Quests page again; it retained all 12 `+0xDDD4DA` indices in only 17 total rows. That log is
+`analysis/script-host-runtime/20260815-031000-objective-definition-dedup-smoke/sunrise.log`.
+
+These values prove a client-visible objective definition namespace and consumer boundary. They do
+not map extraction order `0..4` or Homecoming tags `80F02150..80F0215C` to runtime indices, and the
+empty Quests page proves that definition lookup alone is not active objective state. Consequently
+this narrows the next work to the already-ported completion/progress readers and their state input;
+it does not yet justify advertising `objective.set`.

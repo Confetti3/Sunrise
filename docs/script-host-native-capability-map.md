@@ -11,7 +11,7 @@ Destiny 2 build 86657. No row infers Bungie's absent host policy from client pac
 | `activity.session.observe` | four copied `SessionRecord` values exist behind the State lock | none | `state/activity/activity_session_lookup.cpp` only exposes `contains` and `is_joined` | No stable copied session snapshot ABI | high / probe required |
 | `activity.incident.observe` | bounded 64-row pointer-free queue; each row copies session/account scalars, target indices, flags, and payload length | client svc8 activity message type 19 -> native queue -> pipe `activity.incident` | build-86657 source `+0xD82730` -> retail encoder -> `activity_message_route.cpp` -> `incident::validate` -> `state::activity::incidents` -> script-host worker | A Tower control correlated one client source call containing target 1121 plus five ordered extras with the immediately accepted server incident. | high / available |
 | `activity.incident.emit` | none | generic service-9 notification framing exists, but msg-19 selector/payload semantics and ordering are not recovered | client msg-19 handler table is only indirectly identified by the validator artifacts | No harmless target/payload has been replayed | low / wire adapter required |
-| `objective.set` | no objective-specific Sunrise State found | generic service-9 notification framing and progression banks are not an objective binding | no objective-specific client consumer is localized in source | No definition-index, payload, state transition, or UI result is verified | low / wire adapter required |
+| `objective.set` | no objective-specific Sunrise State found | generic service-9 notification framing and progression banks are not an objective binding | build-86657 definition resolver `+0xC923A0` is observed read-only; setter/producer remains unknown | Quests/Director resolved real 16-bit definition indices and stable definition hashes, but no mutation or Homecoming index mapping is verified | medium for definition consumer; low / wire adapter required |
 | `gameplay-switch.set` | no gameplay-switch-specific Sunrise State found | unknown | no consumer localized | No wire or runtime evidence | low / wire adapter required |
 | `entity.allocate` | 8192-bit lease mask per joined activity session | svc8 slot request -> svc9 slot notification | `state/activity/entity_slots` transaction code | Lease lifecycle is implemented, but it does not identify an actor or object | high for leases; low for actors / probe required |
 | `entity.spawn` / `entity.update` / `entity.destroy` | no actor lifecycle State | unknown create/baseline/update/remove messages | no SObject, actor baseline, health, damage, death, or removal funnel localized | Spawn-set catalogs contain placement/package provenance only | low / probe required |
@@ -73,7 +73,20 @@ Destiny 2 build 86657. No row infers Bungie's absent host policy from client pac
 ## Objective hypothesis boundary
 
 Service 9 can carry activity notifications, and msg 19 is bidirectional, but neither fact proves
-that an objective is a msg-19 target or that a progression row drives the objective UI. The next
-objective experiment must start at a client-visible objective consumer or a captured retail-like
-event, identify its definition/runtime index and state ordering, and then add one narrow host-side
-adapter. Until that evidence exists, `objective.set` must stay unavailable.
+that an objective is a msg-19 target or that a progression row drives the objective UI. An exact
+build-87221 quest-reader dependency was ported to build 86657: objective-definition resolver
+`+0xC90980` became `+0xC923A0` with an instruction-identical body apart from relative calls. Its
+long signature matches the reconstructed executable exactly once.
+
+A read-only detour at that resolver survived sign-in, orbit, Quests, Director, an 80-second Tower
+load, and rendered Courtyard. It observed real definition indices without retaining native
+pointers or changing the output pair. Account/orbit consumers at callers `+0xFA0F41`,
+`+0x13E819D`, and `+0x13E7D99` resolved `1163`, `1193`, and `1361..1363`. The Quests/Director
+consumer at `+0xDDD4DA` resolved `2914`, `2915..2917`, `2920..2922`, and `2929..2933`. Quests
+visibly contained `0 / 0`, so these are definition queries, not proof of active quest state.
+
+This localizes the first objective-specific client consumer and its 16-bit namespace, but not the
+state writer, completion/progress producer, or the five Homecoming definitions' runtime indices.
+The next experiment should follow the known build-86657 completion/progress readers from those
+callers and correlate a real state change before adding a narrow host-side adapter. Until then,
+`objective.set` stays unavailable.
