@@ -23,7 +23,7 @@
     },
     {
       "id": "activity.incident.observe",
-      "status": "available",
+      "status": "probeRequired",
       "owner": "sunrise-native-bridge",
       "evidence": "Build 86657 emitted Tower target 1121 through the bounded native queue and the live C# host consumed sequence 2 in the same fresh session.",
       "notes": "Reconnect discards stale rows; queue overflow and lock contention are bounded and counted."
@@ -50,9 +50,10 @@
     },
     {
       "id": "gameplay-switch.set",
-      "status": "wireAdapterRequired",
-      "owner": "activity-host",
-      "evidence": "The native expression consumer reads one of 0x5BCC activity-state bytes and treats value 2 as true. The unique definition-backed writer at +0x555EC0 can mutate the retained +0x9348 bank. A read-only registry probe maps arcade_homecoming definition 0xF6 to writer type 3 and retained bank index 1 in the base table; original mission_towerfall candidates 0x19D..0x1A2 are type 0/bank -1. No safe recurring owner context, read-before-write validation, wire producer, or reliable command-drain point exists."
+      "status": "available",
+      "owner": "sunrise-native-bridge",
+      "evidence": "The native expression consumer reads one of 0x5BCC activity-state bytes and treats value 2 as true. Build-86657 runtime evidence proves concrete activity-owner update +0xFA6CD0 recurs in idle, transitioning, and arrived phases with validated vtable +0x1C35DC8 and retained source identity 0x00100101. A first guarded command correctly reported rejection after an invalid source-pointer call left bank 1 unchanged at zero.",
+      "notes": "The bridge now passes the validated activity owner to writer +0x555EC0 and verifies the retained byte afterward, but that correction is compiled only and not runtime-verified. Keep this capability unadvertised until a fresh run proves the mutation and a client-visible effect."
     },
     {
       "id": "entity.allocate",

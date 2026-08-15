@@ -342,3 +342,19 @@ write experiment therefore moves to `arcade_homecoming` definition `0xF6`, after
 owner context and a read-only current-state observation are established. Evidence is retained in
 `analysis/script-host-runtime/20260815-063239-definition-candidates-orbit/`; exercised DLL SHA-256
 `E7CAC8A88B984B9916507B4567213DC171BC9DACEA4AB0A7BD1EF3E27545B9E1`.
+
+## Recurring activity-owner boundary
+
+Ghidra recovered the concrete activity-owner vtable at `+0x1C35DC8`; its update slot `+0x90`
+resolves to `+0xFA6CD0`. A signature-guarded read-only detour validated that exact vtable and
+source identity `0x00100101`, then copied only `arcade_homecoming` definition `0xF6` bank byte 1.
+A genuine launch observed the method in `idle`, `transitioning`, and `arrived` phases with value
+zero, establishing the first recurring in-world command-drain boundary. Evidence is retained in
+`analysis/script-host-runtime/20260815-owner-update-arcade-runtime/`; exercised DLL SHA-256
+`B29FA3C963C939AA9464B99AB07DA253BB7B6341849AD2599F7E8F1640A25400`.
+
+A bounded single-slot bridge experiment then requested value 2 after arrival. Its first call passed
+the retained source rather than the activity owner to writer `+0x555EC0`; the post-write guard
+observed `before=0, after=0` and returned an explicit rejection. No objective success is claimed.
+The adapter now passes the validated owner and still verifies the retained byte, but that correction
+is build-only and remains unadvertised pending a fresh runtime mutation and visible-client check.

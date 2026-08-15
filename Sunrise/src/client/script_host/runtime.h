@@ -17,6 +17,7 @@
 #include "../../state/activity/forced/activity_forced_destination.h"
 #include "../../state/activity/incidents/runtime.h"
 #include "../../state/activity/runtime.h"
+#include "../../state/activity/switch_commands/runtime.h"
 
 namespace sunrise::client::script_host {
 namespace detail {
@@ -106,7 +107,7 @@ inline void pipe_path(std::array<wchar_t, kPipePathCapacity>& output) noexcept {
 
 [[nodiscard]] inline bool write_hello(HANDLE pipe) noexcept {
     constexpr std::string_view hello =
-        R"({"protocol":1,"type":"bridge.hello","bridge":"sunrise-native","build":"Sunrise 0.2.1 / Destiny 2 build 86657","capabilities":["host.ping","world.phase.observe","activity.incident.observe","activity.override.configure"],"limitations":["no activity-session snapshot","no incident encoder","no objective adapter","no actor lifecycle adapter","no AI policy"]})";
+        R"({"protocol":1,"type":"bridge.hello","bridge":"sunrise-native","build":"Sunrise 0.2.1 / Destiny 2 build 86657","capabilities":["host.ping","world.phase.observe","activity.incident.observe","activity.override.configure"],"limitations":["experimental gameplay-switch adapter is not runtime-verified","no activity-session snapshot","no incident encoder","no objective adapter","no actor lifecycle adapter","no AI policy"]})";
     return write_line(pipe, hello);
 }
 
@@ -442,6 +443,101 @@ inline void report_stale_incidents(std::size_t discarded) noexcept {
     return write_command_result(pipe, request, capabilityName, "ok", "override published");
 }
 
+[[nodiscard]] inline bool write_gameplay_switch_result(HANDLE pipe,
+                                                        std::string_view line) noexcept {
+    constexpr std::string_view capabilityName = "gameplay-switch.set";
+    constexpr std::uint64_t kResultTimeoutMilliseconds = 2'000;
+    std::array<char, 96> requestId{};
+    std::array<char, 96> capability{};
+    std::size_t requestLength = 0;
+    std::size_t capabilityLength = 0;
+    if (!extract_json_string(line, "requestId", requestId, requestLength)
+        || !extract_json_string(line, "capability", capability, capabilityLength)
+        || std::string_view(capability.data(), capabilityLength) != capabilityName) {
+        return write_command_result(
+            pipe, "unknown", capabilityName, "error", "malformed gameplay switch request");
+    }
+    const std::string_view request(requestId.data(), requestLength);
+    std::uint64_t definition = 0;
+    std::uint64_t value = 0;
+    if (!extract_json_unsigned(
+            line, "definitionIndex", (std::numeric_limits<std::uint16_t>::max)(), definition)
+        || !extract_json_unsigned(line, "value", 2, value)) {
+        return write_command_result(pipe,
+                                    request,
+                                    capabilityName,
+                                    "error",
+                                    "definitionIndex or value is invalid");
+    }
+    if (definition != 0x00F6) {
+        return write_command_result(pipe,
+                                    request,
+                                    capabilityName,
+                                    "error",
+                                    "only verified Homecoming definition 0xF6 is accepted");
+    }
+    if (state::activity::world_phase() != state::activity::WorldPhase::arrived) {
+        return write_command_result(
+            pipe, request, capabilityName, "error", "client is not in an arrived world");
+    }
+
+    std::uint64_t sequence = 0;
+    if (!state::activity::switch_commands::publish(
+            static_cast<std::uint16_t>(definition), static_cast<std::int32_t>(value), sequence)) {
+        return write_command_result(
+            pipe, request, capabilityName, "error", "native command slot is busy");
+    }
+
+    const std::uint64_t started = GetTickCount64();
+    state::activity::switch_commands::Result result{};
+    while (GetTickCount64() - started < kResultTimeoutMilliseconds) {
+        if (state::activity::switch_commands::try_take_result(sequence, result)) {
+            std::array<char, 128> reason{};
+            const int written = std::snprintf(reason.data(),
+                                              reason.size(),
+                                              "definition 0x%X changed %u to %u",
+                                              static_cast<unsigned int>(definition),
+                                              result.before,
+                                              result.after);
+            if (!result.applied || written <= 0
+                || static_cast<std::size_t>(written) >= reason.size()) {
+                return write_command_result(pipe,
+                                            request,
+                                            capabilityName,
+                                            "error",
+                                            "native writer rejected the retained switch");
+            }
+            return write_command_result(
+                pipe,
+                request,
+                capabilityName,
+                "ok",
+                std::string_view(reason.data(), static_cast<std::size_t>(written)));
+        }
+        Sleep(5);
+    }
+    if (state::activity::switch_commands::cancel(sequence)) {
+        return write_command_result(pipe,
+                                    request,
+                                    capabilityName,
+                                    "error",
+                                    "timed out before the game thread claimed the command");
+    }
+    for (std::uint32_t attempt = 0; attempt < 20; ++attempt) {
+        if (state::activity::switch_commands::try_take_result(sequence, result)) {
+            return write_command_result(pipe,
+                                        request,
+                                        capabilityName,
+                                        result.applied ? "ok" : "error",
+                                        result.applied ? "native writer applied after claim"
+                                                       : "native writer rejected after claim");
+        }
+        Sleep(5);
+    }
+    return write_command_result(
+        pipe, request, capabilityName, "error", "claimed native command did not finish");
+}
+
 [[nodiscard]] inline bool write_unsupported(HANDLE pipe, std::string_view line) noexcept {
     std::array<char, 96> requestId{};
     std::array<char, 96> capability{};
@@ -479,6 +575,10 @@ inline void report_stale_incidents(std::size_t discarded) noexcept {
         if (line.find(R"("capability":"activity.override.configure")")
             != std::string_view::npos) {
             return write_activity_override_result(pipe, line);
+        }
+        if (line.find(R"("capability":"gameplay-switch.set")")
+            != std::string_view::npos) {
+            return write_gameplay_switch_result(pipe, line);
         }
         return write_unsupported(pipe, line);
     }

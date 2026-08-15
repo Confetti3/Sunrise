@@ -12,6 +12,8 @@
 #include <string_view>
 
 #include "../../../core/logging/log.h"
+#include "../../../state/activity/runtime.h"
+#include "../../../state/activity/switch_commands/runtime.h"
 #include "../../hooking/detour.h"
 #include "internal.h"
 
@@ -39,6 +41,12 @@ constexpr std::string_view kApplyListsSignatureText =
 constexpr auto kApplyListsSignature =
     signature<signature_length(kApplyListsSignatureText)>(kApplyListsSignatureText);
 
+/** Build-86657 concrete activity-owner virtual method +0x90 at RVA +0xFA6CD0. */
+constexpr std::string_view kOwnerUpdateSignatureText =
+    "41 54 48 83 EC 40 48 8B 01 4C 8B E1 FF 90 88 00 00 00 84 C0 0F 85 ? ? ? ?";
+constexpr auto kOwnerUpdateSignature =
+    signature<signature_length(kOwnerUpdateSignatureText)>(kOwnerUpdateSignatureText);
+
 /** Offset of the writer's near call to the definition-registry singleton getter. */
 constexpr std::size_t kRegistryCallOffset = 36;
 constexpr std::size_t kNearCallOperandOffset = 1;
@@ -56,6 +64,9 @@ constexpr std::size_t kProgressCaptureCapacity = 32;
 constexpr std::size_t kPersistentSwitchBankOffset = 0x9348;
 constexpr std::size_t kPersistentSwitchBankSize = 0x1000;
 constexpr std::uint32_t kPersistentSourceIdentity = 0x00100101U;
+constexpr std::uint16_t kArcadeHomecomingCandidateDefinition = 0x00F6;
+constexpr std::size_t kArcadeHomecomingCandidateBankIndex = 1;
+constexpr std::uintptr_t kActivityOwnerVtableRva = 0x1C35DC8;
 constexpr std::size_t kSeenCapacity = 256;
 constexpr std::size_t kReportCapacity = 192;
 constexpr std::size_t kLineCapacity = 240;
@@ -77,6 +88,7 @@ using ApplyCategory = void(__fastcall*)(void*,
                                         void*) noexcept;
 using WriteSwitch = void(__fastcall*)(void*, std::uint16_t, std::int32_t) noexcept;
 using ApplyLists = void(__fastcall*)(void*, const void*, const void*) noexcept;
+using OwnerUpdate = void(__fastcall*)(void*) noexcept;
 using StateGetter = void*(__fastcall*)(void*) noexcept;
 using DefinitionRegistry = void*(__fastcall*)() noexcept;
 using DefinitionTable = std::uintptr_t(__fastcall*)(void*) noexcept;
@@ -84,9 +96,11 @@ using DefinitionTable = std::uintptr_t(__fastcall*)(void*) noexcept;
 hooking::detour::Handle g_applyHandle{};
 hooking::detour::Handle g_writerHandle{};
 hooking::detour::Handle g_applyListsHandle{};
+hooking::detour::Handle g_ownerUpdateHandle{};
 std::atomic<ApplyCategory> g_original{nullptr};
 std::atomic<WriteSwitch> g_originalWriter{nullptr};
 std::atomic<ApplyLists> g_originalApplyLists{nullptr};
+std::atomic<OwnerUpdate> g_originalOwnerUpdate{nullptr};
 std::atomic<DefinitionRegistry> g_definitionRegistry{nullptr};
 std::array<std::atomic<std::uint64_t>, kSeenCapacity> g_seen{};
 std::atomic<std::uint32_t> g_reports{};
@@ -122,12 +136,24 @@ static_assert(sizeof(DefinitionRecordSnapshot) == 8);
 struct SourceSnapshot {
     std::array<std::uint32_t, 4> prefixWords{};
     std::uintptr_t vtableRva{};
+    state::activity::WorldPhase worldPhase{state::activity::WorldPhase::idle};
+    bool candidateStateValid{};
+    std::uint8_t candidateState{};
     std::int32_t switchCount{};
     std::int32_t progressCount{};
     std::size_t capturedSwitches{};
     std::size_t capturedProgressions{};
     std::array<SwitchRow, kSwitchCapacity> switches{};
     std::array<ProgressRow, kProgressCaptureCapacity> progressions{};
+};
+
+struct OwnerUpdateSnapshot {
+    void* owner{};
+    void* source{};
+    std::uintptr_t callerRva{};
+    std::uintptr_t vtableRva{};
+    state::activity::WorldPhase worldPhase{state::activity::WorldPhase::idle};
+    std::uint8_t candidateState{};
 };
 
 /** Returns a stable main-image-relative value when one copied pointer identifies a client vtable.
@@ -161,7 +187,15 @@ struct SourceSnapshot {
     }
     __try {
         const auto* const bytes = static_cast<const std::byte*>(source);
+        output.worldPhase = state::activity::world_phase();
         std::memcpy(output.prefixWords.data(), bytes, sizeof output.prefixWords);
+        if (output.prefixWords[0] == kPersistentSourceIdentity) {
+            std::memcpy(&output.candidateState,
+                        bytes + kPersistentSwitchBankOffset
+                            + kArcadeHomecomingCandidateBankIndex,
+                        sizeof output.candidateState);
+            output.candidateStateValid = true;
+        }
         std::uintptr_t possibleVtable{};
         std::memcpy(&possibleVtable, bytes, sizeof possibleVtable);
         output.vtableRva = main_image_rva(possibleVtable);
@@ -215,6 +249,42 @@ struct SourceSnapshot {
         for (std::size_t row = 0; row < output.captured; ++row) {
             std::memcpy(&output.rows[row], rows + row * sizeof(SwitchRow), sizeof(SwitchRow));
         }
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+/** Copies one retained switch byte while the concrete owner is valid on its update call. */
+[[nodiscard]] bool snapshot_owner_update(void* owner, OwnerUpdateSnapshot& output) noexcept {
+    if (owner == nullptr) {
+        return false;
+    }
+    __try {
+        output.owner = owner;
+        const auto ownerVtable = reinterpret_cast<std::uintptr_t>(*static_cast<void***>(owner));
+        output.vtableRva = main_image_rva(ownerVtable);
+        if (output.vtableRva != kActivityOwnerVtableRva) {
+            return false;
+        }
+        const auto* const ownerBytes = static_cast<const std::byte*>(owner);
+        const void* source{};
+        std::memcpy(&source, ownerBytes + 0x18, sizeof source);
+        if (source == nullptr) {
+            return false;
+        }
+        output.source = const_cast<void*>(source);
+        const auto* const sourceBytes = static_cast<const std::byte*>(source);
+        std::uint32_t identity{};
+        std::memcpy(&identity, sourceBytes, sizeof identity);
+        if (identity != kPersistentSourceIdentity) {
+            return false;
+        }
+        output.worldPhase = state::activity::world_phase();
+        std::memcpy(&output.candidateState,
+                    sourceBytes + kPersistentSwitchBankOffset
+                        + kArcadeHomecomingCandidateBankIndex,
+                    sizeof output.candidateState);
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
@@ -328,6 +398,22 @@ void report(std::uintptr_t callerRva, bool enabled, const SourceSnapshot& snapsh
     }
     if (claim(identityKey)) {
         write_identity_line(callerRva, snapshot);
+    }
+    if (snapshot.candidateStateValid) {
+        std::uint64_t candidateKey = mix(kOffset, 6);
+        candidateKey = mix(candidateKey, callerRva);
+        candidateKey = mix(candidateKey, static_cast<std::uint8_t>(snapshot.worldPhase));
+        candidateKey = mix(candidateKey, snapshot.candidateState);
+        if (claim(candidateKey)) {
+            write_line("ev=activity_state_source stage=%s n=%u caller=+0x%llX definition=%u "
+                       "bank_index=%u value=%u phase=%u",
+                       "definition_state",
+                       callerRva,
+                       kArcadeHomecomingCandidateDefinition,
+                       static_cast<std::uint32_t>(kArcadeHomecomingCandidateBankIndex),
+                       snapshot.candidateState,
+                       static_cast<std::uint8_t>(snapshot.worldPhase));
+        }
     }
     std::uint64_t summaryKey = mix(kOffset, callerRva);
     summaryKey = mix(summaryKey, static_cast<std::uint32_t>(snapshot.switchCount));
@@ -465,6 +551,73 @@ void report_switch_list(std::uintptr_t callerRva, const SwitchListSnapshot& snap
                        static_cast<std::uint32_t>(snapshot.ownerVtableRva));
         }
     }
+}
+
+void report_owner_update(const OwnerUpdateSnapshot& snapshot) noexcept {
+    constexpr std::uint64_t kOffset = 14'695'981'039'346'656'037ULL;
+    std::uint64_t key = mix(kOffset, 7);
+    key = mix(key, snapshot.callerRva);
+    key = mix(key, snapshot.vtableRva);
+    key = mix(key, static_cast<std::uint8_t>(snapshot.worldPhase));
+    key = mix(key, snapshot.candidateState);
+    if (!claim(key)) {
+        return;
+    }
+    write_line("ev=activity_state_source stage=%s n=%u caller=+0x%llX definition=%u "
+               "bank_index=%u value=%u phase=%u",
+               "owner_update",
+               snapshot.callerRva,
+               kArcadeHomecomingCandidateDefinition,
+               static_cast<std::uint32_t>(kArcadeHomecomingCandidateBankIndex),
+               snapshot.candidateState,
+               static_cast<std::uint8_t>(snapshot.worldPhase));
+}
+
+void report_owner_command(const state::activity::switch_commands::Command& command,
+                          std::uint8_t before,
+                          std::uint8_t after,
+                          bool applied) noexcept {
+    write_line("ev=activity_state_source stage=%s n=%u command=%llu definition=%u "
+               "value=%u before=%u after=%u",
+               applied ? "owner_command_applied" : "owner_command_rejected",
+               static_cast<std::uintptr_t>(command.sequence),
+               command.definition,
+               static_cast<std::uint32_t>(command.value),
+               before,
+               after);
+}
+
+/** Executes one claimed switch command while the validated retained source is transiently live. */
+void apply_owner_command(const OwnerUpdateSnapshot& snapshot) noexcept {
+    if (snapshot.worldPhase != state::activity::WorldPhase::arrived) {
+        return;
+    }
+    state::activity::switch_commands::Command command{};
+    if (!state::activity::switch_commands::try_claim(command)) {
+        return;
+    }
+    std::uint8_t after = snapshot.candidateState;
+    bool applied = false;
+    if (command.definition == kArcadeHomecomingCandidateDefinition && command.value >= 0
+        && command.value <= 2 && snapshot.owner != nullptr && snapshot.source != nullptr) {
+        const WriteSwitch writer = g_originalWriter.load(std::memory_order_acquire);
+        if (writer != nullptr) {
+            __try {
+                writer(snapshot.owner, command.definition, command.value);
+                const auto* const sourceBytes = static_cast<const std::byte*>(snapshot.source);
+                std::memcpy(&after,
+                            sourceBytes + kPersistentSwitchBankOffset
+                                + kArcadeHomecomingCandidateBankIndex,
+                            sizeof after);
+                applied = after == static_cast<std::uint8_t>(command.value);
+            } __except (EXCEPTION_EXECUTE_HANDLER) {
+                applied = false;
+            }
+        }
+    }
+    state::activity::switch_commands::complete(
+        command, snapshot.candidateState, after, applied);
+    report_owner_command(command, snapshot.candidateState, after, applied);
 }
 
 /** Resolves one record through the same unpatched base table used by the native writer. */
@@ -668,6 +821,23 @@ __declspec(noinline) void __fastcall apply_lists(void* owner,
     }
 }
 
+/** Observes one concrete owner update without retaining the owner or its state pointer. */
+__declspec(noinline) void __fastcall update_owner(void* owner) noexcept {
+    OwnerUpdateSnapshot snapshot{};
+    const bool captured = snapshot_owner_update(owner, snapshot);
+    if (captured) {
+        snapshot.callerRva = caller_rva(_ReturnAddress());
+    }
+    const OwnerUpdate original = g_originalOwnerUpdate.load(std::memory_order_acquire);
+    if (original != nullptr) {
+        original(owner);
+    }
+    if (captured) {
+        apply_owner_command(snapshot);
+        report_owner_update(snapshot);
+    }
+}
+
 void log_install(const char* result, const char* reason = nullptr) noexcept {
     std::array<char, 144> line{};
     const int written = reason == nullptr
@@ -675,7 +845,7 @@ void log_install(const char* result, const char* reason = nullptr) noexcept {
                                             line.size(),
                                             "ev=activity_state_source stage=install result=%s "
                                             "dispatcher=+0x540320 apply_lists=+0x52FD60 "
-                                            "writer=+0x555EC0",
+                                            "writer=+0x555EC0 owner_update=+0xFA6CD0",
                                             result)
                             : std::snprintf(line.data(),
                                             line.size(),
@@ -697,7 +867,8 @@ void log_install(const char* result, const char* reason = nullptr) noexcept {
 
 /** Attaches the read-only observer for explicit retained activity-state source rows. */
 bool install_activity_state_source_observer() noexcept {
-    if (g_applyHandle.attached && g_applyListsHandle.attached && g_writerHandle.attached) {
+    if (g_applyHandle.attached && g_applyListsHandle.attached && g_writerHandle.attached
+        && g_ownerUpdateHandle.attached) {
         return true;
     }
     std::byte* const applyTarget =
@@ -706,11 +877,15 @@ bool install_activity_state_source_observer() noexcept {
         scan_main_image_unique(kWriterSignature, "activity_state_switch_writer");
     std::byte* const applyListsTarget =
         scan_main_image_unique(kApplyListsSignature, "activity_state_apply_lists");
-    if (applyTarget == nullptr || applyListsTarget == nullptr || writerTarget == nullptr) {
+    std::byte* const ownerUpdateTarget =
+        scan_main_image_unique(kOwnerUpdateSignature, "activity_owner_update");
+    if (applyTarget == nullptr || applyListsTarget == nullptr || writerTarget == nullptr
+        || ownerUpdateTarget == nullptr) {
         log_install("fail",
                     applyTarget == nullptr        ? "apply_target"
                     : applyListsTarget == nullptr ? "apply_lists_target"
-                                                  : "writer_target");
+                    : writerTarget == nullptr     ? "writer_target"
+                                                  : "owner_update_target");
         return false;
     }
     const std::byte* const registryCall = writerTarget + kRegistryCallOffset;
@@ -753,12 +928,29 @@ bool install_activity_state_source_observer() noexcept {
     }
     g_originalWriter.store(reinterpret_cast<WriteSwitch>(g_writerHandle.original),
                            std::memory_order_release);
+    if (!hooking::detour::install({ownerUpdateTarget, reinterpret_cast<void*>(&update_owner)},
+                                  g_ownerUpdateHandle)) {
+        (void)hooking::detour::uninstall(g_writerHandle);
+        (void)hooking::detour::uninstall(g_applyListsHandle);
+        (void)hooking::detour::uninstall(g_applyHandle);
+        g_originalWriter.store(nullptr, std::memory_order_release);
+        g_originalApplyLists.store(nullptr, std::memory_order_release);
+        g_original.store(nullptr, std::memory_order_release);
+        g_definitionRegistry.store(nullptr, std::memory_order_release);
+        log_install("fail", "owner_update_attach");
+        return false;
+    }
+    g_originalOwnerUpdate.store(reinterpret_cast<OwnerUpdate>(g_ownerUpdateHandle.original),
+                                std::memory_order_release);
     log_install("ok");
     return true;
 }
 
 /** Detaches the activity-state source observer and clears its bounded diagnostics. */
 void uninstall_activity_state_source_observer() noexcept {
+    if (g_ownerUpdateHandle.attached) {
+        (void)hooking::detour::uninstall(g_ownerUpdateHandle);
+    }
     if (g_writerHandle.attached) {
         (void)hooking::detour::uninstall(g_writerHandle);
     }
@@ -769,6 +961,7 @@ void uninstall_activity_state_source_observer() noexcept {
         (void)hooking::detour::uninstall(g_applyHandle);
     }
     g_originalWriter.store(nullptr, std::memory_order_release);
+    g_originalOwnerUpdate.store(nullptr, std::memory_order_release);
     g_originalApplyLists.store(nullptr, std::memory_order_release);
     g_original.store(nullptr, std::memory_order_release);
     g_definitionRegistry.store(nullptr, std::memory_order_release);
