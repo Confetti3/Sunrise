@@ -18,5 +18,6 @@ inline constexpr std::size_t kMaximumIoOperationsPerService = 8;
 
 inline constexpr char kCapabilityPing[] = "host.ping";
 inline constexpr char kCapabilityWorldPhaseObserve[] = "world.phase.observe";
+inline constexpr char kCapabilityPlacedContentAuthorityObserve[] = "placed-content.authority.observe";
 
 } // namespace sunrise::server::script_host::protocol

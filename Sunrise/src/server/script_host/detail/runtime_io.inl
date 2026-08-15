@@ -125,14 +125,26 @@ void connect_if_due(std::uint64_t now) noexcept {
     g_pipe = pipe;
     clear_transport_buffers();
     enqueue_hello();
-    enqueue_world_phase();
+    (void)enqueue_world_phase();
     report("connect", "ok");
 }
 
 void stage_world_phase() noexcept {
     const state::activity::WorldPhase phase = state::activity::world_phase();
     if (!g_hasWorldPhase || phase != g_lastWorldPhase) {
-        enqueue_world_phase();
+        (void)enqueue_world_phase();
+    }
+}
+
+void stage_placed_content_authority() noexcept {
+    client::hooks::network::bubble_authority::AuthorityObservation observation{};
+    if (!client::hooks::network::bubble_authority::try_observation(observation)) {
+        return;
+    }
+    if (!g_hasPlacedContentAuthority
+        || observation.decodeCount != g_lastPlacedContentAuthority.decodeCount
+        || observation.droppedCount != g_lastPlacedContentAuthority.droppedCount) {
+        (void)enqueue_placed_content_authority(observation);
     }
 }
 

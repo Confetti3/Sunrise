@@ -6,6 +6,9 @@ on:
       - 'ScriptHost/**'
       - 'Sunrise/src/server/script_host/**'
       - 'Sunrise/src/server/runtime/server_runtime.cpp'
+      - 'Sunrise/src/client/hooks/network/bubble_authority/**'
+      - 'Sunrise/src/client/runtime/client_runtime_lifecycle.cpp'
+      - 'Sunrise/src/client/script_host/**'
       - '.github/workflows/script-host.yml'
   workflow_dispatch:
 

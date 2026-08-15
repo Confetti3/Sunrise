@@ -94,6 +94,9 @@ public sealed class ScriptHostService
             case "bridge.pong":
                 Console.WriteLine("Sunrise native bridge responded to ping.");
                 break;
+            case "placed-content.authority":
+                HandlePlacedContentAuthority(message);
+                break;
         }
     }
 
@@ -148,5 +151,22 @@ public sealed class ScriptHostService
         };
         await _runtime.PublishEventAsync(new HostEvent("world.phase", fields), cancellationToken)
             .ConfigureAwait(false);
+    }
+
+    private static void HandlePlacedContentAuthority(JsonElement message)
+    {
+        if (!PlacedContentAuthorityObservation.TryParse(message, out PlacedContentAuthorityObservation? observation)
+            || observation is null)
+        {
+            Console.Error.WriteLine("Rejected malformed placed-content.authority observation.");
+            return;
+        }
+
+        Console.WriteLine(
+            $"Placed-content authority: decodes={observation.DecodeCount}, "
+            + $"forced-reads={observation.ForcedReadCount}, "
+            + $"last-forced-reads={observation.LastDecoderForcedReads}, "
+            + $"dropped={observation.DroppedCount}, "
+            + $"last-decoder-succeeded={(observation.LastDecoderSucceeded ? "true" : "false")}.");
     }
 }

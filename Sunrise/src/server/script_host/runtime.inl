@@ -12,6 +12,7 @@
 #include <span>
 #include <string_view>
 
+#include "../../client/hooks/network/bubble_authority/bubble_authority_replacements.h"
 #include "../../core/logging/log.h"
 #include "../../state/activity/runtime.h"
 #include "protocol.h"
@@ -48,8 +49,8 @@ void service(std::uint64_t now) noexcept {
     if (g_pipe == INVALID_HANDLE_VALUE) {
         return;
     }
-
     stage_world_phase();
+    stage_placed_content_authority();
     if (!flush_output() || !receive_input() || !flush_output()) {
         report("connection", "lost");
         disconnect();

@@ -146,6 +146,17 @@ void process_command(std::string_view line) noexcept {
         enqueue_world_phase_result(request);
         return;
     }
+    if (requestedCapability == protocol::kCapabilityPlacedContentAuthorityObserve) {
+        client::hooks::network::bubble_authority::AuthorityObservation observation{};
+        if (!client::hooks::network::bubble_authority::try_observation(observation)) {
+            enqueue_command_result(request,
+                                   "busy",
+                                   "Placed-content authority observation is updating.");
+            return;
+        }
+        enqueue_placed_content_authority_result(request, observation);
+        return;
+    }
     enqueue_command_result(request,
                            "unsupported",
                            "The native bridge does not advertise this capability.");

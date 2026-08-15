@@ -15,6 +15,12 @@
       "evidence": "state::activity::world_phase and world_transition_age are public, atomic observations."
     },
     {
+      "id": "placed-content.authority.observe",
+      "status": "available",
+      "owner": "sunrise-native-bridge",
+      "evidence": "The scoped message-5 decoder/getter detour publishes copied pointer-free authority counters; observation is read-only telemetry, not a remote authority API."
+    },
+    {
       "id": "activity.session.observe",
       "status": "probeRequired",
       "owner": "sunrise-state",

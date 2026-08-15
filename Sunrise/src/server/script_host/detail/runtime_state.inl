@@ -16,6 +16,8 @@ std::size_t g_receiveSize{};
 std::uint64_t g_nextConnectTick{};
 state::activity::WorldPhase g_lastWorldPhase{state::activity::WorldPhase::idle};
 bool g_hasWorldPhase{};
+client::hooks::network::bubble_authority::AuthorityObservation g_lastPlacedContentAuthority{};
+bool g_hasPlacedContentAuthority{};
 bool g_initialized{};
 bool g_disabled{};
 
@@ -55,6 +57,7 @@ void disconnect() noexcept {
     }
     clear_transport_buffers();
     g_hasWorldPhase = false;
+    g_hasPlacedContentAuthority = false;
 }
 
 [[nodiscard]] bool copy_pipe_path(std::wstring_view value) noexcept {

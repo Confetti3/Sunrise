@@ -4,9 +4,11 @@ This directory contains a standalone .NET 8 host for authored offline activity e
 host framework, capability scanner, and deterministic mission state machine. It is **not** a claim
 that Bungie's original Red War host scripts were recovered.
 
-The native Sunrise bridge is deliberately small. It connects to the named pipe, publishes the
-client's `WorldPhase`, answers pings, and rejects unimplemented mutation commands. The C# host owns
-scenario state, checkpoints, directory probes, managed plugins, and command dispatch.
+The native Sunrise bridge is deliberately small. It is a fixed-budget, nonblocking server service
+slice that owns the single named-pipe client, publishes the client's `WorldPhase` and coalesced
+placed-content authority counters, answers pings and read-only observe queries, and rejects
+unimplemented mutation commands. The C# host owns scenario state, checkpoints, directory probes,
+managed plugins, and command dispatch.
 
 ## Build
 
@@ -41,9 +43,9 @@ Start the C# host before launching Destiny. Sunrise connects to
 set `SUNRISE_SCRIPT_HOST_PIPE` to a different full pipe path or leaf name.
 
 ## What works in this draft
-
 - deterministic JSON scenario graph with checkpoints;
 - world arrival/transition observation from Sunrise;
+- placed-content authority observation (decode, forced-read, and dropped counters) from Sunrise;
 - versioned newline-delimited JSON named-pipe protocol;
 - explicit build capability manifest;
 - managed plugin loading without third-party packages;
@@ -57,7 +59,7 @@ set `SUNRISE_SCRIPT_HOST_PIPE` to a different full pipe path or leaf name.
 - enemy navigation, combat policy, encounter population budgets, or encounter adjudication;
 - incident schema/index mapping;
 - objective/gameplay-switch wire adapters;
-- placed-content bubble authority;
+- placed-content bubble authority control (only read-only observation counters are published);
 - dialogue, cinematic, completion, and reward bindings.
 
 Each item is represented in `bindings/build-86657.json` with the evidence class required to make it

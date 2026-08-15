@@ -17,7 +17,7 @@
 
 void enqueue_hello() noexcept {
     (void)enqueue(R"({"protocol":1,"type":"bridge.hello","build":"Sunrise 0.2.1",)"
-                  R"("capabilities":["host.ping","world.phase.observe"]})");
+                  R"("capabilities":["host.ping","world.phase.observe","placed-content.authority.observe"]})");
 }
 
 [[nodiscard]] constexpr std::string_view phase_name(
@@ -33,7 +33,7 @@ void enqueue_hello() noexcept {
     return "unknown";
 }
 
-void enqueue_world_phase() noexcept {
+[[nodiscard]] bool enqueue_world_phase() noexcept {
     const state::activity::WorldPhase phase = state::activity::world_phase();
     const std::string_view name = phase_name(phase);
     std::array<char, 192> line{};
@@ -44,11 +44,15 @@ void enqueue_world_phase() noexcept {
         static_cast<int>(name.size()),
         name.data(),
         static_cast<unsigned long long>(state::activity::world_transition_age()));
-    if (written > 0 && static_cast<std::size_t>(written) < line.size()) {
-        (void)enqueue(std::string_view(line.data(), static_cast<std::size_t>(written)));
+    if (written <= 0 || static_cast<std::size_t>(written) >= line.size()) {
+        return false;
+    }
+    if (!enqueue(std::string_view(line.data(), static_cast<std::size_t>(written)))) {
+        return false;
     }
     g_lastWorldPhase = phase;
     g_hasWorldPhase = true;
+    return true;
 }
 
 void enqueue_pong() noexcept {
@@ -117,6 +121,54 @@ void enqueue_world_phase_result(std::string_view requestId) noexcept {
         static_cast<int>(name.size()),
         name.data(),
         static_cast<unsigned long long>(state::activity::world_transition_age()));
+    if (written > 0 && static_cast<std::size_t>(written) < result.size()) {
+        enqueue_command_result(requestId,
+                               "ok",
+                               {},
+                               std::string_view(result.data(),
+                                                static_cast<std::size_t>(written)));
+    }
+}
+
+[[nodiscard]] bool enqueue_placed_content_authority(
+    const client::hooks::network::bubble_authority::AuthorityObservation& observation) noexcept {
+    std::array<char, 384> line{};
+    const int written = std::snprintf(
+        line.data(),
+        line.size(),
+        R"({"protocol":1,"type":"placed-content.authority",)"
+        R"("decodeCount":%llu,"forcedReadCount":%llu,"lastDecoderForcedReads":%llu,)"
+        R"("droppedCount":%llu,"lastDecoderSucceeded":%s})",
+        static_cast<unsigned long long>(observation.decodeCount),
+        static_cast<unsigned long long>(observation.forcedReadCount),
+        static_cast<unsigned long long>(observation.lastDecoderForcedReads),
+        static_cast<unsigned long long>(observation.droppedCount),
+        observation.lastDecoderSucceeded ? "true" : "false");
+    if (written <= 0 || static_cast<std::size_t>(written) >= line.size()) {
+        return false;
+    }
+    if (!enqueue(std::string_view(line.data(), static_cast<std::size_t>(written)))) {
+        return false;
+    }
+    g_lastPlacedContentAuthority = observation;
+    g_hasPlacedContentAuthority = true;
+    return true;
+}
+
+void enqueue_placed_content_authority_result(
+    std::string_view requestId,
+    const client::hooks::network::bubble_authority::AuthorityObservation& observation) noexcept {
+    std::array<char, 384> result{};
+    const int written = std::snprintf(
+        result.data(),
+        result.size(),
+        R"({"decodeCount":%llu,"forcedReadCount":%llu,"lastDecoderForcedReads":%llu,)"
+        R"("droppedCount":%llu,"lastDecoderSucceeded":%s})",
+        static_cast<unsigned long long>(observation.decodeCount),
+        static_cast<unsigned long long>(observation.forcedReadCount),
+        static_cast<unsigned long long>(observation.lastDecoderForcedReads),
+        static_cast<unsigned long long>(observation.droppedCount),
+        observation.lastDecoderSucceeded ? "true" : "false");
     if (written > 0 && static_cast<std::size_t>(written) < result.size()) {
         enqueue_command_result(requestId,
                                "ok",

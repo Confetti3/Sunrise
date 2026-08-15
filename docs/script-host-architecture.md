@@ -33,23 +33,26 @@ no retained game pointers                deterministic scenario graph
                                           managed policy plugins
 ```
 
-The native bridge runs on a dedicated worker thread. Game and hook threads never wait for the C#
-process. Disconnects only remove bridge-provided capabilities; they do not demote Sunrise's normal
-boot or destination support.
+The native bridge is a fixed-budget, nonblocking server service slice: the server loop owns the
+single named-pipe client and runs a bounded number of I/O operations per slice. Hook threads only
+update copied scalars (world phase, placed-content authority counters) and never perform pipe I/O
+or wait for the C# process. Disconnects only remove bridge-provided capabilities; they do not
+demote Sunrise's normal boot or destination support.
 
 ## Protocol v1
 
-The pipe uses one UTF-8 JSON object per line. Current messages:
-
 - `bridge.hello`: bridge/build identity and actually available capabilities;
 - `world.phase`: `idle`, `transitioning`, or `arrived`, plus transition age;
+- `placed-content.authority`: coalesced, pointer-free decode/forced-read/dropped counters;
 - `host.capabilities`: asks the bridge to repeat its hello;
 - `host.ping` / `bridge.pong`: liveness;
 - `command.request`: request id, capability id, and JSON payload;
 - `command.result`: `ok`, `unsupported`, `error`, or another explicit status.
 
-The bridge currently advertises only `host.ping` and `world.phase.observe`. It returns
-`unsupported` for every mutation request. This is intentional and testable.
+The bridge advertises `host.ping`, `world.phase.observe`, and `placed-content.authority.observe`.
+The authority observation is read-only telemetry from the scoped message-5 decoder/getter detour;
+it does not create a remote authority control API. The bridge returns `unsupported` for every
+mutation request, including `placed-content.authority`. This is intentional and testable.
 
 ## AI spawning decomposition
 
@@ -82,7 +85,7 @@ A minimal playable mission slice needs separate adapters for:
 - activity/session snapshot and current destination identity;
 - incident emission with recovered definition-index schema and target ordering;
 - objective and gameplay-switch mutation;
-- placed-content/bubble authority;
+- placed-content/bubble authority (read-only observation counters are published; control is not);
 - actor lifecycle and health/death observation;
 - dialogue/cinematic invocation;
 - completion and retry behavior.
@@ -96,7 +99,8 @@ PR #8 noclip module.
 1. Add a copied, read-only activity/session snapshot to the bridge.
 2. Capture and replay one harmless typed incident in a loaded destination.
 3. Verify one objective or gameplay-switch state transition.
-4. Prove placed-content authority for one known local object.
+4. Prove placed-content authority for one known local object (observation counters exist; control
+   is not yet recovered).
 5. Recover entity allocation plus a no-AI static actor baseline and clean removal.
 6. Add health/death state and a deterministic stationary target.
 7. Add navigation/combat policy as authored host behavior.
