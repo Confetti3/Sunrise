@@ -275,7 +275,8 @@ A fresh build-86657 lookup resolved `mission_towerfall` exactly once at activity
 then caused the offline activity host to select `mission_towerfall`. The client subsequently logged
 `successfully changed world to: mission_towerfall`, observed boot-flow step 38 as `phase=arrived`,
 and the C# host advanced to `open-objective`. The same run recorded 60 real objective-definition
-lookups. Evidence is retained in
+lookups, but line-order analysis places all of them before activity selection and none after it.
+They are Director/UI evidence, not mission objective activation. Evidence is retained in
 `analysis/script-host-runtime/20260815-052700-mission-towerfall-runtime/`; the deployed DLL SHA-256
 was `6F9FC7AA3EA5456786FF8C01B39983F2C630A4BFC35C71A449C0539724082AD3`.
 

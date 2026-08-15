@@ -45,7 +45,7 @@
       "id": "objective.set",
       "status": "wireAdapterRequired",
       "owner": "activity-host",
-      "evidence": "Definition, completion, progress, and retained-row application consumers are localized. DestinyResearch identifies original Red War Homecoming as mission_towerfall (root 80B500AC, scenario 80B500BC), distinct from the later arcade_homecoming copy. A fresh build-86657 run selected mission_towerfall, changed the client world to mission_towerfall, reached phase=arrived, advanced the host to open-objective, and produced 60 real definition lookups. The definition-backed switch writer at +0x555EC0 produced zero calls, so no verified host mutation exists.",
+      "evidence": "Definition, completion, progress, and retained-row application consumers are localized. DestinyResearch identifies original Red War Homecoming as mission_towerfall (root 80B500AC, scenario 80B500BC), distinct from the later arcade_homecoming copy. A fresh build-86657 run selected mission_towerfall, changed the client world to mission_towerfall, reached phase=arrived, and advanced the host to open-objective. Its 60 definition lookups all preceded activity selection; none occurred afterward. The definition-backed switch writer at +0x555EC0 likewise produced zero calls, so no mission objective activation or verified host mutation exists.",
       "notes": "Static payload/runtime correlation maps the later copy's named objectives to secondary words 0x093D..0x0941, but this is not a verified objective.set index or wire adapter. Resolver records do not expose the completion-reader expression container at +0x38; implausible counts are rejected rather than reported as expressions."
     },
     {
