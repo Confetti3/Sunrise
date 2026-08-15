@@ -1,11 +1,14 @@
 using System.IO.Pipes;
 using System.Text;
 using System.Text.Json;
+using Sunrise.ScriptHost.Runtime;
 
 namespace Sunrise.ScriptHost.Protocol;
 
 public sealed class NamedPipeBridge : IAsyncDisposable
 {
+    private const int MaximumLineLength = 2_048;
+
     private readonly string _pipeName;
     private readonly object _connectionLock = new();
     private readonly SemaphoreSlim _writeGate = new(1, 1);
@@ -76,7 +79,13 @@ public sealed class NamedPipeBridge : IAsyncDisposable
             return false;
         }
 
-        string json = JsonSerializer.Serialize(message, Json.DefaultOptions);
+        string json = JsonSerializer.Serialize(message, Json.WireOptions);
+        if (json.Length > MaximumLineLength || json.Contains('\r') || json.Contains('\n'))
+        {
+            throw new InvalidOperationException(
+                $"Bridge messages must be one line and at most {MaximumLineLength:N0} characters.");
+        }
+
         await _writeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -129,7 +138,9 @@ public sealed class NamedPipeBridge : IAsyncDisposable
         _writeGate.Dispose();
     }
 
-    private async Task HandleConnectionAsync(NamedPipeServerStream pipe, CancellationToken cancellationToken)
+    private async Task HandleConnectionAsync(
+        NamedPipeServerStream pipe,
+        CancellationToken cancellationToken)
     {
         using var reader = new StreamReader(
             pipe,
@@ -166,6 +177,12 @@ public sealed class NamedPipeBridge : IAsyncDisposable
             {
                 continue;
             }
+            if (line.Length > MaximumLineLength)
+            {
+                Console.Error.WriteLine(
+                    $"Rejected bridge line longer than {MaximumLineLength:N0} characters.");
+                break;
+            }
 
             try
             {
@@ -184,7 +201,9 @@ public sealed class NamedPipeBridge : IAsyncDisposable
         }
     }
 
-    private async Task ClearConnectionAsync(NamedPipeServerStream pipe, CancellationToken cancellationToken)
+    private async Task ClearConnectionAsync(
+        NamedPipeServerStream pipe,
+        CancellationToken cancellationToken)
     {
         bool changed = false;
         lock (_connectionLock)
@@ -199,11 +218,14 @@ public sealed class NamedPipeBridge : IAsyncDisposable
 
         if (changed)
         {
-            await RaiseConnectionChangedAsync(connected: false, cancellationToken).ConfigureAwait(false);
+            await RaiseConnectionChangedAsync(connected: false, cancellationToken)
+                .ConfigureAwait(false);
         }
     }
 
-    private async Task RaiseConnectionChangedAsync(bool connected, CancellationToken cancellationToken)
+    private async Task RaiseConnectionChangedAsync(
+        bool connected,
+        CancellationToken cancellationToken)
     {
         Func<bool, CancellationToken, Task>? handler = ConnectionChanged;
         if (handler is not null)

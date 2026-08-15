@@ -5,9 +5,11 @@ namespace Sunrise.ScriptHost.Runtime;
 
 public static class Json
 {
-    public static JsonSerializerOptions DefaultOptions { get; } = CreateOptions();
+    public static JsonSerializerOptions DefaultOptions { get; } =
+        CreateOptions(writeIndented: true);
+    public static JsonSerializerOptions WireOptions { get; } = CreateOptions(writeIndented: false);
 
-    private static JsonSerializerOptions CreateOptions()
+    private static JsonSerializerOptions CreateOptions(bool writeIndented)
     {
         var options = new JsonSerializerOptions
         {
@@ -15,7 +17,7 @@ public static class Json
             PropertyNameCaseInsensitive = true,
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
             ReadCommentHandling = JsonCommentHandling.Skip,
-            WriteIndented = true,
+            WriteIndented = writeIndented,
         };
         options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
         return options;

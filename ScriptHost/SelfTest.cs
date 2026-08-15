@@ -7,6 +7,8 @@ public static class SelfTest
 {
     public static async Task RunAsync()
     {
+        VerifyWireSerialization();
+
         const string scenarioJson = """
         {
           "schema": 1,
@@ -43,7 +45,10 @@ public static class SelfTest
         }
         """;
 
-        string temporaryRoot = Path.Combine(Path.GetTempPath(), "sunrise-script-host-self-test", Guid.NewGuid().ToString("N"));
+        string temporaryRoot = Path.Combine(
+            Path.GetTempPath(),
+            "sunrise-script-host-self-test",
+            Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(temporaryRoot);
         try
         {
@@ -57,15 +62,37 @@ public static class SelfTest
             var runtime = new MissionRuntime(scenario, catalog, dispatcher, store);
 
             await runtime.InitializeAsync(CancellationToken.None).ConfigureAwait(false);
-            await runtime.PublishEventAsync(HostEvent.Start, CancellationToken.None).ConfigureAwait(false);
+            await runtime.PublishEventAsync(HostEvent.Start, CancellationToken.None)
+                .ConfigureAwait(false);
             if (!runtime.IsCompleted || dispatcher.LastValue != "ready")
             {
-                throw new InvalidOperationException("Mission runtime did not complete the deterministic self-test.");
+                throw new InvalidOperationException(
+                    "Mission runtime did not complete the deterministic self-test.");
             }
         }
         finally
         {
             Directory.Delete(temporaryRoot, recursive: true);
+        }
+    }
+
+    private static void VerifyWireSerialization()
+    {
+        string wire = JsonSerializer.Serialize(
+            new { protocol = 1, type = "host.ping" },
+            Json.WireOptions);
+        if (wire.Contains('\r') || wire.Contains('\n'))
+        {
+            throw new InvalidOperationException(
+                "Wire JSON must contain exactly one physical line.");
+        }
+
+        using JsonDocument document = JsonDocument.Parse(wire);
+        if (document.RootElement.GetProperty("protocol").GetInt32() != 1
+            || document.RootElement.GetProperty("type").GetString() != "host.ping")
+        {
+            throw new InvalidOperationException(
+                "Wire JSON did not round-trip the protocol envelope.");
         }
     }
 
