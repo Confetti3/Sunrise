@@ -203,6 +203,7 @@
     <ClCompile Include="src\client\hooks\external_server\external_server_setopt_guard.cpp" />
     <ClCompile Include="src\client\hooks\bootflow\bootflow_hook_lifecycle.cpp" />
     <ClCompile Include="src\client\hooks\bootflow\activity_descriptor_observer.cpp" />
+    <ClCompile Include="src\client\hooks\bootflow\activity_definition_observer.cpp" />
     <ClCompile Include="src\client\hooks\bootflow\character_select_hold.cpp" />
     <ClCompile Include="src\client\hooks\bootflow\composition_check.cpp" />
     <ClCompile Include="src\client\hooks\bootflow\orbit_handoff.cpp" />

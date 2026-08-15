@@ -1,8 +1,8 @@
 # Homecoming activity/runtime evidence
 
 This note joins the extracted Season of Arrivals activity graph with build-86657 runtime evidence.
-It does not treat name-affinity graph edges as execution order and does not claim that the
-Homecoming activity has a known client activity index.
+It does not treat name-affinity graph edges as execution order. Runtime resolution now establishes
+the registered build-86657 client indices without deriving them from static scenario tags.
 
 ## Static activity identity
 
@@ -62,9 +62,49 @@ definition. It also moves the decisive mismatch earlier than the host request: T
 is assigned at `+0xC19EAC` and copied again at `+0xEE8546` before the request at `+0xC0F61C`.
 Changing only the server destination or the request slot cannot make Homecoming authoritative.
 
-## Next evidence requirement
+## Native activity-definition resolution
 
-The next implementation must resolve a real Homecoming descriptor before the `+0xC19EAC` /
-`+0xEE8546` boundary. The static scenario-client tag `80F0200E` is not interchangeable with a
-client activity index. A mutation is justified only after tracing the native activity-definition
-lookup that turns registered content into the `0x118`-byte descriptor.
+The descriptor normalizer at build-86657 RVA `+0xBFDFA0` calls the activity-definition lookup at
+RVA `+0xDDECA0`. The lookup accepts a 16-bit activity index, obtains the registered activity record
+through the manager's virtual `+0x460` entry, and resolves the relative string pointer stored at
+record offset `+0x68`. The signature includes that final offset so it does not collide with the
+adjacent lookup for the record's `+0x70` field.
+
+On the first proven normalizer call, Sunrise exhaustively queried the wire-valid namespace
+`0..4094` through that native read-only lookup. Exact string comparison produced:
+
+| Activity name | Registered indices |
+| --- | --- |
+| `city_tower_social_d2` | `20`, `84` |
+| `arcade_homecoming` | `37`, `38` |
+| `mission_ember` | `54`, `281` |
+
+The duplicate names explain why an observed UI selection can use an alias other than the first
+registered match. Sunrise retains the first exact Homecoming match (`37`) only after this scan;
+it does not guess an index from the static graph tag.
+
+## Authoritative Homecoming launch
+
+When—and only when—the active script-host override exactly names `arcade_homecoming`, the
+descriptor hook recognizes the type-zero Courtyard payload (`primary=20`, `override=20`) at the
+proven `+0xC19EAC` normalizer boundary. It copies the full `0x118`-byte payload into local storage,
+replaces both indices with the runtime-resolved Homecoming index, writes the fixed `0x28`-byte name
+field as `arcade_homecoming`, and gives the copy to the native assignment. It does not mutate the
+caller's source memory or alter unrelated descriptors.
+
+The retained run recorded:
+
+```text
+ev=activity_definition stage=scan result=complete searched=4095 homecoming=37/2 tower=20/2 ember=54/2
+ev=activity_descriptor stage=override from=20 to=37 name=arcade_homecoming
+world_controller:activity_manager: 'PRIVATE CURRENT' activity client requesting activity host startup [activity: 0x0025 ... (grognok: arcade_homecoming) ... (override: arcade_homecoming)]
+world_controller:state:in_world: Starting activity '0x0025 ... (grognok: arcade_homecoming) ... (override: arcade_homecoming)'.
+```
+
+This is the first retained run in which both the client's authoritative activity and override are
+Homecoming. The descriptor still retained Courtyard's destination hash `0x13e02331`; the server
+destination override independently selected `arcade_homecoming`. The client reached its in-world
+activity-start boundary and the script host advanced from `wait-for-destination` to
+`open-objective`, but the rendered client remained a black frame with cursor glow. The scenario
+then failed honestly at `objective.set` with `WireAdapterRequired`. Activity identity and arrival
+are therefore verified; objective/entity activation and usable world rendering are not.

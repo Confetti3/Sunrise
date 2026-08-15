@@ -10,6 +10,7 @@
 #include <string_view>
 
 #include "../../../core/logging/log.h"
+#include "../../../state/activity/forced/activity_forced_destination.h"
 #include "../../hooking/detour.h"
 #include "internal.h"
 
@@ -40,6 +41,16 @@ constexpr std::array<std::uintptr_t, 9> kActivityReturnRvas{
 };
 /** A complete launch should fit comfortably while a corrupt loop cannot fill the log. */
 constexpr std::uint32_t kReportLimit = 128;
+/** The full normalized activity payload passed to the native assignment. */
+constexpr std::size_t kDescriptorSize = 0x118;
+/** The lookup-backed activity name field copied by the native normalizer. */
+constexpr std::size_t kActivityNameOffset = 0x50;
+/** The native lookup supplies a fixed 0x28-byte name record. */
+constexpr std::size_t kActivityNameCapacity = 0x28;
+/** Courtyard's observed build-86657 descriptor. */
+constexpr std::uint16_t kTowerActivityIndex = 20;
+/** Exact graph and destination name required before the override is eligible. */
+constexpr std::string_view kHomecomingName = "arcade_homecoming";
 /** Fixed event storage. */
 constexpr std::size_t kLineCapacity = 160;
 
@@ -81,6 +92,57 @@ struct DescriptorScalars {
     }
 }
 
+/** @return True only while the script host's active forced destination names Homecoming. */
+[[nodiscard]] bool homecoming_is_forced() noexcept {
+    state::activity::forced::ForcedDestination forced{};
+    state::activity::forced::snapshot(forced);
+    return state::activity::forced::active(forced)
+           && forced.packageNameLength == kHomecomingName.size()
+           && std::memcmp(forced.packageName.data(),
+                          kHomecomingName.data(),
+                          kHomecomingName.size()) == 0;
+}
+
+/** Builds a self-contained Homecoming descriptor from the observed Courtyard payload. */
+[[nodiscard]] bool build_homecoming_descriptor(
+    const void* source,
+    std::uint16_t activityIndex,
+    std::array<std::byte, kDescriptorSize>& output) noexcept {
+    if (source == nullptr) {
+        return false;
+    }
+    __try {
+        std::memcpy(output.data(), source, output.size());
+        std::memcpy(output.data() + 2, &activityIndex, sizeof activityIndex);
+        std::memcpy(output.data() + 4, &activityIndex, sizeof activityIndex);
+        std::memset(output.data() + kActivityNameOffset, 0, kActivityNameCapacity);
+        std::memcpy(output.data() + kActivityNameOffset,
+                    kHomecomingName.data(),
+                    kHomecomingName.size());
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+/** Reports the one narrowly scoped descriptor replacement. */
+void report_override(std::uint16_t activityIndex) noexcept {
+    std::array<char, 128> line{};
+    const int written = std::snprintf(line.data(),
+                                      line.size(),
+                                      "ev=activity_descriptor stage=override from=%u to=%u "
+                                      "name=arcade_homecoming",
+                                      static_cast<unsigned>(kTowerActivityIndex),
+                                      static_cast<unsigned>(activityIndex));
+    if (written > 0) {
+        const auto length = static_cast<std::size_t>(written) < line.size()
+                                ? static_cast<std::size_t>(written)
+                                : line.size() - 1;
+        core::log::write(
+            core::log::Channel::client, core::log::Level::info, {line.data(), length});
+    }
+}
+
 /** Emits one bounded observation after the native assignment has completed. */
 void report(std::uintptr_t returnRva, const DescriptorScalars& descriptor, bool result) noexcept {
     const std::uint32_t seen = g_reports.fetch_add(1, std::memory_order_relaxed) + 1;
@@ -118,7 +180,21 @@ __declspec(noinline) bool __fastcall assignment(void* destination, const void* s
     DescriptorScalars descriptor{};
     const bool observe = is_activity_writer(returnRva) && read_scalars(source, descriptor);
     const Assignment original = g_original.load(std::memory_order_acquire);
-    const bool result = original != nullptr && original(destination, source);
+    const void* effectiveSource = source;
+    std::array<std::byte, kDescriptorSize> homecoming{};
+    std::uint16_t homecomingIndex = 0;
+    const bool replace = observe && returnRva == 0xC19EAC && descriptor.type == 0
+                         && descriptor.primary == kTowerActivityIndex
+                         && descriptor.overrideValue == kTowerActivityIndex
+                         && homecoming_is_forced() && homecoming_activity_index(homecomingIndex)
+                         && build_homecoming_descriptor(source, homecomingIndex, homecoming);
+    if (replace) {
+        effectiveSource = homecoming.data();
+        descriptor.primary = homecomingIndex;
+        descriptor.overrideValue = homecomingIndex;
+        report_override(homecomingIndex);
+    }
+    const bool result = original != nullptr && original(destination, effectiveSource);
     if (observe) {
         report(returnRva, descriptor, result);
     }
@@ -145,7 +221,7 @@ __declspec(noinline) bool __fastcall assignment(void* destination, const void* s
 
 } // namespace
 
-/** Attaches the read-only controller activity-descriptor observer. */
+/** Attaches the controller activity-descriptor observer and scoped Homecoming replacement. */
 bool install_activity_descriptor_observer() noexcept {
     if (g_handle.attached) {
         return true;
@@ -166,7 +242,7 @@ bool install_activity_descriptor_observer() noexcept {
     return true;
 }
 
-/** Detaches the descriptor observer. */
+/** Detaches the descriptor hook. */
 void uninstall_activity_descriptor_observer() noexcept {
     if (g_handle.attached) {
         (void)hooking::detour::uninstall(g_handle);

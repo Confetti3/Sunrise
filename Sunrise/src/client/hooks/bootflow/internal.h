@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 #include "../../patterns/image_scan.h"
 
 namespace sunrise::client::hooks::bootflow {
@@ -86,13 +88,27 @@ void uninstall_region_private() noexcept;
 
 /**
  * Observes the nine build-86657 call sites that replace the controller's activity descriptor.
- * The detour records scalar descriptor fields only and never changes the assignment.
- * @return True when the descriptor assignment entry is found and the observer attaches.
+ * When the script host explicitly forces Homecoming, the Courtyard selection is narrowly replaced
+ * with the graph-resolved Homecoming definition before the native assignment copies it.
+ * @return True when the descriptor assignment entry is found and the hook attaches.
  */
 [[nodiscard]] bool install_activity_descriptor_observer() noexcept;
 
-/** Detaches the activity-descriptor observer. */
+/** Detaches the activity-descriptor hook. */
 void uninstall_activity_descriptor_observer() noexcept;
+
+/**
+ * Observes the build-86657 activity-index lookup used by the descriptor normalizer. The detour
+ * records the returned 0x28-byte definition only at that proven caller and never changes it.
+ * @return True when the lookup entry is found and the observer attaches.
+ */
+[[nodiscard]] bool install_activity_definition_observer() noexcept;
+
+/** Detaches the activity-definition lookup observer. */
+void uninstall_activity_definition_observer() noexcept;
+
+/** @return True and copies the graph-resolved Homecoming activity index after its native scan. */
+[[nodiscard]] bool homecoming_activity_index(std::uint16_t& output) noexcept;
 
 /**
  * Finds the boot-flow step accessor, the only input to the world phase.
