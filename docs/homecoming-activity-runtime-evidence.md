@@ -242,3 +242,21 @@ row counts still zero. The prefix has no literal match in the reconstructed exec
 points toward a decoded/runtime producer. The exact log and DLL are retained in
 `analysis/script-host-runtime/20260815-040931-activity-state-source-identity-orbit/`; DLL SHA-256
 `FB5882E6F2C30360BC9E7E2FBD4E648A256200965C0F75801DC556D73489A5EA`.
+
+## Generic decode-dispatch control
+
+The absence of the category 4/index-1 callback was resolved by observing generic post-decode
+dispatcher `+0xE05DA0` directly. A fresh orbit run produced one tuple from return RVA `+0xE018FA`:
+category `4`, index `0`, with identical first/second prefixes
+`00100100,9EAA3001`. The retained source subsequently consumed by `+0x540320` still began
+`00100101,9EAA3001`, so these are distinct state identities despite the shared second word.
+
+The category 4/index-0 branch jumps to `+0xE078F0`. Its statically recovered comparator operates
+on a state object at least `0x175E4` bytes long and visits fields at `+0x728`, `+0x1108`,
+`+0x68B0`, `+0x6978`, `+0x6C3C`, `+0x742C`, `+0x1249C`, and `+0x17508`. It does not touch the
+index-1 object's 4 KiB switch bank at `+0x9348`. This closes the apparent contradiction without
+inventing an objective transition: the observed orbit decode belongs to the index-0 layout, while
+the retained activity source has the index-1 identity. The writer for that retained source remains
+the next boundary. The exact log and DLL are in
+`analysis/script-host-runtime/20260815-044100-decode-dispatch-orbit/`; DLL SHA-256 is
+`A6B02EA7A5871C16925A4D1226667073AAB472ADCFE85F4DB5CD7E0363EFA4F8`.

@@ -154,3 +154,15 @@ downstream `+0x540320` observer did fire with zero rows. This excludes that post
 from the current type-1 offline update path; it does not identify a writer. Evidence and the exact
 DLL are in `analysis/script-host-runtime/20260815-043300-activity-state-postdecode-control/`; DLL
 SHA-256 is `0064B5F7B3502D254717979664E82C543F8E6E36D303F2CB6BB7509A4FEE9108`.
+
+Instrumenting the generic dispatcher itself resolves that negative control. A fresh orbit decode
+called `+0xE05DA0` from return RVA `+0xE018FA` with category `4`, index `0`, and matching argument
+prefixes `00100100,9EAA3001`; the retained source seen immediately afterward at `+0x540320`
+remained `00100101,9EAA3001`. Category 4/index 0 jumps to comparator `+0xE078F0`, not the
+index-1 comparator `+0xE07BA0`. Static inspection shows that the index-0 object is at least
+`0x175E4` bytes and its comparator visits fields at `+0x728`, `+0x1108`, `+0x68B0`, `+0x6978`,
+`+0x6C3C`, `+0x742C`, `+0x1249C`, and `+0x17508`; it does not compare the index-1 `+0x9348`
+switch bank. The different low-byte identity and disjoint layouts prevent treating this orbit
+decode as a retained activity-state update. Evidence and the exact DLL are in
+`analysis/script-host-runtime/20260815-044100-decode-dispatch-orbit/`; DLL SHA-256 is
+`A6B02EA7A5871C16925A4D1226667073AAB472ADCFE85F4DB5CD7E0363EFA4F8`.

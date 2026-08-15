@@ -25,10 +25,10 @@ constexpr std::string_view kApplySignatureText =
 constexpr auto kApplySignature =
     signature<signature_length(kApplySignatureText)>(kApplySignatureText);
 
-/** Build-86657 old/new retained-state comparison callback reached after generic decode. */
+/** Build-86657 old/new decoded-state comparison dispatcher. */
 constexpr std::string_view kCompareSignatureText =
-    "48 89 5C 24 18 55 56 57 48 83 EC 30 48 8B 05 ? ? ? ? 48 33 C4 48 89 44 24 28 "
-    "48 8B E9 48 8B F2 48 8D 0D ? ? ? ? E8 ? ? ? ? 4C 8B 06";
+    "40 53 48 83 EC 20 48 8B DA 45 85 C9 0F 84 ? ? ? ? 41 83 F9 02 74 70 41 83 F9 "
+    "04 0F 85 ? ? ? ? 44 8B 44 24 58";
 constexpr auto kCompareSignature =
     signature<signature_length(kCompareSignatureText)>(kCompareSignatureText);
 
@@ -59,7 +59,8 @@ using ApplyCategory = void(__fastcall*)(void*,
                                         void*,
                                         void*,
                                         void*) noexcept;
-using CompareSource = void(__fastcall*)(void*, const void*) noexcept;
+using CompareSource = void(__fastcall*)(
+    void*, const void*, std::int32_t, std::int32_t, const void*, std::int32_t) noexcept;
 
 hooking::detour::Handle g_applyHandle{};
 hooking::detour::Handle g_compareHandle{};
@@ -90,6 +91,19 @@ struct SourceSnapshot {
     std::array<SwitchRow, kSwitchCapacity> switches{};
     std::array<ProgressRow, kProgressCaptureCapacity> progressions{};
 };
+
+[[nodiscard]] bool snapshot_prefix(const void* source,
+                                   std::array<std::uint32_t, 4>& output) noexcept {
+    if (source == nullptr) {
+        return false;
+    }
+    __try {
+        std::memcpy(output.data(), source, sizeof output);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
 
 /** Returns a stable main-image-relative value when one copied pointer identifies a client vtable.
  */
@@ -377,6 +391,54 @@ void report_delta(const char* stage,
     }
 }
 
+void report_decode_dispatch(std::uintptr_t callerRva,
+                            std::int32_t kind,
+                            std::int32_t category,
+                            std::int32_t index,
+                            const std::array<std::uint32_t, 4>& oldPrefix,
+                            const std::array<std::uint32_t, 4>& newPrefix) noexcept {
+    constexpr std::uint64_t kOffset = 14'695'981'039'346'656'037ULL;
+    std::uint64_t key = mix(kOffset, 6);
+    key = mix(key, callerRva);
+    key = mix(key, static_cast<std::uint32_t>(kind));
+    key = mix(key, static_cast<std::uint32_t>(category));
+    key = mix(key, static_cast<std::uint32_t>(index));
+    for (const std::uint32_t word : oldPrefix) {
+        key = mix(key, word);
+    }
+    for (const std::uint32_t word : newPrefix) {
+        key = mix(key, word);
+    }
+    if (!claim(key) || g_reports.load(std::memory_order_relaxed) >= kReportCapacity) {
+        return;
+    }
+    const std::uint32_t sequence = g_reports.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (sequence > kReportCapacity) {
+        return;
+    }
+    std::array<char, kLineCapacity> line{};
+    const int written = std::snprintf(
+        line.data(),
+        line.size(),
+        "ev=activity_state_source stage=decode_dispatch n=%u caller=+0x%llX kind=%d category=%d "
+        "index=%d old=%08X,%08X new=%08X,%08X",
+        sequence,
+        static_cast<unsigned long long>(callerRva),
+        kind,
+        category,
+        index,
+        oldPrefix[0],
+        oldPrefix[1],
+        newPrefix[0],
+        newPrefix[1]);
+    if (written > 0) {
+        const auto length = static_cast<std::size_t>(written) < line.size()
+                                ? static_cast<std::size_t>(written)
+                                : line.size() - 1;
+        core::log::write(core::log::Channel::client, core::log::Level::info, {line.data(), length});
+    }
+}
+
 /** Mirrors the category dispatcher and observes only its explicit-row category zero. */
 __declspec(noinline) void __fastcall apply_category(void* first,
                                                     void* second,
@@ -417,17 +479,30 @@ __declspec(noinline) void __fastcall apply_category(void* first,
     }
 }
 
-/** Mirrors the post-decode comparison and snapshots both owned state arguments before dispatch. */
+/** Mirrors the post-decode dispatcher and records only copied scalar identity. */
 __declspec(noinline) void __fastcall compare_source(void* oldSource,
-                                                    const void* newSource) noexcept {
+                                                    const void* newSource,
+                                                    std::int32_t kind,
+                                                    std::int32_t category,
+                                                    const void* context,
+                                                    std::int32_t index) noexcept {
+    std::array<std::uint32_t, 4> oldPrefix{};
+    std::array<std::uint32_t, 4> newPrefix{};
+    const bool capturedOldPrefix = snapshot_prefix(oldSource, oldPrefix);
+    const bool capturedNewPrefix = snapshot_prefix(newSource, newPrefix);
     SourceSnapshot oldSnapshot{};
     SourceSnapshot newSnapshot{};
-    const bool capturedOld = snapshot_source(oldSource, oldSnapshot);
-    const bool capturedNew = snapshot_source(newSource, newSnapshot);
+    const bool sourceIdentity = capturedOldPrefix && capturedNewPrefix
+                                && (oldPrefix[0] == 0x00100101U || newPrefix[0] == 0x00100101U);
+    const bool capturedOld = sourceIdentity && snapshot_source(oldSource, oldSnapshot);
+    const bool capturedNew = sourceIdentity && snapshot_source(newSource, newSnapshot);
     const std::uintptr_t callerRva = caller_rva(_ReturnAddress());
     const CompareSource original = g_originalCompare.load(std::memory_order_acquire);
     if (original != nullptr) {
-        original(oldSource, newSource);
+        original(oldSource, newSource, kind, category, context, index);
+    }
+    if (capturedOldPrefix && capturedNewPrefix) {
+        report_decode_dispatch(callerRva, kind, category, index, oldPrefix, newPrefix);
     }
     if (capturedOld) {
         report_delta("delta_old", 0, callerRva, oldSnapshot);
@@ -443,7 +518,7 @@ void log_install(const char* result, const char* reason = nullptr) noexcept {
                             ? std::snprintf(line.data(),
                                             line.size(),
                                             "ev=activity_state_source stage=install result=%s "
-                                            "dispatcher=+0x540320 comparator=+0xE07BA0",
+                                            "dispatcher=+0x540320 comparator=+0xE05DA0",
                                             result)
                             : std::snprintf(line.data(),
                                             line.size(),
