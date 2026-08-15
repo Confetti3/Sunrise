@@ -30,6 +30,12 @@ The main resource contains 266 unique entity definitions. The complete activity 
 All five use class pair `80808348/8080835A`. These tags and hashes establish content identity;
 they do not establish an `objective.set` wire payload or consumer.
 
+Each objective's serialized `80809C36` resource has six pointers in its trailing resource-pointer
+array. Direct extraction from the user's package copy resolves all six back into fixed offsets
+inside that same objective payload (`+0xA0`, `+0xB8`, `+0xF8`, `+0x110`, `+0x170`, and `+0x1D0`).
+The layout is identical across all five objectives. None is an external trigger/action reference,
+so this initially promising static lead is eliminated rather than promoted into a guessed edge.
+
 The graph also contains 41 serialized WorldID-to-placement links. Those are strong direct links.
 For example, `spawnrule_boss01` (`80F0206F`) points to WorldID `CA7EB3A7D45895FE`, and
 `d_ship_door` (`80F020D2`) points to WorldID `D3FCE3E3838A7339`. The 21 name-affinity flow edges
@@ -124,3 +130,10 @@ with primary target `1121` and five ordered extras; Sunrise immediately accepted
 msg-19 incident. This negative/positive control shows that the Homecoming failure occurs before a
 client scenario produces this class of activity incident. It does not make target `1121` an
 objective id or establish an objective wire format.
+
+A rendered EDZ control later produced the identical six-target list as Tower while changing the
+application body. Therefore those targets are not activity-specific objective identifiers. The
+server parser now retains four decoded application-payload prefix words for bounded diagnostics;
+a follow-up Tower run proved its first decoded word exactly equals the client source-body first
+word. This establishes the source-to-wire payload boundary, but the payload's semantics remain
+unresolved.

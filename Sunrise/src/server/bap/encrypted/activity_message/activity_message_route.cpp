@@ -32,8 +32,7 @@ namespace client_keepalive = service::client_keepalive;
 namespace high_water = service::high_water;
 namespace epoch_message = service::patch_epoch;
 
-static_assert(state::activity::incidents::kBodyCapacity
-              == service::incident::kMaximumBodyBytes);
+static_assert(state::activity::incidents::kBodyCapacity == service::incident::kMaximumBodyBytes);
 
 /** Standard 64-bit FNV-1a constants for a stable, non-content-bearing body fingerprint. */
 constexpr std::uint64_t kFingerprintOffset = 14695981039346656037ULL;
@@ -148,7 +147,7 @@ void report_incident(std::uint64_t boundSessionId, const service::Request& reque
                                       line.size(),
                                       "ev=activity stage=incident result=%s relay=%s session=%llu "
                                       "handle=0x%llX target=%u extra=%u selector=%u payload=%u "
-                                      "body=%u fingerprint=0x%llX",
+                                      "body=%u fingerprint=0x%llX words=%08X,%08X,%08X,%08X",
                                       incident::verdict_name(verdict),
                                       relay,
                                       static_cast<unsigned long long>(boundSessionId),
@@ -158,7 +157,11 @@ void report_incident(std::uint64_t boundSessionId, const service::Request& reque
                                       static_cast<unsigned>(parsed.hasCompressedSelector),
                                       parsed.payloadLength,
                                       reportedBodyLength,
-                                      static_cast<unsigned long long>(reportedFingerprint));
+                                      static_cast<unsigned long long>(reportedFingerprint),
+                                      parsed.payloadPrefixWords[0],
+                                      parsed.payloadPrefixWords[1],
+                                      parsed.payloadPrefixWords[2],
+                                      parsed.payloadPrefixWords[3]);
     if (written <= 0) {
         return;
     }

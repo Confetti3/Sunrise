@@ -43,6 +43,13 @@ Destiny 2 build 86657. No row infers Bungie's absent host policy from client pac
   `5E40AE5B,00000000,00000001,00000000`. Immediately afterward, Sunrise accepted msg 19 with
   primary target `1121`, five extras, and an 84-byte payload. This joins the client producer,
   retail encoder, server parser, queue, and managed observation path without guessing a payload.
+- A rendered EDZ control emitted the same six targets as Tower, while the source body changed.
+  This falsifies the apparent match between target `1121` and one Tower-related static
+  activity-logic cluster: the target list is not an activity/objective identity. A follow-up Tower
+  run decoded the first four application-payload words after the bit-packed msg-19 header. Its
+  first word `3FBDF40B` exactly matched source-body word zero, proving that the source's fixed body
+  becomes the msg-19 application payload. The remaining words are still opaque and no replay is
+  authorized from this correlation alone.
 - A separate named-pipe integration test consumed the same target/scalar shape in C# and preserved
   the mission checkpoint boundary. It is protocol evidence, not a substitute for a fresh in-game
   end-to-end event.

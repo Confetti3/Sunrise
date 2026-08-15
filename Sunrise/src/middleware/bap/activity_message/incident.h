@@ -31,14 +31,16 @@ inline constexpr std::uint8_t kOptionalFieldWidth = 64;
 inline constexpr std::uint8_t kPayloadLengthWidth = 9;
 /** At most 500 payload bytes follow. */
 inline constexpr std::uint32_t kPayloadMaximum = 500;
+/** Small pointer-free prefix retained to correlate the application payload with its producer. */
+inline constexpr std::size_t kPayloadPrefixWordCount = 4;
 /** The smallest body is the five fixed fields with every count zero. */
 inline constexpr std::size_t kMinimumBodyBits = kTargetWidth + kExtraCountWidth
                                                 + kSelectorPresenceWidth + kOptionalPresenceWidth
                                                 + kPayloadLengthWidth;
 /** Widest selector-free body the validator can fully reach. */
-inline constexpr std::size_t kMaximumBodyBits =
-    kMinimumBodyBits + kExtraTargetMaximum * kTargetWidth + kOptionalFieldWidth
-    + kPayloadMaximum * 8;
+inline constexpr std::size_t kMaximumBodyBits = kMinimumBodyBits
+                                                + kExtraTargetMaximum * kTargetWidth
+                                                + kOptionalFieldWidth + kPayloadMaximum * 8;
 inline constexpr std::size_t kMaximumBodyBytes = (kMaximumBodyBits + 7) / 8;
 
 /** Why one incident did not pass validation. */
@@ -60,6 +62,7 @@ enum class Verdict : std::uint8_t {
 struct Incident {
     std::uint32_t primaryTarget{};
     std::uint32_t extraTargets[kExtraTargetMaximum]{};
+    std::array<std::uint32_t, kPayloadPrefixWordCount> payloadPrefixWords{};
     std::uint32_t extraTargetCount{};
     std::uint32_t payloadLength{};
     /** Set when a compressed selector follows, which ends decoding for this body. */
