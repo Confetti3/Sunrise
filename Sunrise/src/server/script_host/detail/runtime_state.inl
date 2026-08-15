@@ -23,6 +23,34 @@ std::size_t g_pendingSwitchRequestSize{};
 std::uint64_t g_pendingSwitchSequence{};
 std::uint64_t g_pendingSwitchDeadline{};
 bool g_hasPendingSwitch{};
+std::uint64_t g_orphanedSwitchSequence{};
+
+void drain_orphaned_switch() noexcept {
+    if (g_orphanedSwitchSequence == 0) {
+        return;
+    }
+    state::activity::switch_commands::Result result{};
+    if (state::activity::switch_commands::try_take_result(g_orphanedSwitchSequence, result)) {
+        g_orphanedSwitchSequence = 0;
+    }
+}
+
+void abandon_pending_switch() noexcept {
+    if (!g_hasPendingSwitch) {
+        return;
+    }
+    const std::uint64_t sequence = g_pendingSwitchSequence;
+    state::activity::switch_commands::Result result{};
+    if (!state::activity::switch_commands::try_take_result(sequence, result)
+        && !state::activity::switch_commands::cancel(sequence)) {
+        g_orphanedSwitchSequence = sequence;
+    }
+    g_pendingSwitchRequestSize = 0;
+    g_pendingSwitchSequence = 0;
+    g_pendingSwitchDeadline = 0;
+    g_hasPendingSwitch = false;
+}
+
 bool g_initialized{};
 bool g_disabled{};
 
@@ -56,6 +84,7 @@ void clear_transport_buffers() noexcept {
 }
 
 void disconnect() noexcept {
+    abandon_pending_switch();
     if (g_pipe != INVALID_HANDLE_VALUE) {
         CloseHandle(g_pipe);
         g_pipe = INVALID_HANDLE_VALUE;
@@ -63,7 +92,6 @@ void disconnect() noexcept {
     clear_transport_buffers();
     g_hasWorldPhase = false;
     g_hasPlacedContentAuthority = false;
-    g_hasPendingSwitch = false;
 }
 
 [[nodiscard]] bool copy_pipe_path(std::wstring_view value) noexcept {

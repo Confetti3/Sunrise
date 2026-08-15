@@ -1,0 +1,3 @@
+Algorithm : SHA256
+Hash      : 0D96F4B0E69CD753436BAF86B4C4AC68F0B8FB95879429569DFE84842FACE5C2
+Path      : S:\sunrise\Sunrise\build\x64\Release\steam_api64.dll

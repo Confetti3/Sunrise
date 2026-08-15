@@ -1,0 +1,8 @@
+Cycle: 1 controlled mutation experiment after orphan-drain correction
+Question: Can gameplay-switch definition 0xF6 be changed through the corrected activity-owner writer and independently read back from retained activity state?
+Hypothesis: A verified arrived arcade_homecoming owner can persistently change definition 0xF6 bank byte 1 from 0 to 2 through writer +0x555EC0.
+Expected success signal: baseline reads remain 0; set returns before=0 after=2; immediate, 1-second, and 5-second reads remain 2.
+Expected failure signal: rejection, timeout, claimed-but-incomplete, crash, or any later read returns 0.
+Files changed: ScriptHost bridge orphan-drain lifecycle; native owner/writer source-path diagnostics.
+Destiny restart required: Yes, corrected native DLL deployment.
+Stop condition: Classify one mutation attempt as persistent, transient, rejected, timed out, claimed-but-incomplete, or crash; stop before unrelated feature work.

@@ -1,0 +1,114 @@
+{
+  "schema": 1,
+  "cycle": 1,
+  "sourceCommitBefore": "9e4860898ff7b3a0c220bb55e0631941cddb231c",
+  "sourceDllSha256": "0D96F4B0E69CD753436BAF86B4C4AC68F0B8FB95879429569DFE84842FACE5C2",
+  "deployedDllSha256": "0D96F4B0E69CD753436BAF86B4C4AC68F0B8FB95879429569DFE84842FACE5C2",
+  "buildChecks": {
+    "managedReleaseBuild": "passed",
+    "managedSelfTest": "passed",
+    "managedValidation": "passed",
+    "nativeReleaseX64V145": "passed"
+  },
+  "sourceChanges": [
+    "Sunrise/src/server/script_host/detail/runtime_state.inl",
+    "Sunrise/src/server/script_host/runtime.inl",
+    "Sunrise/src/client/hooks/bootflow/activity_state_source_observer.cpp"
+  ],
+  "lifecycleCorrection": {
+    "orphanedSequenceDrain": true,
+    "disconnectCancelsOrRetains": true,
+    "serviceDrainsTerminalOrphan": true
+  },
+  "arrival": {
+    "bridgeConnected": true,
+    "active": true,
+    "worldPhase": "arrived",
+    "joined": true,
+    "package": "arcade_homecoming",
+    "reportedRegion": 0,
+    "heldEntitySlots": 151
+  },
+  "baselineReads": [
+    { "sample": 1, "before": 0, "after": 0, "applied": true },
+    { "sample": 2, "before": 0, "after": 0, "applied": true },
+    { "sample": 3, "before": 0, "after": 0, "applied": true }
+  ],
+  "placedContentBefore": {
+    "decodeCount": 38,
+    "forcedReadCount": 65,
+    "lastDecoderForcedReads": 0,
+    "droppedCount": 0,
+    "lastDecoderSucceeded": true
+  },
+  "mutation": {
+    "definitionIndex": 246,
+    "setValue": 2,
+    "before": 0,
+    "after": 2,
+    "applied": true
+  },
+  "persistenceReads": [
+    { "sample": "immediate", "before": 2, "after": 2, "applied": true },
+    { "sample": "after-1s", "before": 2, "after": 2, "applied": true },
+    { "sample": "after-5s", "before": 2, "after": 2, "applied": true }
+  ],
+  "placedContentAfter": {
+    "decodeCount": 45,
+    "forcedReadCount": 65,
+    "lastDecoderForcedReads": 0,
+    "droppedCount": 0,
+    "lastDecoderSucceeded": true
+  },
+  "sourceResolution": {
+    "before": {
+      "samePointer": true,
+      "source": "000001889DE965D8",
+      "getter": "000001889DE965D8",
+      "sourceIdentity": "00100101",
+      "getterIdentity": "00100101",
+      "sourceValue": 0,
+      "getterValue": 0
+    },
+    "after": {
+      "samePointer": true,
+      "source": "000001889DE965D8",
+      "getter": "000001889DE965D8",
+      "sourceIdentity": "00100101",
+      "getterIdentity": "00100101",
+      "sourceValue": 2,
+      "getterValue": 2
+    }
+  },
+  "rollback": {
+    "setBefore": 2,
+    "setAfter": 0,
+    "setApplied": true,
+    "readBefore": 0,
+    "readAfter": 0,
+    "readApplied": true
+  },
+  "nativeCommandSequence": {
+    "baselineReads": [1, 2, 3],
+    "mutationSet": 4,
+    "persistenceReads": [5, 6, 7],
+    "rollbackSet": 8,
+    "rollbackRead": 9
+  },
+  "classification": "persistent",
+  "managedScenarioNote": "The authored scenario paused at gameplay-switch.set because the manifest still labels it ProbeRequired; the direct operator command exercised the native bridge successfully.",
+  "evidence": {
+    "logTail": "logs-tail-250.txt",
+    "cycleStart": "cycle-start.txt",
+    "sourceCommit": "source-commit.txt",
+    "sourceDllHash": "source-dll-hash.txt",
+    "deployedDllHash": "deployed-dll-hash.txt",
+    "installedBackup": "installed-dll-before.dll",
+    "screenshots": [
+      "desktop-boot.png",
+      "desktop-character-select.png",
+      "desktop-orbit.png",
+      "desktop-arrival.png"
+    ]
+  }
+}

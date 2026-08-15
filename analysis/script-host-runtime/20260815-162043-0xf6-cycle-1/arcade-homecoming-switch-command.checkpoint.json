@@ -1,0 +1,10 @@
+{
+  "scenarioId": "arcade-homecoming-switch-command",
+  "currentNodeId": "set-homecoming-switch",
+  "actionIndex": 0,
+  "triggered": true,
+  "nodeEnteredAtUtc": "2026-08-15T23:33:43.1557239+00:00",
+  "pausedReason": "Missing capability \u0027gameplay-switch.set\u0027: ProbeRequired (The native expression consumer reads one of 0x5BCC activity-state bytes and treats value 2 as true. Build-86657 runtime evidence proves concrete activity-owner update \u002B0xFA6CD0 recurs in idle, transitioning, and arrived phases with validated vtable \u002B0x1C35DC8 and retained source identity 0x00100101. A first guarded command correctly reported rejection after an invalid source-pointer call left bank 1 unchanged at zero.)",
+  "completed": false,
+  "variables": {}
+}

@@ -1,0 +1,82 @@
+{
+  "observedAtUtc": "2026-08-15T23:24:03.5407165+00:00",
+  "gameRoot": "S:\\depot\\depots\\1085661\\24238629",
+  "sunriseRoot": "S:\\depot\\depots\\1085661\\24238629\\bin\\x64",
+  "scriptRoot": "S:\\sunrise\\Sunrise\\ScriptHost\\bin\\Release\\net8.0-windows\\scripts",
+  "pluginRoot": "S:\\sunrise\\Sunrise\\ScriptHost\\plugins",
+  "stateRoot": "S:\\sunrise\\Sunrise\\analysis\\script-host-runtime\\20260815-162043-0xf6-cycle-1",
+  "items": [
+    {
+      "kind": "scenario",
+      "path": "S:\\sunrise\\analysis\\script-host-runtime\\20260815-gameplay-switch-mutation-arcade-runtime\\arcade-homecoming-switch-command.json",
+      "exists": true,
+      "length": 1342,
+      "sha256": null
+    },
+    {
+      "kind": "binding",
+      "path": "S:\\sunrise\\Sunrise\\ScriptHost\\bin\\Release\\net8.0-windows\\bindings\\build-86657.json",
+      "exists": true,
+      "length": 6699,
+      "sha256": null
+    },
+    {
+      "kind": "script-root",
+      "path": "S:\\sunrise\\Sunrise\\ScriptHost\\bin\\Release\\net8.0-windows\\scripts",
+      "exists": true,
+      "length": null,
+      "sha256": null
+    },
+    {
+      "kind": "plugin-root",
+      "path": "S:\\sunrise\\Sunrise\\ScriptHost\\plugins",
+      "exists": true,
+      "length": null,
+      "sha256": null
+    },
+    {
+      "kind": "state-root",
+      "path": "S:\\sunrise\\Sunrise\\analysis\\script-host-runtime\\20260815-162043-0xf6-cycle-1",
+      "exists": true,
+      "length": null,
+      "sha256": null
+    },
+    {
+      "kind": "game-root",
+      "path": "S:\\depot\\depots\\1085661\\24238629",
+      "exists": true,
+      "length": null,
+      "sha256": null
+    },
+    {
+      "kind": "destiny-executable",
+      "path": "S:\\depot\\depots\\1085661\\24238629\\destiny2.exe",
+      "exists": true,
+      "length": 122984224,
+      "sha256": "81964380664E7FCEE3C620085A157FDEAF91FEFACF7214907820F188BBEB4CED"
+    },
+    {
+      "kind": "sunrise-root",
+      "path": "S:\\depot\\depots\\1085661\\24238629\\bin\\x64",
+      "exists": true,
+      "length": null,
+      "sha256": null
+    },
+    {
+      "kind": "sunrise-proxy",
+      "path": "S:\\depot\\depots\\1085661\\24238629\\bin\\x64\\steam_api64.dll",
+      "exists": true,
+      "length": 7964160,
+      "sha256": "0D96F4B0E69CD753436BAF86B4C4AC68F0B8FB95879429569DFE84842FACE5C2"
+    },
+    {
+      "kind": "sunrise-log",
+      "path": "S:\\depot\\depots\\1085661\\24238629\\bin\\x64\\Sunrise\\logs\\sunrise.log",
+      "exists": true,
+      "length": 154713,
+      "sha256": null
+    }
+  ],
+  "packageFileCount": 2202,
+  "warnings": []
+}

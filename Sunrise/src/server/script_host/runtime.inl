@@ -48,6 +48,7 @@ void service(std::uint64_t now) noexcept {
     if (!g_initialized || g_disabled) {
         return;
     }
+    drain_orphaned_switch();
     connect_if_due(now);
     if (g_pipe == INVALID_HANDLE_VALUE) {
         return;

@@ -150,11 +150,19 @@ struct SourceSnapshot {
 struct OwnerUpdateSnapshot {
     void* owner{};
     void* source{};
+    void* writerSource{};
     std::uintptr_t callerRva{};
     std::uintptr_t vtableRva{};
     state::activity::WorldPhase worldPhase{state::activity::WorldPhase::idle};
+    std::uint32_t sourceIdentity{};
+    std::uint32_t writerSourceIdentity{};
     std::uint8_t candidateState{};
+    std::uint8_t writerCandidateState{};
+    bool writerSourceValid{};
+    bool sameSource{};
 };
+
+[[nodiscard]] void* persistent_state(void* owner) noexcept;
 
 /** Returns a stable main-image-relative value when one copied pointer identifies a client vtable.
  */
@@ -275,10 +283,25 @@ struct OwnerUpdateSnapshot {
         }
         output.source = const_cast<void*>(source);
         const auto* const sourceBytes = static_cast<const std::byte*>(source);
-        std::uint32_t identity{};
-        std::memcpy(&identity, sourceBytes, sizeof identity);
-        if (identity != kPersistentSourceIdentity) {
+        std::memcpy(&output.sourceIdentity, sourceBytes, sizeof output.sourceIdentity);
+        if (output.sourceIdentity != kPersistentSourceIdentity) {
             return false;
+        }
+        output.writerSource = persistent_state(owner);
+        if (output.writerSource != nullptr) {
+            const auto* const writerSourceBytes =
+                static_cast<const std::byte*>(output.writerSource);
+            std::memcpy(&output.writerSourceIdentity,
+                        writerSourceBytes,
+                        sizeof output.writerSourceIdentity);
+            output.writerSourceValid = output.writerSourceIdentity == kPersistentSourceIdentity;
+            if (output.writerSourceValid) {
+                std::memcpy(&output.writerCandidateState,
+                            writerSourceBytes + kPersistentSwitchBankOffset
+                                + kArcadeHomecomingCandidateBankIndex,
+                            sizeof output.writerCandidateState);
+            }
+            output.sameSource = output.writerSource == output.source;
         }
         output.worldPhase = state::activity::world_phase();
         std::memcpy(&output.candidateState,
@@ -573,6 +596,39 @@ void report_owner_update(const OwnerUpdateSnapshot& snapshot) noexcept {
                static_cast<std::uint8_t>(snapshot.worldPhase));
 }
 
+void report_source_resolution(const char* stage, const OwnerUpdateSnapshot& snapshot) noexcept {
+    if (g_reports.load(std::memory_order_relaxed) >= kReportCapacity) {
+        return;
+    }
+    const std::uint32_t sequence = g_reports.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (sequence > kReportCapacity) {
+        return;
+    }
+    std::array<char, kLineCapacity> line{};
+    const int written = std::snprintf(
+        line.data(),
+        line.size(),
+        "ev=activity_state_source stage=%s n=%u caller=+0x%llX same=%u "
+        "source=%p getter=%p source_identity=%08X getter_identity=%08X "
+        "source_value=%u getter_value=%u",
+        stage,
+        sequence,
+        static_cast<unsigned long long>(snapshot.callerRva),
+        snapshot.sameSource ? 1U : 0U,
+        snapshot.source,
+        snapshot.writerSource,
+        snapshot.sourceIdentity,
+        snapshot.writerSourceIdentity,
+        static_cast<unsigned>(snapshot.candidateState),
+        static_cast<unsigned>(snapshot.writerCandidateState));
+    if (written > 0) {
+        const auto length = static_cast<std::size_t>(written) < line.size()
+                                ? static_cast<std::size_t>(written)
+                                : line.size() - 1;
+        core::log::write(core::log::Channel::client, core::log::Level::info, {line.data(), length});
+    }
+}
+
 void report_owner_command(const state::activity::switch_commands::Command& command,
                           std::uint8_t before,
                           std::uint8_t after,
@@ -606,6 +662,7 @@ void apply_owner_command(const OwnerUpdateSnapshot& snapshot) noexcept {
         applied = command.value >= 0 && command.value <= 2 && snapshot.owner != nullptr;
         const WriteSwitch writer = g_originalWriter.load(std::memory_order_acquire);
         if (applied && writer != nullptr) {
+            report_source_resolution("source_compare_before", snapshot);
             __try {
                 writer(snapshot.owner, command.definition, command.value);
                 OwnerUpdateSnapshot post{};
@@ -613,6 +670,7 @@ void apply_owner_command(const OwnerUpdateSnapshot& snapshot) noexcept {
                     applied = false;
                 } else {
                     after = post.candidateState;
+                    report_source_resolution("source_compare_after", post);
                     applied = after == static_cast<std::uint8_t>(command.value);
                 }
             } __except (EXCEPTION_EXECUTE_HANDLER) {
