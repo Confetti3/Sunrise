@@ -21,11 +21,10 @@
       "evidence": "The scoped message-5 decoder/getter detour publishes copied pointer-free authority counters; observation is read-only telemetry, not a remote authority API."
     },
     {
-      "id": "activity.session.observe",
-      "status": "probeRequired",
-      "owner": "sunrise-state",
-      "evidence": "Session state exists, but this draft does not expose a stable read-only snapshot ABI.",
-      "notes": "Add a copied snapshot rather than exporting pointers into State storage."
+      "id": "activity.snapshot",
+      "status": "available",
+      "owner": "sunrise-native-bridge",
+      "evidence": "The bridge copies the newest bounded activity-session record under the State read lock and returns world phase, destination scalars, membership region, and held-slot count without exporting pointers."
     },
     {
       "id": "activity.incident.observe",
@@ -53,6 +52,12 @@
       "owner": "activity-host",
       "evidence": "Definition, completion, progress, and retained-row application consumers are localized. Fresh build-86657 runs selected original Red War mission_towerfall, reached phase=arrived, and advanced the host to open-objective, but the writer and scalar-list applier produced zero calls. A read-only base-table probe then classified original package-correlated candidates 0x19D..0x1A2 as type 0/bank -1, which the observed writer ignores; no mission objective activation or verified host mutation exists.",
       "notes": "The later arcade_homecoming copy retains one live base-table candidate: definition 0xF6 is type 3/bank 1, while 0xF3..0xF5 and 0x193 are type 0. This narrows a future transition experiment but is not an objective.set binding. The classification does not rule out a hypothetical active hot-patch overlay."
+    },
+    {
+      "id": "gameplay-switch.read",
+      "status": "available",
+      "owner": "sunrise-native-bridge",
+      "evidence": "The recurring validated activity-owner update copies definition 0xF6 bank 1 without invoking the native writer; build-86657 evidence already observed this retained byte across idle, transitioning, and arrived phases."
     },
     {
       "id": "gameplay-switch.set",

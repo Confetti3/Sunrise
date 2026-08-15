@@ -294,20 +294,12 @@ void handle_activity_override(std::string_view request, std::string_view line) n
     enqueue_command_result(request, "ok", "override published");
 }
 
-void handle_gameplay_switch(std::string_view request, std::string_view line) noexcept {
+void begin_gameplay_switch(std::string_view request,
+                           state::activity::switch_commands::Operation operation,
+                           std::uint16_t definition,
+                           std::int32_t value) noexcept {
     constexpr std::uint64_t kResultTimeoutMilliseconds = 2'000;
     constexpr std::uint64_t kInlinePollMilliseconds = 150;
-    std::uint64_t definition = 0;
-    std::uint64_t value = 0;
-    if (!extract_json_unsigned(
-            line,
-            "definitionIndex",
-            (std::numeric_limits<std::uint16_t>::max)(),
-            definition)
-        || !extract_json_unsigned(line, "value", 2, value)) {
-        enqueue_command_result(request, "error", "definitionIndex or value is invalid");
-        return;
-    }
     if (definition != 0x00F6) {
         enqueue_command_result(
             request, "error", "only verified Homecoming definition 0xF6 is accepted");
@@ -319,10 +311,11 @@ void handle_gameplay_switch(std::string_view request, std::string_view line) noe
     }
 
     std::uint64_t sequence = 0;
-    if (!state::activity::switch_commands::publish(
-            static_cast<std::uint16_t>(definition),
-            static_cast<std::int32_t>(value),
-            sequence)) {
+    const bool published =
+        operation == state::activity::switch_commands::Operation::read
+            ? state::activity::switch_commands::publish_read(definition, sequence)
+            : state::activity::switch_commands::publish_set(definition, value, sequence);
+    if (!published) {
         enqueue_command_result(request, "error", "native command slot is busy");
         return;
     }
@@ -331,23 +324,7 @@ void handle_gameplay_switch(std::string_view request, std::string_view line) noe
     state::activity::switch_commands::Result result{};
     while (GetTickCount64() - started < kInlinePollMilliseconds) {
         if (state::activity::switch_commands::try_take_result(sequence, result)) {
-            std::array<char, 128> reason{};
-            const int written = std::snprintf(reason.data(),
-                                              reason.size(),
-                                              "definition 0x%X changed %u to %u",
-                                              static_cast<unsigned int>(definition),
-                                              result.before,
-                                              result.after);
-            if (!result.applied || written <= 0
-                || static_cast<std::size_t>(written) >= reason.size()) {
-                enqueue_command_result(
-                    request, "error", "native writer rejected the retained switch");
-                return;
-            }
-            enqueue_command_result(
-                request,
-                "ok",
-                std::string_view(reason.data(), static_cast<std::size_t>(written)));
+            enqueue_gameplay_switch_result(request, result);
             return;
         }
         Sleep(1);
@@ -360,6 +337,42 @@ void handle_gameplay_switch(std::string_view request, std::string_view line) noe
     g_pendingSwitchSequence = sequence;
     g_pendingSwitchDeadline = GetTickCount64() + kResultTimeoutMilliseconds;
     g_hasPendingSwitch = true;
+}
+
+void handle_gameplay_switch_read(std::string_view request, std::string_view line) noexcept {
+    std::uint64_t definition = 0;
+    if (!extract_json_unsigned(
+            line,
+            "definitionIndex",
+            (std::numeric_limits<std::uint16_t>::max)(),
+            definition)) {
+        enqueue_command_result(request, "error", "definitionIndex is invalid");
+        return;
+    }
+    begin_gameplay_switch(
+        request,
+        state::activity::switch_commands::Operation::read,
+        static_cast<std::uint16_t>(definition),
+        0);
+}
+
+void handle_gameplay_switch_set(std::string_view request, std::string_view line) noexcept {
+    std::uint64_t definition = 0;
+    std::uint64_t value = 0;
+    if (!extract_json_unsigned(
+            line,
+            "definitionIndex",
+            (std::numeric_limits<std::uint16_t>::max)(),
+            definition)
+        || !extract_json_unsigned(line, "value", 2, value)) {
+        enqueue_command_result(request, "error", "definitionIndex or value is invalid");
+        return;
+    }
+    begin_gameplay_switch(
+        request,
+        state::activity::switch_commands::Operation::set,
+        static_cast<std::uint16_t>(definition),
+        static_cast<std::int32_t>(value));
 }
 
 void process_command(std::string_view line) noexcept {
@@ -388,6 +401,10 @@ void process_command(std::string_view line) noexcept {
         enqueue_world_phase_result(request);
         return;
     }
+    if (requestedCapability == protocol::kCapabilityActivitySnapshot) {
+        enqueue_activity_snapshot_result(request);
+        return;
+    }
     if (requestedCapability == protocol::kCapabilityPlacedContentAuthorityObserve) {
         client::hooks::network::bubble_authority::AuthorityObservation observation{};
         if (!client::hooks::network::bubble_authority::try_observation(observation)) {
@@ -402,8 +419,12 @@ void process_command(std::string_view line) noexcept {
         handle_activity_override(request, line);
         return;
     }
+    if (requestedCapability == protocol::kCapabilityGameplaySwitchRead) {
+        handle_gameplay_switch_read(request, line);
+        return;
+    }
     if (requestedCapability == protocol::kCapabilityGameplaySwitchSet) {
-        handle_gameplay_switch(request, line);
+        handle_gameplay_switch_set(request, line);
         return;
     }
     enqueue_command_result(

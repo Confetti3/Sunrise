@@ -62,7 +62,22 @@ internal static class Program
                 Path.Combine(options.StateRoot, $"{FileName.Safe(scenario.Id)}.checkpoint.json"));
             var dispatcher = new CompositeCommandDispatcher(bridge, plugins);
             var runtime = new MissionRuntime(scenario, capabilities, dispatcher, checkpointStore);
-            var service = new ScriptHostService(bridge, capabilities, runtime, dispatcher);
+            string? sunriseLogPath = options.SunriseRoot is null
+                ? null
+                : Path.Combine(options.SunriseRoot, "Sunrise", "logs", "sunrise.log");
+            var operatorServer = new OperatorPipeServer(
+                options.PipeName,
+                sunriseLogPath,
+                bridge,
+                capabilities,
+                runtime,
+                dispatcher);
+            var service = new ScriptHostService(
+                bridge,
+                capabilities,
+                runtime,
+                dispatcher,
+                operatorServer);
 
             using var cancellation = new CancellationTokenSource();
             Console.CancelKeyPress += (_, eventArgs) =>
@@ -72,6 +87,7 @@ internal static class Program
             };
 
             Console.WriteLine($"Sunrise script host listening on \\.\\pipe\\{options.PipeName}");
+            Console.WriteLine($"Operator commands listening on \\.\\pipe\\{operatorServer.PipeName}");
             Console.WriteLine($"Scenario: {scenario.Id}");
             Console.WriteLine("Press Ctrl+C to stop.");
 

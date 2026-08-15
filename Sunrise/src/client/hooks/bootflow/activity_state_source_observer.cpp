@@ -577,9 +577,12 @@ void report_owner_command(const state::activity::switch_commands::Command& comma
                           std::uint8_t before,
                           std::uint8_t after,
                           bool applied) noexcept {
+    const bool reading =
+        command.operation == state::activity::switch_commands::Operation::read;
     write_line("ev=activity_state_source stage=%s n=%u command=%llu definition=%u "
                "value=%u before=%u after=%u",
-               applied ? "owner_command_applied" : "owner_command_rejected",
+               reading ? (applied ? "owner_read_applied" : "owner_read_rejected")
+                       : (applied ? "owner_set_applied" : "owner_set_rejected"),
                static_cast<std::uintptr_t>(command.sequence),
                command.definition,
                static_cast<std::uint32_t>(command.value),
@@ -597,11 +600,12 @@ void apply_owner_command(const OwnerUpdateSnapshot& snapshot) noexcept {
         return;
     }
     std::uint8_t after = snapshot.candidateState;
-    bool applied = false;
-    if (command.definition == kArcadeHomecomingCandidateDefinition && command.value >= 0
-        && command.value <= 2 && snapshot.owner != nullptr && snapshot.source != nullptr) {
+    bool applied = command.definition == kArcadeHomecomingCandidateDefinition
+                   && snapshot.source != nullptr;
+    if (applied && command.operation == state::activity::switch_commands::Operation::set) {
+        applied = command.value >= 0 && command.value <= 2 && snapshot.owner != nullptr;
         const WriteSwitch writer = g_originalWriter.load(std::memory_order_acquire);
-        if (writer != nullptr) {
+        if (applied && writer != nullptr) {
             __try {
                 writer(snapshot.owner, command.definition, command.value);
                 const auto* const sourceBytes = static_cast<const std::byte*>(snapshot.source);
@@ -613,6 +617,8 @@ void apply_owner_command(const OwnerUpdateSnapshot& snapshot) noexcept {
             } __except (EXCEPTION_EXECUTE_HANDLER) {
                 applied = false;
             }
+        } else {
+            applied = false;
         }
     }
     state::activity::switch_commands::complete(

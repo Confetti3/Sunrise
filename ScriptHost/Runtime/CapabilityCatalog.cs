@@ -41,6 +41,7 @@ public sealed class CapabilityCatalog
     private readonly Dictionary<string, CapabilityDefinition> _definitions;
     private readonly HashSet<string> _bridgeCapabilities = new(StringComparer.Ordinal);
     private readonly HashSet<string> _pluginCapabilities = new(StringComparer.Ordinal);
+    private readonly object _gate = new();
 
     private CapabilityCatalog(CapabilityManifest manifest)
     {
@@ -65,17 +66,44 @@ public sealed class CapabilityCatalog
 
     public void ReplaceBridgeCapabilities(IEnumerable<string> capabilities)
     {
-        _bridgeCapabilities.Clear();
-        _bridgeCapabilities.UnionWith(capabilities.Where(item => !string.IsNullOrWhiteSpace(item)));
+        lock (_gate)
+        {
+            _bridgeCapabilities.Clear();
+            _bridgeCapabilities.UnionWith(
+                capabilities.Where(item => !string.IsNullOrWhiteSpace(item)));
+        }
     }
 
     public void ReplacePluginCapabilities(IEnumerable<string> capabilities)
     {
-        _pluginCapabilities.Clear();
-        _pluginCapabilities.UnionWith(capabilities.Where(item => !string.IsNullOrWhiteSpace(item)));
+        lock (_gate)
+        {
+            _pluginCapabilities.Clear();
+            _pluginCapabilities.UnionWith(
+                capabilities.Where(item => !string.IsNullOrWhiteSpace(item)));
+        }
     }
 
     public CapabilityDecision Decide(string id)
+    {
+        lock (_gate)
+        {
+            return DecideLocked(id);
+        }
+    }
+
+    public IReadOnlyList<CapabilityDecision> Snapshot()
+    {
+        lock (_gate)
+        {
+            return _definitions.Keys
+                .OrderBy(item => item, StringComparer.Ordinal)
+                .Select(DecideLocked)
+                .ToArray();
+        }
+    }
+
+    private CapabilityDecision DecideLocked(string id)
     {
         bool runtimeAvailable = _bridgeCapabilities.Contains(id) || _pluginCapabilities.Contains(id);
         if (_definitions.TryGetValue(id, out CapabilityDefinition? definition))
@@ -97,11 +125,6 @@ public sealed class CapabilityCatalog
             "No build binding declares this capability.",
             null);
     }
-
-    public IReadOnlyList<CapabilityDecision> Snapshot() => _definitions.Keys
-        .OrderBy(item => item, StringComparer.Ordinal)
-        .Select(Decide)
-        .ToArray();
 
     private static void Validate(CapabilityManifest manifest, string path)
     {

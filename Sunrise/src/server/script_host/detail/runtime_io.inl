@@ -174,26 +174,7 @@ void stage_gameplay_switch() noexcept {
     if (state::activity::switch_commands::try_take_result(g_pendingSwitchSequence, result)) {
         const std::string_view request(g_pendingSwitchRequest.data(),
                                        g_pendingSwitchRequestSize);
-        std::array<char, 128> reason{};
-        const int written = std::snprintf(reason.data(),
-                                          reason.size(),
-                                          "definition 0x%X changed %u to %u",
-                                          0xF6u,
-                                          result.before,
-                                          result.after);
-        if (result.applied && written > 0
-            && static_cast<std::size_t>(written) < reason.size()) {
-            enqueue_command_result(
-                request,
-                "ok",
-                std::string_view(reason.data(), static_cast<std::size_t>(written)));
-        } else {
-            enqueue_command_result(
-                request,
-                "error",
-                result.applied ? "native writer applied after claim"
-                               : "native writer rejected the retained switch");
-        }
+        enqueue_gameplay_switch_result(request, result);
         g_hasPendingSwitch = false;
         return;
     }

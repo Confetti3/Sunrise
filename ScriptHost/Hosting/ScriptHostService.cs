@@ -10,20 +10,23 @@ public sealed class ScriptHostService
     private readonly CapabilityCatalog _capabilities;
     private readonly MissionRuntime _runtime;
     private readonly CompositeCommandDispatcher _dispatcher;
+    private readonly OperatorPipeServer _operator;
     private int _startRequested;
     private int _startPublished;
     private int _resumeRequested;
 
-    public ScriptHostService(
+    internal ScriptHostService(
         NamedPipeBridge bridge,
         CapabilityCatalog capabilities,
         MissionRuntime runtime,
-        CompositeCommandDispatcher dispatcher)
+        CompositeCommandDispatcher dispatcher,
+        OperatorPipeServer operatorServer)
     {
         _bridge = bridge;
         _capabilities = capabilities;
         _runtime = runtime;
         _dispatcher = dispatcher;
+        _operator = operatorServer;
     }
 
     public async Task RunAsync(CancellationToken cancellationToken)
@@ -34,6 +37,7 @@ public sealed class ScriptHostService
         await _runtime.InitializeAsync(cancellationToken).ConfigureAwait(false);
 
         Task bridgeTask = _bridge.RunAsync(cancellationToken);
+        Task operatorTask = _operator.RunAsync(cancellationToken);
         using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(100));
         try
         {
@@ -56,7 +60,7 @@ public sealed class ScriptHostService
         }
         finally
         {
-            await bridgeTask.ConfigureAwait(false);
+            await Task.WhenAll(bridgeTask, operatorTask).ConfigureAwait(false);
             _bridge.MessageReceived -= OnMessageAsync;
             _bridge.ConnectionChanged -= OnConnectionChangedAsync;
         }

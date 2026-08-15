@@ -3,6 +3,16 @@ using System.Text.Json;
 
 namespace Sunrise.ScriptHost.Runtime;
 
+public sealed record MissionRuntimeStatus(
+    string ScenarioId,
+    string CurrentNodeId,
+    int ActionIndex,
+    bool Triggered,
+    bool Completed,
+    string? PausedReason,
+    DateTimeOffset NodeEnteredAtUtc,
+    IReadOnlyDictionary<string, string> Variables);
+
 public sealed class MissionRuntime
 {
     private readonly ScenarioDefinition _scenario;
@@ -41,17 +51,7 @@ public sealed class MissionRuntime
             return;
         }
 
-        _checkpoint = new MissionCheckpoint
-        {
-            ScenarioId = _scenario.Id,
-            CurrentNodeId = _scenario.Start,
-            ActionIndex = 0,
-            Triggered = false,
-            NodeEnteredAtUtc = DateTimeOffset.UtcNow,
-            PausedReason = null,
-            Completed = false,
-            Variables = new Dictionary<string, string>(_scenario.Parameters, StringComparer.Ordinal),
-        };
+        _checkpoint = CreateInitialCheckpoint();
         await SaveAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -122,6 +122,42 @@ public sealed class MissionRuntime
 
             _checkpoint = _checkpoint with { PausedReason = null };
             await ExecuteAndAdvanceAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<MissionRuntimeStatus> GetStatusAsync(CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            EnsureInitialized();
+            return new MissionRuntimeStatus(
+                _checkpoint!.ScenarioId,
+                _checkpoint.CurrentNodeId,
+                _checkpoint.ActionIndex,
+                _checkpoint.Triggered,
+                _checkpoint.Completed,
+                _checkpoint.PausedReason,
+                _checkpoint.NodeEnteredAtUtc,
+                new Dictionary<string, string>(_checkpoint.Variables, StringComparer.Ordinal));
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task ResetAsync(CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            _checkpoint = CreateInitialCheckpoint();
+            await SaveAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -272,6 +308,18 @@ public sealed class MissionRuntime
             && uint.TryParse(authored, NumberStyles.None, CultureInfo.InvariantCulture, out uint authoredTarget)
             && observedTarget == authoredTarget;
     }
+
+    private MissionCheckpoint CreateInitialCheckpoint() => new()
+    {
+        ScenarioId = _scenario.Id,
+        CurrentNodeId = _scenario.Start,
+        ActionIndex = 0,
+        Triggered = false,
+        NodeEnteredAtUtc = DateTimeOffset.UtcNow,
+        PausedReason = null,
+        Completed = false,
+        Variables = new Dictionary<string, string>(_scenario.Parameters, StringComparer.Ordinal),
+    };
 
     private async Task SaveAsync(CancellationToken cancellationToken)
     {

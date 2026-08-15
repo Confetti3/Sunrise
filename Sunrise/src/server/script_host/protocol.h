@@ -18,9 +18,11 @@ inline constexpr std::size_t kMaximumIoOperationsPerService = 8;
 
 inline constexpr char kCapabilityPing[] = "host.ping";
 inline constexpr char kCapabilityWorldPhaseObserve[] = "world.phase.observe";
+inline constexpr char kCapabilityActivitySnapshot[] = "activity.snapshot";
 inline constexpr char kCapabilityPlacedContentAuthorityObserve[] = "placed-content.authority.observe";
 inline constexpr char kCapabilityIncidentObserve[] = "activity.incident.observe";
 inline constexpr char kCapabilityActivityOverrideConfigure[] = "activity.override.configure";
+inline constexpr char kCapabilityGameplaySwitchRead[] = "gameplay-switch.read";
 inline constexpr char kCapabilityGameplaySwitchSet[] = "gameplay-switch.set";
 
 } // namespace sunrise::server::script_host::protocol

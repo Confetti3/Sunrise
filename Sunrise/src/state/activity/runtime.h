@@ -48,6 +48,22 @@ namespace sunrise::state::activity {
  */
 [[nodiscard]] bool is_joined(std::uint64_t sessionId) noexcept;
 
+/** Pointer-free copy of the newest committed activity session. */
+struct RuntimeSnapshot final {
+    destination::DestinationSelection destination{};
+    std::uint64_t sessionId{};
+    std::uint32_t heldEntitySlots{};
+    std::int32_t reportedRegion{membership::kAbsentRegionIndex};
+    bool joined{};
+};
+
+/**
+ * Copies the newest occupied activity session while holding the root State read lock.
+ * @param output Cleared first, then receives only bounded scalar and fixed-array data.
+ * @return True when the bounded table contains an occupied session.
+ */
+[[nodiscard]] bool latest_snapshot(RuntimeSnapshot& output) noexcept;
+
 /** How far the client has got through the current destination load. */
 enum class WorldPhase : std::uint8_t {
     /** No destination load is running. Orbit sits here, and the spawn is never held. */

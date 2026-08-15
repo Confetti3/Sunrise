@@ -21,6 +21,7 @@ public static class SelfTest
 
         VerifyBoundedUtf8LineBuffer();
         VerifyPlacedContentAuthorityParsing();
+        VerifyActivitySnapshotParsing();
         await VerifyNamedPipeBridgeAsync().ConfigureAwait(false);
 
         const string scenarioJson = """
@@ -110,6 +111,20 @@ public static class SelfTest
             if (!runtime.IsCompleted || dispatcher.LastValue != "ready")
             {
                 throw new InvalidOperationException("Mission runtime did not complete the deterministic self-test.");
+            }
+
+            MissionRuntimeStatus completed =
+                await runtime.GetStatusAsync(CancellationToken.None).ConfigureAwait(false);
+            if (!completed.Completed || completed.CurrentNodeId != "incident")
+            {
+                throw new InvalidOperationException("Runtime status did not copy the completed checkpoint.");
+            }
+            await runtime.ResetAsync(CancellationToken.None).ConfigureAwait(false);
+            MissionRuntimeStatus reset =
+                await runtime.GetStatusAsync(CancellationToken.None).ConfigureAwait(false);
+            if (reset.Completed || reset.CurrentNodeId != "start" || reset.ActionIndex != 0)
+            {
+                throw new InvalidOperationException("Runtime reset did not restore the start checkpoint.");
             }
         }
         finally
@@ -255,6 +270,81 @@ public static class SelfTest
         if (PlacedContentAuthorityObservation.TryParse(document.RootElement, out _))
         {
             throw new InvalidOperationException("Malformed observation was accepted.");
+        }
+    }
+
+    private static void VerifyActivitySnapshotParsing()
+    {
+        const string activeJson = """
+        {
+          "active": true,
+          "worldPhase": "arrived",
+          "transitionAgeMs": 1250,
+          "sessionId": "11414920993740464129",
+          "joined": true,
+          "package": "mission_towerfall",
+          "activityIndex": null,
+          "arrivalBubbleHash": "0xF28FC859",
+          "reportedRegion": 0,
+          "heldEntitySlots": 8192
+        }
+        """;
+        using (JsonDocument active = JsonDocument.Parse(activeJson))
+        {
+            if (!ActivitySnapshot.TryParse(active.RootElement, out ActivitySnapshot? snapshot)
+                || snapshot is null
+                || !snapshot.Active
+                || snapshot.WorldPhase != "arrived"
+                || snapshot.SessionId != 11414920993740464129UL
+                || snapshot.Package != "mission_towerfall"
+                || snapshot.HeldEntitySlots != 8_192)
+            {
+                throw new InvalidOperationException("Representative activity snapshot did not parse.");
+            }
+        }
+
+        const string inactiveJson = """
+        {
+          "active": false,
+          "worldPhase": "idle",
+          "transitionAgeMs": 0,
+          "sessionId": null,
+          "joined": false,
+          "package": null,
+          "activityIndex": null,
+          "arrivalBubbleHash": null,
+          "reportedRegion": null,
+          "heldEntitySlots": 0
+        }
+        """;
+        using (JsonDocument inactive = JsonDocument.Parse(inactiveJson))
+        {
+            if (!ActivitySnapshot.TryParse(inactive.RootElement, out ActivitySnapshot? snapshot)
+                || snapshot is null
+                || snapshot.Active)
+            {
+                throw new InvalidOperationException("Inactive activity snapshot did not parse.");
+            }
+        }
+
+        const string malformedJson = """
+        {
+          "active": true,
+          "worldPhase": "arrived",
+          "transitionAgeMs": 0,
+          "sessionId": "1",
+          "joined": true,
+          "package": "mission_towerfall",
+          "activityIndex": null,
+          "arrivalBubbleHash": "not-a-hash",
+          "reportedRegion": 0,
+          "heldEntitySlots": 8192
+        }
+        """;
+        using JsonDocument malformed = JsonDocument.Parse(malformedJson);
+        if (ActivitySnapshot.TryParse(malformed.RootElement, out _))
+        {
+            throw new InvalidOperationException("Malformed activity snapshot was accepted.");
         }
     }
 

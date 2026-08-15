@@ -17,8 +17,9 @@
 
 void enqueue_hello() noexcept {
     (void)enqueue(R"({"protocol":1,"type":"bridge.hello","build":"Sunrise 0.2.1",)"
-                  R"("capabilities":["host.ping","world.phase.observe","placed-content.authority.observe",)"
-                  R"("activity.incident.observe","activity.override.configure"]})");
+                  R"("capabilities":["host.ping","world.phase.observe","activity.snapshot",)"
+                  R"("placed-content.authority.observe","activity.incident.observe",)"
+                  R"("activity.override.configure","gameplay-switch.read"]})");
 }
 
 [[nodiscard]] constexpr std::string_view phase_name(
@@ -129,6 +130,115 @@ void enqueue_world_phase_result(std::string_view requestId) noexcept {
                                std::string_view(result.data(),
                                                 static_cast<std::size_t>(written)));
     }
+}
+
+void enqueue_activity_snapshot_result(std::string_view requestId) noexcept {
+    const state::activity::WorldPhase phase = state::activity::world_phase();
+    const std::string_view name = phase_name(phase);
+    state::activity::RuntimeSnapshot snapshot{};
+    const bool active = state::activity::latest_snapshot(snapshot);
+    std::array<char, 768> result{};
+    int written = 0;
+    if (!active) {
+        written = std::snprintf(
+            result.data(),
+            result.size(),
+            R"({"active":false,"worldPhase":"%.*s","transitionAgeMs":%llu,)"
+            R"("sessionId":null,"joined":false,"package":null,"activityIndex":null,)"
+            R"("arrivalBubbleHash":null,"reportedRegion":null,"heldEntitySlots":0})",
+            static_cast<int>(name.size()),
+            name.data(),
+            static_cast<unsigned long long>(state::activity::world_transition_age()));
+    } else {
+        std::array<char, 16> activityIndex{};
+        const int activityIndexLength = snapshot.destination.activityIndex
+                                                == state::activity::destination::
+                                                       kAbsentActivityIndex
+                                            ? std::snprintf(activityIndex.data(),
+                                                            activityIndex.size(),
+                                                            "null")
+                                            : std::snprintf(
+                                                  activityIndex.data(),
+                                                  activityIndex.size(),
+                                                  "%d",
+                                                  snapshot.destination.activityIndex);
+        std::array<char, 16> arrivalBubbleHash{};
+        const int arrivalBubbleHashLength =
+            snapshot.destination.hasArrivalBubbleHash
+                ? std::snprintf(arrivalBubbleHash.data(),
+                                arrivalBubbleHash.size(),
+                                R"("0x%08X")",
+                                snapshot.destination.arrivalBubbleHash)
+                : std::snprintf(
+                      arrivalBubbleHash.data(), arrivalBubbleHash.size(), "null");
+        if (activityIndexLength <= 0
+            || static_cast<std::size_t>(activityIndexLength) >= activityIndex.size()
+            || arrivalBubbleHashLength <= 0
+            || static_cast<std::size_t>(arrivalBubbleHashLength)
+                   >= arrivalBubbleHash.size()) {
+            enqueue_command_result(requestId, "error", "activity snapshot encoding failed");
+            return;
+        }
+        written = std::snprintf(
+            result.data(),
+            result.size(),
+            R"({"active":true,"worldPhase":"%.*s","transitionAgeMs":%llu,)"
+            R"("sessionId":"%llu","joined":%s,"package":"%.*s","activityIndex":%s,)"
+            R"("arrivalBubbleHash":%s,"reportedRegion":%d,"heldEntitySlots":%u})",
+            static_cast<int>(name.size()),
+            name.data(),
+            static_cast<unsigned long long>(state::activity::world_transition_age()),
+            static_cast<unsigned long long>(snapshot.sessionId),
+            snapshot.joined ? "true" : "false",
+            snapshot.destination.packageNameLength,
+            reinterpret_cast<const char*>(snapshot.destination.packageName.data()),
+            activityIndex.data(),
+            arrivalBubbleHash.data(),
+            snapshot.reportedRegion,
+            snapshot.heldEntitySlots);
+    }
+    if (written <= 0 || static_cast<std::size_t>(written) >= result.size()) {
+        enqueue_command_result(requestId, "error", "activity snapshot encoding failed");
+        return;
+    }
+    enqueue_command_result(
+        requestId,
+        "ok",
+        {},
+        std::string_view(result.data(), static_cast<std::size_t>(written)));
+}
+
+void enqueue_gameplay_switch_result(
+    std::string_view requestId,
+    const state::activity::switch_commands::Result& switchResult) noexcept {
+    const bool reading =
+        switchResult.operation == state::activity::switch_commands::Operation::read;
+    if (!switchResult.applied) {
+        enqueue_command_result(
+            requestId,
+            "error",
+            reading ? "native reader rejected the retained switch"
+                    : "native writer rejected the retained switch");
+        return;
+    }
+
+    std::array<char, 192> result{};
+    const int written = std::snprintf(
+        result.data(),
+        result.size(),
+        R"({"operation":"%s","definitionIndex":246,"before":%u,"after":%u,"applied":true})",
+        reading ? "read" : "set",
+        switchResult.before,
+        switchResult.after);
+    if (written <= 0 || static_cast<std::size_t>(written) >= result.size()) {
+        enqueue_command_result(requestId, "error", "gameplay switch result encoding failed");
+        return;
+    }
+    enqueue_command_result(
+        requestId,
+        "ok",
+        {},
+        std::string_view(result.data(), static_cast<std::size_t>(written)));
 }
 
 [[nodiscard]] bool enqueue_placed_content_authority(
