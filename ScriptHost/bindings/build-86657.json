@@ -45,7 +45,7 @@
       "id": "objective.set",
       "status": "wireAdapterRequired",
       "owner": "activity-host",
-      "evidence": "Definition, completion, and progress consumers are localized. Native objective expressions read gameplay-switch and progression banks, and static application helpers consume definition-backed source rows, but no source wire schema, Homecoming index mapping, or verified host transition exists."
+      "evidence": "Definition, completion, progress, and retained-row application consumers are localized. Orbit and authoritative Homecoming controls observed enabled category-zero dispatches with zero explicit rows; no source wire schema, Homecoming index mapping, or verified host mutation exists."
     },
     {
       "id": "gameplay-switch.set",

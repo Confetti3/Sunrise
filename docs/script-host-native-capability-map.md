@@ -11,7 +11,7 @@ Destiny 2 build 86657. No row infers Bungie's absent host policy from client pac
 | `activity.session.observe` | four copied `SessionRecord` values exist behind the State lock | none | `state/activity/activity_session_lookup.cpp` only exposes `contains` and `is_joined` | No stable copied session snapshot ABI | high / probe required |
 | `activity.incident.observe` | bounded 64-row pointer-free queue; each row copies session/account scalars, target indices, flags, and payload length | client svc8 activity message type 19 -> native queue -> pipe `activity.incident` | build-86657 source `+0xD82730` -> retail encoder -> `activity_message_route.cpp` -> `incident::validate` -> `state::activity::incidents` -> script-host worker | A Tower control correlated one client source call containing target 1121 plus five ordered extras with the immediately accepted server incident. | high / available |
 | `activity.incident.emit` | none | generic service-9 notification framing exists, but msg-19 selector/payload semantics and ordering are not recovered | client msg-19 handler table is only indirectly identified by the validator artifacts | No harmless target/payload has been replayed | low / wire adapter required |
-| `objective.set` | native objective expressions consume an activity-state switch bank followed by progression rows; no writable Sunrise mirror exists | generic service-9 notification framing and progression banks are not yet a verified objective binding | definition resolver `+0xC923A0`, completion reader `+0x5269D0`, and progress reader `+0x523F30` are localized; application helpers remain unwired | An empty Quests control exercised five completion reads with maxima 1/1/1000/1000/1000, all false; no Homecoming index/bank mapping or mutation is verified | high for read path; low / wire adapter required |
+| `objective.set` | native objective expressions consume an activity-state switch bank followed by progression rows; no writable Sunrise mirror exists | generic service-9 notification framing and progression banks are not yet a verified objective binding | definition resolver `+0xC923A0`, completion reader `+0x5269D0`, progress reader `+0x523F30`, and retained-row dispatcher `+0x540320` are localized; their transport remains unwired | Orbit and authoritative Homecoming controls exercised the dispatcher with zero explicit rows; no Homecoming index/bank mapping or mutation is verified | high for read/application path; low / wire adapter required |
 | `gameplay-switch.set` | native activity state begins with `0x5BCC` one-byte switch states; no writable Sunrise mirror exists | unknown | expression leaf `+0x5549C0` treats state value `2` as true; helper `+0x54BDF0` applies switches from definition-backed source rows | Static instruction-level evidence only; no wire producer or harmless state transition is verified | medium for consumer; low / wire adapter required |
 | `entity.allocate` | 8192-bit lease mask per joined activity session | svc8 slot request -> svc9 slot notification | `state/activity/entity_slots` transaction code | Lease lifecycle is implemented, but it does not identify an actor or object | high for leases; low for actors / probe required |
 | `entity.spawn` / `entity.update` / `entity.destroy` | no actor lifecycle State | unknown create/baseline/update/remove messages | no SObject, actor baseline, health, damage, death, or removal funnel localized | Spawn-set catalogs contain placement/package provenance only | low / probe required |
@@ -111,3 +111,21 @@ expression evaluated false with a non-null context. No progress read fired in th
 control. This validates the completion ABI and expression-state consumer without manufacturing a
 state transition. The Homecoming definition/bank mapping and write-side source remain unknown, so
 the capability status does not change.
+
+The source side of that application path is now bounded as well. Category dispatcher `+0x540320`
+is called by the activity-state rebuild and accepts a retained source object. Category zero reads
+an explicit switch-row count at source `+0xB3F4`, up to 20 four-byte rows at `+0xB3F8`
+(`int16 index`, `uint8 value`, `uint8 auxiliary`), a progression-row count at `+0xB448`, and
+eight-byte progression rows at `+0xB44C` (`int16 index`, `uint16 auxiliary`, `uint32 value`). Its
+return value is ignored at all five direct call sites. A bounded read-only observer copied only
+these scalars while the call owned the source and passed the native call through unchanged.
+
+The observer attached in both an orbit control and an authoritative Homecoming launch. Calls from
+return RVAs `+0x5492F1` and `+0x54DA47` had `enabled=1` but zero switch and progression rows. The
+Homecoming client nevertheless reached `activity:in_world`, and the C# host advanced to the honest
+`objective.set` boundary. No new category-zero rows appeared during activity transition or arrival.
+This rules out the current 189-byte type-1 global-state payload as a source of explicit retained
+rows in this run; it does not establish the missing wire fields or authorize writing the native
+source object. Evidence is retained under
+`analysis/script-host-runtime/20260815-034100-activity-state-source-homecoming/`; the exercised DLL
+SHA-256 is `D5714B55317EB4FAE657876BB6E0D2769A3EFCF92B6413A8DE8C14A616D1DAED`.

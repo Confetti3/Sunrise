@@ -127,6 +127,16 @@ void uninstall_objective_definition_observer() noexcept;
 /** Detaches the objective completion/progress observers. */
 void uninstall_objective_state_observer() noexcept;
 
+/**
+ * Observes category zero of the build-86657 activity-state dispatcher, which copies retained
+ * gameplay-switch and progression rows into a rebuilt activity bank.
+ * @return True when the unique dispatcher entry is found and attached.
+ */
+[[nodiscard]] bool install_activity_state_source_observer() noexcept;
+
+/** Detaches the retained activity-state source-row observer. */
+void uninstall_activity_state_source_observer() noexcept;
+
 /** @return True and copies the graph-resolved Homecoming activity index after its native scan. */
 [[nodiscard]] bool homecoming_activity_index(std::uint16_t& output) noexcept;
 

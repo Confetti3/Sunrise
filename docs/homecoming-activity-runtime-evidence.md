@@ -198,3 +198,31 @@ evidence; it neither identifies the Homecoming definitions nor supplies a mutati
 The exact deployed DLL and retained log are in
 `analysis/script-host-runtime/20260815-031801-objective-state-consumer/`; the DLL SHA-256 is
 `33022AE70972726E6529591842A721E55F78AB3671D90811DA2BFF27E6F72CA9`.
+
+## Retained activity-state source rows
+
+The next static boundary is the build-86657 category dispatcher at `+0x540320`. Its category-zero
+branch copies explicit retained rows into the rebuilt activity-state bank. The source layout is:
+
+| Source offset | Shape | Meaning at the dispatcher |
+| ---: | --- | --- |
+| `+0xB3F4` | `int32` | switch-row count |
+| `+0xB3F8` | 20 × 4 bytes | `int16 index`, `uint8 value`, `uint8 auxiliary` |
+| `+0xB448` | `int32` | progression-row count |
+| `+0xB44C` | 8-byte rows | `int16 index`, `uint16 auxiliary`, `uint32 value` |
+
+A new observer snapshots those bounded values before calling the native dispatcher unchanged. An
+orbit control recorded two enabled category-zero calls from return RVAs `+0x5492F1` and
+`+0x54DA47`; both counts were zero. The same exact DLL then completed the authoritative
+Homecoming launch: the client changed world to `arcade_homecoming`, entered `activity:in_world`,
+and the script host persisted `open-objective`, while the dispatcher emitted no nonzero source
+rows. The rendered result remained the black frame with cursor glow.
+
+This connects the previously recovered application helpers to a concrete retained-source layout
+and supplies a real Homecoming negative control. It also strengthens the boundary: the current
+type-1 global-state message does not populate those explicit rows, and package extraction does not
+provide a runtime objective index. A transport decoder or host-owned state producer still has to
+be identified before `objective.set` can be implemented. The retained log, probe report,
+checkpoint, and exact DLL are in
+`analysis/script-host-runtime/20260815-034100-activity-state-source-homecoming/`; the DLL SHA-256 is
+`D5714B55317EB4FAE657876BB6E0D2769A3EFCF92B6413A8DE8C14A616D1DAED`.
