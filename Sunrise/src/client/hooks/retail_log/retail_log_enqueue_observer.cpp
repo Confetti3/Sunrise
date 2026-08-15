@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <intrin.h>
 #include <string_view>
 
 #include "../../../core/logging/log.h"
@@ -59,17 +60,23 @@ volatile LONG g_sinceAssert{};
  * @param siteId Registered site id.
  * @param text Borrowed native buffer.
  */
-void capture_line(std::int32_t siteId, const char* text) noexcept {
+void capture_line(std::int32_t siteId, const char* text, const void* caller) noexcept {
     if (!core::log::accepts(core::log::Channel::client, core::log::Level::info)) {
         return;
     }
     std::array<char, kNativeTextSize> sanitized{};
     const std::size_t textLength = sanitize(text, sanitized);
     std::array<char, kEventCapacity> line{};
+    const std::uintptr_t image = reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+    const std::uintptr_t returnSite = reinterpret_cast<std::uintptr_t>(caller);
+    const std::uint64_t callerOffset = image != 0 && returnSite >= image
+                                           ? static_cast<std::uint64_t>(returnSite - image)
+                                           : 0;
     const int written = std::snprintf(line.data(),
                                       line.size(),
-                                      "ev=retail site=%d text=%.*s",
+                                      "ev=retail site=%d caller=+0x%llX text=%.*s",
                                       siteId,
+                                      static_cast<unsigned long long>(callerOffset),
                                       static_cast<int>(textLength),
                                       sanitized.data());
     if (written <= 0) {
@@ -87,6 +94,7 @@ void capture_line(std::int32_t siteId, const char* text) noexcept {
  * @param text Native buffer holding the already-formatted line.
  */
 __declspec(noinline) void __fastcall enqueue_body(std::int32_t siteId, const char* text) noexcept {
+    const void* const caller = _ReturnAddress();
     // The verbosity setter logs through this same funnel; without this it would recurse.
     const bool outer = !g_inObserver;
     g_inObserver = true;
@@ -96,7 +104,7 @@ __declspec(noinline) void __fastcall enqueue_body(std::int32_t siteId, const cha
     }
     if (outer) {
         if (siteId != kUnregisteredSite && text != nullptr) {
-            capture_line(siteId, text);
+            capture_line(siteId, text, caller);
         }
         assert_verbosity();
         g_inObserver = false;
