@@ -85,6 +85,16 @@ void uninstall_owner_activity_slot() noexcept;
 void uninstall_region_private() noexcept;
 
 /**
+ * Observes the nine build-86657 call sites that replace the controller's activity descriptor.
+ * The detour records scalar descriptor fields only and never changes the assignment.
+ * @return True when the descriptor assignment entry is found and the observer attaches.
+ */
+[[nodiscard]] bool install_activity_descriptor_observer() noexcept;
+
+/** Detaches the activity-descriptor observer. */
+void uninstall_activity_descriptor_observer() noexcept;
+
+/**
  * Finds the boot-flow step accessor, the only input to the world phase.
  * Nothing is detoured: the accessor is called, so a miss leaves the phase idle.
  * @return True when the target was found.
