@@ -39,6 +39,12 @@ constexpr std::string_view kApplyListsSignatureText =
 constexpr auto kApplyListsSignature =
     signature<signature_length(kApplyListsSignatureText)>(kApplyListsSignatureText);
 
+/** Offset of the writer's near call to the definition-registry singleton getter. */
+constexpr std::size_t kRegistryCallOffset = 36;
+constexpr std::size_t kNearCallOperandOffset = 1;
+constexpr std::size_t kNearCallLength = 5;
+constexpr std::byte kNearCallOpcode{0xE8};
+
 constexpr std::size_t kSwitchCountOffset = 0xB3F4;
 constexpr std::size_t kSwitchRowsOffset = 0xB3F8;
 constexpr std::size_t kSwitchRowStride = 4;
@@ -72,6 +78,8 @@ using ApplyCategory = void(__fastcall*)(void*,
 using WriteSwitch = void(__fastcall*)(void*, std::uint16_t, std::int32_t) noexcept;
 using ApplyLists = void(__fastcall*)(void*, const void*, const void*) noexcept;
 using StateGetter = void*(__fastcall*)(void*) noexcept;
+using DefinitionRegistry = void*(__fastcall*)() noexcept;
+using DefinitionTable = std::uintptr_t(__fastcall*)(void*) noexcept;
 
 hooking::detour::Handle g_applyHandle{};
 hooking::detour::Handle g_writerHandle{};
@@ -79,8 +87,10 @@ hooking::detour::Handle g_applyListsHandle{};
 std::atomic<ApplyCategory> g_original{nullptr};
 std::atomic<WriteSwitch> g_originalWriter{nullptr};
 std::atomic<ApplyLists> g_originalApplyLists{nullptr};
+std::atomic<DefinitionRegistry> g_definitionRegistry{nullptr};
 std::array<std::atomic<std::uint64_t>, kSeenCapacity> g_seen{};
 std::atomic<std::uint32_t> g_reports{};
+std::atomic<bool> g_definitionCandidatesReported{false};
 
 struct SwitchRow {
     std::int16_t index{};
@@ -100,6 +110,14 @@ struct SwitchListSnapshot {
     std::size_t captured{};
     std::array<SwitchRow, kSwitchCapacity> rows{};
 };
+
+struct DefinitionRecordSnapshot {
+    std::uint32_t prefix{};
+    std::uint8_t type{};
+    std::uint8_t flags{};
+    std::int16_t bankIndex{};
+};
+static_assert(sizeof(DefinitionRecordSnapshot) == 8);
 
 struct SourceSnapshot {
     std::array<std::uint32_t, 4> prefixWords{};
@@ -449,6 +467,81 @@ void report_switch_list(std::uintptr_t callerRva, const SwitchListSnapshot& snap
     }
 }
 
+/** Resolves one record through the same unpatched base table used by the native writer. */
+[[nodiscard]] bool snapshot_definition_record(std::uint16_t definition,
+                                              DefinitionRecordSnapshot& output) noexcept {
+    const DefinitionRegistry registryGetter =
+        g_definitionRegistry.load(std::memory_order_acquire);
+    if (registryGetter == nullptr) {
+        return false;
+    }
+    __try {
+        void* const registry = registryGetter();
+        if (registry == nullptr) {
+            return false;
+        }
+        auto** const vtable = *static_cast<void***>(registry);
+        const auto tableGetter =
+            reinterpret_cast<DefinitionTable>(vtable[0x3C0 / sizeof(void*)]);
+        if (tableGetter == nullptr) {
+            return false;
+        }
+        const std::uintptr_t tableAddress = tableGetter(registry);
+        if (tableAddress == 0) {
+            return false;
+        }
+        const auto* const table = reinterpret_cast<const std::byte*>(tableAddress);
+        std::int64_t relative{};
+        std::memcpy(&relative, table + 8, sizeof relative);
+        const auto* const record = table + 8 + relative
+                                   + (static_cast<std::size_t>(definition) + 2U) * 8U;
+        std::memcpy(&output, record, sizeof output);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+/** Classifies the package-correlated Homecoming candidates once on an existing game-thread call. */
+void report_definition_candidates() noexcept {
+    if (g_definitionCandidatesReported.exchange(true, std::memory_order_acq_rel)) {
+        return;
+    }
+    constexpr std::array<std::uint16_t, 11> kCandidates{
+        0x00F3, 0x00F4, 0x00F5, 0x00F6, 0x0193, 0x019D,
+        0x019E, 0x019F, 0x01A0, 0x01A1, 0x01A2};
+    for (const std::uint16_t definition : kCandidates) {
+        DefinitionRecordSnapshot snapshot{};
+        const bool captured = snapshot_definition_record(definition, snapshot);
+        std::array<char, kLineCapacity> line{};
+        const int written = captured
+                                ? std::snprintf(
+                                      line.data(),
+                                      line.size(),
+                                      "ev=activity_state_source stage=definition_candidate "
+                                      "definition=%u result=ok prefix=%08X type=%u flags=%u "
+                                      "bank_index=%d source=base_table",
+                                      static_cast<unsigned>(definition),
+                                      snapshot.prefix,
+                                      static_cast<unsigned>(snapshot.type),
+                                      static_cast<unsigned>(snapshot.flags),
+                                      static_cast<int>(snapshot.bankIndex))
+                                : std::snprintf(
+                                      line.data(),
+                                      line.size(),
+                                      "ev=activity_state_source stage=definition_candidate "
+                                      "definition=%u result=unavailable source=base_table",
+                                      static_cast<unsigned>(definition));
+        if (written > 0) {
+            const auto length = static_cast<std::size_t>(written) < line.size()
+                                    ? static_cast<std::size_t>(written)
+                                    : line.size() - 1;
+            core::log::write(
+                core::log::Channel::client, core::log::Level::info, {line.data(), length});
+        }
+    }
+}
+
 /** Obtains the index-1 retained state through the same owner getter the native writer uses. */
 [[nodiscard]] void* persistent_state(void* owner) noexcept {
     if (owner == nullptr) {
@@ -521,6 +614,7 @@ __declspec(noinline) void __fastcall apply_category(void* first,
     }
     if (captured) {
         report(callerRva, (enabled & 0xFFU) != 0, snapshot);
+        report_definition_candidates();
     }
 }
 
@@ -619,9 +713,20 @@ bool install_activity_state_source_observer() noexcept {
                                                   : "writer_target");
         return false;
     }
+    const std::byte* const registryCall = writerTarget + kRegistryCallOffset;
+    if (*registryCall != kNearCallOpcode) {
+        log_install("fail", "registry_call_opcode");
+        return false;
+    }
+    std::byte* const registryTarget =
+        resolve_relative(registryCall + kNearCallOperandOffset,
+                         registryCall + kNearCallLength);
+    g_definitionRegistry.store(reinterpret_cast<DefinitionRegistry>(registryTarget),
+                               std::memory_order_release);
     if (!hooking::detour::install({applyTarget, reinterpret_cast<void*>(&apply_category)},
                                   g_applyHandle)) {
         log_install("fail", "apply_attach");
+        g_definitionRegistry.store(nullptr, std::memory_order_release);
         return false;
     }
     g_original.store(reinterpret_cast<ApplyCategory>(g_applyHandle.original),
@@ -630,6 +735,7 @@ bool install_activity_state_source_observer() noexcept {
                                   g_applyListsHandle)) {
         (void)hooking::detour::uninstall(g_applyHandle);
         g_original.store(nullptr, std::memory_order_release);
+        g_definitionRegistry.store(nullptr, std::memory_order_release);
         log_install("fail", "apply_lists_attach");
         return false;
     }
@@ -641,6 +747,7 @@ bool install_activity_state_source_observer() noexcept {
         (void)hooking::detour::uninstall(g_applyHandle);
         g_originalApplyLists.store(nullptr, std::memory_order_release);
         g_original.store(nullptr, std::memory_order_release);
+        g_definitionRegistry.store(nullptr, std::memory_order_release);
         log_install("fail", "writer_attach");
         return false;
     }
@@ -664,7 +771,9 @@ void uninstall_activity_state_source_observer() noexcept {
     g_originalWriter.store(nullptr, std::memory_order_release);
     g_originalApplyLists.store(nullptr, std::memory_order_release);
     g_original.store(nullptr, std::memory_order_release);
+    g_definitionRegistry.store(nullptr, std::memory_order_release);
     g_reports.store(0, std::memory_order_release);
+    g_definitionCandidatesReported.store(false, std::memory_order_release);
     for (auto& entry : g_seen) {
         entry.store(0, std::memory_order_release);
     }

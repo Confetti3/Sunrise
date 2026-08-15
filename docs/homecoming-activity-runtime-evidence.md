@@ -321,3 +321,24 @@ secondary scalar from `0x1A2` to `0x193`. The archive labels these locations onl
 storage, so neither value family is promoted to a gameplay-switch definition. The six trailing
 relative pointers resolve internally to component offsets `+0xA0`, `+0xB8`, `+0xF8`, `+0x110`,
 `+0x170`, and `+0x1D0`; they are not external trigger/action edges.
+
+## Homecoming definition-record classification
+
+The writer at `+0x555EC0` resolves its `uint16` definition through a registry-owned base table
+before selecting a state bank. A bounded read-only probe decoded the writer's registry-getter call
+and copied only the eight-byte record prefix for the package-correlated Homecoming candidates on
+an existing game-thread callback. It did not retain native pointers or modify game state.
+
+The original `mission_towerfall` references `0x19D..0x1A2`; all six base-table records were type
+`0` with bank index `-1`, so the observed writer implementation would ignore them. The later
+`arcade_homecoming` candidates `0xF3..0xF5` were also type `0`, but `0xF6` was type `3` with bank
+index `1`. Writer type `3` selects the retained state through owner virtual method `+0xA8` and
+addresses its switch bank at `+0x9348 + bank_index`. Candidate `0x193` was type `0` as well.
+
+This is base-table evidence, not a claim about a hypothetical active hot-patch overlay. It shows
+that build 86657's original Homecoming package references are stale for the unpatched writer path,
+while the later arcade copy retains at least one live definition-backed switch. The smallest safe
+write experiment therefore moves to `arcade_homecoming` definition `0xF6`, after a transient valid
+owner context and a read-only current-state observation are established. Evidence is retained in
+`analysis/script-host-runtime/20260815-063239-definition-candidates-orbit/`; exercised DLL SHA-256
+`E7CAC8A88B984B9916507B4567213DC171BC9DACEA4AB0A7BD1EF3E27545B9E1`.

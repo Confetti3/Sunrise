@@ -45,14 +45,14 @@
       "id": "objective.set",
       "status": "wireAdapterRequired",
       "owner": "activity-host",
-      "evidence": "Definition, completion, progress, and retained-row application consumers are localized. DestinyResearch identifies original Red War Homecoming as mission_towerfall (root 80B500AC, scenario 80B500BC), distinct from the later arcade_homecoming copy. Fresh build-86657 runs selected mission_towerfall, changed the client world to mission_towerfall, reached phase=arrived, and advanced the host to open-objective. The definition-backed switch writer at +0x555EC0 and its typed scalar-list caller at +0x52FD60 both produced zero calls through arrival, so no mission objective activation or verified host mutation exists.",
-      "notes": "Original objective-group payloads under resource 80B508F4 contain low serialized values 0..3, while the later arcade copy uses 0x3D..0x41. These are static discriminators, not verified objective.set indices or gameplay-switch definitions. Resolver records do not expose the completion-reader expression container at +0x38; implausible counts are rejected rather than reported as expressions."
+      "evidence": "Definition, completion, progress, and retained-row application consumers are localized. Fresh build-86657 runs selected original Red War mission_towerfall, reached phase=arrived, and advanced the host to open-objective, but the writer and scalar-list applier produced zero calls. A read-only base-table probe then classified original package-correlated candidates 0x19D..0x1A2 as type 0/bank -1, which the observed writer ignores; no mission objective activation or verified host mutation exists.",
+      "notes": "The later arcade_homecoming copy retains one live base-table candidate: definition 0xF6 is type 3/bank 1, while 0xF3..0xF5 and 0x193 are type 0. This narrows a future transition experiment but is not an objective.set binding. The classification does not rule out a hypothetical active hot-patch overlay."
     },
     {
       "id": "gameplay-switch.set",
       "status": "wireAdapterRequired",
       "owner": "activity-host",
-      "evidence": "The native expression consumer reads one of 0x5BCC activity-state bytes and treats value 2 as true. The unique definition-backed writer at +0x555EC0 calls the retained index-1 state getter and can mutate its +0x9348 switch bank. Its typed scalar-list caller at +0x52FD60 provides a valid owner only during an event-driven native call; a fresh mission_towerfall arrival control recorded zero list-applier calls and zero writer calls. No wire producer, definition-to-bank mapping, or reliable command-drain safe point exists."
+      "evidence": "The native expression consumer reads one of 0x5BCC activity-state bytes and treats value 2 as true. The unique definition-backed writer at +0x555EC0 can mutate the retained +0x9348 bank. A read-only registry probe maps arcade_homecoming definition 0xF6 to writer type 3 and retained bank index 1 in the base table; original mission_towerfall candidates 0x19D..0x1A2 are type 0/bank -1. No safe recurring owner context, read-before-write validation, wire producer, or reliable command-drain point exists."
     },
     {
       "id": "entity.allocate",

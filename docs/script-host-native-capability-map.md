@@ -194,3 +194,14 @@ their named later-copy counterparts. Their serialized low ordinals (`0..3` origi
 `0x3D..0x41` arcade) join the package copies but are not typed as the writer's definition input.
 Likewise, the six trailing relative pointers are internal component links, not external graph
 edges. These fields remain discriminators until a native consumer proves their runtime meaning.
+
+A bounded live classification of the writer's registry base table now separates those serialized
+references from writable definitions. Original `mission_towerfall` candidates `0x19D..0x1A2`
+resolve to type `0`, bank index `-1`, and are ignored by the observed `+0x555EC0` writer path. In
+the later `arcade_homecoming` copy, `0xF3..0xF5` are likewise type `0`, but `0xF6` resolves to
+type `3`, retained bank index `1`. This materially narrows the first real transition target without
+making it available: a valid transient activity owner, read-before-write observation, and bounded
+game-thread command drain are still required. The classification is explicitly for the base table;
+no active hot-patch overlay was observed. Evidence is in
+`analysis/script-host-runtime/20260815-063239-definition-candidates-orbit/`; exercised DLL SHA-256
+`E7CAC8A88B984B9916507B4567213DC171BC9DACEA4AB0A7BD1EF3E27545B9E1`.
