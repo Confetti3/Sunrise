@@ -143,3 +143,14 @@ reconstructed executable. The structure is therefore consistent with decoded/run
 a polymorphic object or a static package record. Both row counts remained zero. Evidence is in
 `analysis/script-host-runtime/20260815-040931-activity-state-source-identity-orbit/`; the exact DLL
 SHA-256 is `FB5882E6F2C30360BC9E7E2FBD4E648A256200965C0F75801DC556D73489A5EA`.
+
+The same registry source has a persistent switch-state bank at `+0x9348`: direct readers at
+`+0xE06090` and `+0xE08D40` test its bytes for state `2`. Generic post-decode dispatcher
+`+0xE05DA0` routes category 4/subtype 1 to comparison callback `+0xE07BA0`, which compares old and
+new source blobs and performs a 4 KiB comparison of that bank. A second read-only detour attached
+to this unique callback alongside the retained-row observer. It survived sign-in, real orbit, a
+genuine Courtyard hold/launch, and `activity:in_world` in `nadir_endgame`, but never fired. The
+downstream `+0x540320` observer did fire with zero rows. This excludes that post-decode callback
+from the current type-1 offline update path; it does not identify a writer. Evidence and the exact
+DLL are in `analysis/script-host-runtime/20260815-043300-activity-state-postdecode-control/`; DLL
+SHA-256 is `0064B5F7B3502D254717979664E82C543F8E6E36D303F2CB6BB7509A4FEE9108`.

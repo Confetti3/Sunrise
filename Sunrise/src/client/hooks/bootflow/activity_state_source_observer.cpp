@@ -25,6 +25,13 @@ constexpr std::string_view kApplySignatureText =
 constexpr auto kApplySignature =
     signature<signature_length(kApplySignatureText)>(kApplySignatureText);
 
+/** Build-86657 old/new retained-state comparison callback reached after generic decode. */
+constexpr std::string_view kCompareSignatureText =
+    "48 89 5C 24 18 55 56 57 48 83 EC 30 48 8B 05 ? ? ? ? 48 33 C4 48 89 44 24 28 "
+    "48 8B E9 48 8B F2 48 8D 0D ? ? ? ? E8 ? ? ? ? 4C 8B 06";
+constexpr auto kCompareSignature =
+    signature<signature_length(kCompareSignatureText)>(kCompareSignatureText);
+
 constexpr std::size_t kSwitchCountOffset = 0xB3F4;
 constexpr std::size_t kSwitchRowsOffset = 0xB3F8;
 constexpr std::size_t kSwitchRowStride = 4;
@@ -52,9 +59,12 @@ using ApplyCategory = void(__fastcall*)(void*,
                                         void*,
                                         void*,
                                         void*) noexcept;
+using CompareSource = void(__fastcall*)(void*, const void*) noexcept;
 
-hooking::detour::Handle g_handle{};
+hooking::detour::Handle g_applyHandle{};
+hooking::detour::Handle g_compareHandle{};
 std::atomic<ApplyCategory> g_original{nullptr};
+std::atomic<CompareSource> g_originalCompare{nullptr};
 std::array<std::atomic<std::uint64_t>, kSeenCapacity> g_seen{};
 std::atomic<std::uint32_t> g_reports{};
 
@@ -307,6 +317,66 @@ void report(std::uintptr_t callerRva, bool enabled, const SourceSnapshot& snapsh
     }
 }
 
+void report_delta(const char* stage,
+                  std::uint64_t side,
+                  std::uintptr_t callerRva,
+                  const SourceSnapshot& snapshot) noexcept {
+    constexpr std::uint64_t kOffset = 14'695'981'039'346'656'037ULL;
+    std::uint64_t summaryKey = mix(kOffset, 3);
+    summaryKey = mix(summaryKey, side);
+    summaryKey = mix(summaryKey, callerRva);
+    summaryKey = mix(summaryKey, static_cast<std::uint32_t>(snapshot.switchCount));
+    summaryKey = mix(summaryKey, static_cast<std::uint32_t>(snapshot.progressCount));
+    for (const std::uint32_t word : snapshot.prefixWords) {
+        summaryKey = mix(summaryKey, word);
+    }
+    if (claim(summaryKey)) {
+        write_line("ev=activity_state_source stage=%s n=%u caller=+0x%llX switches=%u "
+                   "progressions=%u head0=%08X head1=%08X",
+                   stage,
+                   callerRva,
+                   static_cast<std::uint32_t>(snapshot.switchCount),
+                   static_cast<std::uint32_t>(snapshot.progressCount),
+                   snapshot.prefixWords[0],
+                   snapshot.prefixWords[1]);
+    }
+    for (const SwitchRow& row : std::span(snapshot.switches).first(snapshot.capturedSwitches)) {
+        std::uint64_t key = mix(kOffset, 4);
+        key = mix(key, side);
+        key = mix(key, static_cast<std::uint16_t>(row.index));
+        key = mix(key, row.value);
+        key = mix(key, row.auxiliary);
+        if (claim(key)) {
+            write_line("ev=activity_state_source stage=%s n=%u caller=+0x%llX index=%u "
+                       "value=%u auxiliary=%u reserved=%u",
+                       side == 0 ? "delta_old_switch" : "delta_new_switch",
+                       callerRva,
+                       static_cast<std::uint16_t>(row.index),
+                       row.value,
+                       row.auxiliary,
+                       0);
+        }
+    }
+    for (const ProgressRow& row :
+         std::span(snapshot.progressions).first(snapshot.capturedProgressions)) {
+        std::uint64_t key = mix(kOffset, 5);
+        key = mix(key, side);
+        key = mix(key, static_cast<std::uint16_t>(row.index));
+        key = mix(key, row.value);
+        key = mix(key, row.auxiliary);
+        if (claim(key)) {
+            write_line("ev=activity_state_source stage=%s n=%u caller=+0x%llX index=%u "
+                       "value=%u auxiliary=%u reserved=%u",
+                       side == 0 ? "delta_old_progression" : "delta_new_progression",
+                       callerRva,
+                       static_cast<std::uint16_t>(row.index),
+                       row.value,
+                       row.auxiliary,
+                       0);
+        }
+    }
+}
+
 /** Mirrors the category dispatcher and observes only its explicit-row category zero. */
 __declspec(noinline) void __fastcall apply_category(void* first,
                                                     void* second,
@@ -347,13 +417,33 @@ __declspec(noinline) void __fastcall apply_category(void* first,
     }
 }
 
+/** Mirrors the post-decode comparison and snapshots both owned state arguments before dispatch. */
+__declspec(noinline) void __fastcall compare_source(void* oldSource,
+                                                    const void* newSource) noexcept {
+    SourceSnapshot oldSnapshot{};
+    SourceSnapshot newSnapshot{};
+    const bool capturedOld = snapshot_source(oldSource, oldSnapshot);
+    const bool capturedNew = snapshot_source(newSource, newSnapshot);
+    const std::uintptr_t callerRva = caller_rva(_ReturnAddress());
+    const CompareSource original = g_originalCompare.load(std::memory_order_acquire);
+    if (original != nullptr) {
+        original(oldSource, newSource);
+    }
+    if (capturedOld) {
+        report_delta("delta_old", 0, callerRva, oldSnapshot);
+    }
+    if (capturedNew) {
+        report_delta("delta_new", 1, callerRva, newSnapshot);
+    }
+}
+
 void log_install(const char* result, const char* reason = nullptr) noexcept {
     std::array<char, 144> line{};
     const int written = reason == nullptr
                             ? std::snprintf(line.data(),
                                             line.size(),
                                             "ev=activity_state_source stage=install result=%s "
-                                            "dispatcher=+0x540320",
+                                            "dispatcher=+0x540320 comparator=+0xE07BA0",
                                             result)
                             : std::snprintf(line.data(),
                                             line.size(),
@@ -375,29 +465,46 @@ void log_install(const char* result, const char* reason = nullptr) noexcept {
 
 /** Attaches the read-only observer for explicit retained activity-state source rows. */
 bool install_activity_state_source_observer() noexcept {
-    if (g_handle.attached) {
+    if (g_applyHandle.attached && g_compareHandle.attached) {
         return true;
     }
-    std::byte* const target =
+    std::byte* const applyTarget =
         scan_main_image_unique(kApplySignature, "activity_state_category_dispatcher");
-    if (target == nullptr) {
-        log_install("fail", "target");
+    std::byte* const compareTarget =
+        scan_main_image_unique(kCompareSignature, "activity_state_source_comparator");
+    if (applyTarget == nullptr || compareTarget == nullptr) {
+        log_install("fail", applyTarget == nullptr ? "apply_target" : "compare_target");
         return false;
     }
-    if (!hooking::detour::install({target, reinterpret_cast<void*>(&apply_category)}, g_handle)) {
-        log_install("fail", "attach");
+    if (!hooking::detour::install({applyTarget, reinterpret_cast<void*>(&apply_category)},
+                                  g_applyHandle)) {
+        log_install("fail", "apply_attach");
         return false;
     }
-    g_original.store(reinterpret_cast<ApplyCategory>(g_handle.original), std::memory_order_release);
+    g_original.store(reinterpret_cast<ApplyCategory>(g_applyHandle.original),
+                     std::memory_order_release);
+    if (!hooking::detour::install({compareTarget, reinterpret_cast<void*>(&compare_source)},
+                                  g_compareHandle)) {
+        (void)hooking::detour::uninstall(g_applyHandle);
+        g_original.store(nullptr, std::memory_order_release);
+        log_install("fail", "compare_attach");
+        return false;
+    }
+    g_originalCompare.store(reinterpret_cast<CompareSource>(g_compareHandle.original),
+                            std::memory_order_release);
     log_install("ok");
     return true;
 }
 
 /** Detaches the activity-state source observer and clears its bounded diagnostics. */
 void uninstall_activity_state_source_observer() noexcept {
-    if (g_handle.attached) {
-        (void)hooking::detour::uninstall(g_handle);
+    if (g_compareHandle.attached) {
+        (void)hooking::detour::uninstall(g_compareHandle);
     }
+    if (g_applyHandle.attached) {
+        (void)hooking::detour::uninstall(g_applyHandle);
+    }
+    g_originalCompare.store(nullptr, std::memory_order_release);
     g_original.store(nullptr, std::memory_order_release);
     g_reports.store(0, std::memory_order_release);
     for (auto& entry : g_seen) {
