@@ -19,7 +19,8 @@ std::atomic_uint64_t g_dropped{};
 
 /** Publishes one copied observation without blocking the activity-message route. */
 bool publish(Observation observation) noexcept {
-    if (observation.extraTargetCount > observation.extraTargets.size()) {
+    if (observation.extraTargetCount > observation.extraTargets.size()
+        || observation.bodyLength > observation.body.size()) {
         g_dropped.fetch_add(1, std::memory_order_relaxed);
         return false;
     }

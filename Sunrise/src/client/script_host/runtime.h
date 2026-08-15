@@ -165,8 +165,10 @@ write_activity_incident(HANDLE pipe,
     if (!append_format(
             line,
             length,
-            R"(],"payloadLength":%u,"hasCompressedSelector":%s,"hasPayload":%s,"droppedBefore":%llu})",
+            R"(],"payloadLength":%u,"bodyLength":%u,"bodyFingerprint":"0x%016llX","hasCompressedSelector":%s,"hasPayload":%s,"droppedBefore":%llu})",
             observation.payloadLength,
+            observation.bodyLength,
+            static_cast<unsigned long long>(observation.bodyFingerprint),
             observation.hasCompressedSelector ? "true" : "false",
             observation.hasPayload ? "true" : "false",
             static_cast<unsigned long long>(observation.droppedBefore))) {

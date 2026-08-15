@@ -32,6 +32,22 @@ namespace client_keepalive = service::client_keepalive;
 namespace high_water = service::high_water;
 namespace epoch_message = service::patch_epoch;
 
+static_assert(state::activity::incidents::kBodyCapacity
+              == service::incident::kMaximumBodyBytes);
+
+/** Standard 64-bit FNV-1a constants for a stable, non-content-bearing body fingerprint. */
+constexpr std::uint64_t kFingerprintOffset = 14695981039346656037ULL;
+constexpr std::uint64_t kFingerprintPrime = 1099511628211ULL;
+
+[[nodiscard]] std::uint64_t fingerprint(std::span<const std::byte> bytes) noexcept {
+    std::uint64_t value = kFingerprintOffset;
+    for (const std::byte byte : bytes) {
+        value ^= std::to_integer<std::uint8_t>(byte);
+        value *= kFingerprintPrime;
+    }
+    return value;
+}
+
 /** Activity message type 3 starts the client join transaction. */
 constexpr std::uint32_t kJoinRequestMessageType = 3;
 
@@ -103,6 +119,8 @@ void report_incident(std::uint64_t boundSessionId, const service::Request& reque
     incident::Incident parsed;
     const incident::Verdict verdict = incident::validate(request.payload, parsed);
     const char* relay = "rejected";
+    std::uint32_t reportedBodyLength = 0;
+    std::uint64_t reportedFingerprint = 0;
     if (verdict == incident::Verdict::accepted) {
         state::activity::incidents::Observation observation{};
         observation.sessionId = boundSessionId;
@@ -113,13 +131,24 @@ void report_incident(std::uint64_t boundSessionId, const service::Request& reque
         observation.payloadLength = parsed.payloadLength;
         observation.hasCompressedSelector = parsed.hasCompressedSelector;
         observation.hasPayload = parsed.hasPayload;
+        // A selector's unknown wire width prevents full validation. Retain only selector-free
+        // bodies that fit the validator's derived maximum; raw bytes never leave this process.
+        if (!parsed.hasCompressedSelector && parsed.hasPayload
+            && request.payload.size() <= observation.body.size()) {
+            observation.bodyLength = static_cast<std::uint32_t>(request.payload.size());
+            std::copy(request.payload.begin(), request.payload.end(), observation.body.begin());
+            observation.bodyFingerprint = fingerprint(request.payload);
+            reportedBodyLength = observation.bodyLength;
+            reportedFingerprint = observation.bodyFingerprint;
+        }
         relay = state::activity::incidents::publish(observation) ? "queued" : "dropped";
     }
     std::array<char, core::log::kLineCapacity> line{};
     const int written = std::snprintf(line.data(),
                                       line.size(),
                                       "ev=activity stage=incident result=%s relay=%s session=%llu "
-                                      "handle=0x%llX target=%u extra=%u selector=%u payload=%u",
+                                      "handle=0x%llX target=%u extra=%u selector=%u payload=%u "
+                                      "body=%u fingerprint=0x%llX",
                                       incident::verdict_name(verdict),
                                       relay,
                                       static_cast<unsigned long long>(boundSessionId),
@@ -127,7 +156,9 @@ void report_incident(std::uint64_t boundSessionId, const service::Request& reque
                                       parsed.primaryTarget,
                                       parsed.extraTargetCount,
                                       static_cast<unsigned>(parsed.hasCompressedSelector),
-                                      parsed.payloadLength);
+                                      parsed.payloadLength,
+                                      reportedBodyLength,
+                                      static_cast<unsigned long long>(reportedFingerprint));
     if (written <= 0) {
         return;
     }

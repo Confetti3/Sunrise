@@ -35,6 +35,11 @@ inline constexpr std::uint32_t kPayloadMaximum = 500;
 inline constexpr std::size_t kMinimumBodyBits = kTargetWidth + kExtraCountWidth
                                                 + kSelectorPresenceWidth + kOptionalPresenceWidth
                                                 + kPayloadLengthWidth;
+/** Widest selector-free body the validator can fully reach. */
+inline constexpr std::size_t kMaximumBodyBits =
+    kMinimumBodyBits + kExtraTargetMaximum * kTargetWidth + kOptionalFieldWidth
+    + kPayloadMaximum * 8;
+inline constexpr std::size_t kMaximumBodyBytes = (kMaximumBodyBits + 7) / 8;
 
 /** Why one incident did not pass validation. */
 enum class Verdict : std::uint8_t {
