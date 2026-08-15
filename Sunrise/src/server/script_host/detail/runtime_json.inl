@@ -299,7 +299,6 @@ void begin_gameplay_switch(std::string_view request,
                            std::uint16_t definition,
                            std::int32_t value) noexcept {
     constexpr std::uint64_t kResultTimeoutMilliseconds = 2'000;
-    constexpr std::uint64_t kInlinePollMilliseconds = 150;
     if (definition != 0x00F6) {
         enqueue_command_result(
             request, "error", "only verified Homecoming definition 0xF6 is accepted");
@@ -309,6 +308,10 @@ void begin_gameplay_switch(std::string_view request,
         enqueue_command_result(request, "error", "client is not in an arrived world");
         return;
     }
+    if (g_hasPendingSwitch) {
+        enqueue_command_result(request, "busy", "native switch command is already pending");
+        return;
+    }
 
     std::uint64_t sequence = 0;
     const bool published =
@@ -316,21 +319,11 @@ void begin_gameplay_switch(std::string_view request,
             ? state::activity::switch_commands::publish_read(definition, sequence)
             : state::activity::switch_commands::publish_set(definition, value, sequence);
     if (!published) {
-        enqueue_command_result(request, "error", "native command slot is busy");
+        enqueue_command_result(request, "busy", "native switch command is already pending");
         return;
     }
 
-    const std::uint64_t started = GetTickCount64();
-    state::activity::switch_commands::Result result{};
-    while (GetTickCount64() - started < kInlinePollMilliseconds) {
-        if (state::activity::switch_commands::try_take_result(sequence, result)) {
-            enqueue_gameplay_switch_result(request, result);
-            return;
-        }
-        Sleep(1);
-    }
-
-    // Defer completion to a follow-up service tick; never stall the draw thread.
+    // Publish and return immediately; the follow-up service tick completes the result.
     g_pendingSwitchRequest.fill('\0');
     std::memcpy(g_pendingSwitchRequest.data(), request.data(), request.size());
     g_pendingSwitchRequestSize = request.size();

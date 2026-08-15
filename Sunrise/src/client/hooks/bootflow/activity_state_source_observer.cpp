@@ -608,12 +608,13 @@ void apply_owner_command(const OwnerUpdateSnapshot& snapshot) noexcept {
         if (applied && writer != nullptr) {
             __try {
                 writer(snapshot.owner, command.definition, command.value);
-                const auto* const sourceBytes = static_cast<const std::byte*>(snapshot.source);
-                std::memcpy(&after,
-                            sourceBytes + kPersistentSwitchBankOffset
-                                + kArcadeHomecomingCandidateBankIndex,
-                            sizeof after);
-                applied = after == static_cast<std::uint8_t>(command.value);
+                OwnerUpdateSnapshot post{};
+                if (!snapshot_owner_update(snapshot.owner, post)) {
+                    applied = false;
+                } else {
+                    after = post.candidateState;
+                    applied = after == static_cast<std::uint8_t>(command.value);
+                }
             } __except (EXCEPTION_EXECUTE_HANDLER) {
                 applied = false;
             }
@@ -829,19 +830,21 @@ __declspec(noinline) void __fastcall apply_lists(void* owner,
 
 /** Observes one concrete owner update without retaining the owner or its state pointer. */
 __declspec(noinline) void __fastcall update_owner(void* owner) noexcept {
-    OwnerUpdateSnapshot snapshot{};
-    const bool captured = snapshot_owner_update(owner, snapshot);
-    if (captured) {
-        snapshot.callerRva = caller_rva(_ReturnAddress());
-    }
-    const OwnerUpdate original = g_originalOwnerUpdate.load(std::memory_order_acquire);
+    const OwnerUpdate original =
+        g_originalOwnerUpdate.load(std::memory_order_acquire);
+
     if (original != nullptr) {
         original(owner);
     }
-    if (captured) {
-        apply_owner_command(snapshot);
-        report_owner_update(snapshot);
+
+    OwnerUpdateSnapshot current{};
+    if (!snapshot_owner_update(owner, current)) {
+        return;
     }
+
+    current.callerRva = caller_rva(_ReturnAddress());
+    apply_owner_command(current);
+    report_owner_update(current);
 }
 
 void log_install(const char* result, const char* reason = nullptr) noexcept {
