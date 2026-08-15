@@ -111,6 +111,16 @@ void uninstall_activity_definition_observer() noexcept;
 [[nodiscard]] bool homecoming_activity_index(std::uint16_t& output) noexcept;
 
 /**
+ * Observes the build-86657 client source that assembles the bounded retail `send_incident`
+ * body.
+ * @return True when the unique source entry is found and the observer attaches.
+ */
+[[nodiscard]] bool install_activity_incident_source_observer() noexcept;
+
+/** Detaches the client incident-source observer. */
+void uninstall_activity_incident_source_observer() noexcept;
+
+/**
  * Finds the boot-flow step accessor, the only input to the world phase.
  * Nothing is detoured: the accessor is called, so a miss leaves the phase idle.
  * @return True when the target was found.

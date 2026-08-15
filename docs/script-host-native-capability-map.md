@@ -9,7 +9,7 @@ Destiny 2 build 86657. No row infers Bungie's absent host policy from client pac
 | `host.ping` | none | pipe `host.ping` / `bridge.pong` | `client/script_host/runtime.h` | Deterministic bridge protocol | high / available |
 | `world.phase.observe` | atomic `state::activity::WorldPhase` and transition tick | pipe `world.phase` | detoured build-86657 boot-step accessor maps steps 33-37 to transitioning and step 38 to arrived | A fresh Tower run emitted step 33, then step 38 after physics join; C# consumed arrived, advanced to `open-objective`, and the one-shot fade release produced a rendered Courtyard view | high / available |
 | `activity.session.observe` | four copied `SessionRecord` values exist behind the State lock | none | `state/activity/activity_session_lookup.cpp` only exposes `contains` and `is_joined` | No stable copied session snapshot ABI | high / probe required |
-| `activity.incident.observe` | bounded 64-row pointer-free queue; each row copies session/account scalars, target indices, flags, and payload length | client svc8 activity message type 19 -> native queue -> pipe `activity.incident` | `activity_message_route.cpp` -> `incident::validate` -> `state::activity::incidents` -> script-host worker | A fresh build-86657 Tower session accepted target 1121 with 5 extras and an 84-byte payload as sequence 2; the live C# host consumed it before disconnect. | high / available |
+| `activity.incident.observe` | bounded 64-row pointer-free queue; each row copies session/account scalars, target indices, flags, and payload length | client svc8 activity message type 19 -> native queue -> pipe `activity.incident` | build-86657 source `+0xD82730` -> retail encoder -> `activity_message_route.cpp` -> `incident::validate` -> `state::activity::incidents` -> script-host worker | A Tower control correlated one client source call containing target 1121 plus five ordered extras with the immediately accepted server incident. | high / available |
 | `activity.incident.emit` | none | generic service-9 notification framing exists, but msg-19 selector/payload semantics and ordering are not recovered | client msg-19 handler table is only indirectly identified by the validator artifacts | No harmless target/payload has been replayed | low / wire adapter required |
 | `objective.set` | no objective-specific Sunrise State found | generic service-9 notification framing and progression banks are not an objective binding | no objective-specific client consumer is localized in source | No definition-index, payload, state transition, or UI result is verified | low / wire adapter required |
 | `gameplay-switch.set` | no gameplay-switch-specific Sunrise State found | unknown | no consumer localized | No wire or runtime evidence | low / wire adapter required |
@@ -33,6 +33,16 @@ Destiny 2 build 86657. No row infers Bungie's absent host policy from client pac
 - A fresh Tower Courtyard launch reached `idle -> transitioning`, completed its 62-second initial
   slice load despite the nonfatal prologue-filler timeout, entered `activity:in_world`, and emitted
   target 1121. The connected C# host consumed it as sequence 2.
+- A read-only observer now covers the exact build-86657 client source at RVA `+0xD82730`. The
+  unique signature and offline disassembly establish a target count at source offset zero, target
+  ids at `+0x0C` with `0x10` stride, and a pointer at `+0x420` to the fixed `0x400`-byte body copied
+  into the retail `0x510`-byte request. The hook retains bounded scalars and a body hash only while
+  the source call owns them; it never retains native pointers or changes the request.
+- In the rendered Tower control, caller return RVA `+0x4AA286` supplied six ordered targets
+  `1121,7117,3904,4913,850,2323`. The source body began
+  `5E40AE5B,00000000,00000001,00000000`. Immediately afterward, Sunrise accepted msg 19 with
+  primary target `1121`, five extras, and an 84-byte payload. This joins the client producer,
+  retail encoder, server parser, queue, and managed observation path without guessing a payload.
 - A separate named-pipe integration test consumed the same target/scalar shape in C# and preserved
   the mission checkpoint boundary. It is protocol evidence, not a substitute for a fresh in-game
   end-to-end event.

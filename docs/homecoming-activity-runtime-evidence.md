@@ -35,6 +35,12 @@ For example, `spawnrule_boss01` (`80F0206F`) points to WorldID `CA7EB3A7D45895FE
 `d_ship_door` (`80F020D2`) points to WorldID `D3FCE3E3838A7339`. The 21 name-affinity flow edges
 in the report are candidates only and must not be used as proof of encounter execution order.
 
+The separate A1 activity graph gives one additional typed boundary: Homecoming root `80F02003`
+points at `arcade_homecoming:scenario_client` tag `80F0200E` at payload offset `+0x40`, and at the
+still-unresolved shared resource `80FDB97F` at `+0x44`. This is a root-to-scenario relationship,
+not an objective activation path. The graph explicitly does not resolve destinations, bubbles,
+phases, entities, or execution order.
+
 ## Build-86657 descriptor boundary
 
 The client stores its active activity descriptor in a wrapper at controller offset `+0x8E08`.
@@ -108,3 +114,13 @@ activity-start boundary and the script host advanced from `wait-for-destination`
 `open-objective`, but the rendered client remained a black frame with cursor glow. The scenario
 then failed honestly at `objective.set` with `WireAdapterRequired`. Activity identity and arrival
 are therefore verified; objective/entity activation and usable world rendering are not.
+
+## Incident-source control
+
+The exact build-86657 client incident source at RVA `+0xD82730` was observed during both the
+authoritative Homecoming launch and a rendered Tower control. Homecoming reached the black
+in-world frame without invoking the source. Tower invoked it once from return RVA `+0x4AA286`
+with primary target `1121` and five ordered extras; Sunrise immediately accepted the corresponding
+msg-19 incident. This negative/positive control shows that the Homecoming failure occurs before a
+client scenario produces this class of activity incident. It does not make target `1121` an
+objective id or establish an objective wire format.

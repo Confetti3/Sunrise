@@ -27,15 +27,17 @@ bool install() noexcept {
     const bool regionPrivate = install_region_private();
     const bool activityDescriptor = install_activity_descriptor_observer();
     const bool activityDefinition = install_activity_definition_observer();
+    const bool activityIncidentSource = install_activity_incident_source_observer();
     const bool worldStep = install_world_step();
     const bool spawn = install_spawn_hold();
     const bool fade = install_fade_release();
     const bool anyFix = hold || sliceSet || skip || composition || handoff || joinReady || ownerSlot
-                        || regionPrivate || activityDescriptor || activityDefinition || worldStep
-                        || spawn || fade;
+                        || regionPrivate || activityDescriptor || activityDefinition
+                        || activityIncidentSource || worldStep || spawn || fade;
     g_installed.store(anyFix, std::memory_order_release);
     return hold && sliceSet && skip && composition && handoff && joinReady && ownerSlot
-           && regionPrivate && activityDescriptor && activityDefinition && worldStep && spawn && fade;
+           && regionPrivate && activityDescriptor && activityDefinition && activityIncidentSource
+           && worldStep && spawn && fade;
 }
 
 /** Detaches every boot-step fix, in the reverse order of install. */
@@ -43,6 +45,7 @@ void uninstall() noexcept {
     uninstall_fade_release();
     uninstall_spawn_hold();
     uninstall_world_step();
+    uninstall_activity_incident_source_observer();
     uninstall_activity_definition_observer();
     uninstall_activity_descriptor_observer();
     uninstall_region_private();
