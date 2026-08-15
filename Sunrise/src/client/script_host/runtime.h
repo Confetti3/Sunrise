@@ -14,6 +14,7 @@
 #include <string_view>
 
 #include "../../core/logging/log.h"
+#include "../../state/activity/forced/activity_forced_destination.h"
 #include "../../state/activity/incidents/runtime.h"
 #include "../../state/activity/runtime.h"
 
@@ -105,7 +106,7 @@ inline void pipe_path(std::array<wchar_t, kPipePathCapacity>& output) noexcept {
 
 [[nodiscard]] inline bool write_hello(HANDLE pipe) noexcept {
     constexpr std::string_view hello =
-        R"({"protocol":1,"type":"bridge.hello","bridge":"sunrise-native","build":"Sunrise 0.2.1 / Destiny 2 build 86657","capabilities":["host.ping","world.phase.observe","activity.incident.observe"],"limitations":["no activity-session snapshot","no incident encoder","no objective adapter","no actor lifecycle adapter","no AI policy"]})";
+        R"({"protocol":1,"type":"bridge.hello","bridge":"sunrise-native","build":"Sunrise 0.2.1 / Destiny 2 build 86657","capabilities":["host.ping","world.phase.observe","activity.incident.observe","activity.override.configure"],"limitations":["no activity-session snapshot","no incident encoder","no objective adapter","no actor lifecycle adapter","no AI policy"]})";
     return write_line(pipe, hello);
 }
 
@@ -230,6 +231,217 @@ inline void report_stale_incidents(std::size_t discarded) noexcept {
     return true;
 }
 
+[[nodiscard]] inline bool extract_json_value(std::string_view line,
+                                             std::string_view key,
+                                             std::string_view& output) noexcept {
+    output = {};
+    std::array<char, 64> token{};
+    const int tokenLength = std::snprintf(
+        token.data(), token.size(), "\"%.*s\"", static_cast<int>(key.size()), key.data());
+    if (tokenLength <= 0 || static_cast<std::size_t>(tokenLength) >= token.size()) {
+        return false;
+    }
+    const std::size_t keyPosition =
+        line.find(std::string_view(token.data(), static_cast<std::size_t>(tokenLength)));
+    const std::size_t colon = keyPosition == std::string_view::npos
+                                  ? std::string_view::npos
+                                  : line.find(':', keyPosition + tokenLength);
+    if (colon == std::string_view::npos) {
+        return false;
+    }
+    std::size_t first = colon + 1;
+    while (first < line.size() && (line[first] == ' ' || line[first] == '\t')) {
+        ++first;
+    }
+    if (first == line.size()) {
+        return false;
+    }
+    if (line[first] == '"') {
+        const std::size_t last = line.find('"', first + 1);
+        if (last == std::string_view::npos || last == first + 1) {
+            return false;
+        }
+        output = line.substr(first + 1, last - first - 1);
+        return true;
+    }
+    std::size_t last = first;
+    while (last < line.size() && line[last] != ',' && line[last] != '}' && line[last] != ' '
+           && line[last] != '\t' && line[last] != '\r' && line[last] != '\n') {
+        ++last;
+    }
+    if (last == first) {
+        return false;
+    }
+    output = line.substr(first, last - first);
+    return true;
+}
+
+[[nodiscard]] inline bool parse_unsigned(std::string_view text,
+                                         std::uint64_t maximum,
+                                         std::uint64_t& output) noexcept {
+    output = 0;
+    unsigned base = 10;
+    std::size_t index = 0;
+    if (text.size() > 2 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X')) {
+        base = 16;
+        index = 2;
+    }
+    if (index == text.size()) {
+        return false;
+    }
+    for (; index < text.size(); ++index) {
+        const char character = text[index];
+        unsigned digit = 0;
+        if (character >= '0' && character <= '9') {
+            digit = static_cast<unsigned>(character - '0');
+        } else if (base == 16 && character >= 'a' && character <= 'f') {
+            digit = static_cast<unsigned>(character - 'a') + 10U;
+        } else if (base == 16 && character >= 'A' && character <= 'F') {
+            digit = static_cast<unsigned>(character - 'A') + 10U;
+        } else {
+            return false;
+        }
+        if (digit >= base || output > (maximum - digit) / base) {
+            return false;
+        }
+        output = output * base + digit;
+    }
+    return true;
+}
+
+[[nodiscard]] inline bool extract_json_unsigned(std::string_view line,
+                                                std::string_view key,
+                                                std::uint64_t maximum,
+                                                std::uint64_t& output) noexcept {
+    std::string_view value;
+    return extract_json_value(line, key, value) && parse_unsigned(value, maximum, output);
+}
+
+[[nodiscard]] inline bool extract_json_boolean(std::string_view line,
+                                               std::string_view key,
+                                               bool& output) noexcept {
+    std::string_view value;
+    if (!extract_json_value(line, key, value)) {
+        return false;
+    }
+    if (value == "true") {
+        output = true;
+        return true;
+    }
+    if (value == "false") {
+        output = false;
+        return true;
+    }
+    return false;
+}
+
+[[nodiscard]] inline bool write_command_result(HANDLE pipe,
+                                               std::string_view requestId,
+                                               std::string_view capability,
+                                               std::string_view status,
+                                               std::string_view reason) noexcept {
+    std::array<char, 512> response{};
+    const int written = std::snprintf(
+        response.data(),
+        response.size(),
+        R"({"protocol":1,"type":"command.result","requestId":"%.*s","capability":"%.*s","status":"%.*s","reason":"%.*s"})",
+        static_cast<int>(requestId.size()),
+        requestId.data(),
+        static_cast<int>(capability.size()),
+        capability.data(),
+        static_cast<int>(status.size()),
+        status.data(),
+        static_cast<int>(reason.size()),
+        reason.data());
+    return written > 0 && static_cast<std::size_t>(written) < response.size()
+           && write_line(pipe, std::string_view(response.data(), static_cast<std::size_t>(written)));
+}
+
+[[nodiscard]] inline bool valid_package_name(std::string_view name) noexcept {
+    if (name.empty() || name.size() > state::activity::destination::kPackageNameCapacity) {
+        return false;
+    }
+    for (const char character : name) {
+        if (!((character >= 'a' && character <= 'z') || (character >= '0' && character <= '9')
+              || character == '_')) {
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] inline bool write_activity_override_result(HANDLE pipe,
+                                                         std::string_view line) noexcept {
+    constexpr std::string_view capabilityName = "activity.override.configure";
+    std::array<char, 96> requestId{};
+    std::array<char, 96> capability{};
+    std::size_t requestLength = 0;
+    std::size_t capabilityLength = 0;
+    if (!extract_json_string(line, "requestId", requestId, requestLength)
+        || !extract_json_string(line, "capability", capability, capabilityLength)
+        || std::string_view(capability.data(), capabilityLength) != capabilityName) {
+        return write_command_result(pipe,
+                                    "unknown",
+                                    capabilityName,
+                                    "error",
+                                    "malformed activity override request");
+    }
+    const std::string_view request(requestId.data(), requestLength);
+    bool enabled = false;
+    if (!extract_json_boolean(line, "enabled", enabled)) {
+        return write_command_result(
+            pipe, request, capabilityName, "error", "enabled must be a boolean");
+    }
+    if (!enabled) {
+        state::activity::forced::clear();
+        report(core::log::Level::info,
+               "ev=script_host stage=activity_override result=cleared");
+        return write_command_result(pipe, request, capabilityName, "ok", "override cleared");
+    }
+
+    std::array<char, 96> package{};
+    std::size_t packageLength = 0;
+    std::uint64_t bubble = 0;
+    std::uint64_t sliceSet = 0;
+    if (!extract_json_string(line, "packageName", package, packageLength)
+        || !valid_package_name(std::string_view(package.data(), packageLength))
+        || !extract_json_unsigned(line, "bubble", state::activity::forced::kMaximumBubble, bubble)
+        || !extract_json_unsigned(
+            line, "sliceSet", state::activity::forced::kMaximumSliceSet, sliceSet)) {
+        return write_command_result(pipe,
+                                    request,
+                                    capabilityName,
+                                    "error",
+                                    "packageName, bubble, or sliceSet is invalid");
+    }
+
+    state::activity::forced::ForcedDestination value{};
+    std::copy_n(package.begin(), packageLength, value.packageName.begin());
+    value.packageNameLength = static_cast<std::uint8_t>(packageLength);
+    value.bubble = static_cast<std::uint8_t>(bubble);
+    value.hasBubble = true;
+    value.sliceSet = static_cast<std::uint16_t>(sliceSet);
+    value.hasSliceSet = true;
+    value.enabled = true;
+    if (line.find(R"("spawnSetHash")") != std::string_view::npos) {
+        std::uint64_t spawnSet = 0;
+        if (!extract_json_unsigned(
+                line, "spawnSetHash", (std::numeric_limits<std::uint32_t>::max)(), spawnSet)) {
+            return write_command_result(
+                pipe, request, capabilityName, "error", "spawnSetHash is invalid");
+        }
+        value.spawnSetHash = static_cast<std::uint32_t>(spawnSet);
+        value.hasSpawnSetHash = true;
+    }
+    if (!state::activity::forced::publish(value)) {
+        return write_command_result(
+            pipe, request, capabilityName, "error", "override failed state validation");
+    }
+    report(core::log::Level::info,
+           "ev=script_host stage=activity_override result=published");
+    return write_command_result(pipe, request, capabilityName, "ok", "override published");
+}
+
 [[nodiscard]] inline bool write_unsupported(HANDLE pipe, std::string_view line) noexcept {
     std::array<char, 96> requestId{};
     std::array<char, 96> capability{};
@@ -264,6 +476,10 @@ inline void report_stale_incidents(std::size_t discarded) noexcept {
         return write_hello(pipe);
     }
     if (line.find(R"("type":"command.request")") != std::string_view::npos) {
+        if (line.find(R"("capability":"activity.override.configure")")
+            != std::string_view::npos) {
+            return write_activity_override_result(pipe, line);
+        }
         return write_unsupported(pipe, line);
     }
     return true;

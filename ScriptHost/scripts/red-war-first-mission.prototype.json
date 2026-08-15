@@ -3,16 +3,41 @@
   "id": "red-war-first-mission.prototype",
   "title": "Red War first mission host-capability prototype",
   "provenance": "authored-prototype",
-  "start": "wait-for-destination",
+  "start": "configure-destination",
   "parameters": {
-    "activityPackage": "SET_ME_FROM_RUNTIME_EXTRACTION",
-    "arrivalBubbleHash": "0x00000000",
-    "spawnSetHash": "0x00000000",
+    "activityPackage": "arcade_homecoming",
+    "activityBubble": "0",
+    "activitySliceSet": "0",
+    "arrivalBubbleHash": "0xF28FC859",
+    "spawnSetHash": "0x811C9DC5",
     "objectiveDefinitionHash": "0x00000000",
     "enemyActorDefinitionHash": "0x00000000",
     "enemyCount": "3"
   },
   "nodes": [
+    {
+      "id": "configure-destination",
+      "trigger": {
+        "type": "host.start"
+      },
+      "actions": [
+        {
+          "type": "command",
+          "capability": "activity.override.configure",
+          "payload": {
+            "enabled": true,
+            "packageName": "${activityPackage}",
+            "bubble": "${activityBubble}",
+            "sliceSet": "${activitySliceSet}"
+          }
+        },
+        {
+          "type": "log",
+          "message": "Configured process-local destination ${activityPackage}, bubble ${activityBubble}, slice set ${activitySliceSet}; spawn remains client-selected."
+        }
+      ],
+      "next": "wait-for-destination"
+    },
     {
       "id": "wait-for-destination",
       "trigger": {

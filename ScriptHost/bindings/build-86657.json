@@ -29,6 +29,13 @@
       "notes": "Reconnect discards stale rows; queue overflow and lock contention are bounded and counted."
     },
     {
+      "id": "activity.override.configure",
+      "status": "available",
+      "owner": "sunrise-native-bridge",
+      "evidence": "The local named-pipe bridge validates and publishes the same process-local forced destination used by the overlay, and returns an explicit command result.",
+      "notes": "This controls server-side destination, bubble, slice set, and optional spawn set. It does not by itself replace the client's retained activity definition."
+    },
+    {
       "id": "activity.incident.emit",
       "status": "wireAdapterRequired",
       "owner": "activity-host",

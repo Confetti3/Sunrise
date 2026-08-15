@@ -10,6 +10,9 @@ public sealed class ScriptHostService
     private readonly CapabilityCatalog _capabilities;
     private readonly MissionRuntime _runtime;
     private readonly CompositeCommandDispatcher _dispatcher;
+    private int _startRequested;
+    private int _startPublished;
+    private int _resumeRequested;
 
     public ScriptHostService(
         NamedPipeBridge bridge,
@@ -29,7 +32,6 @@ public sealed class ScriptHostService
         _bridge.ConnectionChanged += OnConnectionChangedAsync;
 
         await _runtime.InitializeAsync(cancellationToken).ConfigureAwait(false);
-        await _runtime.PublishEventAsync(HostEvent.Start, cancellationToken).ConfigureAwait(false);
 
         Task bridgeTask = _bridge.RunAsync(cancellationToken);
         using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(100));
@@ -37,7 +39,19 @@ public sealed class ScriptHostService
         {
             while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
             {
+                if (Interlocked.Exchange(ref _startRequested, 0) != 0
+                    && Interlocked.Exchange(ref _startPublished, 1) == 0)
+                {
+                    // A host.start command may target the bridge, whose receive loop is already
+                    // running on bridgeTask by the time this service-loop dispatch begins.
+                    await _runtime.PublishEventAsync(HostEvent.Start, cancellationToken)
+                        .ConfigureAwait(false);
+                }
                 await _runtime.TickAsync(cancellationToken).ConfigureAwait(false);
+                if (Interlocked.Exchange(ref _resumeRequested, 0) != 0)
+                {
+                    await _runtime.TryResumeAsync(cancellationToken).ConfigureAwait(false);
+                }
             }
         }
         finally
@@ -75,7 +89,10 @@ public sealed class ScriptHostService
         {
             case "bridge.hello":
                 HandleHello(message);
-                await _runtime.TryResumeAsync(cancellationToken).ConfigureAwait(false);
+                // The receive loop must return before a command dispatched by TryResumeAsync can
+                // receive its command.result. The service loop consumes this one-shot request.
+                Interlocked.Exchange(ref _startRequested, 1);
+                Interlocked.Exchange(ref _resumeRequested, 1);
                 break;
             case "world.phase":
                 await HandleWorldPhaseAsync(message, cancellationToken).ConfigureAwait(false);

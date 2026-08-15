@@ -5,8 +5,9 @@ host framework, capability scanner, and deterministic mission state machine. It 
 that Bungie's original Red War host scripts were recovered.
 
 The native Sunrise bridge is deliberately small. It connects to the named pipe, publishes the
-client’s `WorldPhase`, answers pings, and rejects unimplemented mutation commands. The C# host owns
-scenario state, checkpoints, directory probes, managed plugins, and command dispatch.
+client’s `WorldPhase`, answers pings, accepts a validated process-local activity-override command,
+and rejects unimplemented gameplay mutation commands. The C# host owns scenario state,
+checkpoints, directory probes, managed plugins, and command dispatch.
 
 The current runtime branch also contains a bounded `activity.incident` observation probe. It copies
 validated client msg-19 scalars to C# without retaining packet or game pointers. A fresh build-86657
@@ -55,6 +56,8 @@ set `SUNRISE_SCRIPT_HOST_PIPE` to a different full pipe path or leaf name.
 - managed plugin loading without third-party packages;
 - exact-root VM probe report with optional executable/DLL SHA-256;
 - managed `activity.incident` trigger matching by validated primary target;
+- scenario-driven `activity.override.configure`, using the same process-local destination state as
+  the overlay and an explicit command acknowledgment;
 - failure at the first unavailable native capability instead of silent mission progression;
 - built-in `--self-test` and `--validate` modes.
 

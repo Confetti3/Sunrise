@@ -7,6 +7,15 @@ public static class SelfTest
 {
     public static async Task RunAsync()
     {
+        string protocolFrame = JsonSerializer.Serialize(
+            new { protocol = 1, type = "command.request" },
+            Json.ProtocolOptions);
+        if (protocolFrame.Contains('\n') || protocolFrame.Contains('\r'))
+        {
+            throw new InvalidOperationException(
+                "Named-pipe protocol JSON must occupy exactly one physical line.");
+        }
+
         const string scenarioJson = """
         {
           "schema": 1,

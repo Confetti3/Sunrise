@@ -77,7 +77,8 @@ public sealed class NamedPipeBridge : IAsyncDisposable
             return false;
         }
 
-        string json = JsonSerializer.Serialize(message, Json.DefaultOptions);
+        // This is a newline-delimited transport: one logical message must occupy one physical line.
+        string json = JsonSerializer.Serialize(message, Json.ProtocolOptions);
         await _writeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
