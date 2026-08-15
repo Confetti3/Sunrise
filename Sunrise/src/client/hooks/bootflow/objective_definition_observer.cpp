@@ -1,5 +1,6 @@
 #include <Windows.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstddef>
@@ -26,8 +27,9 @@ constexpr auto kResolverSignature =
     signature<signature_length(kResolverSignatureText)>(kResolverSignatureText);
 
 constexpr std::size_t kRecordWords = 4;
+constexpr std::size_t kExpressionNodeCapacity = 24;
 constexpr std::uint32_t kReportLimit = 256;
-constexpr std::size_t kLineCapacity = 320;
+constexpr std::size_t kLineCapacity = 512;
 constexpr std::uint64_t kOccupiedBit = 0x8000'0000'0000'0000ULL;
 
 struct OutputPair {
@@ -35,11 +37,27 @@ struct OutputPair {
     const void* secondary{};
 };
 
+struct ExpressionNode {
+    std::uint8_t opcode{};
+    std::array<std::uint8_t, 3> metadata{};
+    std::uint32_t operand{};
+};
+static_assert(sizeof(ExpressionNode) == 8);
+
+struct RecordSnapshot {
+    bool present{};
+    std::array<std::uint32_t, kRecordWords> prefix{};
+    std::uint32_t maximum{};
+    std::uint8_t flag28{};
+    std::uint8_t flag2c{};
+    std::int32_t expressionCount{};
+    std::size_t capturedNodes{};
+    std::array<ExpressionNode, kExpressionNodeCapacity> nodes{};
+};
+
 struct Snapshot {
-    bool primaryPresent{};
-    bool secondaryPresent{};
-    std::array<std::uint32_t, kRecordWords> primary{};
-    std::array<std::uint32_t, kRecordWords> secondary{};
+    RecordSnapshot primary{};
+    RecordSnapshot secondary{};
 };
 
 using Resolver = void*(__fastcall*)(void*, OutputPair*, std::uint16_t) noexcept;
@@ -69,24 +87,80 @@ std::array<std::atomic<std::uint64_t>, kReportLimit> g_seen{};
     return false;
 }
 
-/** Copies a bounded, pointer-free prefix from each definition record while the call owns it. */
+/** Copies one definition prefix and its bounded RPN expression while the call owns it. */
+[[nodiscard]] bool snapshot_record(const void* record, RecordSnapshot& output) noexcept {
+    if (record == nullptr) {
+        return false;
+    }
+    __try {
+        const auto* const bytes = static_cast<const std::byte*>(record);
+        output.present = true;
+        std::memcpy(output.prefix.data(), bytes, sizeof output.prefix);
+        std::memcpy(&output.maximum, bytes + 0x30, sizeof output.maximum);
+        std::memcpy(&output.flag28, bytes + 0x28, sizeof output.flag28);
+        std::memcpy(&output.flag2c, bytes + 0x2C, sizeof output.flag2c);
+        const auto* const expression = bytes + 0x38;
+        std::memcpy(&output.expressionCount, expression, sizeof output.expressionCount);
+        if (output.expressionCount > 0
+            && output.expressionCount <= static_cast<std::int32_t>(output.nodes.size())) {
+            std::int64_t relative{};
+            std::memcpy(&relative, expression + 8, sizeof relative);
+            const auto* const nodes = expression + 0x18 + relative;
+            output.capturedNodes = static_cast<std::size_t>(output.expressionCount);
+            std::memcpy(output.nodes.data(), nodes, output.capturedNodes * sizeof(ExpressionNode));
+        }
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+/** Copies bounded, pointer-free state from each resolved definition record. */
 [[nodiscard]] bool snapshot(const OutputPair* pair, Snapshot& output) noexcept {
     if (pair == nullptr) {
         return false;
     }
     __try {
         const OutputPair local = *pair;
-        output.primaryPresent = local.primary != nullptr;
-        output.secondaryPresent = local.secondary != nullptr;
-        if (local.primary != nullptr) {
-            std::memcpy(output.primary.data(), local.primary, sizeof output.primary);
-        }
-        if (local.secondary != nullptr) {
-            std::memcpy(output.secondary.data(), local.secondary, sizeof output.secondary);
-        }
-        return true;
+        const bool primary = snapshot_record(local.primary, output.primary);
+        const bool secondary = snapshot_record(local.secondary, output.secondary);
+        return primary || secondary || (local.primary == nullptr && local.secondary == nullptr);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
+    }
+}
+
+/** Emits the bounded expression nodes belonging to one resolved side. */
+void report_expression(std::uint32_t sequence,
+                       std::uintptr_t callerRva,
+                       std::uint16_t objectiveIndex,
+                       char side,
+                       const RecordSnapshot& record) noexcept {
+    for (std::size_t index = 0; index < record.capturedNodes; ++index) {
+        const ExpressionNode& node = record.nodes[index];
+        std::array<char, kLineCapacity> line{};
+        const int written = std::snprintf(
+            line.data(),
+            line.size(),
+            "ev=objective_definition stage=expression n=%u caller=+0x%llX index=%u side=%c "
+            "node=%u opcode=%u meta=%02X%02X%02X operand=%08X",
+            sequence,
+            static_cast<unsigned long long>(callerRva),
+            static_cast<unsigned>(objectiveIndex),
+            side,
+            static_cast<unsigned>(index),
+            static_cast<unsigned>(node.opcode),
+            static_cast<unsigned>(node.metadata[0]),
+            static_cast<unsigned>(node.metadata[1]),
+            static_cast<unsigned>(node.metadata[2]),
+            node.operand);
+        if (written > 0) {
+            const auto length = static_cast<std::size_t>(written) < line.size()
+                                    ? static_cast<std::size_t>(written)
+                                    : line.size() - 1;
+            core::log::write(
+                core::log::Channel::client, core::log::Level::info, {line.data(), length});
+        }
     }
 }
 
@@ -104,26 +178,39 @@ void report(std::uintptr_t callerRva, std::uint16_t objectiveIndex, const Snapsh
         line.data(),
         line.size(),
         "ev=objective_definition stage=lookup n=%u caller=+0x%llX index=%u present=%u,%u "
-        "primary=%08X,%08X,%08X,%08X secondary=%08X,%08X,%08X,%08X",
+        "primary=%08X,%08X,%08X,%08X secondary=%08X,%08X,%08X,%08X "
+        "max=%u,%u flags=%u,%u,%u,%u expression=%d,%d captured=%u,%u",
         sequence,
         static_cast<unsigned long long>(callerRva),
         static_cast<unsigned>(objectiveIndex),
-        value.primaryPresent ? 1U : 0U,
-        value.secondaryPresent ? 1U : 0U,
-        value.primary[0],
-        value.primary[1],
-        value.primary[2],
-        value.primary[3],
-        value.secondary[0],
-        value.secondary[1],
-        value.secondary[2],
-        value.secondary[3]);
+        value.primary.present ? 1U : 0U,
+        value.secondary.present ? 1U : 0U,
+        value.primary.prefix[0],
+        value.primary.prefix[1],
+        value.primary.prefix[2],
+        value.primary.prefix[3],
+        value.secondary.prefix[0],
+        value.secondary.prefix[1],
+        value.secondary.prefix[2],
+        value.secondary.prefix[3],
+        value.primary.maximum,
+        value.secondary.maximum,
+        static_cast<unsigned>(value.primary.flag28),
+        static_cast<unsigned>(value.primary.flag2c),
+        static_cast<unsigned>(value.secondary.flag28),
+        static_cast<unsigned>(value.secondary.flag2c),
+        value.primary.expressionCount,
+        value.secondary.expressionCount,
+        static_cast<unsigned>(value.primary.capturedNodes),
+        static_cast<unsigned>(value.secondary.capturedNodes));
     if (written > 0) {
         const auto length = static_cast<std::size_t>(written) < line.size()
                                 ? static_cast<std::size_t>(written)
                                 : line.size() - 1;
         core::log::write(core::log::Channel::client, core::log::Level::info, {line.data(), length});
     }
+    report_expression(sequence, callerRva, objectiveIndex, 'p', value.primary);
+    report_expression(sequence, callerRva, objectiveIndex, 's', value.secondary);
 }
 
 /** Mirrors the native resolver and observes its completed output pair without changing it. */

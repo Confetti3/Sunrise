@@ -53,9 +53,10 @@ struct NamedIndex {
     std::uint32_t matches{};
 };
 
-/** The graph target and two independently observed controls. */
-constexpr std::array<std::string_view, 3> kKnownNames{
+/** The two Homecoming graph variants and two independently observed controls. */
+constexpr std::array<std::string_view, 4> kKnownNames{
     "arcade_homecoming",
+    "mission_towerfall",
     "city_tower_social_d2",
     "mission_ember",
 };
@@ -130,16 +131,17 @@ void scan_known_names(Lookup original) noexcept {
             }
         }
     }
-    if (targets[0].matches != 0) {
-        g_homecomingIndex.store(targets[0].index, std::memory_order_release);
+    if (targets[1].matches != 0) {
+        g_homecomingIndex.store(targets[1].index, std::memory_order_release);
     }
     std::array<char, 184> line{};
     const int written = std::snprintf(
         line.data(),
         line.size(),
-        "ev=activity_definition stage=scan result=%s searched=%u homecoming=%d/%u tower=%d/%u "
-        "ember=%d/%u",
+        "ev=activity_definition stage=scan result=%s searched=%u arcade=%d/%u towerfall=%d/%u "
+        "tower=%d/%u ember=%d/%u",
         targets[0].matches != 0 && targets[1].matches != 0 && targets[2].matches != 0
+                && targets[3].matches != 0
             ? "complete"
             : "partial",
         searched,
@@ -148,7 +150,9 @@ void scan_known_names(Lookup original) noexcept {
         targets[1].matches != 0 ? static_cast<int>(targets[1].index) : -1,
         targets[1].matches,
         targets[2].matches != 0 ? static_cast<int>(targets[2].index) : -1,
-        targets[2].matches);
+        targets[2].matches,
+        targets[3].matches != 0 ? static_cast<int>(targets[3].index) : -1,
+        targets[3].matches);
     if (written > 0) {
         const auto length = static_cast<std::size_t>(written) < line.size()
                                 ? static_cast<std::size_t>(written)

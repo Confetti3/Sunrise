@@ -260,3 +260,34 @@ the retained activity source has the index-1 identity. The writer for that retai
 the next boundary. The exact log and DLL are in
 `analysis/script-host-runtime/20260815-044100-decode-dispatch-orbit/`; DLL SHA-256 is
 `A6B02EA7A5871C16925A4D1226667073AAB472ADCFE85F4DB5CD7E0363EFA4F8`.
+
+## Original Red War identity correction and live arrival
+
+The `DestinyResearch` activity graphs distinguish two Homecoming implementations. The original
+Red War activity is `mission_towerfall`, with root tag `80B500AC`, scenario tag `80B500BC`, and
+destination `city_tower_d16_t0`. `arcade_homecoming` (root `80F02003`, scenario `80F0200E`) is a
+later copy. Their repeated phase and objective names explain the earlier semantic match, but they
+are not the same activity identity. The authored prototype and process-local client override now
+target `mission_towerfall`.
+
+A fresh build-86657 lookup resolved `mission_towerfall` exactly once at activity index `266`;
+`arcade_homecoming` resolved twice at indices `37` and `38`. A genuine Earth campaign Launch hold
+then caused the offline activity host to select `mission_towerfall`. The client subsequently logged
+`successfully changed world to: mission_towerfall`, observed boot-flow step 38 as `phase=arrived`,
+and the C# host advanced to `open-objective`. The same run recorded 60 real objective-definition
+lookups. Evidence is retained in
+`analysis/script-host-runtime/20260815-052700-mission-towerfall-runtime/`; the deployed DLL SHA-256
+was `6F9FC7AA3EA5456786FF8C01B39983F2C630A4BFC35C71A449C0539724082AD3`.
+
+Static payload correlation also joins the later copy's five named objective definitions to live
+resolver secondary words `0x093D` through `0x0941` (`obj_ghaul`, `obj_damaged`, `obj_deck`,
+`obj_shield_gen`, and `obj_deck_ultra`). This is a useful name-to-runtime discriminator, not a
+verified objective index or writable binding. The resolver record's bytes at `+0x38` are not the
+completion reader's expression container; the first probe produced implausible counts, so the
+observer now rejects values outside its bounded 1..24 range.
+
+The unique definition-backed switch writer at `+0x555EC0` was observed around the retained
+index-1 `+0x9348` switch bank during the same original-activity run. It produced zero calls from
+launch through arrival. That negative control leaves `objective.set` and `gameplay-switch.set` at
+`wireAdapterRequired`: the correct activity now loads, but no genuine write transition has yet
+been correlated.

@@ -45,13 +45,14 @@
       "id": "objective.set",
       "status": "wireAdapterRequired",
       "owner": "activity-host",
-      "evidence": "Definition, completion, progress, and retained-row application consumers are localized. Orbit and authoritative Homecoming controls observed enabled category-zero dispatches with zero explicit rows. The retained source comes from activity-owner virtual method +0x18 and has a stable non-polymorphic runtime prefix. Generic decode observation separated a category-4/index-0 state object from the retained index-1 activity source; the index-0 comparator does not visit the index-1 switch bank. No source wire schema, Homecoming index mapping, or verified host mutation exists."
+      "evidence": "Definition, completion, progress, and retained-row application consumers are localized. DestinyResearch identifies original Red War Homecoming as mission_towerfall (root 80B500AC, scenario 80B500BC), distinct from the later arcade_homecoming copy. A fresh build-86657 run selected mission_towerfall, changed the client world to mission_towerfall, reached phase=arrived, advanced the host to open-objective, and produced 60 real definition lookups. The definition-backed switch writer at +0x555EC0 produced zero calls, so no verified host mutation exists.",
+      "notes": "Static payload/runtime correlation maps the later copy's named objectives to secondary words 0x093D..0x0941, but this is not a verified objective.set index or wire adapter. Resolver records do not expose the completion-reader expression container at +0x38; implausible counts are rejected rather than reported as expressions."
     },
     {
       "id": "gameplay-switch.set",
       "status": "wireAdapterRequired",
       "owner": "activity-host",
-      "evidence": "The native expression consumer reads one of 0x5BCC activity-state bytes and treats value 2 as true; a definition-backed application helper is localized, but no wire producer or verified safe transition exists."
+      "evidence": "The native expression consumer reads one of 0x5BCC activity-state bytes and treats value 2 as true. The unique definition-backed writer at +0x555EC0 calls the retained index-1 state getter and can mutate its +0x9348 switch bank, but the fresh mission_towerfall arrival control recorded zero writer calls. No wire producer, definition-to-bank mapping, or verified safe transition exists."
     },
     {
       "id": "entity.allocate",

@@ -25,12 +25,12 @@ constexpr std::string_view kApplySignatureText =
 constexpr auto kApplySignature =
     signature<signature_length(kApplySignatureText)>(kApplySignatureText);
 
-/** Build-86657 old/new decoded-state comparison dispatcher. */
-constexpr std::string_view kCompareSignatureText =
-    "40 53 48 83 EC 20 48 8B DA 45 85 C9 0F 84 ? ? ? ? 41 83 F9 02 74 70 41 83 F9 "
-    "04 0F 85 ? ? ? ? 44 8B 44 24 58";
-constexpr auto kCompareSignature =
-    signature<signature_length(kCompareSignatureText)>(kCompareSignatureText);
+/** Build-86657 definition-backed gameplay-switch writer. */
+constexpr std::string_view kWriterSignatureText =
+    "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 48 89 7C 24 20 41 56 48 83 "
+    "EC 20 41 8B E8 48 0F BF DA 48 8B F1 E8 ? ? ? ?";
+constexpr auto kWriterSignature =
+    signature<signature_length(kWriterSignatureText)>(kWriterSignatureText);
 
 constexpr std::size_t kSwitchCountOffset = 0xB3F4;
 constexpr std::size_t kSwitchRowsOffset = 0xB3F8;
@@ -40,6 +40,9 @@ constexpr std::size_t kProgressCountOffset = 0xB448;
 constexpr std::size_t kProgressRowsOffset = 0xB44C;
 constexpr std::size_t kProgressRowStride = 8;
 constexpr std::size_t kProgressCaptureCapacity = 32;
+constexpr std::size_t kPersistentSwitchBankOffset = 0x9348;
+constexpr std::size_t kPersistentSwitchBankSize = 0x1000;
+constexpr std::uint32_t kPersistentSourceIdentity = 0x00100101U;
 constexpr std::size_t kSeenCapacity = 256;
 constexpr std::size_t kReportCapacity = 192;
 constexpr std::size_t kLineCapacity = 240;
@@ -59,13 +62,13 @@ using ApplyCategory = void(__fastcall*)(void*,
                                         void*,
                                         void*,
                                         void*) noexcept;
-using CompareSource = void(__fastcall*)(
-    void*, const void*, std::int32_t, std::int32_t, const void*, std::int32_t) noexcept;
+using WriteSwitch = void(__fastcall*)(void*, std::uint16_t, std::int32_t) noexcept;
+using StateGetter = void*(__fastcall*)(void*) noexcept;
 
 hooking::detour::Handle g_applyHandle{};
-hooking::detour::Handle g_compareHandle{};
+hooking::detour::Handle g_writerHandle{};
 std::atomic<ApplyCategory> g_original{nullptr};
-std::atomic<CompareSource> g_originalCompare{nullptr};
+std::atomic<WriteSwitch> g_originalWriter{nullptr};
 std::array<std::atomic<std::uint64_t>, kSeenCapacity> g_seen{};
 std::atomic<std::uint32_t> g_reports{};
 
@@ -91,19 +94,6 @@ struct SourceSnapshot {
     std::array<SwitchRow, kSwitchCapacity> switches{};
     std::array<ProgressRow, kProgressCaptureCapacity> progressions{};
 };
-
-[[nodiscard]] bool snapshot_prefix(const void* source,
-                                   std::array<std::uint32_t, 4>& output) noexcept {
-    if (source == nullptr) {
-        return false;
-    }
-    __try {
-        std::memcpy(output.data(), source, sizeof output);
-        return true;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return false;
-    }
-}
 
 /** Returns a stable main-image-relative value when one copied pointer identifies a client vtable.
  */
@@ -331,84 +321,22 @@ void report(std::uintptr_t callerRva, bool enabled, const SourceSnapshot& snapsh
     }
 }
 
-void report_delta(const char* stage,
-                  std::uint64_t side,
-                  std::uintptr_t callerRva,
-                  const SourceSnapshot& snapshot) noexcept {
+void report_switch_write(std::uintptr_t callerRva,
+                         std::uint16_t definition,
+                         std::int32_t requested,
+                         std::uint16_t index,
+                         std::uint8_t before,
+                         std::uint8_t after,
+                         std::uint32_t changes) noexcept {
     constexpr std::uint64_t kOffset = 14'695'981'039'346'656'037ULL;
-    std::uint64_t summaryKey = mix(kOffset, 3);
-    summaryKey = mix(summaryKey, side);
-    summaryKey = mix(summaryKey, callerRva);
-    summaryKey = mix(summaryKey, static_cast<std::uint32_t>(snapshot.switchCount));
-    summaryKey = mix(summaryKey, static_cast<std::uint32_t>(snapshot.progressCount));
-    for (const std::uint32_t word : snapshot.prefixWords) {
-        summaryKey = mix(summaryKey, word);
-    }
-    if (claim(summaryKey)) {
-        write_line("ev=activity_state_source stage=%s n=%u caller=+0x%llX switches=%u "
-                   "progressions=%u head0=%08X head1=%08X",
-                   stage,
-                   callerRva,
-                   static_cast<std::uint32_t>(snapshot.switchCount),
-                   static_cast<std::uint32_t>(snapshot.progressCount),
-                   snapshot.prefixWords[0],
-                   snapshot.prefixWords[1]);
-    }
-    for (const SwitchRow& row : std::span(snapshot.switches).first(snapshot.capturedSwitches)) {
-        std::uint64_t key = mix(kOffset, 4);
-        key = mix(key, side);
-        key = mix(key, static_cast<std::uint16_t>(row.index));
-        key = mix(key, row.value);
-        key = mix(key, row.auxiliary);
-        if (claim(key)) {
-            write_line("ev=activity_state_source stage=%s n=%u caller=+0x%llX index=%u "
-                       "value=%u auxiliary=%u reserved=%u",
-                       side == 0 ? "delta_old_switch" : "delta_new_switch",
-                       callerRva,
-                       static_cast<std::uint16_t>(row.index),
-                       row.value,
-                       row.auxiliary,
-                       0);
-        }
-    }
-    for (const ProgressRow& row :
-         std::span(snapshot.progressions).first(snapshot.capturedProgressions)) {
-        std::uint64_t key = mix(kOffset, 5);
-        key = mix(key, side);
-        key = mix(key, static_cast<std::uint16_t>(row.index));
-        key = mix(key, row.value);
-        key = mix(key, row.auxiliary);
-        if (claim(key)) {
-            write_line("ev=activity_state_source stage=%s n=%u caller=+0x%llX index=%u "
-                       "value=%u auxiliary=%u reserved=%u",
-                       side == 0 ? "delta_old_progression" : "delta_new_progression",
-                       callerRva,
-                       static_cast<std::uint16_t>(row.index),
-                       row.value,
-                       row.auxiliary,
-                       0);
-        }
-    }
-}
-
-void report_decode_dispatch(std::uintptr_t callerRva,
-                            std::int32_t kind,
-                            std::int32_t category,
-                            std::int32_t index,
-                            const std::array<std::uint32_t, 4>& oldPrefix,
-                            const std::array<std::uint32_t, 4>& newPrefix) noexcept {
-    constexpr std::uint64_t kOffset = 14'695'981'039'346'656'037ULL;
-    std::uint64_t key = mix(kOffset, 6);
+    std::uint64_t key = mix(kOffset, 3);
     key = mix(key, callerRva);
-    key = mix(key, static_cast<std::uint32_t>(kind));
-    key = mix(key, static_cast<std::uint32_t>(category));
-    key = mix(key, static_cast<std::uint32_t>(index));
-    for (const std::uint32_t word : oldPrefix) {
-        key = mix(key, word);
-    }
-    for (const std::uint32_t word : newPrefix) {
-        key = mix(key, word);
-    }
+    key = mix(key, definition);
+    key = mix(key, static_cast<std::uint32_t>(requested));
+    key = mix(key, index);
+    key = mix(key, before);
+    key = mix(key, after);
+    key = mix(key, changes);
     if (!claim(key) || g_reports.load(std::memory_order_relaxed) >= kReportCapacity) {
         return;
     }
@@ -420,22 +348,56 @@ void report_decode_dispatch(std::uintptr_t callerRva,
     const int written = std::snprintf(
         line.data(),
         line.size(),
-        "ev=activity_state_source stage=decode_dispatch n=%u caller=+0x%llX kind=%d category=%d "
-        "index=%d old=%08X,%08X new=%08X,%08X",
+        "ev=activity_state_source stage=switch_write n=%u caller=+0x%llX definition=%u "
+        "requested=%d index=%u before=%u after=%u changes=%u",
         sequence,
         static_cast<unsigned long long>(callerRva),
-        kind,
-        category,
-        index,
-        oldPrefix[0],
-        oldPrefix[1],
-        newPrefix[0],
-        newPrefix[1]);
+        static_cast<unsigned>(definition),
+        requested,
+        static_cast<unsigned>(index),
+        static_cast<unsigned>(before),
+        static_cast<unsigned>(after),
+        changes);
     if (written > 0) {
         const auto length = static_cast<std::size_t>(written) < line.size()
                                 ? static_cast<std::size_t>(written)
                                 : line.size() - 1;
         core::log::write(core::log::Channel::client, core::log::Level::info, {line.data(), length});
+    }
+}
+
+/** Obtains the index-1 retained state through the same owner getter the native writer uses. */
+[[nodiscard]] void* persistent_state(void* owner) noexcept {
+    if (owner == nullptr) {
+        return nullptr;
+    }
+    __try {
+        auto** const vtable = *static_cast<void***>(owner);
+        const auto getter = reinterpret_cast<StateGetter>(vtable[0xA8 / sizeof(void*)]);
+        return getter != nullptr ? getter(owner) : nullptr;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return nullptr;
+    }
+}
+
+/** Copies the persistent 4 KiB switch bank only when the state identity is index 1. */
+[[nodiscard]] bool snapshot_persistent_switches(
+    void* owner, std::array<std::uint8_t, kPersistentSwitchBankSize>& output) noexcept {
+    void* const source = persistent_state(owner);
+    if (source == nullptr) {
+        return false;
+    }
+    __try {
+        const auto* const bytes = static_cast<const std::byte*>(source);
+        std::uint32_t identity{};
+        std::memcpy(&identity, bytes, sizeof identity);
+        if (identity != kPersistentSourceIdentity) {
+            return false;
+        }
+        std::memcpy(output.data(), bytes + kPersistentSwitchBankOffset, output.size());
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
     }
 }
 
@@ -479,37 +441,38 @@ __declspec(noinline) void __fastcall apply_category(void* first,
     }
 }
 
-/** Mirrors the post-decode dispatcher and records only copied scalar identity. */
-__declspec(noinline) void __fastcall compare_source(void* oldSource,
-                                                    const void* newSource,
-                                                    std::int32_t kind,
-                                                    std::int32_t category,
-                                                    const void* context,
-                                                    std::int32_t index) noexcept {
-    std::array<std::uint32_t, 4> oldPrefix{};
-    std::array<std::uint32_t, 4> newPrefix{};
-    const bool capturedOldPrefix = snapshot_prefix(oldSource, oldPrefix);
-    const bool capturedNewPrefix = snapshot_prefix(newSource, newPrefix);
-    SourceSnapshot oldSnapshot{};
-    SourceSnapshot newSnapshot{};
-    const bool sourceIdentity = capturedOldPrefix && capturedNewPrefix
-                                && (oldPrefix[0] == 0x00100101U || newPrefix[0] == 0x00100101U);
-    const bool capturedOld = sourceIdentity && snapshot_source(oldSource, oldSnapshot);
-    const bool capturedNew = sourceIdentity && snapshot_source(newSource, newSnapshot);
+/** Mirrors the definition-backed writer and reports any resulting index-1 bank delta. */
+__declspec(noinline) void __fastcall write_switch(void* owner,
+                                                  std::uint16_t definition,
+                                                  std::int32_t requested) noexcept {
+    std::array<std::uint8_t, kPersistentSwitchBankSize> before{};
+    const bool capturedBefore = snapshot_persistent_switches(owner, before);
     const std::uintptr_t callerRva = caller_rva(_ReturnAddress());
-    const CompareSource original = g_originalCompare.load(std::memory_order_acquire);
+    const WriteSwitch original = g_originalWriter.load(std::memory_order_acquire);
     if (original != nullptr) {
-        original(oldSource, newSource, kind, category, context, index);
+        original(owner, definition, requested);
     }
-    if (capturedOldPrefix && capturedNewPrefix) {
-        report_decode_dispatch(callerRva, kind, category, index, oldPrefix, newPrefix);
+    std::array<std::uint8_t, kPersistentSwitchBankSize> after{};
+    if (!capturedBefore || !snapshot_persistent_switches(owner, after)) {
+        return;
     }
-    if (capturedOld) {
-        report_delta("delta_old", 0, callerRva, oldSnapshot);
+    std::uint32_t changes = 0;
+    std::uint16_t changedIndex = UINT16_MAX;
+    std::uint8_t oldValue = 0;
+    std::uint8_t newValue = 0;
+    for (std::size_t index = 0; index < before.size(); ++index) {
+        if (before[index] == after[index]) {
+            continue;
+        }
+        if (changes == 0) {
+            changedIndex = static_cast<std::uint16_t>(index);
+            oldValue = before[index];
+            newValue = after[index];
+        }
+        ++changes;
     }
-    if (capturedNew) {
-        report_delta("delta_new", 1, callerRva, newSnapshot);
-    }
+    report_switch_write(
+        callerRva, definition, requested, changedIndex, oldValue, newValue, changes);
 }
 
 void log_install(const char* result, const char* reason = nullptr) noexcept {
@@ -518,7 +481,7 @@ void log_install(const char* result, const char* reason = nullptr) noexcept {
                             ? std::snprintf(line.data(),
                                             line.size(),
                                             "ev=activity_state_source stage=install result=%s "
-                                            "dispatcher=+0x540320 comparator=+0xE05DA0",
+                                            "dispatcher=+0x540320 writer=+0x555EC0",
                                             result)
                             : std::snprintf(line.data(),
                                             line.size(),
@@ -540,15 +503,15 @@ void log_install(const char* result, const char* reason = nullptr) noexcept {
 
 /** Attaches the read-only observer for explicit retained activity-state source rows. */
 bool install_activity_state_source_observer() noexcept {
-    if (g_applyHandle.attached && g_compareHandle.attached) {
+    if (g_applyHandle.attached && g_writerHandle.attached) {
         return true;
     }
     std::byte* const applyTarget =
         scan_main_image_unique(kApplySignature, "activity_state_category_dispatcher");
-    std::byte* const compareTarget =
-        scan_main_image_unique(kCompareSignature, "activity_state_source_comparator");
-    if (applyTarget == nullptr || compareTarget == nullptr) {
-        log_install("fail", applyTarget == nullptr ? "apply_target" : "compare_target");
+    std::byte* const writerTarget =
+        scan_main_image_unique(kWriterSignature, "activity_state_switch_writer");
+    if (applyTarget == nullptr || writerTarget == nullptr) {
+        log_install("fail", applyTarget == nullptr ? "apply_target" : "writer_target");
         return false;
     }
     if (!hooking::detour::install({applyTarget, reinterpret_cast<void*>(&apply_category)},
@@ -558,28 +521,28 @@ bool install_activity_state_source_observer() noexcept {
     }
     g_original.store(reinterpret_cast<ApplyCategory>(g_applyHandle.original),
                      std::memory_order_release);
-    if (!hooking::detour::install({compareTarget, reinterpret_cast<void*>(&compare_source)},
-                                  g_compareHandle)) {
+    if (!hooking::detour::install({writerTarget, reinterpret_cast<void*>(&write_switch)},
+                                  g_writerHandle)) {
         (void)hooking::detour::uninstall(g_applyHandle);
         g_original.store(nullptr, std::memory_order_release);
-        log_install("fail", "compare_attach");
+        log_install("fail", "writer_attach");
         return false;
     }
-    g_originalCompare.store(reinterpret_cast<CompareSource>(g_compareHandle.original),
-                            std::memory_order_release);
+    g_originalWriter.store(reinterpret_cast<WriteSwitch>(g_writerHandle.original),
+                           std::memory_order_release);
     log_install("ok");
     return true;
 }
 
 /** Detaches the activity-state source observer and clears its bounded diagnostics. */
 void uninstall_activity_state_source_observer() noexcept {
-    if (g_compareHandle.attached) {
-        (void)hooking::detour::uninstall(g_compareHandle);
+    if (g_writerHandle.attached) {
+        (void)hooking::detour::uninstall(g_writerHandle);
     }
     if (g_applyHandle.attached) {
         (void)hooking::detour::uninstall(g_applyHandle);
     }
-    g_originalCompare.store(nullptr, std::memory_order_release);
+    g_originalWriter.store(nullptr, std::memory_order_release);
     g_original.store(nullptr, std::memory_order_release);
     g_reports.store(0, std::memory_order_release);
     for (auto& entry : g_seen) {

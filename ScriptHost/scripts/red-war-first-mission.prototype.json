@@ -5,7 +5,7 @@
   "provenance": "authored-prototype",
   "start": "configure-destination",
   "parameters": {
-    "activityPackage": "arcade_homecoming",
+    "activityPackage": "mission_towerfall",
     "activityBubble": "0",
     "activitySliceSet": "0",
     "arrivalBubbleHash": "0xF28FC859",

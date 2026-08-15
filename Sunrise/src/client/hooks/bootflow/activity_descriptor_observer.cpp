@@ -50,7 +50,7 @@ constexpr std::size_t kActivityNameCapacity = 0x28;
 /** Courtyard's observed build-86657 descriptor. */
 constexpr std::uint16_t kTowerActivityIndex = 20;
 /** Exact graph and destination name required before the override is eligible. */
-constexpr std::string_view kHomecomingName = "arcade_homecoming";
+constexpr std::string_view kHomecomingName = "mission_towerfall";
 /** Fixed event storage. */
 constexpr std::size_t kLineCapacity = 160;
 
@@ -131,7 +131,7 @@ void report_override(std::uint16_t activityIndex) noexcept {
     const int written = std::snprintf(line.data(),
                                       line.size(),
                                       "ev=activity_descriptor stage=override from=%u to=%u "
-                                      "name=arcade_homecoming",
+                                      "name=mission_towerfall",
                                       static_cast<unsigned>(kTowerActivityIndex),
                                       static_cast<unsigned>(activityIndex));
     if (written > 0) {
