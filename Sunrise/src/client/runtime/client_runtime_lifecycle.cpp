@@ -7,6 +7,7 @@
 #include "../hooks/async_io/async_io_lifetime_guard.h"
 #include "../hooks/bitmap/bitmap_hook_lifecycle.h"
 #include "../hooks/bootflow/bootflow_hook_lifecycle.h"
+#include "../hooks/bootflow/bootflow_texture_override.h"
 #include "../hooks/config_getter/config_getter_lifecycle.h"
 #include "../hooks/cursor/runtime.h"
 #include "../hooks/graphics/graphics_hook_lifecycle.h"
@@ -73,6 +74,13 @@ bool shutdown() noexcept {
         core::log::write(core::log::Channel::client,
                          core::log::Level::error,
                          "ev=shutdown stage=network_hooks result=fail");
+        ReleaseSRWLockExclusive(&runtime::g_lock);
+        return false;
+    }
+    if (!hooks::bootflow::texture_override::uninstall()) {
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::error,
+                         "ev=shutdown stage=bootflow_texture result=fail");
         ReleaseSRWLockExclusive(&runtime::g_lock);
         return false;
     }

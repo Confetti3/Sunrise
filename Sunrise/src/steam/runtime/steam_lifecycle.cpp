@@ -3,6 +3,7 @@
 #include <atomic>
 
 #include "../../client/graphics/wine_compat.h"
+#include "../../client/hooks/bootflow/bootflow_texture_override.h"
 #include "../../client/hooks/egress/runtime.h"
 #include "../../client/hooks/package_trust/package_trust_bypass.h"
 #include "../../client/runtime/runtime.h"
@@ -75,6 +76,14 @@ bool initialize(void* module) noexcept {
                              "ev=steam_init stage=package_trust result=fail");
             (void)core::shutdown();
             return false;
+        }
+        // Bootflow GPU entries can load before the first Steam callback pump. The decoded-entry
+        // override must therefore attach here while the stock `_unp1` package remains registered
+        // through its native path.
+        if (!client::hooks::bootflow::texture_override::install(module)) {
+            core::log::write(core::log::Channel::client,
+                             core::log::Level::warn,
+                             "ev=steam_init stage=bootflow_texture result=fail");
         }
         advance_context_generation();
         g_initialized.store(true, std::memory_order_release);
