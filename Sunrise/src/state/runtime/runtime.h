@@ -57,6 +57,14 @@ struct PendingSubclassSelection {
 /** Commits a prepared subclass selection behind the exact full-character staleness guard. */
 [[nodiscard]] bool commit_subclass_selection(PendingSubclassSelection& mutation) noexcept;
 
+/**
+ * Equips each character with the "Emotes" collection item (hash 3183180185) in the emote slot,
+ * in place of an individual emote, if it is not already equipped there. The stock client opens
+ * its own wheel-configuration screen for this item; the 4 ordinary sockets seed default lanes
+ * from its real plug pool so the wheel has something in every slot the first time it opens.
+ */
+[[nodiscard]] bool ensure_character_emote_collection() noexcept;
+
 /** Direction of one checked character equipment mutation. */
 enum class EquipmentMutationKind : std::uint8_t {
     none,
