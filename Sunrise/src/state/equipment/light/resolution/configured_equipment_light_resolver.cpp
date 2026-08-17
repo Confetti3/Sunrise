@@ -43,30 +43,21 @@ using NativeSlotMap = std::array<std::optional<std::size_t>, build_details::kEqu
  */
 [[nodiscard]] bool
 resolve_item(const authored::Item& item, std::size_t& nativeSlot, ItemScore& itemScore) noexcept {
-    // The "Emotes" collection item's real content carries no native equipment-slot mapping at
-    // all, unlike every other character-scoped item; it does not contribute to light either way.
-    // Kept self-consistent with the loadout resolver's own fallback for the same case (the emote
-    // slot's own native number, since that is where this item is equipped).
-    constexpr std::size_t kEmoteCollectionNativeSlot = 14;
     build_items::Definition definition{};
     build_details::Definition detail{};
+    std::uint8_t resolvedSlot = 0;
     if (!build_data::find_item_definition_hash(item.definitionHash, definition)
         || !build_data::find_configured_item_detail(definition.definitionIndex, detail)
         || detail.definitionIndex != definition.definitionIndex
-        || (detail.equipmentSlot.has_value() && *detail.equipmentSlot < 0)) {
+        || !authored::resolve_native_equipment_slot(
+            item.definitionHash, detail.equipmentSlot, resolvedSlot)
+        || static_cast<std::size_t>(resolvedSlot) >= build_details::kEquipmentSlotCount) {
         return false;
     }
-    if (!detail.equipmentSlot.has_value()) {
-        nativeSlot = kEmoteCollectionNativeSlot;
-        itemScore = ItemScore{definition.definitionIndex, 0};
-        return true;
-    }
-    if (static_cast<std::size_t>(*detail.equipmentSlot) >= build_details::kEquipmentSlotCount) {
-        return false;
-    }
-    nativeSlot = static_cast<std::size_t>(*detail.equipmentSlot);
+    nativeSlot = static_cast<std::size_t>(resolvedSlot);
+    // The "Emotes" collection item's real content contributes no light either way.
     std::int32_t power = 0;
-    if (!item_power(item.level, power)) {
+    if (detail.equipmentSlot.has_value() && !item_power(item.level, power)) {
         return false;
     }
     itemScore = ItemScore{definition.definitionIndex, power};
