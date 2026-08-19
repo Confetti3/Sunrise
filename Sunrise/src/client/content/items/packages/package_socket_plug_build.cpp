@@ -246,6 +246,18 @@ std::size_t SocketPlugBuild::member_count() const noexcept {
     return memberCount_;
 }
 
+std::span<const socket_plugs::Rule> SocketPlugBuild::rules() const noexcept {
+    return std::span(rules_).first(ruleCount_);
+}
+
+std::span<const socket_plugs::Pool> SocketPlugBuild::pools() const noexcept {
+    return std::span(pools_).first(poolCount_);
+}
+
+std::span<const socket_plugs::Member> SocketPlugBuild::members() const noexcept {
+    return std::span(members_).first(memberCount_);
+}
+
 /** Drops all heap-backed extraction scratch and resets every count. */
 void SocketPlugBuild::release() noexcept {
     rules_.clear();

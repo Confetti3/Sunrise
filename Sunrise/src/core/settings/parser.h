@@ -11,6 +11,8 @@
 
 namespace sunrise::core::settings::parser {
 
+struct ParserTestAccess;
+
 /**
  * Fixed-storage JSON reader for the supported Core settings.
  * Every parse below writes `output` only once its whole object is valid, and skips unknown keys.
@@ -25,6 +27,8 @@ public:
     [[nodiscard]] bool parse_root(Settings& output) noexcept;
 
 private:
+    friend struct ParserTestAccess;
+
     /** Parses the Core settings object. */
     [[nodiscard]] bool core(Settings& output) noexcept;
     /** Parses the activity SDK generation boot gate. `enabled` must be unique and boolean. */

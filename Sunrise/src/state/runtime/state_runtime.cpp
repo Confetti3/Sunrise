@@ -233,6 +233,8 @@ bool initialize(void* module,
     if (!build_data::initialize(module, runtime::equipment::configured_hash(*runtimeAccount))) {
         return false;
     }
+    build_data::set_exotic_catalyst_completion_enabled(
+        core::settings::get().completeExoticCatalysts);
     // A cache hit already has the complete plug relation, so publish canonical profile identities
     // in the first State image. On a first cache build, snapshot preparation repeats this step
     // after package extraction has published the relation.

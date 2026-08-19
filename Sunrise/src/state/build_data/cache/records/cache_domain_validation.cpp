@@ -7,6 +7,7 @@
 #include "../../abilities/ability_bucket_catalog.h"
 #include "../../hash_names/hash_name_catalog.h"
 #include "../../inventory/buckets/inventory_bucket_catalog.h"
+#include "../../items/catalysts/exotic_catalyst_catalog.h"
 #include "../../items/details/item_detail_catalog.h"
 #include "../../items/socket_plugs/socket_plug_catalog.h"
 #include "../../material_requirements/material_requirement_catalog.h"
@@ -72,6 +73,12 @@ namespace {
                                          const items::socket_plugs::Rule& right) noexcept {
     return left.itemDefinitionIndex < right.itemDefinitionIndex
            || (left.itemDefinitionIndex == right.itemDefinitionIndex && left.lane < right.lane);
+}
+
+/** @return Native item-index order for catalyst rows. */
+[[nodiscard]] bool catalyst_less(const items::catalysts::Definition& left,
+                                 const items::catalysts::Definition& right) noexcept {
+    return left.itemDefinitionIndex < right.itemDefinitionIndex;
 }
 
 /** @return Native definition-index order for item rows. */
@@ -140,6 +147,7 @@ template <typename Value, typename Less>
            && counts.socketPlugRules <= domains.socketPlugRules.size()
            && counts.socketPlugPools <= domains.socketPlugPools.size()
            && counts.socketPlugMembers <= domains.socketPlugMembers.size()
+           && counts.exoticCatalysts <= domains.exoticCatalysts.size()
            && counts.inventoryBuckets <= domains.inventoryBuckets.size()
            && counts.socketEntryLists <= domains.socketEntryLists.size()
            && counts.socketEntryTables <= domains.socketEntryTables.size()
@@ -171,6 +179,7 @@ bool canonicalize(MutableDomains domains, const DomainCounts& counts) noexcept {
         domains.materialRequirementSets.first(counts.materialRequirementSets);
     const auto itemDetails = domains.itemDetails.first(counts.itemDetails);
     const auto socketPlugRules = domains.socketPlugRules.first(counts.socketPlugRules);
+    const auto exoticCatalysts = domains.exoticCatalysts.first(counts.exoticCatalysts);
     const auto inventoryBuckets = domains.inventoryBuckets.first(counts.inventoryBuckets);
     const auto socketEntryLists = domains.socketEntryLists.first(counts.socketEntryLists);
     std::sort(named.begin(), named.end(), named_less);
@@ -184,6 +193,7 @@ bool canonicalize(MutableDomains domains, const DomainCounts& counts) noexcept {
     if (!std::is_sorted(socketPlugRules.begin(), socketPlugRules.end(), socket_plug_rule_less)) {
         return false;
     }
+    std::sort(exoticCatalysts.begin(), exoticCatalysts.end(), catalyst_less);
     std::sort(inventoryBuckets.begin(), inventoryBuckets.end(), bucket_less);
     const auto abilityBuckets = domains.abilityBuckets.first(counts.abilityBuckets);
     const auto socketEntryTables = domains.socketEntryTables.first(counts.socketEntryTables);
@@ -201,8 +211,8 @@ bool valid_domains(Domains domains) noexcept {
         || domains.constants.weaponPowerStatRow >= constants::kStatRowCount || domains.named.empty()
         || domains.items.empty() || domains.collectibles.empty()
         || domains.materialRequirementSets.empty() || domains.socketPlugRules.empty()
-        || domains.socketPlugPools.empty() || domains.inventoryBuckets.empty()
-        || domains.socketEntryLists.empty()
+        || domains.socketPlugPools.empty() || domains.exoticCatalysts.empty()
+        || domains.inventoryBuckets.empty() || domains.socketEntryLists.empty()
         || !std::all_of(domains.named.begin(), domains.named.end(), valid_name)
         || !strictly_ordered(domains.named, named_less) || !items::valid(domains.items)
         || !collectibles::valid(domains.collectibles)
@@ -216,6 +226,7 @@ bool valid_domains(Domains domains) noexcept {
         || !strictly_ordered(domains.itemDetails, detail_less)
         || !items::socket_plugs::valid(
             domains.socketPlugRules, domains.socketPlugPools, domains.socketPlugMembers)
+        || !items::catalysts::valid(domains.exoticCatalysts)
         || !abilities::valid(domains.abilityBuckets)
         || !strictly_ordered(domains.abilityBuckets, ability_less)
         || !progressions::valid(domains.progressions)
@@ -265,8 +276,14 @@ bool valid_domains(Domains domains) noexcept {
            && valid_socket_plug_links(domains.socketPlugRules,
                                       domains.socketPlugPools,
                                       domains.socketPlugMembers,
-                                      domains.items,
-                                      domains.itemDetails);
+                                       domains.items,
+                                       domains.itemDetails)
+           && valid_exotic_catalyst_links(domains.exoticCatalysts,
+                                           domains.items,
+                                           domains.itemDetails,
+                                           domains.socketPlugRules,
+                                           domains.socketPlugPools,
+                                           domains.socketPlugMembers);
 }
 
 } // namespace sunrise::state::build_data::cache::records

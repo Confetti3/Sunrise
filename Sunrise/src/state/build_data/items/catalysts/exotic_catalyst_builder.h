@@ -1,0 +1,70 @@
+#pragma once
+
+#include <cstddef>
+#include <cstdint>
+#include <span>
+
+#include "../../definition.h"
+#include "../details/definition.h"
+#include "../item_catalog.h"
+#include "../socket_plugs/definition.h"
+#include "definition.h"
+
+namespace sunrise::state::build_data::items::catalysts {
+
+/** Build-scoped facts that package structure cannot identify safely. */
+struct Facts {
+    std::uint32_t imageTimestamp{};
+    std::uint32_t imageSize{};
+    std::uint32_t emptyCatalystPlugHash{};
+    std::span<const std::uint32_t> legacyCompletionPlugHashes;
+    std::span<const std::uint32_t> releasedWeaponHashes;
+};
+
+/** Installed domains used to derive exact item, socket, and completed-plug relations. */
+struct Source {
+    BuildIdentity build;
+    std::span<const items::Definition> items;
+    std::span<const details::Definition> details;
+    std::span<const socket_plugs::Rule> socketPlugRules;
+    std::span<const socket_plugs::Pool> socketPlugPools;
+    std::span<const socket_plugs::Member> socketPlugMembers;
+};
+
+/** @return The generated facts pinned to Destiny 2 build 86657.20.08.23. */
+[[nodiscard]] Facts generated_facts() noexcept;
+
+/**
+ * @param build Executable identity to compare with the generated content build.
+ * @return True when the executable identity matches the generated content build.
+ */
+[[nodiscard]] bool matches_target_build(const BuildIdentity& build) noexcept;
+
+/**
+ * Derives all released and placeholder catalyst records without display text.
+ * On failure, count is zero and no partial record is visible.
+ * @param source Installed build domains and executable identity.
+ * @param facts Build-scoped role and release facts.
+ * @param output Fixed storage that receives the complete catalog.
+ * @param count Receives the number of used output rows.
+ * @param report Receives counts and the first unsafe released relation.
+ * @return True when all released relations are clear and the catalog fits.
+ */
+[[nodiscard]] bool derive(const Source& source,
+                          const Facts& facts,
+                          std::span<Definition> output,
+                          std::size_t& count,
+                          Report& report) noexcept;
+
+/**
+ * Re-derives a catalog and compares every row with a stored candidate.
+ * @param source Installed build domains and executable identity.
+ * @param facts Build-scoped role and release facts.
+ * @param definitions Candidate catalog to verify.
+ * @return True when the candidate exactly matches one safe derivation.
+ */
+[[nodiscard]] bool matches_derived(const Source& source,
+                                   const Facts& facts,
+                                   std::span<const Definition> definitions) noexcept;
+
+} // namespace sunrise::state::build_data::items::catalysts

@@ -14,6 +14,7 @@
 #include "../../definition.h"
 #include "../../hash_names/definition.h"
 #include "../../inventory/buckets/definition.h"
+#include "../../items/catalysts/definition.h"
 #include "../../items/details/definition.h"
 #include "../../items/item_catalog.h"
 #include "../../items/socket_plugs/definition.h"
@@ -37,6 +38,7 @@ struct Context {
     std::vector<items::socket_plugs::Rule> socketPlugRuleScratch{};
     std::vector<items::socket_plugs::Pool> socketPlugPoolScratch{};
     std::vector<items::socket_plugs::Member> socketPlugMemberScratch{};
+    std::vector<items::catalysts::Definition> exoticCatalystScratch{};
     std::vector<inventory::buckets::Descriptor> inventoryBucketScratch{};
     std::vector<socket_entry_lists::Definition> socketEntryListScratch{};
     std::vector<socket_entry_lists::EntryTable> socketEntryTableScratch{};

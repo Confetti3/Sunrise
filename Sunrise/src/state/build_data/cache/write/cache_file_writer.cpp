@@ -24,6 +24,7 @@ namespace {
            && domains.socketPlugRules.size() <= kMaximumCount
            && domains.socketPlugPools.size() <= kMaximumCount
            && domains.socketPlugMembers.size() <= kMaximumCount
+           && domains.exoticCatalysts.size() <= kMaximumCount
            && domains.inventoryBuckets.size() <= kMaximumCount
            && domains.socketEntryLists.size() <= kMaximumCount
            && domains.socketEntryTables.size() <= kMaximumCount

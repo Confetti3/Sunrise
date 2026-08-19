@@ -11,6 +11,7 @@
 #include "../../constants/definition.h"
 #include "../../definition.h"
 #include "../../hash_names/definition.h"
+#include "../../items/catalysts/definition.h"
 #include "../../items/details/definition.h"
 #include "../../items/item_catalog.h"
 #include "../../items/socket_plugs/definition.h"
@@ -74,6 +75,7 @@ struct Header {
     std::uint32_t socketPlugRuleCount{};
     std::uint32_t socketPlugPoolCount{};
     std::uint32_t socketPlugMemberCount{};
+    std::uint32_t exoticCatalystCount{};
     std::uint32_t inventoryBucketCount{};
     std::uint32_t socketEntryListCount{};
     std::uint32_t socketEntryTableCount{};
@@ -201,6 +203,18 @@ struct SocketPlugPoolRecord {
 /** Disk form of one native item-definition index allowed as a plug. */
 struct SocketPlugMemberRecord {
     std::uint16_t itemDefinitionIndex{};
+};
+
+/** Disk form of one build-derived exotic weapon catalyst relation. */
+struct ExoticCatalystRecord {
+    std::uint32_t itemDefinitionHash{};
+    std::uint16_t itemDefinitionIndex{};
+    std::uint16_t completedPlugDefinitionIndex{};
+    std::uint16_t effectDefinitionIndex{};
+    std::uint8_t socketLane{};
+    std::uint8_t availability{};
+    /** Must remain zero so all unused bytes have one canonical value. */
+    std::uint16_t reserved{};
 };
 
 /** Disk form of one inventory-bucket array-routing descriptor. */
@@ -423,7 +437,7 @@ static_assert(sizeof(Prefix) == kCacheMagic.size() + sizeof(std::uint32_t));
 static_assert(sizeof(InvestmentConstants)
               == constants::kCharacterStatRowCount + 3 * sizeof(std::uint8_t));
 static_assert(sizeof(Header)
-              == kCacheMagic.size() + 26 * sizeof(std::uint32_t) + 2 * sizeof(std::uint64_t)
+              == kCacheMagic.size() + 27 * sizeof(std::uint32_t) + 2 * sizeof(std::uint64_t)
                      + sizeof(InvestmentConstants));
 static_assert(sizeof(SpawnPointRecord)
               == spawn_sets::kPositionComponents * sizeof(float) + sizeof(std::uint32_t)
@@ -493,6 +507,8 @@ static_assert(sizeof(SocketPlugRuleRecord)
               == sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t) + sizeof(std::uint32_t));
 static_assert(sizeof(SocketPlugPoolRecord) == 2 * sizeof(std::uint32_t));
 static_assert(sizeof(SocketPlugMemberRecord) == sizeof(std::uint16_t));
+static_assert(sizeof(ExoticCatalystRecord)
+              == sizeof(std::uint32_t) + 4 * sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t));
 static_assert(sizeof(InventoryBucketRecord)
               == 4 * sizeof(std::uint8_t) + 2 * sizeof(std::uint16_t));
 static_assert(sizeof(SocketEntryListRecord)

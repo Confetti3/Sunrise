@@ -23,7 +23,12 @@ public:
     SocketPlugBuild(const SocketPlugBuild&) = delete;
     SocketPlugBuild& operator=(const SocketPlugBuild&) = delete;
 
-    /** Allocates bounded scratch and indexes the three native expandable plug categories. */
+    /**
+     * Allocates bounded scratch and indexes the three native expandable plug categories.
+     * @param specialCategories Category code for each native item index.
+     * @param itemDefinitions Complete installed item table.
+     * @return True when every bounded scratch bank is ready.
+     */
     [[nodiscard]] bool
     prepare(std::span<const std::uint8_t> specialCategories,
             std::span<const state::build_data::items::Definition> itemDefinitions) noexcept;
@@ -42,6 +47,9 @@ public:
     [[nodiscard]] std::size_t rule_count() const noexcept;
     [[nodiscard]] std::size_t pool_count() const noexcept;
     [[nodiscard]] std::size_t member_count() const noexcept;
+    [[nodiscard]] std::span<const socket_plugs::Rule> rules() const noexcept;
+    [[nodiscard]] std::span<const socket_plugs::Pool> pools() const noexcept;
+    [[nodiscard]] std::span<const socket_plugs::Member> members() const noexcept;
 
     /** Package-list visitor entry point; accepts only an in-range bounded native index. */
     [[nodiscard]] bool add(std::uint32_t itemDefinitionIndex,

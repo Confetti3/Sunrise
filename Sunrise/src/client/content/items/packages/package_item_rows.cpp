@@ -43,16 +43,19 @@ bool build_item_rows(const reader::Source& source,
     const bool needDefinitions = !state::build_data::item_definitions_ready();
     const bool needDetails = !state::build_data::configured_item_details_ready();
     const bool needSocketPlugs = !state::build_data::socket_plug_rules_ready();
+    const bool needCatalysts = !state::build_data::exotic_catalysts_ready();
     const bool needBuckets = !state::build_data::inventory_bucket_descriptors_ready();
-    const bool needDetailRows = needDetails || needSocketPlugs;
+    const bool retainDetails = needDetails || needCatalysts;
+    const bool needSocketRows = needSocketPlugs || needCatalysts;
+    const bool needDetailRows = needDetails || needSocketRows;
     // Bucket equipment slots are derived from this same complete item walk, so a partial retry
     // must still revisit the table even when definitions and detail domains already published.
     const bool needRows = needDefinitions || needDetailRows || needBuckets;
     bool published = !needRows;
-    if (needDetails && storage.details.size() != kDetailCapacity) {
+    if (retainDetails && storage.details.size() != kDetailCapacity) {
         storage.details.assign(kDetailCapacity, build_details::Definition{});
     }
-    const bool detailStorageReady = !needDetails || storage.details.size() == kDetailCapacity;
+    const bool detailStorageReady = !retainDetails || storage.details.size() == kDetailCapacity;
     const std::span<const std::byte> container{storage.child};
     reason = "rows";
     // The detail closure is gathered during this one walk. Collections can name any installed
@@ -88,7 +91,7 @@ bool build_item_rows(const reader::Source& source,
                                                  item.plugCategoryHash,
                                                  item.rollSetIndex,
                                                  item.linkedPlugIndex};
-        if (needSocketPlugs) {
+        if (needSocketRows) {
             storage.specialPlugCategories[item.definitionIndex] =
                 special_plug_category(item.plugCategoryHash);
         }
@@ -119,7 +122,7 @@ bool build_item_rows(const reader::Source& source,
     }
     SocketPlugBuild socketPlugBuild;
     const bool socketStorageReady =
-        !needSocketPlugs
+        !needSocketRows
         || socketPlugBuild.prepare(storage.specialPlugCategories,
                                    std::span(storage.rows).first(rowCount));
     if (published && !socketStorageReady) {
@@ -141,10 +144,10 @@ bool build_item_rows(const reader::Source& source,
                 report_detail_failure(slot, storage.requestedDetailIndices[slot]);
                 continue;
             }
-            if (needDetails) {
+            if (retainDetails) {
                 storage.details[builtDetailCount++] = detail;
             }
-            if (needSocketPlugs) {
+            if (needSocketRows) {
                 (void)socketPlugBuild.append(item,
                                              std::span<const std::byte>{storage.definition},
                                              std::span<const std::byte>{storage.plugSetTable},
@@ -156,6 +159,25 @@ bool build_item_rows(const reader::Source& source,
                 std::span<build_details::Definition>{storage.details}.first(builtDetailCount));
             report_detail_count(detailCount, builtDetailCount);
         }
+        std::array<state::build_data::items::catalysts::Definition,
+                   state::build_data::items::catalysts::kDefinitionCapacity>
+            catalystRows{};
+        std::size_t catalystCount = 0;
+        state::build_data::items::catalysts::Report catalystReport{};
+        if (published && needCatalysts) {
+            reason = "exotic_catalysts";
+            const bool built = state::build_data::derive_exotic_catalysts(
+                std::span(storage.rows).first(rowCount),
+                std::span(storage.details).first(builtDetailCount),
+                socketPlugBuild.rules(),
+                socketPlugBuild.pools(),
+                socketPlugBuild.members(),
+                catalystRows,
+                catalystCount,
+                catalystReport);
+            report_catalyst_catalog(catalystReport, built);
+            published = built;
+        }
         if (published && needSocketPlugs) {
             const std::size_t rules = socketPlugBuild.rule_count();
             const std::size_t pools = socketPlugBuild.pool_count();
@@ -166,6 +188,11 @@ bool build_item_rows(const reader::Source& source,
             if (published) {
                 report_socket_plug_count(rules, pools, members, skipped);
             }
+        }
+        if (published && needCatalysts) {
+            reason = "exotic_catalysts";
+            published = state::build_data::publish_exotic_catalysts(
+                std::span(catalystRows).first(catalystCount));
         }
     }
     // Ability buckets read the socket entry list table again and depend on the detail domain, so
@@ -199,6 +226,7 @@ bool build_item_rows(const reader::Source& source,
     return published && state::build_data::item_definitions_ready()
            && state::build_data::configured_item_details_ready()
            && state::build_data::socket_plug_rules_ready()
+           && state::build_data::exotic_catalysts_ready()
            && state::build_data::ability_buckets_ready();
 }
 

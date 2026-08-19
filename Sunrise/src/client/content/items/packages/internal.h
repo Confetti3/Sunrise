@@ -304,9 +304,17 @@ void report_row_count(std::size_t walked,
 
 /** Reports the exact socket-rule, deduplicated-pool, member, and skipped-lane counts. */
 void report_socket_plug_count(std::size_t rules,
-                              std::size_t pools,
-                              std::size_t members,
-                              std::size_t skipped) noexcept;
+                               std::size_t pools,
+                               std::size_t members,
+                               std::size_t skipped) noexcept;
+
+/**
+ * Reports released, placeholder, and unsupported catalyst catalog counts.
+ * @param report Complete catalog report from the build pass.
+ * @param built True when all released catalyst relations were safe.
+ */
+void report_catalyst_catalog(const state::build_data::items::catalysts::Report& report,
+                             bool built) noexcept;
 
 /** Reports the validated installed bucket/equipment-slot coverage. */
 void report_bucket_equipment_mapping(std::size_t mappedSlots) noexcept;

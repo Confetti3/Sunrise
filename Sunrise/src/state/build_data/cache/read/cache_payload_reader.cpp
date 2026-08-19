@@ -72,8 +72,11 @@ void clear(records::MutableDomains output) noexcept {
     std::fill(
         output.socketPlugPools.begin(), output.socketPlugPools.end(), items::socket_plugs::Pool{});
     std::fill(output.socketPlugMembers.begin(),
-              output.socketPlugMembers.end(),
-              items::socket_plugs::Member{});
+               output.socketPlugMembers.end(),
+               items::socket_plugs::Member{});
+    std::fill(output.exoticCatalysts.begin(),
+              output.exoticCatalysts.end(),
+              items::catalysts::Definition{});
     std::fill(output.inventoryBuckets.begin(),
               output.inventoryBuckets.end(),
               inventory::buckets::Descriptor{});
@@ -112,6 +115,7 @@ bool expected_size(const records::DomainCounts& counts, std::uint64_t& size) noe
            && add_records(counts.socketPlugRules, sizeof(records::SocketPlugRuleRecord), size)
            && add_records(counts.socketPlugPools, sizeof(records::SocketPlugPoolRecord), size)
            && add_records(counts.socketPlugMembers, sizeof(records::SocketPlugMemberRecord), size)
+           && add_records(counts.exoticCatalysts, sizeof(records::ExoticCatalystRecord), size)
            && add_records(counts.inventoryBuckets, sizeof(records::InventoryBucketRecord), size)
            && add_records(counts.socketEntryLists, sizeof(records::SocketEntryListRecord), size)
            && add_records(counts.socketEntryTables, sizeof(records::SocketEntryTableRecord), size)
@@ -158,8 +162,11 @@ bool read_payload(HANDLE file,
             && read_domain<records::SocketPlugPoolRecord>(
                 file, output.socketPlugPools.first(counts.socketPlugPools), checksum);
     valid = valid
-            && read_domain<records::SocketPlugMemberRecord>(
-                file, output.socketPlugMembers.first(counts.socketPlugMembers), checksum);
+             && read_domain<records::SocketPlugMemberRecord>(
+                 file, output.socketPlugMembers.first(counts.socketPlugMembers), checksum);
+    valid = valid
+            && read_domain<records::ExoticCatalystRecord>(
+                file, output.exoticCatalysts.first(counts.exoticCatalysts), checksum);
     valid = valid
             && read_domain<records::InventoryBucketRecord>(
                 file, output.inventoryBuckets.first(counts.inventoryBuckets), checksum);
@@ -218,6 +225,7 @@ bool read_payload(HANDLE file,
         output.socketPlugRules.first(counts.socketPlugRules),
         output.socketPlugPools.first(counts.socketPlugPools),
         output.socketPlugMembers.first(counts.socketPlugMembers),
+        output.exoticCatalysts.first(counts.exoticCatalysts),
         output.inventoryBuckets.first(counts.inventoryBuckets),
         output.socketEntryLists.first(counts.socketEntryLists),
         output.socketEntryTables.first(counts.socketEntryTables),

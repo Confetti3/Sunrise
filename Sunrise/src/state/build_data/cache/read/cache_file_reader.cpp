@@ -13,7 +13,8 @@ namespace {
 [[nodiscard]] bool required_domains_present(const records::DomainCounts& counts) noexcept {
     return counts.named != 0 && counts.items != 0 && counts.collectibles != 0
            && counts.materialRequirementSets != 0 && counts.socketPlugRules != 0
-           && counts.socketPlugPools != 0 && counts.inventoryBuckets != 0
+           && counts.socketPlugPools != 0 && counts.exoticCatalysts != 0
+           && counts.inventoryBuckets != 0
            && counts.socketEntryLists != 0 && counts.progressions != 0 && counts.scenarios != 0
            && counts.rosterGroups != 0;
 }
@@ -28,6 +29,7 @@ namespace {
            && counts.socketPlugRules <= output.socketPlugRules.size()
            && counts.socketPlugPools <= output.socketPlugPools.size()
            && counts.socketPlugMembers <= output.socketPlugMembers.size()
+           && counts.exoticCatalysts <= output.exoticCatalysts.size()
            && counts.inventoryBuckets <= output.inventoryBuckets.size()
            && counts.socketEntryLists <= output.socketEntryLists.size()
            && counts.socketEntryTables <= output.socketEntryTables.size()
@@ -56,6 +58,7 @@ namespace {
         header.socketPlugRuleCount,
         header.socketPlugPoolCount,
         header.socketPlugMemberCount,
+        header.exoticCatalystCount,
         header.inventoryBucketCount,
         header.socketEntryListCount,
         header.socketEntryTableCount,
