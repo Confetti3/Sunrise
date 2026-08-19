@@ -155,6 +155,18 @@ bool build() noexcept {
                         std::span(storage.progressionRows).first(progressionCount));
                 }
             }
+            if (!state::build_data::record_definitions_ready()) {
+                std::size_t recordCount = 0;
+                if (build_records(source,
+                                  storage.scratch,
+                                  std::span<const std::byte>{storage.root},
+                                  storage.child,
+                                  storage.recordRows,
+                                  recordCount)) {
+                    (void)state::build_data::publish_record_definitions(
+                        std::span(storage.recordRows).first(recordCount));
+                }
+            }
             if (!state::build_data::investment_constants_ready()) {
                 state::build_data::constants::InvestmentConstants extracted{};
                 if (read_investment_constants(source,

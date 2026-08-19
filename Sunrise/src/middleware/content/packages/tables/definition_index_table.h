@@ -88,6 +88,22 @@ inline constexpr std::size_t kStatBlockOffset = 112;
 /** The investment root holds the constants blob at this slot. */
 inline constexpr std::size_t kInvestmentConstantsSlot = 11;
 /** The investment root holds the progression definition table at this slot. */
+/** Investment root slot of the records and lore table. */
+inline constexpr std::size_t kRecordTableSlot = 72;
+/** One record row, wider than any field this pass reads. */
+inline constexpr std::size_t kRecordRowStride = 216;
+/** Unlock slot of the record's completion flag, or a non-positive value when it has none. */
+inline constexpr std::size_t kRecordCompletionFlagOffset = 100;
+
+/** Investment root slot of the five unlock flag mapping tables. */
+inline constexpr std::size_t kUnlockFlagMapTableSlot = 111;
+/** Array descriptor of the account object's flag mapping table, the bank flag runs author. */
+inline constexpr std::size_t kAccountFlagMapDescriptor = 8;
+/** One mapping row: the unlock hash, then the destination slot its object byte feeds. */
+inline constexpr std::size_t kUnlockMapRowStride = 8;
+/** Destination slot offset inside one mapping row. */
+inline constexpr std::size_t kUnlockMapDestinationSlotOffset = 4;
+
 inline constexpr std::size_t kProgressionTableSlot = 68;
 /** Element class of the progression definition table. */
 inline constexpr std::uint32_t kProgressionTableClass = 0x80807CDDU;
