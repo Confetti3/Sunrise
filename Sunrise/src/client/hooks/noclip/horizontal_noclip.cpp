@@ -23,6 +23,7 @@
 #include "../../movement/movement_settings_store.h"
 #include "../../patterns/image_scan.h"
 #include "../fly/fly.h"
+#include "../player_hold/player_hold.h"
 #include "runtime.h"
 
 namespace sunrise::client::hooks::noclip {
@@ -226,7 +227,7 @@ capped_speed(const std::array<float, kVectorLanes>& velocity, float limit) noexc
     return client::movement::get().noclipEnabled;
 }
 
-/** Runs Havok normally, then moves the character on from where it stood before the step. */
+/** Runs Havok normally, then applies movement policies and Player Hold in ownership order. */
 std::int32_t __fastcall havok_step(std::byte* simulation, float deltaTime) noexcept {
     std::array<float, kVectorLanes> nativeVelocity{};
     std::array<float, kVectorLanes> nativePosition{};
@@ -250,64 +251,58 @@ std::int32_t __fastcall havok_step(std::byte* simulation, float deltaTime) noexc
     if (rested) {
         field<std::array<float, kVectorLanes>>(before, kBodyVelocity) = {};
     }
+    const player_hold::StepContext hold = player_hold::before_havok_step();
 
     const HavokStep next = reinterpret_cast<HavokStep>(g_stepHandle.original);
     const std::int32_t result = next != nullptr ? next(simulation, deltaTime) : 0;
 
-    // The body is resolved once here for both features.
+    // The movement body is resolved once here for Fly and Noclip. Player Hold independently proves
+    // the local body through the observed physics component.
     std::byte* const body = (enabledBeforeStep || flying) ? character_body(simulation) : nullptr;
-    // A character created or replaced during this step has no matching before-state.
     const bool sameBody = hasBody && body == before;
-    // Re-read after the step, so a toggle from the interface thread lands before a position write.
     const bool noclipping = enabledBeforeStep && enabled();
-    // With both on this hook drives all three lanes. Fly holds the height, so carrying the
-    // vertical one is safe.
     const bool verticalToo = noclipping && flying;
     if (flying) {
         fly::after_step(body, verticalToo);
     }
-    // The game reads this field after the step and damages the player for carrying speed into
-    // geometry. It is shown a capped speed instead. Nothing is lost: the step it belonged to has
-    // already run, and fly writes the real speed again before the next one.
     if (flying && sameBody) {
         const std::array<float, kVectorLanes> moved =
             rested ? nativeVelocity : field<std::array<float, kVectorLanes>>(body, kBodyVelocity);
         field<std::array<float, kVectorLanes>>(body, kBodyVelocity) =
             capped_speed(moved, fly::kPublishedSpeedCap);
     }
-    if (!noclipping || !sameBody) {
-        return result;
-    }
-    const float step = std::clamp(deltaTime, 0.0F, kMaximumStepSeconds);
-    float velocitySquared = nativeVelocity[kHorizontalX] * nativeVelocity[kHorizontalX]
-                            + nativeVelocity[kHorizontalY] * nativeVelocity[kHorizontalY];
-    if (verticalToo) {
-        // Straight up has no horizontal velocity, and without this the move is dropped.
-        velocitySquared += nativeVelocity[kVertical] * nativeVelocity[kVertical];
-    }
-    if (step <= 0.0F || velocitySquared <= kMinimumVelocitySquared) {
-        return result;
-    }
-    // Moved on from where the body stood before the step, not from a position of our own. The game
-    // owns the position, so a respawn or any other placement is picked up with nothing to reset.
-    std::array<float, kVectorLanes> position =
-        field<std::array<float, kVectorLanes>>(body, kBodyPosition);
-    position[kHorizontalX] = nativePosition[kHorizontalX] + nativeVelocity[kHorizontalX] * step;
-    position[kHorizontalY] = nativePosition[kHorizontalY] + nativeVelocity[kHorizontalY] * step;
-    if (verticalToo) {
-        position[kVertical] = nativePosition[kVertical] + nativeVelocity[kVertical] * step;
-    }
-    field<std::array<float, kVectorLanes>>(body, kBodyPosition) = position;
 
-    // Collision may consume velocity before publication. Restore it so the next step still moves.
-    // The vertical lane stays resolved. A rested body already had every lane put back above.
-    if (!rested) {
-        std::array<float, kVectorLanes> wakeVelocity =
-            field<std::array<float, kVectorLanes>>(body, kBodyVelocity);
-        wakeVelocity[kHorizontalX] = nativeVelocity[kHorizontalX];
-        wakeVelocity[kHorizontalY] = nativeVelocity[kHorizontalY];
-        field<std::array<float, kVectorLanes>>(body, kBodyVelocity) = wakeVelocity;
+    if (noclipping && sameBody) {
+        const float step = std::clamp(deltaTime, 0.0F, kMaximumStepSeconds);
+        float velocitySquared = nativeVelocity[kHorizontalX] * nativeVelocity[kHorizontalX]
+                                + nativeVelocity[kHorizontalY] * nativeVelocity[kHorizontalY];
+        if (verticalToo) {
+            velocitySquared += nativeVelocity[kVertical] * nativeVelocity[kVertical];
+        }
+        if (step > 0.0F && velocitySquared > kMinimumVelocitySquared) {
+            std::array<float, kVectorLanes> position =
+                field<std::array<float, kVectorLanes>>(body, kBodyPosition);
+            position[kHorizontalX] =
+                nativePosition[kHorizontalX] + nativeVelocity[kHorizontalX] * step;
+            position[kHorizontalY] =
+                nativePosition[kHorizontalY] + nativeVelocity[kHorizontalY] * step;
+            if (verticalToo) {
+                position[kVertical] = nativePosition[kVertical] + nativeVelocity[kVertical] * step;
+            }
+            field<std::array<float, kVectorLanes>>(body, kBodyPosition) = position;
+
+            if (!rested) {
+                std::array<float, kVectorLanes> wakeVelocity =
+                    field<std::array<float, kVectorLanes>>(body, kBodyVelocity);
+                wakeVelocity[kHorizontalX] = nativeVelocity[kHorizontalX];
+                wakeVelocity[kHorizontalY] = nativeVelocity[kHorizontalY];
+                field<std::array<float, kVectorLanes>>(body, kBodyVelocity) = wakeVelocity;
+            }
+        }
     }
+
+    // Final writer: no Fly, Noclip, collision, gravity, or contact result escapes while held.
+    player_hold::after_havok_step(hold);
     return result;
 }
 

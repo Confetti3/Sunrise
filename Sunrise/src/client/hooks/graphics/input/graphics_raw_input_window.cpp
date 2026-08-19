@@ -1,8 +1,8 @@
 /**
  * Subclass of the game's hidden raw-mouse sink window. The game registers raw mouse to its own
  * `Tiger Input Window`, not to the swap-chain output window, so every mouse move and button
- * arrives there as WM_INPUT and never reaches the render window's subclass. A visible interface
- * takes those messages; every other message is forwarded unchanged.
+ * arrives there as WM_INPUT and never reaches the render window's subclass. A visible interface or
+ * active Viewer Camera takes those messages; every other message is forwarded unchanged.
  */
 
 #include <Windows.h>
@@ -11,6 +11,7 @@
 #include <bit>
 
 #include "../../../../core/ui/runtime/ui_visibility_runtime.h"
+#include "../../viewer_camera/viewer_camera.h"
 #include "input.h"
 
 namespace sunrise::client::hooks::graphics::input {
@@ -48,8 +49,22 @@ SRWLOCK g_rawLock{SRWLOCK_INIT};
     return nullptr;
 }
 
+/** Publishes one relative mouse packet to Viewer Camera. */
+void publish_viewer_mouse(LPARAM value) noexcept {
+    RAWINPUT input{};
+    UINT size = sizeof input;
+    if (GetRawInputData(
+            reinterpret_cast<HRAWINPUT>(value), RID_INPUT, &input, &size, sizeof(RAWINPUTHEADER))
+            != size
+        || input.header.dwType != RIM_TYPEMOUSE
+        || (input.data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE) != 0) {
+        return;
+    }
+    viewer::camera::add_mouse_delta(input.data.mouse.lLastX, input.data.mouse.lLastY);
+}
+
 /**
- * Takes raw input while the interface is visible and forwards everything else.
+ * Takes raw input while the interface or Viewer Camera owns it and forwards everything else.
  * @return Default result for captured raw input, or the exact original procedure result.
  */
 LRESULT CALLBACK raw_window_procedure(HWND window,
@@ -63,7 +78,12 @@ LRESULT CALLBACK raw_window_procedure(HWND window,
 
     // A captured message still goes to the default procedure, or the system keeps the raw-input
     // buffer alive. That is also the fallback when there is no procedure to forward to.
-    const bool captured = message == WM_INPUT && core::ui::runtime::snapshot().visible;
+    const bool rawInput = message == WM_INPUT;
+    const bool viewerCaptured = rawInput && viewer::camera::captures_mouse();
+    if (viewerCaptured) {
+        publish_viewer_mouse(value);
+    }
+    const bool captured = rawInput && (core::ui::runtime::snapshot().visible || viewerCaptured);
     const bool forward = !captured && original != nullptr;
     const LRESULT result = forward ? CallWindowProcW(original, window, message, word, value)
                                    : DefWindowProcW(window, message, word, value);

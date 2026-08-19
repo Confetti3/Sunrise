@@ -22,6 +22,10 @@ inline constexpr std::uint32_t kInvalidHandle = 0xFFFFFFFF;
 
 /** Camera pose block stride, indexed by player. Its vectors are plain floats. */
 inline constexpr std::size_t kCameraBlockStride = 0xC50;
+/** Native object selected as the source of the current camera frame. */
+inline constexpr std::size_t kCameraSourceHandle = 0x544;
+/** Native source classifier paired with the selected camera object. */
+inline constexpr std::size_t kCameraSourceClass = 0x548;
 /** Camera forward vector. Its default is (1,0,0), so the basis is X forward, Z up. */
 inline constexpr std::size_t kCameraForwardX = 1468;
 

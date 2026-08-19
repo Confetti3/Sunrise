@@ -19,6 +19,12 @@ void poll() noexcept;
 /** Drops the published position. */
 void reset() noexcept;
 
+/**
+ * Returns the last physics component observed for the local player.
+ * The caller must revalidate ownership and resolve any body fresh before use.
+ */
+[[nodiscard]] void* component_candidate() noexcept;
+
 /** @return The last published position, which any thread may read. */
 [[nodiscard]] Snapshot snapshot() noexcept;
 

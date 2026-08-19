@@ -49,10 +49,10 @@ template <typename Function> [[nodiscard]] Function original(HookSlot slot) noex
     return reinterpret_cast<Function>(entry);
 }
 
-/** Reports every key released to game code while the interface is open. */
+/** Reports interface-blocked or feature-claimed keys released to game code. */
 SHORT WINAPI get_key_state(int virtualKey) noexcept;
 
-/** Reports every key released to game code while the interface is open. */
+/** Reports interface-blocked or feature-claimed keys released to game code. */
 SHORT WINAPI get_async_key_state(int virtualKey) noexcept;
 
 /**

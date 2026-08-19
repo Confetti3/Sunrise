@@ -29,6 +29,8 @@
 #include "../hooks/queuez/queuez_hook_lifecycle.h"
 #include "../hooks/retail_log/retail_log_lifecycle.h"
 #include "../hooks/teleport/runtime.h"
+#include "../hooks/viewer_audio/viewer_audio.h"
+#include "../hooks/viewer_camera/viewer_camera.h"
 #include "../patterns/registry.h"
 #include "../targets/game.h"
 #include "internal.h"
@@ -176,6 +178,10 @@ void clear_game_targets() noexcept {
     (void)hooks::noclip::install();
     // Presentation owns the independent weapon and HUD policies.
     (void)hooks::presentation::install();
+    // Viewer Camera overrides only copied pose/FOV outputs and remains optional per build.
+    (void)viewer::camera::install();
+    // Audio follows only the primary Wwise listener and remains optional per build.
+    (void)viewer::audio::install();
     // Attaches whether or not the feature is on, so the interface can enable it without a restart.
     (void)hooks::infinite_ammo::install();
     // Resolves the activity config getter here; the hold itself runs on the frame tick.

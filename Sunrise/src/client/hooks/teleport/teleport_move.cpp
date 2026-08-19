@@ -18,6 +18,7 @@
 #include "../../../state/runtime/runtime.h"
 #include "../../input/window_focus.h"
 #include "../../movement/movement_settings_store.h"
+#include "../player_hold/player_hold.h"
 #include "../polled_input/runtime.h"
 #include "internal.h"
 #include "runtime.h"
@@ -164,6 +165,15 @@ void end_press() noexcept {
     if (g_pressFrames.fetch_sub(1, std::memory_order_acq_rel) <= 1) {
         hooks::polled_input::release_key();
     }
+}
+
+/** Cancels every deferred or injected move while Player Hold owns placement. */
+void cancel_for_hold() noexcept {
+    g_requested.store(false, std::memory_order_release);
+    g_requestAge.store(0, std::memory_order_relaxed);
+    g_keyDown.store(false, std::memory_order_relaxed);
+    g_pressFrames.store(0, std::memory_order_release);
+    hooks::polled_input::release_key();
 }
 
 /**
@@ -345,6 +355,21 @@ void clear_targets() noexcept {
     g_playerComponent.store(nullptr, std::memory_order_relaxed);
 }
 
+/** Copies the native source selected for one player's current camera frame. */
+bool camera_identity(std::uint32_t playerIndex, CameraIdentity& identity) noexcept {
+    identity = {};
+    if (playerIndex == kInvalidHandle || g_cameraSingleton == nullptr) {
+        return false;
+    }
+    std::byte* const camera = g_cameraSingleton();
+    if (camera == nullptr) {
+        return false;
+    }
+    const std::byte* const block = camera + kCameraBlockStride * playerIndex;
+    return read_at(block + kCameraSourceHandle, identity.sourceHandle)
+           && read_at(block + kCameraSourceClass, identity.sourceClass);
+}
+
 /** Publishes the camera forward vector for the physics tick that follows. */
 void capture_forward(std::uint32_t playerIndex) noexcept {
     if (playerIndex == kInvalidHandle || g_cameraSingleton == nullptr) {
@@ -366,6 +391,10 @@ void capture_forward(std::uint32_t playerIndex) noexcept {
 void poll_request() noexcept {
     end_press();
     expire_request();
+    if (hooks::player_hold::blocks_teleport()) {
+        cancel_for_hold();
+        return;
+    }
     const client::movement::Settings settings = client::movement::get();
     const bool usable = settings.enabled && settings.virtualKey != client::movement::kNoKey;
     g_active.store(usable, std::memory_order_relaxed);
@@ -390,6 +419,10 @@ void poll_request() noexcept {
 
 /** Moves the local player if a request is pending and this component owns them. */
 void apply_pending(void* component) noexcept {
+    if (hooks::player_hold::blocks_teleport()) {
+        cancel_for_hold();
+        return;
+    }
     if (!g_active.load(std::memory_order_relaxed) || component == nullptr
         || g_controlledHandle == nullptr) {
         return;
@@ -414,6 +447,10 @@ void apply_pending(void* component) noexcept {
 
 /** Runs the move for a request no physics tick collected. */
 void force_pending() noexcept {
+    if (hooks::player_hold::blocks_teleport()) {
+        cancel_for_hold();
+        return;
+    }
     if (!g_requested.load(std::memory_order_acquire)
         || !g_forwardValid.load(std::memory_order_acquire)
         || g_requestAge.load(std::memory_order_relaxed) < kForceAfterFrames) {
@@ -444,14 +481,25 @@ bool owns_local_player(void* component) noexcept {
            && owns_player(static_cast<std::byte*>(component));
 }
 
+/** Resolves a transient rigid body for an already qualified component. */
+void* transient_body(void* component) noexcept {
+    return component != nullptr ? body_of(static_cast<std::byte*>(component)) : nullptr;
+}
+
 /** @return True while the game publishes a controlled local player. */
 bool local_player_available() noexcept {
+    std::uint32_t controlled = kInvalidHandle;
+    return controlled_player_handle(controlled);
+}
+
+/** Copies the current controlled-object handle. */
+bool controlled_player_handle(std::uint32_t& handle) noexcept {
+    handle = kInvalidHandle;
     if (g_controlledHandle == nullptr) {
         return false;
     }
-    std::uint32_t controlled = kInvalidHandle;
-    g_controlledHandle(&controlled);
-    return controlled != kInvalidHandle;
+    g_controlledHandle(&handle);
+    return handle != kInvalidHandle;
 }
 
 /** Reads the world position of the body a physics component drives. */

@@ -11,17 +11,21 @@
 #include "../hooks/network/runtime.h"
 #include "../hooks/noclip/runtime.h"
 #include "../hooks/package_trust/package_trust_bypass.h"
+#include "../hooks/player_hold/player_hold.h"
 #include "../hooks/polled_input/runtime.h"
 #include "../hooks/presentation/presentation.h"
 #include "../hooks/queuez/queuez_hook_lifecycle.h"
 #include "../hooks/retail_log/retail_log_lifecycle.h"
 #include "../hooks/teleport/runtime.h"
+#include "../hooks/viewer_audio/viewer_audio.h"
+#include "../hooks/viewer_camera/viewer_camera.h"
 #include "../inactivity/inactivity_settings_store.h"
 #include "../movement/movement_settings_store.h"
 #include "../player/player_settings_store.h"
 #include "../targets/game.h"
 #include "../targets/steam_targets.h"
 #include "../ui/runtime/client_ui_module_runtime.h"
+#include "../viewer/viewer_camera_settings_store.h"
 #include "internal.h"
 #include "runtime.h"
 
@@ -33,6 +37,7 @@ bool initialize(void* module) noexcept {
     movement::initialize(module);
     player::initialize(module);
     inactivity::initialize(module);
+    viewer::initialize(module);
     return ui::runtime::initialize();
 }
 
@@ -46,7 +51,22 @@ bool shutdown() noexcept {
         ReleaseSRWLockExclusive(&runtime::g_lock);
         return false;
     }
-    // Detached after presentation, so no later frame can apply the cursor policy.
+    if (!viewer::audio::uninstall()) {
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::error,
+                         "ev=shutdown stage=viewer_audio result=fail");
+        ReleaseSRWLockExclusive(&runtime::g_lock);
+        return false;
+    }
+    if (!viewer::camera::uninstall()) {
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::error,
+                         "ev=shutdown stage=viewer_camera result=fail");
+        ReleaseSRWLockExclusive(&runtime::g_lock);
+        return false;
+    }
+    hooks::player_hold::reset();
+    // Viewer Camera no longer owns input, so the shared input hooks can now detach.
     hooks::cursor::uninstall();
     hooks::polled_input::uninstall();
     if (!hooks::presentation::uninstall()) {
@@ -112,6 +132,7 @@ bool shutdown() noexcept {
     runtime::g_platformStage = runtime::StageState::pending;
     ui::runtime::shutdown();
     // The reverse of the order the stores initialize in.
+    viewer::shutdown();
     inactivity::shutdown();
     player::shutdown();
     movement::shutdown();

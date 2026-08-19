@@ -90,6 +90,11 @@ void reset() noexcept {
     g_present.store(false, std::memory_order_release);
 }
 
+/** Returns the last locally-owned component candidate. */
+void* component_candidate() noexcept {
+    return g_component.load(std::memory_order_acquire);
+}
+
 /** @return The last published position. */
 Snapshot snapshot() noexcept {
     Snapshot value{};

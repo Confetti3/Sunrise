@@ -95,6 +95,11 @@ void clear_action_keys() noexcept {
     g_scanCodes = nullptr;
 }
 
+/** @return True after both authored-action key tables have been resolved. */
+bool action_keys_ready() noexcept {
+    return g_virtualKeys != nullptr && g_scanCodes != nullptr;
+}
+
 /** Turns one authored binding into the virtual key the scan will read. */
 std::uint32_t action_key(std::uint16_t binding) noexcept {
     // The key code is the low byte. The bits above it are modifiers, which the tables do not index.

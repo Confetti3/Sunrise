@@ -19,6 +19,12 @@ using ControlledHandle = std::uint32_t* (*)(std::uint32_t*);
 /** Returns the camera pose block array. The pointer in its global is obfuscated, so we call it. */
 using CameraSingleton = std::byte* (*)();
 
+/** Copied identity of the native source selected for one player's camera frame. */
+struct CameraIdentity {
+    std::uint32_t sourceHandle{};
+    std::uint32_t sourceClass{};
+};
+
 /**
  * Publishes the two functions the hooks call.
  * @param controlled Writes the local player's object handle.
@@ -59,6 +65,9 @@ void force_pending() noexcept;
 /** Drops both key tables. */
 void clear_action_keys() noexcept;
 
+/** @return True after both authored-action key tables have been resolved. */
+[[nodiscard]] bool action_keys_ready() noexcept;
+
 /**
  * Turns one authored binding into the virtual key the scan will read.
  * @param binding Input code taken from an authored binding half.
@@ -87,8 +96,17 @@ void apply_pending(void* component) noexcept;
  */
 [[nodiscard]] bool owns_local_player(void* component) noexcept;
 
+/**
+ * Resolves the current rigid body for an already qualified component.
+ * The result is transient game memory and must not outlive the caller's engine callback.
+ */
+[[nodiscard]] void* transient_body(void* component) noexcept;
+
 /** @return True while the game publishes a controlled local player. */
 [[nodiscard]] bool local_player_available() noexcept;
+
+/** Copies the current controlled-object handle without retaining a gameplay pointer. */
+[[nodiscard]] bool controlled_player_handle(std::uint32_t& handle) noexcept;
 
 /**
  * Reads the world position of the body a physics component drives.
@@ -128,6 +146,13 @@ void apply_pending(void* component) noexcept;
  * @return True when the body was found and written.
  */
 [[nodiscard]] bool write_velocity(void* component, const Vector& velocity) noexcept;
+
+/**
+ * Copies the native source selected for one player's current camera frame.
+ * @param playerIndex Camera block index observed by the owning callback.
+ * @param identity Receives scalar source identity only.
+ */
+[[nodiscard]] bool camera_identity(std::uint32_t playerIndex, CameraIdentity& identity) noexcept;
 
 /**
  * The camera hook is the only site that sees the pose block, so it publishes the vector here.
