@@ -165,21 +165,31 @@ bool shutdown() noexcept {
         ReleaseSRWLockExclusive(&g_runtimeLock);
         return true;
     }
+    log::write(log::Channel::core, log::Level::debug, "ev=shutdown stage=client phase=begin");
     if (!client::shutdown()) {
         // Server and State must remain valid while any Client hook is attached.
         ReleaseSRWLockExclusive(&g_runtimeLock);
         return false;
     }
+    log::write(log::Channel::core, log::Level::debug, "ev=shutdown stage=client result=ok");
     g_initialized.store(false, std::memory_order_release);
+    log::write(log::Channel::core, log::Level::debug, "ev=shutdown stage=server phase=begin");
     server::shutdown();
+    log::write(log::Channel::core, log::Level::debug, "ev=shutdown stage=server result=ok");
+    log::write(log::Channel::core, log::Level::debug, "ev=shutdown stage=middleware phase=begin");
     middleware::shutdown();
+    log::write(log::Channel::core, log::Level::debug, "ev=shutdown stage=middleware result=ok");
+    log::write(log::Channel::core, log::Level::debug, "ev=shutdown stage=state phase=begin");
     state::content_manifest::shutdown();
     state::shutdown();
     state::entitlements::clear();
+    log::write(log::Channel::core, log::Level::debug, "ev=shutdown stage=state result=ok");
+    log::write(log::Channel::core, log::Level::debug, "ev=shutdown stage=core_ui phase=begin");
     ui::modules::logs::shutdown();
     ui::modules::hud::shutdown();
     ui::modules::registry::shutdown();
     ui::runtime::shutdown();
+    log::write(log::Channel::core, log::Level::debug, "ev=shutdown stage=core_ui result=ok");
     log::write(log::Channel::core, log::Level::info, "ev=shutdown result=ok");
     state::unlocks::clear();
     log::shutdown();

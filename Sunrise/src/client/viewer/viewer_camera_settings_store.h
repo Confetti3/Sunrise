@@ -24,6 +24,15 @@ inline constexpr float kMinimumFov = 20.0F;
 inline constexpr float kMaximumFov = 150.0F;
 inline constexpr std::size_t kBookmarkCount = 4;
 inline constexpr std::size_t kVectorLanes = 3;
+inline constexpr float kDefaultInspectorLeftWidth = 300.0F;
+inline constexpr float kMinimumInspectorLeftWidth = 220.0F;
+inline constexpr float kMaximumInspectorLeftWidth = 520.0F;
+inline constexpr float kDefaultInspectorRightWidth = 350.0F;
+inline constexpr float kMinimumInspectorRightWidth = 260.0F;
+inline constexpr float kMaximumInspectorRightWidth = 620.0F;
+inline constexpr float kDefaultInspectorBottomHeight = 210.0F;
+inline constexpr float kMinimumInspectorBottomHeight = 120.0F;
+inline constexpr float kMaximumInspectorBottomHeight = 480.0F;
 
 struct Bookmark {
     std::array<float, kVectorLanes> position{};
@@ -40,8 +49,12 @@ struct Settings {
     float precisionMultiplier{kDefaultPrecisionMultiplier};
     float mouseSensitivity{kDefaultMouseSensitivity};
     float fov{kNativeFov};
+    float inspectorLeftWidth{kDefaultInspectorLeftWidth};
+    float inspectorRightWidth{kDefaultInspectorRightWidth};
+    float inspectorBottomHeight{kDefaultInspectorBottomHeight};
     bool hideWeaponOnEnter{};
     bool removeHudOnEnter{};
+    bool inspectorBottomCollapsed{};
     std::array<Bookmark, kBookmarkCount> bookmarks{};
 };
 

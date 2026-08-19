@@ -4,6 +4,8 @@
 
 #include <dxgi.h>
 
+#include "graphics_frame_capture.h"
+
 namespace sunrise::client::hooks::graphics::renderer {
 
 /** Draws the UI frame, if any, for a checked swap chain. */
@@ -23,6 +25,9 @@ void present_result(IDXGISwapChain* swapChain, HRESULT result) noexcept;
 
 /** @return True once a chosen swap chain has started all UI resources. */
 [[nodiscard]] bool active() noexcept;
+
+/** @return Current captured game frame. Call only from the renderer-owned UI frame. */
+[[nodiscard]] frame_capture::View captured_frame_locked() noexcept;
 
 /**
  * Feeds one window message into the live Dear ImGui context.

@@ -184,6 +184,28 @@ void clear_session(Session& session) noexcept {
 
 } // namespace
 
+/** Copies the newest private ActivityClient binding under the BAP session lock. */
+bool snapshot_private_activity(ActivitySnapshot& output) noexcept {
+    output = {};
+    bool found = false;
+    AcquireSRWLockShared(&g_lock);
+    for (const Session& session : g_sessions) {
+        const ActivityClientBinding& activity = session.activity;
+        if (session.id == 0 || !session.authenticated
+            || activity.role != ActivityClientRole::privateCurrent
+            || activity.session.sessionId == state::activity::kAbsentSessionId
+            || (found && activity.session.createdRevision <= output.binding.createdRevision)) {
+            continue;
+        }
+        output.binding = activity.session;
+        output.bindingGeneration = activity.bindingGeneration;
+        output.advertisedRegion = activity.advertisedRegion;
+        found = true;
+    }
+    ReleaseSRWLockShared(&g_lock);
+    return found;
+}
+
 /** Applies one serialized BAP connection lifecycle event. */
 bool consume(const client::network::BapRequest& request,
              client::network::BapResponse& response) noexcept {

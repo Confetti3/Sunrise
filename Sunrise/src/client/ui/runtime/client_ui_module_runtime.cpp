@@ -9,6 +9,7 @@
 #include "../movement/movement_panel.h"
 #include "../player/player_panel.h"
 #include "../viewer/viewer_panel.h"
+#include "../world_inspector/world_inspector.h"
 
 namespace sunrise::client::ui::runtime {
 namespace {
@@ -32,6 +33,7 @@ core::ui::modules::registry::PageRegistration g_playerPage;
 
 /** @return True when all Client modules own their Core UI registry slots. */
 bool initialize() noexcept {
+    world_inspector::initialize();
     // Registered after movement, which is the order the menu lists them in.
     const bool movementOwned = g_movementPage.acquire(
         core::ui::modules::Owner::client, kMovementStableId, kMovementDisplayName, &movement::draw);
@@ -47,6 +49,7 @@ bool initialize() noexcept {
 
 /** Removes the Client modules from the Core UI registry. */
 void shutdown() noexcept {
+    world_inspector::shutdown();
     core::ui::modules::hud::set_extension(nullptr);
     g_playerPage.release();
     g_viewerPage.release();

@@ -27,6 +27,7 @@ struct ClipboardState {
     std::array<char, kMaximumClipboardBytes> payload{};
     std::size_t payloadBytes{};
     CopyStatus status{CopyStatus::idle};
+    bool notificationPosted{};
     bool dispatching{};
     bool cancelDispatchResult{};
 };
@@ -132,9 +133,56 @@ bool request_copy(const log::view::Result& visible) noexcept {
     write_payload(visible, g_clipboard.payload.data());
     g_clipboard.payloadBytes = payloadBytes;
     g_clipboard.status = CopyStatus::pending;
+    g_clipboard.notificationPosted = false;
     g_clipboard.cancelDispatchResult = false;
     ReleaseSRWLockExclusive(&g_clipboard.lock);
     return true;
+}
+
+/** Queues one exact text payload without calling Win32 from the render lock. */
+bool request_copy(std::string_view text) noexcept {
+    if (text.size() >= kMaximumClipboardBytes || text.find('\0') != std::string_view::npos) {
+        return false;
+    }
+
+    AcquireSRWLockExclusive(&g_clipboard.lock);
+    if (g_clipboard.dispatching) {
+        ReleaseSRWLockExclusive(&g_clipboard.lock);
+        return false;
+    }
+    clear_payload_locked();
+    if (!text.empty()) {
+        std::memcpy(g_clipboard.payload.data(), text.data(), text.size());
+    }
+    g_clipboard.payload[text.size()] = '\0';
+    g_clipboard.payloadBytes = text.size() + kClipboardTerminatorBytes;
+    g_clipboard.status = CopyStatus::pending;
+    g_clipboard.notificationPosted = false;
+    g_clipboard.cancelDispatchResult = false;
+    ReleaseSRWLockExclusive(&g_clipboard.lock);
+    return true;
+}
+
+/** Posts one window-thread dispatch message for pending clipboard work. */
+void notify_pending_copy(HWND owner, UINT message) noexcept {
+    AcquireSRWLockExclusive(&g_clipboard.lock);
+    if (g_clipboard.status != CopyStatus::pending || g_clipboard.notificationPosted) {
+        ReleaseSRWLockExclusive(&g_clipboard.lock);
+        return;
+    }
+    if (owner == nullptr || IsWindow(owner) == FALSE || message == 0) {
+        clear_payload_locked();
+        g_clipboard.status = CopyStatus::failed;
+        ReleaseSRWLockExclusive(&g_clipboard.lock);
+        return;
+    }
+    g_clipboard.notificationPosted = true;
+    if (PostMessageW(owner, message, 0, 0) == FALSE) {
+        g_clipboard.notificationPosted = false;
+        g_clipboard.status = CopyStatus::failed;
+        clear_payload_locked();
+    }
+    ReleaseSRWLockExclusive(&g_clipboard.lock);
 }
 
 /** @return State of the last explicit clipboard request, read under the lock. */
@@ -155,11 +203,13 @@ bool dispatch_pending_copy(HWND owner, CopyAction action) noexcept {
     if (owner == nullptr || IsWindow(owner) == FALSE || action == nullptr) {
         clear_payload_locked();
         g_clipboard.status = CopyStatus::failed;
+        g_clipboard.notificationPosted = false;
         ReleaseSRWLockExclusive(&g_clipboard.lock);
         return false;
     }
 
     g_clipboard.dispatching = true;
+    g_clipboard.notificationPosted = false;
     g_clipboard.cancelDispatchResult = false;
     const std::string_view payload(g_clipboard.payload.data(), g_clipboard.payloadBytes);
     ReleaseSRWLockExclusive(&g_clipboard.lock);
@@ -186,6 +236,7 @@ void dispatch_pending_copy(HWND owner) noexcept {
 void cancel_pending_copy() noexcept {
     AcquireSRWLockExclusive(&g_clipboard.lock);
     g_clipboard.status = CopyStatus::idle;
+    g_clipboard.notificationPosted = false;
     if (g_clipboard.dispatching) {
         // The bridge owns the buffer until it returns; only its stale result is dropped.
         g_clipboard.cancelDispatchResult = true;

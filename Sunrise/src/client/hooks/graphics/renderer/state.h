@@ -7,6 +7,7 @@
 #include <dxgi.h>
 
 #include "../textures/graphics_texture_upload.h"
+#include "graphics_frame_capture.h"
 
 namespace sunrise::client::hooks::graphics::renderer {
 
@@ -18,6 +19,8 @@ struct Resources {
     ID3D11RenderTargetView* renderTarget{};
     /** Bundled logo sheet, uploaded on this device for the interface to draw. */
     textures::Uploaded logoSheet{};
+    /** Reusable game-frame copy shown inside the inspector viewport. */
+    frame_capture::Storage frameCapture{};
     HWND window{};
     bool layoutInitialized{};
     bool win32BackendInitialized{};

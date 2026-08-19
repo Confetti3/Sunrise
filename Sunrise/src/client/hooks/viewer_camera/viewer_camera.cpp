@@ -24,6 +24,7 @@
 #include "../../player/player_position.h"
 #include "../../player/player_settings_store.h"
 #include "../../viewer/viewer_camera_settings_store.h"
+#include "../../viewer/viewer_input_ownership.h"
 #include "../polled_input/runtime.h"
 #include "../teleport/runtime.h"
 
@@ -31,6 +32,8 @@ namespace sunrise::client::viewer::camera {
 namespace {
 
 namespace bindings = state::account::settings::bindings;
+namespace window_input = client::input;
+namespace workspace_input = client::viewer::input;
 
 constexpr std::string_view kFovCopyText =
     "40 53 48 83 EC 20 E8 ? ? ? ? 48 8B D8 48 85 C0 74 1F F3 0F 10 80 D4 05 00 00 "
@@ -70,6 +73,7 @@ struct RuntimeState {
     std::uint32_t controlledHandle{kInvalidPlayer};
     hooks::teleport::CameraIdentity cameraIdentity{};
     std::uint64_t generation{};
+    std::uint64_t activeSession{};
     std::uint64_t lastTick{};
     bool active{};
     bool applied{};
@@ -305,6 +309,7 @@ bool __fastcall copy_pose(float* position, float* forward, float* up) noexcept {
         if (session == 0) {
             session = g_nextSession.fetch_add(1, std::memory_order_acq_rel);
         }
+        g_state.activeSession = session;
         g_activeSession.store(session, std::memory_order_release);
         g_active.store(true, std::memory_order_release);
         publish_pose_locked();
@@ -453,6 +458,7 @@ void stop_runtime(Failure failure) noexcept {
     g_state.playerIndex = kInvalidPlayer;
     g_state.controlledHandle = kInvalidPlayer;
     g_state.cameraIdentity = {};
+    g_state.activeSession = 0;
     g_state.lastTick = 0;
     ++g_state.generation;
     publish_pose_locked();
@@ -462,6 +468,7 @@ void stop_runtime(Failure failure) noexcept {
     g_mouseX.store(0, std::memory_order_release);
     g_mouseY.store(0, std::memory_order_release);
     hooks::polled_input::clear_claimed_keys();
+    workspace_input::reset();
     if (failure != Failure::none) {
         g_failure.store(failure, std::memory_order_release);
     }
@@ -481,7 +488,7 @@ void finish_exit(Failure failure = Failure::none) noexcept {
 
 void update_toggle(const client::viewer::Settings& settings, bool uiVisible) noexcept {
     const bool down =
-        settings.toggleKey != kNoKey && input::game_focused()
+        settings.toggleKey != kNoKey && window_input::game_focused()
         && (GetAsyncKeyState(static_cast<int>(settings.toggleKey)) & kKeyHeldBit) != 0;
     AcquireSRWLockExclusive(&g_stateLock);
     const bool pressed = down && !g_state.toggleDown;
@@ -505,7 +512,8 @@ void update_motion(const client::viewer::Settings& settings, bool uiVisible) noe
     const std::uint64_t elapsed =
         g_state.lastTick == 0 ? 0 : std::min(now - g_state.lastTick, kMaximumFrameMilliseconds);
     g_state.lastTick = now;
-    if (uiVisible || !input::game_focused()) {
+    if ((uiVisible && !workspace_input::workspace_navigation())
+        || !window_input::game_focused()) {
         ReleaseSRWLockExclusive(&g_stateLock);
         return;
     }
@@ -705,8 +713,10 @@ void add_mouse_delta(long x, long y) noexcept {
 bool captures_mouse() noexcept {
     return g_installed.load(std::memory_order_acquire)
            && g_requested.load(std::memory_order_acquire)
-           && !g_stopping.load(std::memory_order_acquire) && !core::ui::runtime::snapshot().visible
-           && input::game_focused();
+           && !g_stopping.load(std::memory_order_acquire)
+           && (!core::ui::runtime::snapshot().visible
+               || workspace_input::workspace_navigation())
+           && window_input::game_focused();
 }
 
 void request_active(bool active) noexcept {
@@ -787,6 +797,7 @@ Status status() noexcept {
     snapshot.pose = g_state.pose;
     snapshot.pose.fov = g_outputFov.load(std::memory_order_acquire);
     snapshot.generation = g_state.generation;
+    snapshot.activeSession = g_state.activeSession;
     snapshot.active = g_state.active;
     snapshot.applied = g_state.applied;
     ReleaseSRWLockShared(&g_stateLock);

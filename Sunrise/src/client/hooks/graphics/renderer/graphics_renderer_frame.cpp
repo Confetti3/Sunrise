@@ -13,6 +13,7 @@
 #include "../../../../core/ui/runtime/ui_visibility_runtime.h"
 #include "../../../../core/ui/scaling/dpi/ui_dpi_scaling.h"
 #include "../../../../core/ui/theme/sunrise_ui_theme.h"
+#include "../../../ui/world_inspector/world_inspector.h"
 #include "../input/input.h"
 #include "graphics_renderer_report.h"
 #include "state.h"
@@ -25,6 +26,8 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND window,
 namespace sunrise::client::hooks::graphics::renderer {
 namespace {
 
+/** The fitted inspector clears every back-buffer pixel before its captured frame is composited. */
+constexpr std::array<float, 4> kInspectorClearColor{0.025F, 0.029F, 0.035F, 1.0F};
 /** The overlay uses one render target, set only while Dear ImGui draws. */
 constexpr UINT kOverlayRenderTargetCount = 1;
 // A visible UI eats this whole range. A range that stopped short of the wheel or the extra
@@ -32,6 +35,15 @@ constexpr UINT kOverlayRenderTargetCount = 1;
 static_assert(WM_MOUSEWHEEL <= WM_MOUSELAST);
 static_assert(WM_MOUSEHWHEEL <= WM_MOUSELAST);
 static_assert(WM_XBUTTONDBLCLK <= WM_MOUSELAST);
+
+[[nodiscard]] bool output_surface_usable(HWND window) noexcept {
+    if (window == nullptr || IsIconic(window) != FALSE) {
+        return false;
+    }
+    RECT client{};
+    return GetClientRect(window, &client) != FALSE && client.right > client.left
+           && client.bottom > client.top;
+}
 
 /** @param message Win32 message ID. @return True for ordinary client-area mouse input. */
 [[nodiscard]] bool is_mouse_input(UINT message) noexcept {
@@ -91,8 +103,9 @@ void transition_input_visibility_locked(bool visible) noexcept {
 /**
  * Draws Dear ImGui data, then puts back every output-merger target that was set before.
  * @param drawData Completed frame draw data.
+ * @param clearSurface True when the fitted inspector must hide the original full-screen frame.
  */
-void draw_data(ImDrawData* drawData) noexcept {
+void draw_data(ImDrawData* drawData, bool clearSurface) noexcept {
     if (drawData == nullptr) {
         return;
     }
@@ -103,6 +116,9 @@ void draw_data(ImDrawData* drawData) noexcept {
 
     ID3D11RenderTargetView* overlayTarget = g_resources.renderTarget;
     g_resources.context->OMSetRenderTargets(kOverlayRenderTargetCount, &overlayTarget, nullptr);
+    if (clearSurface) {
+        g_resources.context->ClearRenderTargetView(overlayTarget, kInspectorClearColor.data());
+    }
     ImGui_ImplDX11_RenderDrawData(drawData);
     g_resources.context->OMSetRenderTargets(
         static_cast<UINT>(priorTargets.size()), priorTargets.data(), priorDepth);
@@ -126,6 +142,12 @@ void render_frame_locked() noexcept {
     if (!fully_active_locked()) {
         return;
     }
+    if (!output_surface_usable(g_resources.window)) {
+        frame_capture::release(g_resources.frameCapture);
+        ui::world_inspector::suspend();
+        transition_input_visibility_locked(false);
+        return;
+    }
     if (core::ui::scaling::dpi::update(g_resources.window)) {
         // Style and text scale change together, before the backend sets up the frame.
         core::ui::theme::apply();
@@ -136,6 +158,13 @@ void render_frame_locked() noexcept {
         }
     }
     const core::ui::runtime::VisibilitySnapshot visibility = core::ui::runtime::snapshot();
+    const bool inspectorSelected = ui::world_inspector::visible();
+    if (inspectorSelected && visibility.visible) {
+        (void)frame_capture::update(g_resources.device,
+                                    g_resources.context,
+                                    g_resources.swapChain,
+                                    g_resources.frameCapture);
+    }
     transition_input_visibility_locked(visibility.visible);
     ImGui_ImplDX11_NewFrame();
     ImGui_ImplWin32_NewFrame();
@@ -143,8 +172,10 @@ void render_frame_locked() noexcept {
     // A hidden surface still draws until its close animation ends, so the layout decides. The
     // HUD, running-work and notice overlays draw whether the surface is open or not. The HUD
     // goes first, so the surface stays above it when the two meet.
-    const bool hudDrawn = core::ui::hud::draw(visibility.enabled);
-    const bool surfaceDrawn = core::ui::layout::render(visibility.visible);
+    const bool suppressHud = inspectorSelected && visibility.visible;
+    const bool hudDrawn = !suppressHud && core::ui::hud::draw(visibility.enabled);
+    const bool surfaceDrawn = inspectorSelected ? ui::world_inspector::render(visibility.visible)
+                                                : core::ui::layout::render(visibility.visible);
     const bool busyDrawn = core::ui::busy::draw();
     const bool noticeDrawn = core::ui::notice::draw();
     if (!hudDrawn && !surfaceDrawn && !busyDrawn && !noticeDrawn) {
@@ -153,7 +184,11 @@ void render_frame_locked() noexcept {
         return;
     }
     ImGui::Render();
-    draw_data(ImGui::GetDrawData());
+    draw_data(ImGui::GetDrawData(), suppressHud);
+}
+
+frame_capture::View captured_frame_locked() noexcept {
+    return frame_capture::view(g_resources.frameCapture);
 }
 
 /** Feeds one ordinary window message into the active Dear ImGui context. */

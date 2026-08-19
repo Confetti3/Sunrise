@@ -2,6 +2,7 @@
 
 #include <dxgi.h>
 
+#include "../../../ui/world_inspector/world_inspector.h"
 #include "graphics_renderer_report.h"
 #include "state.h"
 
@@ -21,8 +22,10 @@ void before_surface_change(IDXGISwapChain* swapChain) noexcept {
     AcquireSRWLockExclusive(&g_rendererLock);
     if (g_resources.swapChain == swapChain) {
         if (g_resources.activeSurfaceChanges == 0) {
-            // The first of any overlapping calls drops the RTV until they have all returned.
+            // The first of any overlapping calls drops views tied to the retiring surface.
             release_render_target(g_resources);
+            frame_capture::release(g_resources.frameCapture);
+            ui::world_inspector::suspend();
         }
         ++g_resources.activeSurfaceChanges;
     }

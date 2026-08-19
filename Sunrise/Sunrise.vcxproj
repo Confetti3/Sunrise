@@ -198,6 +198,7 @@
     <ClCompile Include="src\client\hooks\graphics\renderer\selection\graphics_swap_chain_selection.cpp" />
     <ClCompile Include="src\client\hooks\graphics\renderer\graphics_renderer_lifecycle.cpp" />
     <ClCompile Include="src\client\hooks\graphics\renderer\graphics_renderer_frame.cpp" />
+    <ClCompile Include="src\client\hooks\graphics\renderer\graphics_frame_capture.cpp" />
     <ClCompile Include="src\client\hooks\graphics\renderer\graphics_renderer_report.cpp" />
     <ClCompile Include="src\client\hooks\egress\dns\egress_dns_replacements.cpp" />
     <ClCompile Include="src\client\hooks\egress\resolver\egress_resolver_forward.cpp" />
@@ -220,7 +221,12 @@
     <ClCompile Include="src\client\ui\hud\hud_panel.cpp" />
     <ClCompile Include="src\client\ui\movement\movement_panel.cpp" />
     <ClCompile Include="src\client\ui\viewer\viewer_panel.cpp" />
+    <ClCompile Include="src\client\ui\world_inspector\world_inspector.cpp" />
+    <ClCompile Include="src\client\ui\world_inspector\world_inspector_viewport.cpp" />
+    <ClCompile Include="src\client\inspection\world_inspection_model.cpp" />
+    <ClCompile Include="src\client\inspection\providers\spawn_inspection_provider.cpp" />
     <ClCompile Include="src\client\viewer\viewer_camera_settings_store.cpp" />
+    <ClCompile Include="src\client\viewer\viewer_input_ownership.cpp" />
     <ClCompile Include="src\client\movement\movement_settings_store.cpp" />
     <ClCompile Include="src\client\inactivity\inactivity_settings_store.cpp" />
     <ClCompile Include="src\client\hooks\inactivity\inactivity_override.cpp" />
@@ -912,6 +918,11 @@
     <ClInclude Include="src\client\runtime\runtime.h" />
     <ClInclude Include="src\client\movement\movement_settings_store.h" />
     <ClInclude Include="src\client\viewer\viewer_camera_settings_store.h" />
+    <ClInclude Include="src\client\viewer\viewer_input_ownership.h" />
+    <ClInclude Include="src\client\inspection\world_inspection_model.h" />
+    <ClInclude Include="src\client\inspection\providers\spawn_inspection_provider.h" />
+    <ClInclude Include="src\client\ui\world_inspector\world_inspector.h" />
+    <ClInclude Include="src\client\ui\world_inspector\world_inspector_viewport.h" />
     <ClInclude Include="src\client\inactivity\inactivity_settings_store.h" />
     <ClInclude Include="src\client\hooks\inactivity\inactivity_override.h" />
     <ClInclude Include="src\client\ui\player\player_panel.h" />
@@ -940,6 +951,7 @@
     <ClInclude Include="src\client\hooks\graphics\textures\graphics_texture_upload.h" />
     <ClInclude Include="src\client\hooks\graphics\renderer\renderer.h" />
     <ClInclude Include="src\client\hooks\graphics\renderer\state.h" />
+    <ClInclude Include="src\client\hooks\graphics\renderer\graphics_frame_capture.h" />
     <ClInclude Include="src\client\hooks\graphics\renderer\graphics_renderer_report.h" />
     <ClInclude Include="src\client\ui\runtime\client_ui_module_runtime.h" />
     <ClInclude Include="src\client\memory\current_process_memory.h" />

@@ -35,6 +35,7 @@ struct Status {
     Pose pose{};
     Failure failure{Failure::none};
     std::uint64_t generation{};
+    std::uint64_t activeSession{};
     bool installed{};
     bool requested{};
     bool active{};

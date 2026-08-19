@@ -44,6 +44,12 @@ using CopyAction = bool (*)(HWND owner, std::string_view payload) noexcept;
  */
 [[nodiscard]] bool request_copy(const log::view::Result& visible) noexcept;
 
+/** Queues one exact text payload without calling Win32 from the render lock. */
+[[nodiscard]] bool request_copy(std::string_view text) noexcept;
+
+/** Posts one window-thread dispatch message for pending clipboard work. */
+void notify_pending_copy(HWND owner, UINT message) noexcept;
+
 /** @return State of the last explicit clipboard request, read under the lock. */
 [[nodiscard]] CopyStatus copy_status() noexcept;
 

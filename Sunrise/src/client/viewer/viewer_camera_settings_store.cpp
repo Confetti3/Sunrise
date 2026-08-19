@@ -42,7 +42,15 @@ bool g_pathResolved{};
         || !std::isfinite(settings.mouseSensitivity)
         || settings.mouseSensitivity < kMinimumMouseSensitivity
         || settings.mouseSensitivity > kMaximumMouseSensitivity || !std::isfinite(settings.fov)
-        || !valid_fov(settings.fov)) {
+        || !valid_fov(settings.fov) || !std::isfinite(settings.inspectorLeftWidth)
+        || settings.inspectorLeftWidth < kMinimumInspectorLeftWidth
+        || settings.inspectorLeftWidth > kMaximumInspectorLeftWidth
+        || !std::isfinite(settings.inspectorRightWidth)
+        || settings.inspectorRightWidth < kMinimumInspectorRightWidth
+        || settings.inspectorRightWidth > kMaximumInspectorRightWidth
+        || !std::isfinite(settings.inspectorBottomHeight)
+        || settings.inspectorBottomHeight < kMinimumInspectorBottomHeight
+        || settings.inspectorBottomHeight > kMaximumInspectorBottomHeight) {
         return false;
     }
     for (const Bookmark& bookmark : settings.bookmarks) {
@@ -129,8 +137,12 @@ void parse(std::string_view text, Settings& output) noexcept {
     parse_float(text, "\"precision_multiplier\"", output.precisionMultiplier);
     parse_float(text, "\"mouse_sensitivity\"", output.mouseSensitivity);
     parse_float(text, "\"fov\"", output.fov);
+    parse_float(text, "\"inspector_left_width\"", output.inspectorLeftWidth);
+    parse_float(text, "\"inspector_right_width\"", output.inspectorRightWidth);
+    parse_float(text, "\"inspector_bottom_height\"", output.inspectorBottomHeight);
     parse_bool(text, "\"hide_weapon_on_enter\"", output.hideWeaponOnEnter);
     parse_bool(text, "\"remove_hud_on_enter\"", output.removeHudOnEnter);
+    parse_bool(text, "\"inspector_bottom_collapsed\"", output.inspectorBottomCollapsed);
 
     for (std::size_t index = 0; index < output.bookmarks.size(); ++index) {
         Bookmark& bookmark = output.bookmarks[index];
@@ -174,16 +186,24 @@ void parse(std::string_view text, Settings& output) noexcept {
                            "  \"boost_multiplier\": %.4f,\n"
                            "  \"precision_multiplier\": %.4f,\n"
                            "  \"mouse_sensitivity\": %.6f,\n  \"fov\": %.4f,\n"
+                           "  \"inspector_left_width\": %.2f,\n"
+                           "  \"inspector_right_width\": %.2f,\n"
+                           "  \"inspector_bottom_height\": %.2f,\n"
                            "  \"hide_weapon_on_enter\": %s,\n"
-                           "  \"remove_hud_on_enter\": %s",
+                           "  \"remove_hud_on_enter\": %s,\n"
+                           "  \"inspector_bottom_collapsed\": %s",
                            static_cast<unsigned>(settings.toggleKey),
                            static_cast<double>(settings.speed),
                            static_cast<double>(settings.boostMultiplier),
                            static_cast<double>(settings.precisionMultiplier),
                            static_cast<double>(settings.mouseSensitivity),
                            static_cast<double>(settings.fov),
+                           static_cast<double>(settings.inspectorLeftWidth),
+                           static_cast<double>(settings.inspectorRightWidth),
+                           static_cast<double>(settings.inspectorBottomHeight),
                            settings.hideWeaponOnEnter ? "true" : "false",
-                           settings.removeHudOnEnter ? "true" : "false");
+                           settings.removeHudOnEnter ? "true" : "false",
+                           settings.inspectorBottomCollapsed ? "true" : "false");
     for (std::size_t index = 0; complete && index < settings.bookmarks.size(); ++index) {
         const Bookmark& bookmark = settings.bookmarks[index];
         complete = append(",\n  \"bookmark_%zu_valid\": %s,\n"

@@ -43,7 +43,13 @@ bool initialize(void* module) noexcept {
 
 /** Detaches Client hooks before clearing their resolved target entries. */
 bool shutdown() noexcept {
+    core::log::write(core::log::Channel::client,
+                     core::log::Level::debug,
+                     "ev=shutdown stage=client phase=begin");
     AcquireSRWLockExclusive(&runtime::g_lock);
+    core::log::write(core::log::Channel::client,
+                     core::log::Level::debug,
+                     "ev=shutdown stage=graphics_hooks phase=begin");
     if (!hooks::graphics::uninstall()) {
         core::log::write(core::log::Channel::client,
                          core::log::Level::error,
@@ -51,6 +57,12 @@ bool shutdown() noexcept {
         ReleaseSRWLockExclusive(&runtime::g_lock);
         return false;
     }
+    core::log::write(core::log::Channel::client,
+                     core::log::Level::debug,
+                     "ev=shutdown stage=graphics_hooks result=ok");
+    core::log::write(core::log::Channel::client,
+                     core::log::Level::debug,
+                     "ev=shutdown stage=viewer_audio phase=begin");
     if (!viewer::audio::uninstall()) {
         core::log::write(core::log::Channel::client,
                          core::log::Level::error,
@@ -58,6 +70,12 @@ bool shutdown() noexcept {
         ReleaseSRWLockExclusive(&runtime::g_lock);
         return false;
     }
+    core::log::write(core::log::Channel::client,
+                     core::log::Level::debug,
+                     "ev=shutdown stage=viewer_audio result=ok");
+    core::log::write(core::log::Channel::client,
+                     core::log::Level::debug,
+                     "ev=shutdown stage=viewer_camera phase=begin");
     if (!viewer::camera::uninstall()) {
         core::log::write(core::log::Channel::client,
                          core::log::Level::error,
@@ -65,10 +83,16 @@ bool shutdown() noexcept {
         ReleaseSRWLockExclusive(&runtime::g_lock);
         return false;
     }
+    core::log::write(core::log::Channel::client,
+                     core::log::Level::debug,
+                     "ev=shutdown stage=viewer_camera result=ok");
     hooks::player_hold::reset();
     // Viewer Camera no longer owns input, so the shared input hooks can now detach.
     hooks::cursor::uninstall();
     hooks::polled_input::uninstall();
+    core::log::write(core::log::Channel::client,
+                     core::log::Level::debug,
+                     "ev=shutdown stage=presentation phase=begin");
     if (!hooks::presentation::uninstall()) {
         core::log::write(core::log::Channel::client,
                          core::log::Level::error,
@@ -76,6 +100,12 @@ bool shutdown() noexcept {
         ReleaseSRWLockExclusive(&runtime::g_lock);
         return false;
     }
+    core::log::write(core::log::Channel::client,
+                     core::log::Level::debug,
+                     "ev=shutdown stage=presentation result=ok");
+    core::log::write(core::log::Channel::client,
+                     core::log::Level::debug,
+                     "ev=shutdown stage=network_hooks phase=begin");
     if (!hooks::network::uninstall()) {
         core::log::write(core::log::Channel::client,
                          core::log::Level::error,
@@ -83,6 +113,12 @@ bool shutdown() noexcept {
         ReleaseSRWLockExclusive(&runtime::g_lock);
         return false;
     }
+    core::log::write(core::log::Channel::client,
+                     core::log::Level::debug,
+                     "ev=shutdown stage=network_hooks result=ok");
+    core::log::write(core::log::Channel::client,
+                     core::log::Level::debug,
+                     "ev=shutdown stage=package_trust phase=begin");
     if (!hooks::package_trust::uninstall()) {
         core::log::write(core::log::Channel::client,
                          core::log::Level::error,
@@ -90,6 +126,12 @@ bool shutdown() noexcept {
         ReleaseSRWLockExclusive(&runtime::g_lock);
         return false;
     }
+    core::log::write(core::log::Channel::client,
+                     core::log::Level::debug,
+                     "ev=shutdown stage=package_trust result=ok");
+    core::log::write(core::log::Channel::client,
+                     core::log::Level::debug,
+                     "ev=shutdown stage=remaining_hooks phase=begin");
     hooks::bitmap::uninstall();
     hooks::bootflow::uninstall();
     hooks::infinite_ammo::uninstall();
@@ -97,14 +139,29 @@ bool shutdown() noexcept {
     hooks::noclip::uninstall();
     hooks::teleport::uninstall();
     hooks::queuez::uninstall();
+    core::log::write(core::log::Channel::client,
+                     core::log::Level::debug,
+                     "ev=shutdown stage=config_getter phase=begin");
     if (!hooks::config_getter::uninstall()) {
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::error,
+                         "ev=shutdown stage=config_getter result=fail");
         ReleaseSRWLockExclusive(&runtime::g_lock);
         return false;
     }
+    core::log::write(core::log::Channel::client,
+                     core::log::Level::debug,
+                     "ev=shutdown stage=assert_handler phase=begin");
     if (!hooks::assert_handler::uninstall()) {
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::error,
+                         "ev=shutdown stage=assert_handler result=fail");
         ReleaseSRWLockExclusive(&runtime::g_lock);
         return false;
     }
+    core::log::write(core::log::Channel::client,
+                     core::log::Level::debug,
+                     "ev=shutdown stage=retail_log phase=begin");
     if (!hooks::retail_log::uninstall()) {
         core::log::write(core::log::Channel::client,
                          core::log::Level::error,
@@ -112,6 +169,9 @@ bool shutdown() noexcept {
         ReleaseSRWLockExclusive(&runtime::g_lock);
         return false;
     }
+    core::log::write(core::log::Channel::client,
+                     core::log::Level::debug,
+                     "ev=shutdown stage=remaining_hooks result=ok");
     content::investment::worker::reset();
     targets::steam::clear();
     if (runtime::g_platformModule != nullptr) {
