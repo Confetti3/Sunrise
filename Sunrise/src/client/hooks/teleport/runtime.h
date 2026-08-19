@@ -87,6 +87,9 @@ void apply_pending(void* component) noexcept;
  */
 [[nodiscard]] bool owns_local_player(void* component) noexcept;
 
+/** @return True while the game publishes a controlled local player. */
+[[nodiscard]] bool local_player_available() noexcept;
+
 /**
  * Reads the world position of the body a physics component drives.
  * @param component Physics component.

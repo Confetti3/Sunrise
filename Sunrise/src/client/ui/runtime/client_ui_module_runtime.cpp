@@ -2,8 +2,10 @@
 
 #include <string_view>
 
+#include "../../../core/ui/modules/hud/hud.h"
 #include "../../../core/ui/modules/registry/ui_module_registry.h"
 #include "../../../core/ui/modules/ui_module_descriptor.h"
+#include "../hud/hud_panel.h"
 #include "../movement/movement_panel.h"
 #include "../player/player_panel.h"
 
@@ -30,11 +32,15 @@ bool initialize() noexcept {
         core::ui::modules::Owner::client, kMovementStableId, kMovementDisplayName, &movement::draw);
     const bool playerOwned = g_playerPage.acquire(
         core::ui::modules::Owner::client, kPlayerStableId, kPlayerDisplayName, &player::draw);
+    if (movementOwned && playerOwned) {
+        core::ui::modules::hud::set_extension(&hud::draw);
+    }
     return movementOwned && playerOwned;
 }
 
 /** Removes the Client modules from the Core UI registry. */
 void shutdown() noexcept {
+    core::ui::modules::hud::set_extension(nullptr);
     g_playerPage.release();
     g_movementPage.release();
 }

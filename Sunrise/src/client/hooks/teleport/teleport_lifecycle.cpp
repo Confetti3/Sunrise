@@ -17,6 +17,7 @@
 #include "../bootflow/bootflow_hook_lifecycle.h"
 #include "../fly/fly.h"
 #include "../polled_input/runtime.h"
+#include "../presentation/presentation.h"
 #include "../sword_skate/sword_skate.h"
 #include "internal.h"
 #include "runtime.h"
@@ -79,6 +80,7 @@ std::int64_t __fastcall camera_transform(std::uint32_t playerIndex) noexcept {
     const CameraTransform next = original<CameraTransform>(kCameraSlot);
     const std::int64_t result = next != nullptr ? next(playerIndex) : 0;
     capture_forward(playerIndex);
+    hooks::presentation::apply(playerIndex);
     poll_request();
     force_pending();
     // Read here, not on the physics tick: that tick stops for a player who is standing still.

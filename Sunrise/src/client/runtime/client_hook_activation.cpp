@@ -25,6 +25,7 @@
 #include "../hooks/noclip/runtime.h"
 #include "../hooks/package_trust/package_trust_bypass.h"
 #include "../hooks/polled_input/runtime.h"
+#include "../hooks/presentation/presentation.h"
 #include "../hooks/queuez/queuez_hook_lifecycle.h"
 #include "../hooks/retail_log/retail_log_lifecycle.h"
 #include "../hooks/teleport/runtime.h"
@@ -173,6 +174,8 @@ void clear_game_targets() noexcept {
     (void)hooks::teleport::install();
     // Noclip owns its Havok-step target, so a patch-specific miss cannot disable teleport.
     (void)hooks::noclip::install();
+    // Presentation owns the independent weapon and HUD policies.
+    (void)hooks::presentation::install();
     // Attaches whether or not the feature is on, so the interface can enable it without a restart.
     (void)hooks::infinite_ammo::install();
     // Resolves the activity config getter here; the hold itself runs on the frame tick.

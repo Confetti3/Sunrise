@@ -1,16 +1,31 @@
-/** The HUD page. One switch per overlay, in the order the overlays stack on screen. */
+/** The HUD page: Core overlays followed by an optional feature-owned presentation section. */
 
+#include <atomic>
 #include <cstddef>
 #include <imgui.h>
 
 #include "../../components/section/ui_section_component.h"
 #include "../../components/toggle/ui_toggle_component.h"
 #include "../../hud/overlay.h"
+#include "hud.h"
 #include "internal.h"
 
-namespace sunrise::core::ui::modules::hud::internal {
+namespace sunrise::core::ui::modules::hud {
+namespace {
 
-/** Draws the HUD page inside the active Core UI frame. */
+/** Static-lifetime callback published atomically against the render thread. */
+std::atomic<ExtensionCallback> g_extension{nullptr};
+
+} // namespace
+
+/** Publishes or removes the optional feature section. */
+void set_extension(ExtensionCallback callback) noexcept {
+    g_extension.store(callback, std::memory_order_release);
+}
+
+namespace internal {
+
+/** Draws Core overlays first, then the optional feature section. */
 void draw() noexcept {
     ImGui::TextWrapped("Overlays draw in the top-left corner while the game runs, with or "
                        "without this menu open.");
@@ -20,7 +35,6 @@ void draw() noexcept {
          ++index) {
         const auto overlay = static_cast<ui::hud::Overlay>(index);
         bool on = ui::hud::enabled(overlay);
-        // The label is unique per overlay, so it carries the control's identity on its own.
         if (components::toggle::control(ui::hud::display_name(overlay), on)) {
             ui::hud::set_enabled(overlay, on);
         }
@@ -38,6 +52,14 @@ void draw() noexcept {
             ui::hud::set_enabled(line, on);
         }
     }
+
+    const ExtensionCallback extension = g_extension.load(std::memory_order_acquire);
+    if (extension != nullptr) {
+        ImGui::Spacing();
+        ImGui::Spacing();
+        extension();
+    }
 }
 
-} // namespace sunrise::core::ui::modules::hud::internal
+} // namespace internal
+} // namespace sunrise::core::ui::modules::hud

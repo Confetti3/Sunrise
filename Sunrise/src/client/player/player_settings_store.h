@@ -5,6 +5,8 @@ namespace sunrise::client::player {
 /** Runtime player configuration. This module owns it; Core settings do not carry it. */
 struct Settings {
     bool infiniteAmmoEnabled{false};
+    bool removeHud{false};
+    bool hideWeapon{false};
 };
 
 /**

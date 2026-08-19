@@ -216,6 +216,7 @@
     <ClCompile Include="src\client\hooks\egress\winsock\transmission\egress_datagram_transmission.cpp" />
     <ClCompile Include="src\client\hooks\egress\winsock\transmission\egress_message_transmission.cpp" />
     <ClCompile Include="src\client\ui\runtime\client_ui_module_runtime.cpp" />
+    <ClCompile Include="src\client\ui\hud\hud_panel.cpp" />
     <ClCompile Include="src\client\ui\movement\movement_panel.cpp" />
     <ClCompile Include="src\client\movement\movement_settings_store.cpp" />
     <ClCompile Include="src\client\inactivity\inactivity_settings_store.cpp" />
@@ -226,6 +227,7 @@
     <ClCompile Include="src\client\hooks\noclip\horizontal_noclip.cpp" />
     <ClCompile Include="src\client\hooks\sword_skate\sword_skate.cpp" />
     <ClCompile Include="src\client\hooks\fly\fly.cpp" />
+    <ClCompile Include="src\client\hooks\presentation\presentation.cpp" />
     <ClCompile Include="src\client\hooks\infinite_ammo\infinite_ammo.cpp" />
     <ClCompile Include="src\client\input\window_focus.cpp" />
     <ClCompile Include="src\client\hooks\teleport\teleport_lifecycle.cpp" />
@@ -915,6 +917,8 @@
     <ClInclude Include="src\client\input\window_focus.h" />
     <ClInclude Include="src\client\hooks\teleport\internal.h" />
     <ClInclude Include="src\client\hooks\teleport\runtime.h" />
+    <ClInclude Include="src\client\hooks\presentation\presentation.h" />
+    <ClInclude Include="src\client\ui\hud\hud_panel.h" />
     <ClInclude Include="src\client\ui\movement\movement_panel.h" />
     <ClInclude Include="src\client\runtime\internal.h" />
     <ClInclude Include="src\client\runtime\host\game_host_classification.h" />
