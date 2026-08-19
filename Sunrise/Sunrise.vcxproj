@@ -470,6 +470,7 @@
     <ClCompile Include="src\state\build_data\inventory\buckets\inventory_bucket_catalog.cpp" />
     <ClCompile Include="src\state\build_data\runtime\build_data_catalog_runtime.cpp" />
     <ClCompile Include="src\state\build_data\named_build_data_runtime.cpp" />
+    <ClCompile Include="src\state\build_data\socket_entry_buckets\socket_entry_bucket_catalog.cpp" />
     <ClCompile Include="src\state\build_data\socket_entry_lists\socket_entry_list_catalog.cpp" />
     <ClCompile Include="src\client\content\handles\handle_resolver.cpp" />
     <ClCompile Include="src\client\content\activity\activity_tag_reader.cpp" />
@@ -793,6 +794,7 @@
     <ClCompile Include="src\server\gameplay\physics\world\world_types.cpp" />
     <ClCompile Include="src\middleware\gameplay\descriptor\join_descriptor.cpp" />
     <ClCompile Include="src\server\gameplay\gameplay_advertisement.cpp" />
+    <ClCompile Include="src\middleware\web_service\messages\opcode801_codec.cpp" />
     <ClCompile Include="src\middleware\web_service\messages\opcode901\opcode901_codec.cpp" />
     <ClCompile Include="src\middleware\gameplay\peer\reliable_assembly.cpp" />
     <ClCompile Include="src\middleware\gameplay\peer\join_messages.cpp" />
@@ -1082,6 +1084,7 @@
     <ClInclude Include="src\client\content\items\packages\package_socket_plug_build.h" />
     <ClInclude Include="src\state\build_data\inventory\buckets\definition.h" />
     <ClInclude Include="src\state\build_data\inventory\buckets\inventory_bucket_catalog.h" />
+    <ClInclude Include="src\state\build_data\socket_entry_buckets\socket_entry_bucket_catalog.h" />
     <ClInclude Include="src\state\build_data\socket_entry_lists\definition.h" />
     <ClInclude Include="src\state\build_data\socket_entry_lists\socket_entry_list_catalog.h" />
     <ClInclude Include="src\state\build_data\runtime\build_data_catalog_runtime.h" />
@@ -1388,6 +1391,7 @@
     <ClInclude Include="src\server\gameplay\physics\world\world_types.h" />
     <ClInclude Include="src\middleware\gameplay\descriptor\join_descriptor.h" />
     <ClInclude Include="src\server\gameplay\gameplay_advertisement.h" />
+    <ClInclude Include="src\middleware\web_service\messages\opcode801.h" />
     <ClInclude Include="src\middleware\web_service\messages\opcode901\opcode901_codec.h" />
     <ClInclude Include="src\middleware\gameplay\peer\reliable_assembly.h" />
     <ClInclude Include="src\middleware\gameplay\peer\join_messages.h" />
