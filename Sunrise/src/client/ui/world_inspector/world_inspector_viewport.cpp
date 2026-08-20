@@ -1,4 +1,5 @@
 #include "world_inspector_viewport.h"
+#include "world_debug_primitives.h"
 
 #include <algorithm>
 #include <array>
@@ -30,13 +31,20 @@ constexpr ImU32 kSelectionColor = IM_COL32(66, 184, 231, 255);
 constexpr ImU32 kHoverColor = IM_COL32(151, 220, 246, 255);
 constexpr ImU32 kHiddenColor = IM_COL32(116, 124, 135, 230);
 constexpr ImU32 kLabelBackground = IM_COL32(15, 18, 22, 225);
-
 struct Projected final {
     inspection::NodeId id{};
     inspection::NodeKind kind{inspection::NodeKind::unresolved};
     ImVec2 screen{};
     float depth{};
     bool hidden{};
+    bool unknownShape{};
+};
+
+struct ProjectedEdge final {
+    inspection::NodeId id{};
+    debug_primitives::ProjectedSegment segment{};
+    bool hidden{};
+    bool dashed{};
 };
 
 struct LabelPlacement final {
@@ -74,65 +82,9 @@ struct LabelPlacement final {
     return dpi::pixels(value);
 }
 
-[[nodiscard]] float dot(const std::array<float, 3>& left,
-                        const std::array<float, 3>& right) noexcept {
-    return left[0] * right[0] + left[1] * right[1] + left[2] * right[2];
-}
-
-[[nodiscard]] std::array<float, 3> cross(const std::array<float, 3>& left,
-                                         const std::array<float, 3>& right) noexcept {
-    return {left[1] * right[2] - left[2] * right[1],
-            left[2] * right[0] - left[0] * right[2],
-            left[0] * right[1] - left[1] * right[0]};
-}
-
-[[nodiscard]] bool finite(const std::array<float, 3>& value) noexcept {
-    return std::ranges::all_of(value, [](float lane) { return std::isfinite(lane); });
-}
-
-[[nodiscard]] bool project(const inspection::Transform& transform,
-                           const client::viewer::camera::Pose& pose,
-                           const ImVec2& projectionPosition,
-                           const ImVec2& projectionSize,
-                           ImVec2& screen,
-                           float& depth) noexcept {
-    if (!finite(transform.position) || !finite(pose.position) || !finite(pose.forward)
-        || !finite(pose.up) || !std::isfinite(pose.fov) || pose.fov <= 0.05F
-        || pose.fov >= 179.0F || projectionSize.x <= 0.0F || projectionSize.y <= 0.0F) {
-        return false;
-    }
-
-    const std::array<float, 3> relative{
-        transform.position[0] - pose.position[0],
-        transform.position[1] - pose.position[1],
-        transform.position[2] - pose.position[2],
-    };
-    const std::array<float, 3> right = cross(pose.forward, pose.up);
-    depth = dot(relative, pose.forward);
-    if (!std::isfinite(depth) || depth <= kNearDepth) {
-        return false;
-    }
-
-    constexpr float kPi = 3.14159265358979323846F;
-    const float halfFov = pose.fov <= kPi + 0.1F ? pose.fov * 0.5F
-                                                 : pose.fov * (kPi / 360.0F);
-    const float horizontalTangent = std::tan(halfFov);
-    const float aspect = projectionSize.x / projectionSize.y;
-    const float verticalTangent = horizontalTangent / aspect;
-    if (!std::isfinite(horizontalTangent) || horizontalTangent <= 0.0F
-        || !std::isfinite(verticalTangent) || verticalTangent <= 0.0F
-        || !std::isfinite(aspect) || aspect <= 0.0F) {
-        return false;
-    }
-    const float horizontal = dot(relative, right) / (depth * horizontalTangent);
-    const float vertical = dot(relative, pose.up) / (depth * verticalTangent);
-    if (!std::isfinite(horizontal) || !std::isfinite(vertical)) {
-        return false;
-    }
-
-    screen.x = projectionPosition.x + (horizontal * 0.5F + 0.5F) * projectionSize.x;
-    screen.y = projectionPosition.y + (0.5F - vertical * 0.5F) * projectionSize.y;
-    return std::isfinite(screen.x) && std::isfinite(screen.y);
+[[nodiscard]] ImU32 bounds_color(inspection::NodeKind kind) noexcept {
+    const ImU32 color = helper_color(kind);
+    return color | IM_COL32_A_MASK;
 }
 
 [[nodiscard]] bool inside(const ImVec2& point,
@@ -178,6 +130,18 @@ void draw_marker(ImDrawList& drawList,
                                           : helper_color(projected.kind);
     const float radius = selected ? scaled(kSelectedRadius)
                                    : (hovered ? scaled(kHoverRadius) : scaled(kMarkerRadius));
+    if (projected.unknownShape && !selected) {
+        drawList.AddCircle(projected.screen, radius, color, 12, scaled(1.25F));
+        drawList.AddLine({projected.screen.x - radius, projected.screen.y},
+                         {projected.screen.x + radius, projected.screen.y},
+                         color,
+                         scaled(1.25F));
+        drawList.AddLine({projected.screen.x, projected.screen.y - radius},
+                         {projected.screen.x, projected.screen.y + radius},
+                         color,
+                         scaled(1.25F));
+        return;
+    }
     if (selected) {
         drawList.AddCircle(projected.screen, radius, color, 20, scaled(2.0F));
         drawList.AddLine({projected.screen.x - radius - scaled(3.0F), projected.screen.y},
@@ -199,6 +163,30 @@ void draw_marker(ImDrawList& drawList,
     }
 }
 
+void draw_segment(ImDrawList& drawList,
+                  const debug_primitives::ProjectedSegment& segment,
+                  ImU32 color,
+                  float thickness,
+                  bool dashed) noexcept {
+    const ImVec2 start{segment.start.x, segment.start.y};
+    const ImVec2 end{segment.end.x, segment.end.y};
+    if (!dashed) {
+        drawList.AddLine(start, end, color, thickness);
+        return;
+    }
+    constexpr int kDashCount = 6;
+    for (int index = 0; index < kDashCount; ++index) {
+        const float first = static_cast<float>(index) / static_cast<float>(kDashCount);
+        const float second =
+            (static_cast<float>(index) + 0.55F) / static_cast<float>(kDashCount);
+        drawList.AddLine(ImVec2{start.x + (end.x - start.x) * first,
+                                start.y + (end.y - start.y) * first},
+                         ImVec2{start.x + (end.x - start.x) * second,
+                                start.y + (end.y - start.y) * second},
+                         color,
+                         thickness);
+    }
+}
 [[nodiscard]] LabelPlacement make_label(const inspection::Node& node,
                                         const Projected& projected,
                                         ImU32 color,
@@ -347,43 +335,87 @@ Result draw(const inspection::Graph& graph,
         result.navigation = false;
     }
 
-    ImVec2 projectionPosition = imageMinimum;
-    ImVec2 projectionSize{imageMaximum.x - imageMinimum.x, imageMaximum.y - imageMinimum.y};
-    const ImGuiViewport* mainViewport = ImGui::GetMainViewport();
-    if (!frame && mainViewport != nullptr) {
-        projectionPosition = mainViewport->Pos;
-        projectionSize = mainViewport->Size;
-    }
+    const ImVec2 projectionSize{imageMaximum.x - imageMinimum.x,
+                                imageMaximum.y - imageMinimum.y};
+    debug_primitives::ProjectionContext projection{};
+    projection.position = camera.pose.position;
+    projection.forward = camera.pose.forward;
+    projection.up = camera.pose.up;
+    projection.fov = camera.pose.fov;
+    projection.viewportX = imageMinimum.x;
+    projection.viewportY = imageMinimum.y;
+    projection.viewportWidth = projectionSize.x;
+    projection.viewportHeight = projectionSize.y;
 
     static std::vector<Projected> projected;
+    static std::vector<ProjectedEdge> edges;
     projected.clear();
-    if (camera.active) {
+    edges.clear();
+    projected.reserve(graph.nodes().size());
+    if (camera.active && debug_primitives::valid_projection(projection)) {
         for (const inspection::Node& node : graph.nodes()) {
-            if (!node.transform.has_value()
-                || !inspection::supports(node.actions, inspection::Action::hide)) {
-                continue;
-            }
             const bool selectedNode = node.id == selected;
             const bool hiddenNode = hidden.contains(node.id.value);
-            if ((!visible(node.kind, options) || hiddenNode) && !selectedNode) {
+            const bool categoryEnabled = visible(node.kind, options);
+            if ((!categoryEnabled || hiddenNode) && !selectedNode) {
                 continue;
             }
-            Projected marker{node.id, node.kind, {}, 0.0F, hiddenNode};
-            if (project(*node.transform,
-                        camera.pose,
-                        projectionPosition,
-                        projectionSize,
-                        marker.screen,
-                        marker.depth)
-                && inside(marker.screen, imageMinimum, imageMaximum)) {
-                projected.push_back(marker);
+            const bool knownBounds =
+                node.bounds.has_value() && inspection::bounds_valid(*node.bounds);
+            const bool drawBounds = knownBounds && (options.showKnownBounds || selectedNode);
+            const bool unknownShape =
+                node.kind == inspection::NodeKind::trigger && !knownBounds;
+            const bool drawCenter = node.transform.has_value()
+                                    && (node.kind != inspection::NodeKind::trigger
+                                        || options.showTriggerCenters
+                                        || (unknownShape && options.showUnknownShapeMarkers)
+                                        || selectedNode);
+            if (!drawBounds && !drawCenter) {
+                continue;
+            }
+
+            if (drawCenter) {
+                debug_primitives::ProjectedPoint point{};
+                if (debug_primitives::project_point(projection,
+                                                    node.transform->position,
+                                                    point)
+                    && inside({point.screen.x, point.screen.y}, imageMinimum, imageMaximum)) {
+                    projected.push_back(
+                        Projected{node.id,
+                                  node.kind,
+                                  {point.screen.x, point.screen.y},
+                                  point.depth,
+                                  hiddenNode,
+                                  unknownShape && !knownBounds});
+                }
+            }
+            if (drawBounds) {
+                debug_primitives::ProjectedBox box{};
+                const std::size_t count =
+                    debug_primitives::project_aabb(projection, *node.bounds, box);
+                const bool dashed = !node.boundsProvenance.has_value()
+                                    || *node.boundsProvenance != inspection::Provenance::runtime;
+                for (std::size_t index = 0; index < count; ++index) {
+                    edges.push_back(ProjectedEdge{node.id, box[index], hiddenNode, dashed});
+                }
             }
         }
     }
 
     float closestDistance = (std::numeric_limits<float>::max)();
     float closestDepth = (std::numeric_limits<float>::max)();
-    const float pickRadius = scaled(kPickRadius);
+    const float markerPickRadius = scaled(kPickRadius);
+    const float edgePickRadius = scaled(6.0F);
+    const auto consider = [&](inspection::NodeId id, float distance, float depth) noexcept {
+        if (distance < closestDistance
+            || (distance == closestDistance && depth < closestDepth)
+            || (distance == closestDistance && depth == closestDepth
+                && id.value < result.hovered.value)) {
+            result.hovered = id;
+            closestDistance = distance;
+            closestDepth = depth;
+        }
+    };
     if (viewportHovered) {
         for (const Projected& marker : projected) {
             if (marker.hidden) {
@@ -392,16 +424,23 @@ Result draw(const inspection::Graph& graph,
             const float x = pointer.x - marker.screen.x;
             const float y = pointer.y - marker.screen.y;
             const float distance = x * x + y * y;
-            if (distance > pickRadius * pickRadius) {
+            if (distance <= markerPickRadius * markerPickRadius) {
+                consider(marker.id, distance, marker.depth);
+            }
+        }
+        const debug_primitives::ScreenPoint cursor{pointer.x, pointer.y};
+        for (const ProjectedEdge& edge : edges) {
+            if (edge.hidden) {
                 continue;
             }
-            if (distance < closestDistance
-                || (distance == closestDistance && marker.depth < closestDepth)
-                || (distance == closestDistance && marker.depth == closestDepth
-                    && marker.id.value < result.hovered.value)) {
-                result.hovered = marker.id;
-                closestDistance = distance;
-                closestDepth = marker.depth;
+            const float distance = debug_primitives::distance_squared(
+                cursor,
+                edge.segment.start,
+                edge.segment.end);
+            if (distance <= edgePickRadius * edgePickRadius) {
+                consider(edge.id,
+                         distance,
+                         (edge.segment.startDepth + edge.segment.endDepth) * 0.5F);
             }
         }
     }
@@ -442,7 +481,31 @@ Result draw(const inspection::Graph& graph,
                                 kLabelBackground,
                                 scaled(2.0F));
         drawList->AddText(textPosition, kHiddenColor, message);
+    } else {
+        const char* disclosure = "X-ray overlay - no scene depth";
+        drawList->AddText({imageMinimum.x + scaled(8.0F), imageMinimum.y + scaled(8.0F)},
+                          kHiddenColor,
+                          disclosure);
+        for (const ProjectedEdge& edge : edges) {
+            if (edge.id != selected) {
+                draw_segment(*drawList,
+                             edge.segment,
+                             edge.dashed ? kHiddenColor : bounds_color(graph.node(edge.id)->kind),
+                             scaled(edge.dashed ? 1.0F : 1.5F),
+                             edge.dashed);
+            }
+        }
+        for (const ProjectedEdge& edge : edges) {
+            if (edge.id == selected) {
+                draw_segment(*drawList,
+                             edge.segment,
+                             kSelectionColor,
+                             scaled(2.25F),
+                             false);
+            }
+        }
     }
+
     static std::vector<LabelPlacement> labels;
     labels.clear();
     labels.reserve(projected.size());
@@ -488,18 +551,26 @@ Result draw(const inspection::Graph& graph,
 
     if (result.hovered) {
         const inspection::Node* node = graph.node(result.hovered);
-        if (node != nullptr && node->transform.has_value()) {
+        if (node != nullptr && (node->transform.has_value() || node->bounds.has_value())) {
             ImGui::BeginTooltip();
             ImGui::TextUnformatted(node->name.c_str());
             ImGui::TextDisabled("%s", inspection::kind_name(node->kind));
             ImGui::Separator();
-            const auto& position = node->transform->position;
-            ImGui::Text("Position  %.3f  %.3f  %.3f",
-                        static_cast<double>(position[0]),
-                        static_cast<double>(position[1]),
-                        static_cast<double>(position[2]));
-            if (node->bounds.has_value()) {
+            if (node->transform.has_value()) {
+                const auto& position = node->transform->position;
+                ImGui::Text("Position  %.3f  %.3f  %.3f",
+                            static_cast<double>(position[0]),
+                            static_cast<double>(position[1]),
+                            static_cast<double>(position[2]));
+            }
+            if (node->bounds.has_value() && inspection::bounds_valid(*node->bounds)) {
                 draw_bounds_tooltip(*node->bounds);
+                ImGui::TextDisabled("Bounds provenance: %s",
+                                    node->boundsProvenance.has_value()
+                                        ? inspection::provenance_name(*node->boundsProvenance)
+                                        : "unknown");
+            } else if (node->kind == inspection::NodeKind::trigger) {
+                ImGui::TextDisabled("Shape unavailable; center observation only");
             } else {
                 ImGui::TextDisabled("Bounds unavailable");
             }

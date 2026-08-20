@@ -18,6 +18,9 @@ struct Options final {
     bool showTriggers{true};
     bool showAudio{true};
     bool showLabels{};
+    bool showKnownBounds{true};
+    bool showTriggerCenters{true};
+    bool showUnknownShapeMarkers{true};
 };
 
 struct Result final {

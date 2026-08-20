@@ -13,3 +13,6 @@
 
 # CMake build files
 /build/
+/bin/
+**/activity-graph-catalog.bin
+__pycache__/

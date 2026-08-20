@@ -5,6 +5,7 @@
 #include <cctype>
 #include <cstdio>
 #include <limits>
+#include <cmath>
 
 namespace sunrise::client::inspection {
 namespace {
@@ -115,6 +116,39 @@ void append_decimal(std::string& target, std::uint64_t value) {
 
 } // namespace
 
+bool bounds_valid(const Bounds& bounds) noexcept {
+    for (std::size_t lane = 0; lane < bounds.minimum.size(); ++lane) {
+        if (!std::isfinite(bounds.minimum[lane]) || !std::isfinite(bounds.maximum[lane])
+            || bounds.minimum[lane] > bounds.maximum[lane]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::array<float, 3> bounds_center(const Bounds& bounds) noexcept {
+    return {(bounds.minimum[0] + bounds.maximum[0]) * 0.5F,
+            (bounds.minimum[1] + bounds.maximum[1]) * 0.5F,
+            (bounds.minimum[2] + bounds.maximum[2]) * 0.5F};
+}
+
+std::array<float, 3> bounds_extents(const Bounds& bounds) noexcept {
+    return {(bounds.maximum[0] - bounds.minimum[0]) * 0.5F,
+            (bounds.maximum[1] - bounds.minimum[1]) * 0.5F,
+            (bounds.maximum[2] - bounds.minimum[2]) * 0.5F};
+}
+
+std::array<std::array<float, 3>, 8> bounds_corners(const Bounds& bounds) noexcept {
+    return {{{bounds.minimum[0], bounds.minimum[1], bounds.minimum[2]},
+             {bounds.maximum[0], bounds.minimum[1], bounds.minimum[2]},
+             {bounds.maximum[0], bounds.maximum[1], bounds.minimum[2]},
+             {bounds.minimum[0], bounds.maximum[1], bounds.minimum[2]},
+             {bounds.minimum[0], bounds.minimum[1], bounds.maximum[2]},
+             {bounds.maximum[0], bounds.minimum[1], bounds.maximum[2]},
+             {bounds.maximum[0], bounds.maximum[1], bounds.maximum[2]},
+             {bounds.minimum[0], bounds.maximum[1], bounds.maximum[2]}}};
+}
+
 void Graph::reset(std::uint32_t generation) {
     nodes_.clear();
     root_ = {};
@@ -143,6 +177,16 @@ std::optional<std::size_t> Graph::index_for_id(NodeId id) const noexcept {
 }
 
 NodeId Graph::add(Node node, NodeId parent) {
+    if (node.bounds.has_value()) {
+        if (!bounds_valid(*node.bounds)) {
+            return {};
+        }
+        if (!node.boundsProvenance.has_value()) {
+            node.boundsProvenance = node.provenance;
+        }
+    } else {
+        node.boundsProvenance.reset();
+    }
     if (parent && this->node(parent) == nullptr) {
         return {};
     }
@@ -179,6 +223,12 @@ NodeId Graph::add(Node node, NodeId parent) {
     if (node.source.activitySession.has_value()) {
         append_decimal(node.searchText, *node.source.activitySession);
         append_hex(node.searchText, *node.source.activitySession, 16);
+    }
+    if (node.activityMetadata.has_value()) {
+        append_hex(node.searchText, node.activityMetadata->activityHash, 8);
+        append_hex(node.searchText, node.activityMetadata->graphHash, 8);
+        append_hex(node.searchText, node.activityMetadata->nodeHash, 8);
+        append_search(node.searchText, node.activityMetadata->catalogVersion);
     }
 
     nodes_.push_back(std::move(node));
@@ -301,6 +351,12 @@ const char* kind_name(NodeKind kind) noexcept {
         return "Source";
     case NodeKind::activity:
         return "Activity";
+    case NodeKind::activityGraph:
+        return "Activity Graph";
+    case NodeKind::activityGraphNode:
+        return "Activity Graph Node";
+    case NodeKind::activityReference:
+        return "Activity Reference";
     case NodeKind::destination:
         return "Destination";
     case NodeKind::spawnGroup:
@@ -353,6 +409,7 @@ const char* producer_name(Producer producer) noexcept {
     switch (producer) {
     case Producer::graph: return "graph";
     case Producer::catalog: return "catalog";
+    case Producer::activityCatalog: return "activity-catalog";
     case Producer::localPlayer: return "local-player";
     case Producer::objectSystem: return "object-system";
     case Producer::trigger: return "trigger";

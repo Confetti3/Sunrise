@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cmath>
 #include <cstdio>
 #include <span>
 #include <string>
@@ -115,6 +116,29 @@ struct AppendResult final {
                : std::string("Runtime object");
 }
 
+[[nodiscard]] inline bool valid_position(const std::array<float, 3>& position) noexcept {
+    for (const float lane : position) {
+        if (!std::isfinite(lane)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+inline void apply_runtime_position(Node& node,
+                                   const std::array<float, 3>& position,
+                                   bool present) noexcept {
+    if (!present || !valid_position(position)) {
+        node.transform.reset();
+        node.transformRuntime = false;
+        node.actions = Action::copyId;
+        return;
+    }
+    node.transform = Transform{position};
+    node.transformRuntime = true;
+    node.actions = spatial_actions();
+}
+
 inline void append_objects(Graph& graph,
                            std::vector<Diagnostic>& diagnostics,
                            const ObjectSnapshot& snapshot,
@@ -164,14 +188,7 @@ inline void append_objects(Graph& graph,
         node.source = source;
         node.runtimeEntity = observation.handle;
         node.objectSystemType = observation.type;
-        if (observation.positionPresent) {
-            node.transform = Transform{observation.position};
-            node.transformRuntime = true;
-            node.actions = Action::focus | Action::hide | Action::isolate | Action::copyId
-                           | Action::copyPosition;
-        } else {
-            node.actions = Action::copyId;
-        }
+        apply_runtime_position(node, observation.position, observation.positionPresent);
         const NodeId id = graph.add(std::move(node), result.objectGroup);
         if (!id) {
             diagnostics.push_back(
@@ -249,10 +266,7 @@ inline void append_audio(Graph& graph,
     node.source = source;
     node.observationId = 0;
     node.nativeKey = 1;
-    node.transform = Transform{snapshot.position};
-    node.transformRuntime = true;
-    node.actions =
-        Action::focus | Action::hide | Action::isolate | Action::copyId | Action::copyPosition;
+    apply_runtime_position(node, snapshot.position, snapshot.present);
     result.audioListener = graph.add(std::move(node), parent);
     if (!result.audioListener) {
         diagnostics.push_back(
@@ -324,19 +338,16 @@ inline void append_triggers(Graph& graph,
         node.source = source;
         node.observationId = trigger_identity(observation);
         node.nativeKey = *node.observationId;
+        node.actions = Action::copyId;
         if (observation.kind == triggers::Kind::event) {
             node.triggerSelector = observation.selector;
             node.triggerSourceHash = observation.sourceHash;
         } else {
             node.triggerOverlapCount = observation.overlapCount;
-            node.transform = Transform{observation.position};
-            node.transformRuntime = true;
-            node.actions = Action::focus | Action::hide | Action::isolate | Action::copyId
-                           | Action::copyPosition;
+            apply_runtime_position(node, observation.position, observation.positionPresent);
         }
         node.triggerEnabled = observation.enabled;
         node.triggerActive = observation.active;
-        node.actions = Action::copyId;
         for (std::size_t objectIndex = 0;
              observation.kind == triggers::Kind::event
              && objectIndex < objectsSnapshot.objectCount;
@@ -346,12 +357,7 @@ inline void append_triggers(Graph& graph,
                 continue;
             }
             node.runtimeEntity = object.handle;
-            if (object.positionPresent) {
-                node.transform = Transform{object.position};
-                node.transformRuntime = true;
-                node.actions = Action::focus | Action::hide | Action::isolate | Action::copyId
-                               | Action::copyPosition;
-            }
+            apply_runtime_position(node, object.position, object.positionPresent);
             break;
         }
         const NodeId id = graph.add(std::move(node), result.triggerGroup);
@@ -494,21 +500,23 @@ inline void update_triggers(Graph& graph,
             return std::string(text.data());
         }();
         if (observation.kind == triggers::Kind::volume) {
-            node->transform = Transform{observation.position};
-            node->transformRuntime = true;
+            apply_runtime_position(*node, observation.position, observation.positionPresent);
             continue;
         }
-        for (std::size_t objectIndex = 0; objectIndex < objectsSnapshot.objectCount; ++objectIndex) {
+        node->runtimeEntity.reset();
+        node->transform.reset();
+        node->transformRuntime = false;
+        node->actions = Action::copyId;
+        for (std::size_t objectIndex = 0;
+             objectIndex < objectsSnapshot.objectCount;
+             ++objectIndex) {
             const objects::Observation& object = objectsSnapshot.objects[objectIndex];
-            if (static_cast<std::uint16_t>(object.handle) == observation.objectHandle
-                && object.positionPresent) {
-                node->runtimeEntity = object.handle;
-                node->transform = Transform{object.position};
-                node->transformRuntime = true;
-                node->actions = Action::focus | Action::hide | Action::isolate | Action::copyId
-                                | Action::copyPosition;
-                break;
+            if (static_cast<std::uint16_t>(object.handle) != observation.objectHandle) {
+                continue;
             }
+            node->runtimeEntity = object.handle;
+            apply_runtime_position(*node, object.position, object.positionPresent);
+            break;
         }
     }
 }
@@ -525,12 +533,7 @@ inline void update_objects(Graph& graph,
         if (node == nullptr || node->runtimeEntity != observation.handle) {
             continue;
         }
-        if (observation.positionPresent) {
-            node->transform = Transform{observation.position};
-            node->transformRuntime = true;
-            node->actions = Action::focus | Action::hide | Action::isolate | Action::copyId
-                            | Action::copyPosition;
-        }
+        apply_runtime_position(*node, observation.position, observation.positionPresent);
     }
 }
 
@@ -539,8 +542,7 @@ inline void update_audio(Graph& graph, NodeId nodeId, const AudioSnapshot& snaps
     if (node == nullptr || !snapshot.present || node->observationId != 0) {
         return;
     }
-    node->transform = Transform{snapshot.position};
-    node->transformRuntime = true;
+    apply_runtime_position(*node, snapshot.position, snapshot.present);
 }
 
 inline void update_physics(Graph& graph,
@@ -555,8 +557,7 @@ inline void update_physics(Graph& graph,
         if (node == nullptr || node->observationId != observation.slot) {
             continue;
         }
-        node->transform = Transform{observation.position};
-        node->transformRuntime = true;
+        apply_runtime_position(*node, observation.position, true);
         node->linearVelocity = observation.velocity;
     }
 }

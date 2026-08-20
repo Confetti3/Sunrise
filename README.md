@@ -108,6 +108,51 @@ Each optional producer reports `installed`, `ready`, `sequence`, `declared_count
 `truncated`, and failure state. One unavailable or failed producer does not prevent Viewer from
 starting or disable the rest of the inspection graph.
 
+### Using the center views
+
+The center workspace has three modes:
+
+| Mode | Behavior |
+| --- | --- |
+| **World** | Draws the captured game image with projected pointer-free helpers. |
+| **Node Graph** | Shows the current ownership tree with deterministic layered layout. |
+| **Activity Map** | Browses optional authored activity-graph positions without treating them as live world transforms. |
+
+World helpers are an **X-ray overlay — no scene depth**. Known AABBs are drawn only when a producer
+supplies a finite, non-inverted bound. Trigger observations currently provide a center and state only;
+the UI labels them **Shape unavailable; center observation only** and never invents extents. Native
+engine debug-draw calls, global wireframe mode, depth-aware occlusion, and Havok shape retention are
+not enabled.
+
+### Building an optional activity catalog
+
+The converter reads only the required tables from a supplied `manifest.zip` and uses Python's
+standard library:
+
+```powershell
+python tools/build_activity_graph_catalog.py `
+  --input C:\path\to\manifest.zip `
+  --output bin\x64\Sunrise\activity-graph-catalog.bin
+```
+
+The output is optional and must remain outside source control. Sunrise loads it once from the normal
+artifact directory during client initialization. Missing or malformed files produce an Inspector
+diagnostic and do not block startup.
+
+Catalogs carry their content build, manifest version, source-table SHA-256 digests, graph/node
+references, authored positions, and location-release metadata. The current client target is build
+86657. A catalog from another build, including the supplied build-87221 research archive, remains
+**Browse only**: it cannot correlate to the current session and its authored positions never become
+World viewport transforms, bounds, or edges. Empty `connections` arrays stay empty; linked graphs are
+navigation metadata rather than invented node connections.
+
+The converter and native focused tests use synthetic fixtures:
+
+```powershell
+python tests/test_build_activity_graph_catalog.py
+powershell -ExecutionPolicy Bypass -File tests/run_inspector_upgrade_tests.ps1
+```
+
 ## WIP
 
 This mod is work in progress. Things might break or work in unexpected ways. There is also currently

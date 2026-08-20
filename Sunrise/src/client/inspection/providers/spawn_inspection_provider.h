@@ -11,6 +11,7 @@
 #include "live_player_inspection.h"
 #include "placed_object_inspection.h"
 #include "runtime_observation_inspection.h"
+#include "activity_graph_inspection.h"
 
 namespace sunrise::client::inspection::providers {
 
@@ -26,6 +27,10 @@ struct WorldSnapshot final {
     NodeId physicsGroupNode{};
     std::vector<NodeId> physicsBodyNodes;
     NodeId placedObjectGroupNode{};
+    NodeId activityCatalogNode{};
+    std::uint32_t activityCatalogBuild{};
+    std::string activityCatalogVersion;
+    std::string activityCatalogDiagnostic;
     NodeId spawnSetNode{};
     std::string packageName;
     std::string mapStem;
@@ -61,6 +66,8 @@ struct WorldSnapshot final {
     bool physicsTruncated{};
     bool spawnCatalogReady{};
     bool stale{};
+    bool activityCatalogPresent{};
+    bool activityCatalogBuildMatch{};
     /** Activity-scoped identity epoch for runtime producer handles. */
     std::uint32_t producerEpoch{1};
 };

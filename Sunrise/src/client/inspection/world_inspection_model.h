@@ -23,6 +23,9 @@ enum class NodeKind : std::uint8_t {
     world,
     source,
     activity,
+    activityGraph,
+    activityGraphNode,
+    activityReference,
     destination,
     spawnGroup,
     spawnSet,
@@ -51,6 +54,7 @@ enum class Status : std::uint8_t {
 enum class Producer : std::uint8_t {
     graph,
     catalog,
+    activityCatalog,
     localPlayer,
     objectSystem,
     trigger,
@@ -103,6 +107,24 @@ struct Bounds final {
     [[nodiscard]] friend bool operator==(const Bounds&, const Bounds&) noexcept = default;
 };
 
+[[nodiscard]] bool bounds_valid(const Bounds& bounds) noexcept;
+[[nodiscard]] std::array<float, 3> bounds_center(const Bounds& bounds) noexcept;
+[[nodiscard]] std::array<float, 3> bounds_extents(const Bounds& bounds) noexcept;
+[[nodiscard]] std::array<std::array<float, 3>, 8> bounds_corners(const Bounds& bounds) noexcept;
+
+[[nodiscard]] constexpr Action positional_actions() noexcept {
+    return Action::focus | Action::hide | Action::isolate | Action::copyPosition;
+}
+
+[[nodiscard]] constexpr Action identity_actions() noexcept {
+    return Action::copyId;
+}
+
+[[nodiscard]] constexpr Action spatial_actions(Action additional = Action::none) noexcept {
+    return positional_actions() | identity_actions() | additional;
+}
+
+
 struct Source final {
     std::string packageName;
     std::string mapStem;
@@ -114,6 +136,22 @@ struct Source final {
     [[nodiscard]] friend bool operator==(const Source&, const Source&) noexcept = default;
 };
 
+struct ActivityMetadata final {
+    std::uint32_t activityHash{};
+    std::uint32_t graphHash{};
+    std::uint32_t nodeHash{};
+    std::uint32_t stateHash{};
+    std::uint32_t styleHash{};
+    std::array<float, 2> authoredPosition{};
+    std::uint32_t releaseCount{};
+    std::uint32_t referenceCount{};
+    std::uint32_t catalogBuild{};
+    std::string catalogVersion;
+    std::vector<std::uint32_t> linkedGraphHashes;
+    bool buildMatch{};
+    bool browseOnly{true};
+
+};
 struct Node final {
     NodeId id{};
     NodeId parent{};
@@ -127,6 +165,7 @@ struct Node final {
     /** Producer-owned scalar identity. Zero means the graph derives a stable structural key. */
     std::uint64_t nativeKey{};
     Source source{};
+    std::optional<ActivityMetadata> activityMetadata;
     std::optional<std::uint64_t> runtimeEntity;
     std::optional<std::uint8_t> objectSystemType;
     /** Runtime producer-local observation slot; not necessarily a durable engine identity. */
@@ -145,8 +184,12 @@ struct Node final {
     bool transformRuntime{};
     std::optional<std::array<float, 3>> linearVelocity;
     std::optional<Bounds> bounds;
+    std::optional<Provenance> boundsProvenance;
     Action actions{Action::none};
 };
+[[nodiscard]] constexpr bool has_spatial_data(const Node& node) noexcept {
+    return node.transform.has_value() || node.bounds.has_value();
+}
 
 struct Diagnostic final {
     enum class Severity : std::uint8_t {

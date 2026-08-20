@@ -127,6 +127,14 @@
     snapshot_.audioListenerNode = observedResult.audioListener;
     snapshot_.physicsGroupNode = observedResult.physicsGroup;
     snapshot_.physicsBodyNodes = observedResult.physicsBodies;
+    const activity_graph::AppendResult activityResult =
+        activity_graph::append(snapshot_.graph, snapshot_.diagnostics, source, graphParent);
+    snapshot_.activityCatalogNode = activityResult.catalogNode;
+    snapshot_.activityCatalogPresent = activityResult.present;
+    snapshot_.activityCatalogBuildMatch = activityResult.buildMatch;
+    snapshot_.activityCatalogBuild = activityResult.contentBuild;
+    snapshot_.activityCatalogVersion = activityResult.version;
+    snapshot_.activityCatalogDiagnostic = activityResult.diagnostic;
 }
 
 const WorldSnapshot& SpawnInspectionProvider::snapshot() const noexcept {

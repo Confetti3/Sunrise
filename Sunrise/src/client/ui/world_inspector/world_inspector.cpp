@@ -29,6 +29,7 @@
 #include "../../viewer/viewer_camera_path_store.h"
 #include "../../viewer/viewer_input_ownership.h"
 #include "world_inspector_viewport.h"
+#include "world_inspector_graph.h"
 
 namespace sunrise::client::ui::world_inspector {
 namespace {
@@ -39,6 +40,7 @@ namespace dpi = core::ui::scaling::dpi;
 namespace model = client::inspection;
 namespace capture = client::inspection::capture;
 namespace provider = client::inspection::providers;
+namespace activity_catalog = client::inspection::activity_catalog;
 namespace renderer = client::hooks::graphics::renderer;
 namespace section = core::ui::components::section;
 namespace textures = core::ui::textures;
@@ -196,6 +198,11 @@ enum class HierarchyMode : std::uint8_t {
     source,
     activity,
 };
+enum class CenterMode : std::uint8_t {
+    world,
+    nodeGraph,
+    activityMap,
+};
 
 enum class BottomTab : std::uint8_t {
     references,
@@ -250,8 +257,13 @@ struct WorkspaceState final {
     std::unordered_set<std::uint64_t> hidden;
     std::unordered_set<std::uint64_t> collapsed;
     std::vector<TreeRow> rows;
+    std::unordered_set<std::uint64_t> admitted;
+    std::uint64_t admissionRevision{};
+    graph::State graphState;
     std::array<char, kSearchCapacity> search{};
     std::array<char, kSearchCapacity> eventFilter{};
+    CenterMode centerMode{CenterMode::world};
+    std::uint32_t selectedActivityGraphHash{};
     std::string cachedSearch;
     model::NodeId contextTarget{};
     HierarchyMode hierarchyMode{HierarchyMode::world};
@@ -271,6 +283,9 @@ struct WorkspaceState final {
     bool showSpawns{true};
     bool showTriggers{true};
     bool showAudio{true};
+    bool showKnownBounds{true};
+    bool showTriggerCenters{true};
+    bool showUnknownShapeMarkers{true};
     bool showRendering{true};
     bool showNavigation{true};
     bool showHidden{true};
@@ -463,21 +478,40 @@ void isolate(model::NodeId id) noexcept {
 void focus(model::NodeId id) noexcept {
     const model::Node* node = world().graph.node(id);
     const camera::Status status = camera::status();
-    if (node == nullptr || !node->transform.has_value() || !status.active
-        || !model::supports(node->actions, model::Action::focus)) {
+    if (node == nullptr || !status.active || !model::supports(node->actions, model::Action::focus)
+        || (!node->transform.has_value()
+            && !(node->bounds.has_value() && model::bounds_valid(*node->bounds)))) {
         return;
     }
+    std::array<float, 3> target{};
+    float distance = 6.0F;
+    if (node->bounds.has_value() && model::bounds_valid(*node->bounds)) {
+        target = model::bounds_center(*node->bounds);
+        const auto extents = model::bounds_extents(*node->bounds);
+        const float radius =
+            (std::max)({extents[0], extents[1], extents[2], 0.0F});
+        const float halfFov = status.pose.fov <= 3.2415927F
+                                  ? status.pose.fov * 0.5F
+                                  : status.pose.fov * (3.1415927F / 360.0F);
+        const float tangent = std::tan(halfFov);
+        if (std::isfinite(radius) && std::isfinite(tangent) && tangent > 0.05F) {
+            distance = (std::max)(distance, radius / tangent * 2.0F);
+        }
+    } else {
+        target = node->transform->position;
+    }
     camera::Pose pose = status.pose;
-    constexpr float kFocusDistance = 6.0F;
     for (std::size_t lane = 0; lane < pose.position.size(); ++lane) {
-        pose.position[lane] = node->transform->position[lane] - pose.forward[lane] * kFocusDistance;
+        pose.position[lane] = target[lane] - pose.forward[lane] * distance;
     }
     (void)camera::move_to(pose);
 }
 
 void select_node(model::NodeId id) noexcept {
-    if (world().graph.node(id) != nullptr) {
+    if (const model::Node* node = world().graph.node(id); node != nullptr) {
         g_state.selection.select(id);
+        g_state.selectedActivityGraphHash =
+            node->activityMetadata.has_value() ? node->activityMetadata->graphHash : 0;
         g_state.revealSelection = true;
     }
 }
@@ -601,8 +635,10 @@ void refresh_layout_scale() noexcept {
 
 [[nodiscard]] bool is_structural(model::NodeKind kind) noexcept {
     return kind == model::NodeKind::world || kind == model::NodeKind::source
-           || kind == model::NodeKind::activity || kind == model::NodeKind::destination
-           || kind == model::NodeKind::unresolved;
+           || kind == model::NodeKind::activity || kind == model::NodeKind::activityGraph
+           || kind == model::NodeKind::activityGraphNode
+           || kind == model::NodeKind::activityReference
+           || kind == model::NodeKind::destination || kind == model::NodeKind::unresolved;
 }
 
 [[nodiscard]] bool filter_enabled(FilterGroup group) noexcept {
@@ -748,18 +784,24 @@ void rebuild_rows() {
     }
 
     g_state.rows.clear();
+    g_state.admitted.clear();
     const model::Query query = model::parse_query(queryText);
     const bool searching = !query.terms.empty();
-    std::unordered_set<std::uint64_t> admitted;
-    admitted.reserve(snapshot.graph.nodes().size());
+    g_state.admitted.reserve(snapshot.graph.nodes().size());
 
     for (const model::Node& node : snapshot.graph.nodes()) {
         if (node_admitted_by_filters(node, query)) {
-            admit_with_ancestors(snapshot.graph, node.id, admitted);
+            admit_with_ancestors(snapshot.graph, node.id, g_state.admitted);
         }
     }
 
-    append_rows(snapshot.graph, hierarchy_root(snapshot), admitted, searching, 0, snapshot);
+    append_rows(snapshot.graph,
+                hierarchy_root(snapshot),
+                g_state.admitted,
+                searching,
+                0,
+                snapshot);
+    ++g_state.admissionRevision;
 
     g_state.cachedGeneration = snapshot.graph.generation();
     g_state.cachedSearch = queryText;
@@ -1315,8 +1357,21 @@ void draw_transform(const model::Node& node) noexcept {
 }
 
 void draw_bounds(const model::Node& node) noexcept {
-    if (!node.bounds.has_value()
-        || !inspector_header("Bounds", ImGuiTreeNodeFlags_DefaultOpen)
+    if (!node.bounds.has_value()) {
+        if (node.kind == model::NodeKind::trigger && node.transform.has_value()) {
+            if (inspector_header("Bounds", ImGuiTreeNodeFlags_DefaultOpen)) {
+                inspector_text("Shape unavailable; center observation only", true);
+            }
+        }
+        return;
+    }
+    if (!model::bounds_valid(*node.bounds)) {
+        if (inspector_header("Bounds", ImGuiTreeNodeFlags_DefaultOpen)) {
+            inspector_text("Invalid bounds were rejected by the inspection model.", true);
+        }
+        return;
+    }
+    if (!inspector_header("Bounds", ImGuiTreeNodeFlags_DefaultOpen)
         || !begin_properties("##bounds_properties")) {
         return;
     }
@@ -1335,6 +1390,26 @@ void draw_bounds(const model::Node& node) noexcept {
                         static_cast<double>(node.bounds->maximum[1]),
                         static_cast<double>(node.bounds->maximum[2]));
     property_row("Maximum", text.data());
+    const auto center = model::bounds_center(*node.bounds);
+    const auto extents = model::bounds_extents(*node.bounds);
+    (void)std::snprintf(text.data(),
+                        text.size(),
+                        "%.4f, %.4f, %.4f",
+                        static_cast<double>(center[0]),
+                        static_cast<double>(center[1]),
+                        static_cast<double>(center[2]));
+    property_row("Center", text.data());
+    (void)std::snprintf(text.data(),
+                        text.size(),
+                        "%.4f, %.4f, %.4f",
+                        static_cast<double>(extents[0]),
+                        static_cast<double>(extents[1]),
+                        static_cast<double>(extents[2]));
+    property_row("Half extents", text.data());
+    property_row("Provenance",
+                 node.boundsProvenance.has_value()
+                     ? model::provenance_name(*node.boundsProvenance)
+                     : "unknown");
     end_properties();
 }
 
@@ -1386,6 +1461,56 @@ void draw_activity(const model::Node& node) noexcept {
     end_properties();
 }
 
+void draw_activity_metadata(const model::Node& node) noexcept {
+    if (!node.activityMetadata.has_value()) {
+        return;
+    }
+    const model::ActivityMetadata& metadata = *node.activityMetadata;
+    if (!inspector_header("Activity catalog metadata", ImGuiTreeNodeFlags_DefaultOpen)
+        || !begin_properties("##activity_catalog_properties")) {
+        return;
+    }
+    property_u64("Activity hash", metadata.activityHash, 8);
+    property_u64("Graph hash", metadata.graphHash, 8);
+    property_u64("Node hash", metadata.nodeHash, 8);
+    property_u64("State hash", metadata.stateHash, 8);
+    property_u64("Style hash", metadata.styleHash, 8);
+    std::array<char, 96> position{};
+    std::snprintf(position.data(),
+                  position.size(),
+                  "%.3f, %.3f",
+                  static_cast<double>(metadata.authoredPosition[0]),
+                  static_cast<double>(metadata.authoredPosition[1]));
+    property_row("Authored position", position.data());
+    property_u64("Catalog build", metadata.catalogBuild, 8);
+    property_row("Catalog version", metadata.catalogVersion.c_str());
+    property_row("Compatibility", metadata.buildMatch ? "Target build" : "Browse only");
+    property_i32("Location releases", static_cast<std::int32_t>(metadata.releaseCount));
+    property_i32("Activity references", static_cast<std::int32_t>(metadata.referenceCount));
+    end_properties();
+
+    if (metadata.linkedGraphHashes.empty()) {
+        return;
+    }
+    ImGui::TextUnformatted("Linked graphs");
+    for (const std::uint32_t graphHash : metadata.linkedGraphHashes) {
+        std::array<char, 64> label{};
+        std::snprintf(label.data(), label.size(), "Open graph 0x%08X", graphHash);
+        ImGui::PushID(static_cast<int>(graphHash));
+        if (ImGui::Button(label.data())) {
+            for (const model::Node& candidate : world().graph.nodes()) {
+                if (candidate.kind == model::NodeKind::activityGraph
+                    && candidate.activityMetadata.has_value()
+                    && candidate.activityMetadata->graphHash == graphHash) {
+                    select_node(candidate.id);
+                    break;
+                }
+            }
+        }
+        ImGui::PopID();
+    }
+}
+
 void draw_rendering(const model::Node& node) noexcept {
     if (!model::supports(node.actions, model::Action::hide)
         || !inspector_header("Rendering", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -1424,7 +1549,10 @@ void draw_inspector_actions(const model::Node& node) noexcept {
     };
 
     if (model::supports(node.actions, model::Action::focus)) {
-        ImGui::BeginDisabled(!status.active || !node.transform.has_value());
+        ImGui::BeginDisabled(!status.active
+                             || (!node.transform.has_value()
+                                 && !(node.bounds.has_value()
+                                      && model::bounds_valid(*node.bounds))));
         if (button("Focus")) {
             focus(node.id);
         }
@@ -1469,6 +1597,7 @@ void draw_inspector() noexcept {
     draw_rendering(*node);
     draw_activity(*node);
     draw_source(*node);
+    draw_activity_metadata(*node);
 }
 
 void graph_reference_row(const char* relation, const model::Node& node) noexcept {
@@ -1692,9 +1821,16 @@ void draw_data() noexcept {
     if (node->linearVelocity.has_value()) {
         data_vec3("linear_velocity", *node->linearVelocity, "runtime");
     }
-    if (node->bounds.has_value()) {
-        data_vec3("bounds_min", node->bounds->minimum, "runtime");
-        data_vec3("bounds_max", node->bounds->maximum, "runtime");
+    if (node->bounds.has_value() && model::bounds_valid(*node->bounds)) {
+        const char* const boundsOrigin =
+            node->boundsProvenance.has_value()
+                ? model::provenance_name(*node->boundsProvenance)
+                : "unknown";
+        data_vec3("bounds_min", node->bounds->minimum, boundsOrigin);
+        data_vec3("bounds_max", node->bounds->maximum, boundsOrigin);
+        data_row("bounds_provenance", "enum", boundsOrigin, boundsOrigin);
+    } else if (node->kind == model::NodeKind::trigger && node->transform.has_value()) {
+        data_row("trigger_shape", "state", "center observation only", "runtime");
     }
 
     const model::Source& source = node->source;
@@ -1955,7 +2091,10 @@ void draw_node_context_menu() noexcept {
 
     const camera::Status status = camera::status();
     if (model::supports(node->actions, model::Action::focus)) {
-        ImGui::BeginDisabled(!status.active || !node->transform.has_value());
+        ImGui::BeginDisabled(!status.active
+                             || (!node->transform.has_value()
+                                 && !(node->bounds.has_value()
+                                      && model::bounds_valid(*node->bounds))));
         if (ImGui::MenuItem("Focus", "F")) {
             focus(node->id);
         }
@@ -2037,6 +2176,144 @@ void handle_shortcuts() noexcept {
     }
 }
 
+viewport::Result draw_activity_map() noexcept {
+    viewport::Result result{};
+    ImVec2 size = ImGui::GetContentRegionAvail();
+    size.x = (std::max)(size.x, 1.0F);
+    size.y = (std::max)(size.y, 1.0F);
+    const ImVec2 minimum = ImGui::GetCursorScreenPos();
+    const ImVec2 maximum{minimum.x + size.x, minimum.y + size.y};
+    ImGui::InvisibleButton("##world_activity_map",
+                           size,
+                           ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
+    const bool hoveredCanvas = ImGui::IsItemHovered();
+    const ImVec2 pointer = ImGui::GetIO().MousePos;
+
+    static std::vector<const model::Node*> nodes;
+    nodes.clear();
+    for (const model::Node& node : world().graph.nodes()) {
+        if (node.kind == model::NodeKind::activityGraphNode && node.activityMetadata.has_value()
+            && g_state.admitted.contains(node.id.value)) {
+            nodes.push_back(&node);
+        }
+    }
+    std::ranges::stable_sort(nodes, [](const model::Node* left, const model::Node* right) {
+        if (left->activityMetadata->graphHash != right->activityMetadata->graphHash) {
+            return left->activityMetadata->graphHash < right->activityMetadata->graphHash;
+        }
+        return left->activityMetadata->nodeHash < right->activityMetadata->nodeHash;
+    });
+
+    ImDrawList* drawList = ImGui::GetWindowDrawList();
+    drawList->AddRectFilled(minimum, maximum, IM_COL32(11, 12, 17, 255));
+    drawList->PushClipRect(minimum, maximum, true);
+    if (nodes.empty()) {
+        drawList->AddText({minimum.x + scaled(12.0F), minimum.y + scaled(12.0F)},
+                          ImGui::GetColorU32(kMuted),
+                          world().activityCatalogPresent
+                              ? "No authored graph nodes are admitted."
+                              : "Activity catalog is not loaded.");
+        drawList->PopClipRect();
+        return result;
+    }
+
+    float minimumX = (std::numeric_limits<float>::max)();
+    float minimumY = (std::numeric_limits<float>::max)();
+    float maximumX = (std::numeric_limits<float>::lowest)();
+    float maximumY = (std::numeric_limits<float>::lowest)();
+    for (const model::Node* node : nodes) {
+        minimumX = (std::min)(minimumX, node->activityMetadata->authoredPosition[0]);
+        minimumY = (std::min)(minimumY, node->activityMetadata->authoredPosition[1]);
+        maximumX = (std::max)(maximumX, node->activityMetadata->authoredPosition[0]);
+        maximumY = (std::max)(maximumY, node->activityMetadata->authoredPosition[1]);
+    }
+    const float margin = scaled(28.0F);
+    const float cardWidth = scaled(158.0F);
+    const float cardHeight = scaled(48.0F);
+    const float usableWidth = (std::max)(1.0F, size.x - margin * 2.0F - cardWidth);
+    const float usableHeight = (std::max)(1.0F, size.y - margin * 2.0F - cardHeight);
+    const float spanX = maximumX - minimumX;
+    const float spanY = maximumY - minimumY;
+    const auto screen = [&](const model::Node& node) {
+        const float x = spanX > 0.0F
+                            ? (node.activityMetadata->authoredPosition[0] - minimumX) / spanX
+                            : 0.5F;
+        const float y = spanY > 0.0F
+                            ? (node.activityMetadata->authoredPosition[1] - minimumY) / spanY
+                            : 0.5F;
+        return ImVec2{minimum.x + margin + x * usableWidth + cardWidth * 0.5F,
+                      minimum.y + margin + (1.0F - y) * usableHeight + cardHeight * 0.5F};
+    };
+
+    for (const model::Node* node : nodes) {
+        const ImVec2 center = screen(*node);
+        const ImVec2 cardMinimum{center.x - cardWidth * 0.5F, center.y - cardHeight * 0.5F};
+        const ImVec2 cardMaximum{center.x + cardWidth * 0.5F, center.y + cardHeight * 0.5F};
+        const bool isHovered = !result.hovered && pointer.x >= cardMinimum.x
+                                && pointer.x <= cardMaximum.x && pointer.y >= cardMinimum.y
+                                && pointer.y <= cardMaximum.y;
+        if (isHovered) {
+            result.hovered = node->id;
+        }
+        const bool selected = node->id == g_state.selection.selected();
+        drawList->AddRectFilled(cardMinimum,
+                                cardMaximum,
+                                selected ? IM_COL32(54, 48, 35, 250)
+                                         : (isHovered ? IM_COL32(42, 44, 56, 250)
+                                                      : IM_COL32(25, 27, 35, 245)),
+                                scaled(3.0F));
+        drawList->AddRect(cardMinimum,
+                          cardMaximum,
+                          selected ? IM_COL32(228, 181, 79, 255) : IM_COL32(52, 55, 68, 255),
+                          scaled(3.0F));
+        drawList->AddText({cardMinimum.x + scaled(8.0F), cardMinimum.y + scaled(7.0F)},
+                          IM_COL32(231, 231, 224, 255),
+                          node->name.c_str());
+        std::array<char, 96> detail{};
+        std::snprintf(detail.data(),
+                      detail.size(),
+                      "Graph 0x%08X / %u refs",
+                      node->activityMetadata->graphHash,
+                      node->activityMetadata->referenceCount);
+        drawList->AddText({cardMinimum.x + scaled(8.0F), cardMinimum.y + scaled(27.0F)},
+                          IM_COL32(145, 149, 158, 255),
+                          detail.data());
+    }
+    drawList->AddText({minimum.x + scaled(8.0F), minimum.y + scaled(8.0F)},
+                      IM_COL32(145, 149, 158, 255),
+                      "Authored positions only; no node connections in this catalog");
+    std::array<char, 128> version{};
+    std::snprintf(version.data(),
+                  version.size(),
+                  "Catalog %s / build %u / target %u / %s",
+                  world().activityCatalogVersion.c_str(),
+                  world().activityCatalogBuild,
+                  activity_catalog::kTargetContentBuild,
+                  world().activityCatalogBuildMatch ? "Target build" : "Browse only");
+    drawList->AddText({minimum.x + scaled(8.0F), maximum.y - scaled(22.0F)},
+                      IM_COL32(145, 149, 158, 255),
+                      version.data());
+    drawList->PopClipRect();
+
+    if (hoveredCanvas && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        if (result.hovered) {
+            if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                result.focused = result.hovered;
+            } else {
+                result.selected = result.hovered;
+            }
+        } else {
+            result.clearSelection = true;
+        }
+    }
+    if (hoveredCanvas && ImGui::IsMouseReleased(ImGuiMouseButton_Right) && result.hovered) {
+        const ImVec2 drag = ImGui::GetMouseDragDelta(ImGuiMouseButton_Right);
+        if (drag.x * drag.x + drag.y * drag.y <= scaled(4.0F) * scaled(4.0F)) {
+            result.context = result.hovered;
+        }
+    }
+    return result;
+}
 void draw_toolbar(const camera::Status& status) noexcept {
     ImGui::BeginChild("##world_toolbar",
                       {0.0F, scaled(kToolbarHeight)},
@@ -2141,10 +2418,36 @@ void draw_toolbar(const camera::Status& status) noexcept {
             ImGui::EndDisabled();
             ImGui::EndMenu();
         }
+        if (ImGui::BeginMenu("Center view")) {
+            if (ImGui::MenuItem("World", nullptr, g_state.centerMode == CenterMode::world)) {
+                g_state.centerMode = CenterMode::world;
+            }
+            if (ImGui::MenuItem("Node Graph",
+                                nullptr,
+                                g_state.centerMode == CenterMode::nodeGraph)) {
+                g_state.centerMode = CenterMode::nodeGraph;
+                g_state.graphState.fitRequested = true;
+            }
+            if (ImGui::MenuItem("Activity Map",
+                                nullptr,
+                                g_state.centerMode == CenterMode::activityMap)) {
+                g_state.centerMode = CenterMode::activityMap;
+            }
+            ImGui::Separator();
+            ImGui::BeginDisabled(g_state.centerMode != CenterMode::nodeGraph);
+            if (ImGui::MenuItem("Fit Node Graph")) {
+                g_state.graphState.fitRequested = true;
+            }
+            ImGui::EndDisabled();
+            ImGui::EndMenu();
+        }
         if (ImGui::BeginMenu("Overlays")) {
             if (ImGui::MenuItem("Spawn helpers", nullptr, &g_state.showSpawns)) {
                 g_state.rowsValid = false;
             }
+            ImGui::MenuItem("Known bounds (x-ray)", nullptr, &g_state.showKnownBounds);
+            ImGui::MenuItem("Trigger centers", nullptr, &g_state.showTriggerCenters);
+            ImGui::MenuItem("Unknown trigger shapes", nullptr, &g_state.showUnknownShapeMarkers);
             ImGui::MenuItem("Helper labels", nullptr, &g_state.showLabels);
             ImGui::EndMenu();
         }
@@ -2496,7 +2799,8 @@ bool render(bool uiVisible) noexcept {
 
         const float viewportX = contentOrigin.x + leftWidth + splitterSize;
         ImGui::SetCursorScreenPos({viewportX, contentOrigin.y});
-        const ImVec4 viewportBackground = capturedFrame
+        const bool worldCenter = g_state.centerMode == CenterMode::world;
+        const ImVec4 viewportBackground = capturedFrame && worldCenter
                                               ? ImVec4(0.010F, 0.009F, 0.015F, 1.0F)
                                               : ImVec4(0.0F, 0.0F, 0.0F, 0.0F);
         ImGui::PushStyleColor(ImGuiCol_ChildBg, viewportBackground);
@@ -2504,22 +2808,43 @@ bool render(bool uiVisible) noexcept {
         ImGui::BeginChild("##world_viewport",
                           {centerWidth, mainHeight},
                           ImGuiChildFlags_Borders,
-                          capturedFrame ? ImGuiWindowFlags_None : ImGuiWindowFlags_NoBackground);
+                          capturedFrame && worldCenter ? ImGuiWindowFlags_None
+                                                       : ImGuiWindowFlags_NoBackground);
         ImGui::PopStyleVar();
-        const viewport::Options overlayOptions{g_state.showGeometry,
-                                               g_state.showEntities,
-                                               g_state.showSpawns,
-                                               g_state.showTriggers,
-                                               g_state.showAudio,
-                                               g_state.showLabels};
-        const viewport::Result interaction =
-            viewport::draw(world().graph,
-                           g_state.selection.selected(),
-                           g_state.hidden,
-                           cameraStatus,
-                           capturedFrame,
-                           overlayOptions,
-                           g_state.viewportNavigation);
+        viewport::Result interaction{};
+        if (worldCenter) {
+            const viewport::Options overlayOptions{g_state.showGeometry,
+                                                   g_state.showEntities,
+                                                   g_state.showSpawns,
+                                                   g_state.showTriggers,
+                                                   g_state.showAudio,
+                                                   g_state.showLabels,
+                                                   g_state.showKnownBounds,
+                                                   g_state.showTriggerCenters,
+                                                   g_state.showUnknownShapeMarkers};
+            interaction = viewport::draw(world().graph,
+                                         g_state.selection.selected(),
+                                         g_state.hidden,
+                                         cameraStatus,
+                                         capturedFrame,
+                                         overlayOptions,
+                                         g_state.viewportNavigation);
+        } else if (g_state.centerMode == CenterMode::nodeGraph) {
+            const graph::Result graphInteraction =
+                graph::draw(world().graph,
+                            hierarchy_root(world()),
+                            g_state.selection.selected(),
+                            g_state.admitted,
+                            g_state.admissionRevision,
+                            g_state.graphState);
+            interaction.hovered = graphInteraction.hovered;
+            interaction.selected = graphInteraction.selected;
+            interaction.focused = graphInteraction.focused;
+            interaction.context = graphInteraction.context;
+            interaction.clearSelection = graphInteraction.clearSelection;
+        } else {
+            interaction = draw_activity_map();
+        }
         ImGui::EndChild();
         ImGui::PopStyleColor();
 

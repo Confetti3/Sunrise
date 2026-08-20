@@ -1,4 +1,5 @@
 #include "inspection_capture.h"
+#include "activity_graph_catalog.h"
 
 #include <Windows.h>
 
@@ -233,6 +234,20 @@ template <typename Value>
 [[nodiscard]] std::string bounds_text(const std::optional<Bounds>& bounds) {
     return bounds.has_value() ? vector_text(bounds->minimum) + " | " + vector_text(bounds->maximum)
                               : "absent";
+}
+
+[[nodiscard]] std::string bounds_provenance_text(
+    const std::optional<Provenance>& provenance) {
+    return provenance.has_value() ? std::string(provenance_name(*provenance)) : "absent";
+}
+[[nodiscard]] std::string spatial_state_text(const Node& node) {
+    if (node.bounds.has_value() && bounds_valid(*node.bounds)) {
+        return "known AABB / " + bounds_provenance_text(node.boundsProvenance);
+    }
+    if (node.kind == NodeKind::trigger && node.transform.has_value()) {
+        return "shape unavailable; center observation only";
+    }
+    return "absent";
 }
 
 [[nodiscard]] std::uint64_t structural_key(const providers::WorldSnapshot& snapshot,
@@ -477,6 +492,54 @@ void append_node_json(std::string& output,
         append_vector_json(output, node.bounds->maximum);
         output.push_back('}');
     }
+    output.append(", \"bounds_provenance\": ");
+    if (node.boundsProvenance.has_value()) {
+        append_json_string(output, provenance_name(*node.boundsProvenance));
+    } else {
+        output.append("null");
+    }
+    output.append(", \"spatial_helper_state\": ");
+    append_json_string(output, spatial_state_text(node));
+    output.append(", \"activity_metadata\": ");
+    if (!node.activityMetadata.has_value()) {
+        output.append("null");
+    } else {
+        const ActivityMetadata& metadata = *node.activityMetadata;
+        output.append("{\"activity_hash\": ");
+        append_number(output, metadata.activityHash);
+        output.append(", \"graph_hash\": ");
+        append_number(output, metadata.graphHash);
+        output.append(", \"node_hash\": ");
+        append_number(output, metadata.nodeHash);
+        output.append(", \"state_hash\": ");
+        append_number(output, metadata.stateHash);
+        output.append(", \"style_hash\": ");
+        append_number(output, metadata.styleHash);
+        output.append(", \"authored_position\": [");
+        append_float(output, metadata.authoredPosition[0]);
+        output.append(", ");
+        append_float(output, metadata.authoredPosition[1]);
+        output.append("], \"release_count\": ");
+        append_number(output, metadata.releaseCount);
+        output.append(", \"reference_count\": ");
+        append_number(output, metadata.referenceCount);
+        output.append(", \"catalog_build\": ");
+        append_number(output, metadata.catalogBuild);
+        output.append(", \"catalog_version\": ");
+        append_json_string(output, metadata.catalogVersion);
+        output.append(", \"linked_graphs\": [");
+        for (std::size_t index = 0; index < metadata.linkedGraphHashes.size(); ++index) {
+            if (index != 0) {
+                output.append(", ");
+            }
+            append_number(output, metadata.linkedGraphHashes[index]);
+        }
+        output.append("]");
+        output.append(", \"build_match\": ");
+        output.append(metadata.buildMatch ? "true" : "false");
+        output.append(", \"browse_only\": ");
+        output.append(metadata.browseOnly ? "true}" : "false}");
+    }
     output.append(", \"transform_runtime\": ");
     output.append(node.transformRuntime ? "true" : "false");
     output.append(", \"linear_velocity\": ");
@@ -504,7 +567,9 @@ void append_node_json(std::string& output,
     output.reserve(world.graph.nodes().size() * 384U + 2048U);
     output.append("{\n  \"schema_version\": ");
     append_number(output, snapshot.schemaVersion);
-    output.append(",\n  \"build\": {\"client\": \"86657\", \"expected_sha256\": ");
+    output.append(",\n  \"build\": {\"client\": ");
+    append_json_string(output, activity_catalog::kTargetContentBuildText);
+    output.append(", \"expected_sha256\": ");
     append_json_string(output, kBuildHash);
     output.append(", \"image_sha256\": ");
     if (snapshot.imageSha256.empty()) {
@@ -528,6 +593,16 @@ void append_node_json(std::string& output,
     append_json_string(output, world.packageName);
     output.append(", \"map_stem\": ");
     append_json_string(output, world.mapStem);
+    output.append("},\n  \"activity_catalog\": {\"present\": ");
+    output.append(world.activityCatalogPresent ? "true" : "false");
+    output.append(", \"build\": ");
+    append_number(output, world.activityCatalogBuild);
+    output.append(", \"version\": ");
+    append_json_string(output, world.activityCatalogVersion);
+    output.append(", \"build_match\": ");
+    output.append(world.activityCatalogBuildMatch ? "true" : "false");
+    output.append(", \"diagnostic\": ");
+    append_json_string(output, world.activityCatalogDiagnostic);
     output.append("},\n  \"coverage\": {\"graph_generation\": ");
     append_number(output, world.graph.generation());
     output.append(", \"runtime_objects_ready\": ");
@@ -596,10 +671,10 @@ void append_node_json(std::string& output,
         }
         output.append(index + 1 == snapshot.producers.size() ? "}\n" : "},\n");
     }
-    output.append("  ],\n  \"producer_versions\": {\"catalog\": 1, \"local-player\": 1, "
-                  "\"object-system\": 1, \"trigger\": 1, \"audio-listener\": 1, "
-                  "\"physics\": 1},\n  \"unavailable_producers\": [\"audio-emitter\", "
-                  "\"navigation\", \"light\", \"terrain\", \"entity-bounds\"]");
+    output.append("  ],\n  \"producer_versions\": {\"catalog\": 1, \"activity-catalog\": 1, "
+                  "\"local-player\": 1, \"object-system\": 1, \"trigger\": 1, "
+                  "\"audio-listener\": 1, \"physics\": 1},\n  \"unavailable_producers\": ["
+                  "\"audio-emitter\", \"navigation\", \"light\", \"terrain\", \"entity-bounds\"]");
     if (route != nullptr) {
         output.append(",\n  \"route_capture\": {\"path\": ");
         append_json_string(output, route->pathName);
@@ -624,17 +699,19 @@ void append_node_json(std::string& output,
     output.append("\n}\n");
     return output;
 }
-
 [[nodiscard]] std::string snapshot_csv(const InspectionSnapshot& snapshot) {
     std::string output =
         "schema_version,expected_image_sha256,image_sha256,image_verified,activity_revision,"
+        "activity_catalog_build,activity_catalog_version,activity_catalog_build_match,"
         "producer_status,"
         "identity,producer,producer_epoch,native_key,id,parent,name,search_text,kind,status,"
         "provenance,package,map_stem,source_scenario_tag,source_spawn_set_hash,source_session,"
         "source_activity,source_bubble,runtime_entity,observation_id,object_type,world_id,tag,"
         "class_hash,name_hash,trigger_selector,trigger_source_hash,trigger_overlap_count,"
         "trigger_enabled,trigger_active,position_x,position_y,position_z,rotation,scale,"
-        "transform_runtime,velocity,bounds,actions\r\n";
+        "transform_runtime,velocity,bounds,bounds_provenance,spatial_helper_state,"
+        "activity_graph_hash,activity_node_hash,activity_hash,activity_x,activity_y,"
+        "activity_catalog_build,activity_catalog_version,activity_build_match,actions\r\n";
     output.reserve(snapshot.world.graph.nodes().size() * 192U + output.size());
     std::string producerStatus;
     for (const InspectionSnapshot::ProducerState& state : snapshot.producers) {
@@ -658,6 +735,11 @@ void append_node_json(std::string& output,
         output.append(snapshot.imageVerified ? "true," : "false,");
         append_number(output, snapshot.world.activityRevision);
         output.push_back(',');
+        append_number(output, snapshot.world.activityCatalogBuild);
+        output.push_back(',');
+        append_csv(output, snapshot.world.activityCatalogVersion);
+        output.push_back(',');
+        output.append(snapshot.world.activityCatalogBuildMatch ? "true," : "false,");
         append_csv(output, producerStatus);
         output.push_back(',');
         append_csv(output, make_identity(snapshot.world, node));
@@ -731,6 +813,30 @@ void append_node_json(std::string& output,
         output.push_back(',');
         append_csv(output, bounds_text(node.bounds));
         output.push_back(',');
+        append_csv(output, bounds_provenance_text(node.boundsProvenance));
+        output.push_back(',');
+        append_csv(output, spatial_state_text(node));
+        output.push_back(',');
+        if (node.activityMetadata.has_value()) {
+            const ActivityMetadata& metadata = *node.activityMetadata;
+            append_number(output, metadata.graphHash);
+            output.push_back(',');
+            append_number(output, metadata.nodeHash);
+            output.push_back(',');
+            append_number(output, metadata.activityHash);
+            output.push_back(',');
+            append_float(output, metadata.authoredPosition[0]);
+            output.push_back(',');
+            append_float(output, metadata.authoredPosition[1]);
+            output.push_back(',');
+            append_number(output, metadata.catalogBuild);
+            output.push_back(',');
+            append_csv(output, metadata.catalogVersion);
+            output.push_back(',');
+            output.append(metadata.buildMatch ? "true," : "false,");
+        } else {
+            output.append(",,,,,,,");
+        }
         append_number(output, static_cast<std::uint32_t>(node.actions));
         output.append("\r\n");
     }
@@ -741,8 +847,11 @@ void append_node_json(std::string& output,
                                       const InspectionSnapshot& current) {
     std::string output;
     output.reserve(events.size() * 256U + 128U);
-    output.append("{\n  \"schema_version\": 1,\n  \"build\": {\"client\": \"86657\", "
-                  "\"expected_sha256\": ");
+    output.append("{\n  \"schema_version\": ");
+    append_number(output, kSchemaVersion);
+    output.append(",\n  \"build\": {\"client\": ");
+    append_json_string(output, activity_catalog::kTargetContentBuildText);
+    output.append(", \"expected_sha256\": ");
     append_json_string(output, kBuildHash);
     output.append(", \"image_sha256\": ");
     if (current.imageSha256.empty()) {
@@ -754,6 +863,15 @@ void append_node_json(std::string& output,
     output.append(current.imageVerified ? "true" : "false");
     output.append("},\n  \"activity_revision\": ");
     append_number(output, current.world.activityRevision);
+    output.append(",\n  \"activity_catalog\": {\"present\": ");
+    output.append(current.world.activityCatalogPresent ? "true" : "false");
+    output.append(", \"build\": ");
+    append_number(output, current.world.activityCatalogBuild);
+    output.append(", \"version\": ");
+    append_json_string(output, current.world.activityCatalogVersion);
+    output.append(", \"build_match\": ");
+    output.append(current.world.activityCatalogBuildMatch ? "true" : "false");
+    output.append("}");
     output.append(",\n  \"producer_epoch\": ");
     append_number(output, current.world.producerEpoch);
     output.append(",\n  \"producer_status\": [");
@@ -980,6 +1098,16 @@ void History::observe(const providers::WorldSnapshot& snapshot) {
         if (before.bounds != after.bounds) {
             field_changed("bounds", bounds_text(before.bounds), bounds_text(after.bounds));
         }
+        if (before.boundsProvenance != after.boundsProvenance) {
+            field_changed("bounds_provenance",
+                          bounds_provenance_text(before.boundsProvenance),
+                          bounds_provenance_text(after.boundsProvenance));
+        }
+        if (spatial_state_text(before) != spatial_state_text(after)) {
+            field_changed("spatial_helper_state",
+                          spatial_state_text(before),
+                          spatial_state_text(after));
+        }
         if (before.runtimeEntity != after.runtimeEntity) {
             field_changed("runtime_entity",
                           optional_text(before.runtimeEntity),
@@ -1114,6 +1242,14 @@ InspectionSnapshot make_snapshot(const providers::WorldSnapshot& snapshot) {
         snapshot.placedObjectCount + snapshot.placedObjectSlotCount,
         snapshot.placedObjectCount + snapshot.placedObjectSlotCount,
         snapshot.scenarioTruncated || snapshot.placedObjectSlotsTruncated);
+    add("activity-catalog",
+        snapshot.activityCatalogPresent,
+        snapshot.activityCatalogPresent,
+        0,
+        snapshot.activityCatalogPresent ? 1 : 0,
+        snapshot.activityCatalogPresent ? 1 : 0,
+        false,
+        snapshot.activityCatalogDiagnostic);
     add("local-player",
         true,
         snapshot.localPlayerPresent,
