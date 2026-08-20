@@ -254,6 +254,12 @@ bool process(const ServiceRoute& route,
             web_service::mutation_if<state::PendingProfileItemAcquisition>(webOutcome);
         const auto* itemDismantle =
             web_service::mutation_if<state::PendingItemDismantle>(webOutcome);
+        const auto* settingsUpdate =
+            web_service::mutation_if<state::PendingSettingsUpdate>(webOutcome);
+        if (settingsUpdate != nullptr) {
+            // WS-701 promises no immediate QueueZ after-image, so State alone is delayed.
+            outcome.transaction.emplace<state::PendingSettingsUpdate>(*settingsUpdate);
+        }
         if (equipmentSwap != nullptr) {
             // Equip is an optimistic Character-screen action. Its status-pair value is the exact
             // Family-4 revision whose following Queuez frame makes it authoritative. Stage that

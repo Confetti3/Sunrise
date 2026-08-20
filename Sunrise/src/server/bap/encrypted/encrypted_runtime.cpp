@@ -293,7 +293,8 @@ bool consume(Session& session,
         || transaction_if<CurrentActivityTransaction>(outcome) != nullptr
         || transaction_if<ItemAcquisitionTransaction>(outcome) != nullptr
         || transaction_if<ProfileItemAcquisitionTransaction>(outcome) != nullptr
-        || transaction_if<ItemDismantleTransaction>(outcome) != nullptr;
+        || transaction_if<ItemDismantleTransaction>(outcome) != nullptr
+        || transaction_if<state::PendingSettingsUpdate>(outcome) != nullptr;
     // State commits consume and clear their pending payloads. Retain only the small diagnostic
     // fields needed after publication; QueueZ after-images stay owned by the transaction variant.
     const auto* stagedSocket = transaction_if<SocketPlugTransaction>(outcome);
