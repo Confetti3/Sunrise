@@ -2,7 +2,7 @@ name: Build
 
 on:
   push:
-    branches: [master, sunrise-inspector]
+    branches: [master, sunrise-inspector, sunrise-viewer]
   pull_request:
   workflow_dispatch:
 
