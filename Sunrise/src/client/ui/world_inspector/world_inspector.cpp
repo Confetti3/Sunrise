@@ -55,6 +55,81 @@ constexpr ImGuiWindowFlags kWorkspaceFlags =
     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize
     | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus;
 
+struct VerticalLayout final {
+    float mainHeight{};
+    float splitterY{};
+    float bottomY{};
+    float bottomHeight{};
+    float statusY{};
+    float minimumBottom{};
+    float maximumBottom{};
+    bool bottomVisible{};
+};
+
+[[nodiscard]] constexpr VerticalLayout compute_vertical_layout(float availableHeight,
+                                                               float statusHeight,
+                                                               float splitterSize,
+                                                               float minimumMainHeight,
+                                                               float requestedBottomHeight,
+                                                               float minimumUsableBottomHeight,
+                                                               float preferredMinimumBottomHeight,
+                                                               bool collapsed) noexcept {
+    availableHeight = (std::max)(0.0F, availableHeight);
+    statusHeight = std::clamp(statusHeight, 0.0F, availableHeight);
+    splitterSize = (std::max)(0.0F, splitterSize);
+    minimumMainHeight = (std::max)(0.0F, minimumMainHeight);
+    minimumUsableBottomHeight = (std::max)(0.0F, minimumUsableBottomHeight);
+    preferredMinimumBottomHeight = (std::max)(0.0F, preferredMinimumBottomHeight);
+
+    const float statusY = availableHeight - statusHeight;
+    const float maximumBottom =
+        (std::max)(0.0F, statusY - minimumMainHeight - splitterSize);
+    const bool visible = !collapsed && maximumBottom >= minimumUsableBottomHeight;
+    if (!visible) {
+        return VerticalLayout{(std::max)(1.0F, statusY),
+                              statusY,
+                              statusY,
+                              0.0F,
+                              statusY,
+                              0.0F,
+                              0.0F,
+                              false};
+    }
+
+    const float minimumBottom = (std::min)(preferredMinimumBottomHeight, maximumBottom);
+    const float bottomHeight =
+        std::clamp(requestedBottomHeight, minimumBottom, maximumBottom);
+    const float bottomY = statusY - bottomHeight;
+    const float splitterY = bottomY - splitterSize;
+    return VerticalLayout{(std::max)(1.0F, splitterY),
+                          splitterY,
+                          bottomY,
+                          bottomHeight,
+                          statusY,
+                          minimumBottom,
+                          maximumBottom,
+                          true};
+}
+
+constexpr VerticalLayout kNormalLayout =
+    compute_vertical_layout(600.0F, 22.0F, 4.0F, 140.0F, 180.0F, 38.0F, 120.0F, false);
+static_assert(kNormalLayout.bottomVisible);
+static_assert(kNormalLayout.statusY == 578.0F);
+static_assert(kNormalLayout.bottomHeight == 180.0F);
+static_assert(kNormalLayout.bottomY == 398.0F);
+static_assert(kNormalLayout.splitterY == 394.0F);
+static_assert(kNormalLayout.mainHeight == 394.0F);
+
+constexpr VerticalLayout kCollapsedLayout =
+    compute_vertical_layout(600.0F, 22.0F, 4.0F, 140.0F, 180.0F, 38.0F, 120.0F, true);
+static_assert(!kCollapsedLayout.bottomVisible);
+static_assert(kCollapsedLayout.mainHeight == 578.0F);
+
+constexpr VerticalLayout kTightLayout =
+    compute_vertical_layout(180.0F, 22.0F, 4.0F, 140.0F, 120.0F, 38.0F, 120.0F, false);
+static_assert(!kTightLayout.bottomVisible);
+static_assert(kTightLayout.mainHeight == 158.0F);
+
 enum class HierarchyMode : std::uint8_t {
     world,
     source,
@@ -664,7 +739,27 @@ void draw_disclosure(const TreeRow& row, const ImVec2& minimum, float rowHeight)
     ImGui::PopID();
 }
 
+void expand_selected_ancestors() noexcept {
+    model::NodeId cursor = g_state.selection.selected();
+    std::size_t guard = 0;
+    bool changed = false;
+    while (cursor && guard++ <= world().graph.nodes().size()) {
+        const model::Node* node = world().graph.node(cursor);
+        if (node == nullptr || !node->parent) {
+            break;
+        }
+        changed = g_state.collapsed.erase(node->parent.value) != 0 || changed;
+        cursor = node->parent;
+    }
+    if (changed) {
+        g_state.rowsValid = false;
+    }
+}
+
 model::NodeId draw_tree() noexcept {
+    if (g_state.revealSelection && g_state.selection.selected() && g_state.search[0] == '\0') {
+        expand_selected_ancestors();
+    }
     rebuild_rows();
     model::NodeId hovered{};
     if (g_state.rows.empty()) {
@@ -968,7 +1063,15 @@ void draw_inspector_actions(const model::Node& node) noexcept {
 
     const auto button = [&sameLine](const char* label) noexcept {
         if (sameLine) {
-            ImGui::SameLine();
+            const float buttonWidth =
+                ImGui::CalcTextSize(label).x + ImGui::GetStyle().FramePadding.x * 2.0F;
+            const float contentRight =
+                ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
+            const float nextRight = ImGui::GetItemRectMax().x + ImGui::GetStyle().ItemSpacing.x
+                                    + buttonWidth;
+            if (nextRight <= contentRight) {
+                ImGui::SameLine();
+            }
         }
         sameLine = true;
         return ImGui::SmallButton(label);
@@ -989,6 +1092,10 @@ void draw_inspector_actions(const model::Node& node) noexcept {
     }
     if (model::supports(node.actions, model::Action::copyId) && button("Copy ID")) {
         copy_id(node.id);
+    }
+    if (node.tag.has_value() && model::supports(node.actions, model::Action::copyTag)
+        && button("Copy tag")) {
+        copy_tag(*node.tag);
     }
     if (node.transform.has_value() && model::supports(node.actions, model::Action::copyPosition)
         && button("Copy position")) {
@@ -1252,6 +1359,26 @@ void draw_diagnostics() noexcept {
         ImGui::TextDisabled("No inspector diagnostics for this world snapshot.");
         return;
     }
+
+    ImGui::TextDisabled("%zu diagnostics", diagnostics.size());
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Copy diagnostics")) {
+        std::string report;
+        for (const model::Diagnostic& diagnostic : diagnostics) {
+            const char* prefix = diagnostic.severity == model::Diagnostic::Severity::error
+                                     ? "ERROR"
+                                 : diagnostic.severity == model::Diagnostic::Severity::warning
+                                     ? "WARN"
+                                     : "INFO";
+            report.append(prefix);
+            report.append(": ");
+            report.append(diagnostic.message);
+            report.push_back('\n');
+        }
+        copy_text(report);
+    }
+    ImGui::Separator();
+
     for (const model::Diagnostic& diagnostic : diagnostics) {
         ImVec4 color = kMuted;
         const char* prefix = "INFO";
@@ -1269,12 +1396,24 @@ void draw_diagnostics() noexcept {
 }
 
 void draw_bottom_dock() noexcept {
-    const auto tab = [](const char* label, BottomTab tabValue) noexcept {
+    const float contentWidth = (std::max)(1.0F, ImGui::GetContentRegionAvail().x);
+    const char* hide = "Hide";
+    const float hideWidth =
+        ImGui::CalcTextSize(hide).x + ImGui::GetStyle().FramePadding.x * 2.0F;
+    const float headerGap = scaled(8.0F);
+    const float minimumTabWidth = scaled(68.0F);
+    const bool compactHeader =
+        contentWidth < hideWidth + headerGap + minimumTabWidth * 3.0F;
+    const float tabArea = compactHeader ? contentWidth
+                                        : (std::max)(1.0F, contentWidth - hideWidth - headerGap);
+    const float tabWidth = (std::max)(1.0F, tabArea / 3.0F);
+
+    const auto tab = [tabWidth](const char* label, BottomTab tabValue) noexcept {
         const bool active = g_state.bottomTab == tabValue;
         if (active) {
             ImGui::PushStyleColor(ImGuiCol_Text, kSelection);
         }
-        if (ImGui::Selectable(label, active, 0, {scaled(104.0F), scaled(22.0F)})) {
+        if (ImGui::Selectable(label, active, 0, {tabWidth, scaled(22.0F)})) {
             g_state.bottomTab = tabValue;
         }
         if (active) {
@@ -1288,17 +1427,26 @@ void draw_bottom_dock() noexcept {
     ImGui::SameLine(0.0F, 0.0F);
     tab("Diagnostics", BottomTab::diagnostics);
 
-    const char* hide = "Hide";
-    const float hideWidth = ImGui::CalcTextSize(hide).x + ImGui::GetStyle().FramePadding.x * 2.0F;
-    ImGui::SameLine((std::max)(ImGui::GetCursorPosX(),
-                              ImGui::GetWindowWidth() - hideWidth - scaled(8.0F)));
-    if (ImGui::SmallButton(hide)) {
-        g_state.bottomCollapsed = true;
-        persist_layout();
+    if (compactHeader) {
+        if (ImGui::SmallButton("Hide bottom panel")) {
+            g_state.bottomCollapsed = true;
+            persist_layout();
+        }
+    } else {
+        ImGui::SameLine((std::max)(ImGui::GetCursorPosX(),
+                                  ImGui::GetWindowWidth() - hideWidth - scaled(8.0F)));
+        if (ImGui::SmallButton(hide)) {
+            g_state.bottomCollapsed = true;
+            persist_layout();
+        }
     }
 
     ImGui::Separator();
-    ImGui::BeginChild("##bottom_content", {0.0F, 0.0F}, false);
+    const float contentHeight = (std::max)(0.0F, ImGui::GetContentRegionAvail().y);
+    const ImGuiWindowFlags contentFlags = g_state.bottomTab == BottomTab::data
+                                              ? ImGuiWindowFlags_NoScrollbar
+                                              : ImGuiWindowFlags_None;
+    ImGui::BeginChild("##bottom_content", {0.0F, contentHeight}, false, contentFlags);
     switch (g_state.bottomTab) {
     case BottomTab::references:
         draw_references();
@@ -1533,6 +1681,13 @@ void draw_status(const camera::Status& status) noexcept {
     ImGui::TextDisabled("| %.0f FPS", static_cast<double>(ImGui::GetIO().Framerate));
     ImGui::SameLine();
     ImGui::TextDisabled("| %zu objects", world().graph.nodes().size());
+    if (g_state.bottomCollapsed) {
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Show bottom")) {
+            g_state.bottomCollapsed = false;
+            persist_layout();
+        }
+    }
     if (world().bubble.has_value()) {
         ImGui::SameLine();
         ImGui::TextDisabled("| Bubble %u", static_cast<unsigned>(*world().bubble));
@@ -1667,23 +1822,20 @@ bool render(bool uiVisible) noexcept {
         const float availableHeight = (std::max)(0.0F, ImGui::GetContentRegionAvail().y);
         const float availableWidth = (std::max)(1.0F, ImGui::GetContentRegionAvail().x);
 
-        const float maximumVisibleBottom =
-            (std::max)(0.0F,
-                       availableHeight - statusHeight - scaled(kMinimumMainHeight) - splitterSize);
-        const bool bottomVisible =
-            !g_state.bottomCollapsed && maximumVisibleBottom >= scaled(kMinimumBottomUsableHeight);
-        const float minimumBottom =
-            bottomVisible
-                ? (std::min)(scaled(client::viewer::kMinimumInspectorBottomHeight),
-                             maximumVisibleBottom)
-                : 0.0F;
-        float bottomHeight =
-            bottomVisible
-                ? std::clamp(g_state.bottomHeight, minimumBottom, maximumVisibleBottom)
-                : 0.0F;
-        const float bottomSplit = bottomVisible ? splitterSize : 0.0F;
-        const float mainHeight =
-            (std::max)(1.0F, availableHeight - statusHeight - bottomHeight - bottomSplit);
+        const VerticalLayout vertical = compute_vertical_layout(
+            availableHeight,
+            statusHeight,
+            splitterSize,
+            scaled(kMinimumMainHeight),
+            g_state.bottomHeight,
+            scaled(kMinimumBottomUsableHeight),
+            scaled(client::viewer::kMinimumInspectorBottomHeight),
+            g_state.bottomCollapsed);
+        const bool bottomVisible = vertical.bottomVisible;
+        const float minimumBottom = vertical.minimumBottom;
+        const float maximumVisibleBottom = vertical.maximumBottom;
+        const float bottomHeight = vertical.bottomHeight;
+        const float mainHeight = vertical.mainHeight;
 
         const float minimumLeft = scaled(client::viewer::kMinimumInspectorLeftWidth);
         const float maximumLeft = scaled(client::viewer::kMaximumInspectorLeftWidth);
@@ -1808,9 +1960,9 @@ bool render(bool uiVisible) noexcept {
         draw_inspector();
         ImGui::EndChild();
 
-        float statusY = contentOrigin.y + mainHeight;
         if (bottomVisible) {
-            ImGui::SetCursorScreenPos({contentOrigin.x, statusY});
+            ImGui::SetCursorScreenPos(
+                {contentOrigin.x, contentOrigin.y + vertical.splitterY});
             float draggedBottomHeight = bottomHeight;
             const SplitterResult bottomResult =
                 splitter("##bottom_splitter",
@@ -1821,22 +1973,21 @@ bool render(bool uiVisible) noexcept {
                          minimumBottom,
                          maximumVisibleBottom);
             if (bottomResult.changed) {
+                // Keep this frame internally consistent. The new height is consumed by the
+                // next frame after every panel has finished using the current geometry.
                 g_state.bottomHeight = draggedBottomHeight;
-                bottomHeight = draggedBottomHeight;
             }
             finish_splitter(bottomResult);
 
-            statusY += splitterSize;
-            ImGui::SetCursorScreenPos({contentOrigin.x, statusY});
+            ImGui::SetCursorScreenPos({contentOrigin.x, contentOrigin.y + vertical.bottomY});
             ImGui::BeginChild("##world_bottom",
                               {availableWidth, bottomHeight},
                               ImGuiChildFlags_Borders);
             draw_bottom_dock();
             ImGui::EndChild();
-            statusY += bottomHeight;
         }
 
-        ImGui::SetCursorScreenPos({contentOrigin.x, statusY});
+        ImGui::SetCursorScreenPos({contentOrigin.x, contentOrigin.y + vertical.statusY});
         draw_status(cameraStatus);
 
         if (g_state.contextRequested) {
