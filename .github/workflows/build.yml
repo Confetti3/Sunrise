@@ -16,6 +16,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify Viewer diff hygiene
+        shell: pwsh
+        run: |
+          git fetch --no-tags origin sunrise-inspector:refs/remotes/origin/sunrise-inspector
+          git diff --check origin/sunrise-inspector...HEAD
 
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v2
