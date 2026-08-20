@@ -452,6 +452,23 @@ bool process(const ServiceRoute& route,
         }
         // A pick that names the resident character moves nothing, so staging refuses it and the
         // reply still stands on its own.
+        if (webOutcome.hasRecordClaim) {
+            // Every other client action promises the exact Family-4 revision that makes it
+            // authoritative, and the claim was answering with the sentinel instead. The account
+            // resync staged later carries the next version, so promise that one here.
+            middleware::web_service::StatusResponse status{};
+            status.value = queuezState.family4Version + 1;
+            if (!middleware::web_service::encode_response(
+                    message,
+                    middleware::web_service::ResponseShape::statusPair,
+                    status,
+                    output,
+                    written)) {
+                core::log::write(core::log::Channel::server,
+                                 core::log::Level::warn,
+                                 "ev=ws1801 stage=response result=fail");
+            }
+        }
         if (webOutcome.hasSelectedCharacter
             && queuez::stage_select_character(
                 queuezState, webOutcome.selectedCharacterSoid, outcome.selectCharacter)) {
