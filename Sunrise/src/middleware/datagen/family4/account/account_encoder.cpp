@@ -5,6 +5,7 @@
 #include <limits>
 
 #include "../../../../state/build_data/runtime.h"
+#include "../../../../state/record_claims/record_claims.h"
 #include "../../../../state/unlocks/unlocks_runtime.h"
 #include "../progression/progression_bank_keys.h"
 #include "layout.h"
@@ -93,6 +94,9 @@ bool encode(const state::AccountState& state, std::span<std::byte> output) noexc
     // Acquired flags and objective progress are authored policy, published once per process.
     const state::unlocks::Table& unlocks = state::unlocks::get();
     object.acquiredFlags = unlocks.accountFlags;
+    // Claims arrive after boot, so they cannot be in the authored policy. Lay them over the
+    // bank here, which is the one place every Family-4 account image passes through.
+    (void)state::record_claims::apply(object.acquiredFlags);
     object.profileUnlockFlags = unlocks.profileFlags;
     object.objectiveValues = unlocks.objectiveValues;
     for (layout::CharacterUnlockBlock& block : object.characterUnlocks) {

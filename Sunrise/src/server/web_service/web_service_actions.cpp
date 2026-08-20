@@ -7,6 +7,7 @@
 
 #include "../../core/logging/log.h"
 #include "../../middleware/web_service/messages/opcode1801.h"
+#include "../../state/record_claims/record_claims.h"
 #include "../../middleware/web_service/messages/opcode1820.h"
 #include "../../middleware/web_service/messages/opcode1901.h"
 #include "../../middleware/web_service/messages/opcode402.h"
@@ -869,8 +870,16 @@ void claim_record(const middleware::web_service::Message& message, Outcome& outc
             records::kUnavailableFlagIndex);
         return;
     }
+    if (!state::record_claims::claim(definition.completionFlagIndex)) {
+        report_record_claim(message,
+                            "fail",
+                            "flag_index_range",
+                            request.recordIndex,
+                            definition.completionFlagIndex);
+        return;
+    }
     report_record_claim(
-        message, "ok", "resolved", request.recordIndex, definition.completionFlagIndex);
+        message, "ok", "claimed", request.recordIndex, definition.completionFlagIndex);
 }
 
 } // namespace sunrise::server::web_service
