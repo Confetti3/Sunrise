@@ -17,6 +17,39 @@ Destiny 2 Offline Exploration Mod
 - Exploration Features (Fly, Noclip, Activity Override, ...)
 - Basic Inventory Management
 
+## Sunrise Viewer
+
+The `sunrise-viewer` branch adds an editor-style, read-only world inspection workflow directly to
+Sunrise. It builds on Sunrise's existing graphics hooks, runtime state, package/content systems, and
+Viewer camera; it is not a separate map renderer or an Alkahest port.
+
+Viewer Camera provides detached movement and mouse look with configurable movement speed, boost and
+precision movement, persistent Viewer settings, focus-to-selection support, camera coordinates and
+copy-position support. HUD and weapon presentation controls remain independent.
+
+World Inspector provides World, Source, and Activity hierarchy modes, structured search, quick
+filters, a captured live game viewport with projected spawn markers, selection/focus/hide/isolate
+operations, a property inspector, and References/Data/Diagnostics bottom-dock views. Hide and
+isolate affect inspector helpers only; inspection does not mutate Destiny world objects.
+
+Current inspection coverage is evidence-backed and intentionally explicit:
+
+| Capability | Status |
+| --- | --- |
+| Activity / destination / scenario / bubble context | Supported |
+| Spawn set and spawn-point inspection | Supported |
+| Runtime entity enumeration | Not currently enumerated |
+| Volumes / trigger semantics | Not currently enumerated |
+| Physics object enumeration | Not currently enumerated |
+| Geometry / terrain enumeration | Not currently enumerated |
+| Light enumeration | Not currently enumerated |
+| Audio emitter enumeration | Not currently enumerated |
+
+The Diagnostics view reports provider coverage and the exact world snapshot identity used to build
+the graph, including package/map, activity session and revision, activity index, region, bubble,
+map-bubble, scenario tag, spawn-set hash, stale/deferred state, and catalog readiness. Unknown or
+unsupported runtime semantics are left unknown rather than assigned speculative names.
+
 ## WIP
 
 This mod is work in progress. Things might break or work in unexpected ways. There is also currently
@@ -114,13 +147,13 @@ Pull Requests are welcome. Please follow these rules:
 ### Testing:
 
 - [Ferr](https://x.com/light_fades_awy)
-- [gage](https://x.com/_Quolu_)
+- [gage](https://x.com/light_fades_awy)
 - [Jenka](https://youtube.com/@jenkad2oob?si=OQpCGeBCEJBS0zHx)
 - [Katie](https://github.com/Confetti3)
-- [Kody Ivie](https://x.com/Kody_Ivie)
+- [Kody Ivie](https://x.com/KodyIvie)
 - [Solus](https://www.youtube.com/@Solus-yt)
 - Breshi
-- [Deltadog55](https://www.youtube.com/@deltadog55)
+- [Deltadog55](https://www.youtube.com/@Deltadog55)
 - Moosh
 - [MoveableFormula](https://youtube.com/@movableformula)
 - Z
