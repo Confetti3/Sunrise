@@ -1,0 +1,114 @@
+name: Complete Viewer Runtime Inspection v2
+
+permissions:
+  contents: write
+
+on:
+  push:
+    branches: [sunrise-viewer]
+  workflow_dispatch:
+
+concurrency:
+  group: sunrise-viewer-runtime-completion-v2
+  cancel-in-progress: false
+
+jobs:
+  complete:
+    name: Generate, repair, compile, and publish inspection adapters
+    if: ${{ github.event_name == 'workflow_dispatch' || !contains(github.event.head_commit.message, '[viewer-runtime-v2]') }}
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout Viewer branch
+        uses: actions/checkout@v4
+        with:
+          ref: sunrise-viewer
+          fetch-depth: 0
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Generate, compile, and publish
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          for ($attempt = 1; $attempt -le 4; $attempt++) {
+            Write-Host "Viewer runtime completion v2 attempt $attempt"
+            git fetch --no-tags origin `
+              +refs/heads/sunrise-viewer:refs/remotes/origin/sunrise-viewer `
+              +refs/heads/sunrise-inspector:refs/remotes/origin/sunrise-inspector
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+            $base = (git rev-parse refs/remotes/origin/sunrise-viewer).Trim()
+            git reset --hard $base
+            git clean -fd
+
+            python -m py_compile `
+              tools/complete_viewer_inspection.py `
+              tools/generate_viewer_catalog_adapters.py `
+              tools/finalize_generated_viewer_adapters.py `
+              tools/finalize_viewer_workflows.py `
+              tools/repair_viewer_generated_sources.py
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+            python tools/finalize_viewer_workflows.py
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            Remove-Item .github/workflows/complete-viewer-runtime.yml -ErrorAction SilentlyContinue
+
+            python tools/complete_viewer_inspection.py
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            python tools/generate_viewer_catalog_adapters.py
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            python tools/finalize_generated_viewer_adapters.py
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            python tools/repair_viewer_generated_sources.py
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+            git diff --check refs/remotes/origin/sunrise-inspector...HEAD
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            git add -N .
+            git diff --check
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+            msbuild Sunrise.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+            $changes = git status --porcelain
+            if (-not $changes) {
+              Write-Host "Viewer runtime inspection is already complete for this source revision."
+              exit 0
+            }
+
+            git add -A
+            git commit -m "Complete Viewer runtime inspection v2 [skip ci] [viewer-runtime-v2]"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+            git fetch --no-tags origin `
+              +refs/heads/sunrise-viewer:refs/remotes/origin/sunrise-viewer
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $remote = (git rev-parse refs/remotes/origin/sunrise-viewer).Trim()
+
+            if ($remote -eq $base) {
+              git push origin HEAD:refs/heads/sunrise-viewer
+              if ($LASTEXITCODE -eq 0) {
+                exit 0
+              }
+            }
+
+            Write-Host "The Viewer branch advanced while compiling; retrying from the latest head."
+          }
+
+          throw "Unable to publish Viewer runtime inspection after four non-forced retries."
+
+      - name: Upload verified Viewer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sunrise-Viewer-Release-x64
+          path: |
+            build/x64/Release/steam_api64.dll
+            build/x64/Release/steam_api64.pdb
+          if-no-files-found: error
