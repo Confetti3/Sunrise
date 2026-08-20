@@ -1,0 +1,198 @@
+name: Complete Viewer Runtime Inspection v4
+
+permissions:
+  contents: write
+
+on:
+  push:
+    branches: [sunrise-viewer]
+  workflow_dispatch:
+
+concurrency:
+  group: sunrise-viewer-runtime-completion-v4
+  cancel-in-progress: false
+
+jobs:
+  complete:
+    name: Generate, fall back safely, compile, and publish
+    if: ${{ github.event_name == 'workflow_dispatch' || !contains(github.event.head_commit.message, '[viewer-runtime-v4]') }}
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 75
+
+    steps:
+      - name: Checkout Viewer branch
+        uses: actions/checkout@v4
+        with:
+          ref: sunrise-viewer
+          fetch-depth: 0
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Generate, compile, and publish
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          function Invoke-ViewerBuild([string] $label) {
+            Write-Host "Building Viewer tier: $label"
+            & msbuild Sunrise.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal 2>&1 |
+              ForEach-Object { Write-Host $_ }
+            $code = $LASTEXITCODE
+            return ($code -eq 0)
+          }
+
+          for ($attempt = 1; $attempt -le 4; $attempt++) {
+            Write-Host "Viewer runtime completion v4 attempt $attempt"
+            git fetch --no-tags origin `
+              +refs/heads/sunrise-viewer:refs/remotes/origin/sunrise-viewer `
+              +refs/heads/sunrise-inspector:refs/remotes/origin/sunrise-inspector
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+            $base = (git rev-parse refs/remotes/origin/sunrise-viewer).Trim()
+            git reset --hard $base
+            git clean -fd
+
+            python tools/harden_viewer_catalog_generator.py
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            python -m py_compile `
+              tools/complete_viewer_inspection.py `
+              tools/generate_viewer_catalog_adapters.py `
+              tools/finalize_generated_viewer_adapters.py `
+              tools/finalize_viewer_workflows.py `
+              tools/repair_viewer_generated_sources.py `
+              tools/harden_viewer_catalog_generator.py `
+              tools/fallback_viewer_runtime_completion.py `
+              tools/write_viewer_completion_manifest.py
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+            python tools/finalize_viewer_workflows.py
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            Remove-Item .github/workflows/complete-viewer-runtime.yml -ErrorAction SilentlyContinue
+            Remove-Item .github/workflows/complete-viewer-runtime-v2.yml -ErrorAction SilentlyContinue
+            Remove-Item .github/workflows/complete-viewer-runtime-v3.yml -ErrorAction SilentlyContinue
+
+            $tier = 'world-context'
+            $dynamicLayer = $false
+            $catalogLayer = $false
+
+            python tools/complete_viewer_inspection.py
+            if ($LASTEXITCODE -eq 0) {
+              $dynamicLayer = $true
+              $tier = 'live-anchors'
+
+              python tools/generate_viewer_catalog_adapters.py
+              if ($LASTEXITCODE -eq 0) {
+                python tools/finalize_generated_viewer_adapters.py
+                $finalized = $LASTEXITCODE -eq 0
+                if ($finalized) {
+                  python tools/repair_viewer_generated_sources.py
+                  $finalized = $LASTEXITCODE -eq 0
+                }
+                if ($finalized) {
+                  $catalogLayer = $true
+                  $tier = 'public-catalog-discovery'
+                } else {
+                  python tools/fallback_viewer_runtime_completion.py --catalogs
+                  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+                }
+              } else {
+                python tools/fallback_viewer_runtime_completion.py --catalogs
+                if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+              }
+            } else {
+              git checkout $base -- `
+                README.md `
+                Sunrise/src/client/inspection/providers/spawn_inspection_provider.h `
+                Sunrise/src/client/inspection/providers/spawn_inspection_provider.cpp `
+                Sunrise/src/client/ui/world_inspector/world_inspector_viewport.cpp
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
+
+            $built = Invoke-ViewerBuild $tier
+            if (-not $built -and $catalogLayer) {
+              Write-Host "A discovered catalog adapter did not compile; retaining live anchors."
+              python tools/fallback_viewer_runtime_completion.py --catalogs
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+              python tools/repair_viewer_generated_sources.py
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+              $catalogLayer = $false
+              $tier = 'live-anchors'
+              $built = Invoke-ViewerBuild $tier
+            }
+
+            if (-not $built -and $dynamicLayer) {
+              Write-Host "The optional player/marker adapter did not compile; retaining manual world context."
+              python tools/fallback_viewer_runtime_completion.py --catalogs --dynamic-player
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+              $dynamicLayer = $false
+              $tier = 'world-context'
+              $built = Invoke-ViewerBuild $tier
+            }
+
+            if (-not $built) {
+              Write-Host "Restoring this branch's pre-generation source and validating its baseline."
+              git checkout $base -- `
+                README.md `
+                Sunrise/src/client/inspection/providers/spawn_inspection_provider.h `
+                Sunrise/src/client/inspection/providers/spawn_inspection_provider.cpp `
+                Sunrise/src/client/ui/world_inspector/world_inspector_viewport.cpp
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+              Remove-Item `
+                Sunrise/src/client/inspection/providers/generated_runtime_catalog_adapters.h `
+                -ErrorAction SilentlyContinue
+              $tier = 'branch-baseline'
+              $built = Invoke-ViewerBuild $tier
+            }
+
+            if (-not $built) {
+              throw "Release x64 failed for the generated layers and the pre-generation branch baseline."
+            }
+
+            python tools/write_viewer_completion_manifest.py --tier $tier
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+            git diff --check refs/remotes/origin/sunrise-inspector...HEAD
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            git add -N .
+            git diff --check
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+            $changes = git status --porcelain
+            if (-not $changes) {
+              Write-Host "Viewer runtime inspection is already complete for this source revision."
+              exit 0
+            }
+
+            git add -A
+            git commit -m "Complete Viewer runtime inspection v4 [skip ci] [viewer-runtime-v4]"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+            git fetch --no-tags origin `
+              +refs/heads/sunrise-viewer:refs/remotes/origin/sunrise-viewer
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $remote = (git rev-parse refs/remotes/origin/sunrise-viewer).Trim()
+
+            if ($remote -eq $base) {
+              git push origin HEAD:refs/heads/sunrise-viewer
+              if ($LASTEXITCODE -eq 0) {
+                exit 0
+              }
+            }
+
+            Write-Host "The Viewer branch advanced while compiling; retrying from the latest head."
+          }
+
+          throw "Unable to publish Viewer runtime inspection after four non-forced retries."
+
+      - name: Upload verified Viewer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sunrise-Viewer-Release-x64
+          path: |
+            build/x64/Release/steam_api64.dll
+            build/x64/Release/steam_api64.pdb
+          if-no-files-found: error
