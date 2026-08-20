@@ -6,7 +6,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
-#include <cstring>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -39,6 +39,8 @@ constexpr float kToolbarHeight = 30.0F;
 constexpr float kStatusHeight = 22.0F;
 constexpr float kSplitterThickness = 4.0F;
 constexpr float kMinimumViewportWidth = 360.0F;
+constexpr float kMinimumMainHeight = 140.0F;
+constexpr float kMinimumBottomUsableHeight = 38.0F;
 constexpr float kTreeRowHeight = 24.0F;
 constexpr float kTreeIndent = 14.0F;
 constexpr std::size_t kSearchCapacity = 256;
@@ -65,11 +67,24 @@ enum class BottomTab : std::uint8_t {
     diagnostics,
 };
 
+enum class FilterGroup : std::uint8_t {
+    geometry,
+    entities,
+    spawns,
+    triggers,
+    audio,
+};
+
 struct TreeRow final {
     model::NodeId id{};
     std::string label;
     std::uint8_t depth{};
     bool hasChildren{};
+};
+
+struct SplitterResult final {
+    bool changed{};
+    bool released{};
 };
 
 struct WorkspaceState final {
@@ -93,7 +108,11 @@ struct WorkspaceState final {
     float layoutScale{1.0F};
     bool layoutInitialized{};
     bool rowsValid{};
+    bool showGeometry{true};
+    bool showEntities{true};
     bool showSpawns{true};
+    bool showTriggers{true};
+    bool showAudio{true};
     bool showHidden{true};
     bool errorsOnly{};
     bool showLabels{};
@@ -101,6 +120,7 @@ struct WorkspaceState final {
     bool viewportNavigation{};
     bool layoutDirty{};
     bool contextRequested{};
+    bool focusSearch{};
 };
 
 std::atomic_bool g_open{};
@@ -199,7 +219,7 @@ void isolate(model::NodeId id) noexcept {
     }
     g_state.hidden.clear();
     for (const model::Node& node : world().graph.nodes()) {
-        if (node.kind == model::NodeKind::spawnPoint && node.id != id) {
+        if (model::supports(node.actions, model::Action::hide) && node.id != id) {
             g_state.hidden.insert(node.id.value);
         }
     }
@@ -219,6 +239,12 @@ void focus(model::NodeId id) noexcept {
         pose.position[lane] = node->transform->position[lane] - pose.forward[lane] * kFocusDistance;
     }
     (void)camera::move_to(pose);
+}
+
+void select_node(model::NodeId id) noexcept {
+    if (world().graph.node(id) != nullptr) {
+        g_state.selection.select(id);
+    }
 }
 
 void select_and_focus(model::NodeId id) noexcept {
@@ -313,6 +339,146 @@ void refresh_layout_scale() noexcept {
     return "World";
 }
 
+[[nodiscard]] FilterGroup filter_group(model::NodeKind kind) noexcept {
+    switch (kind) {
+    case model::NodeKind::geometry:
+    case model::NodeKind::terrain:
+        return FilterGroup::geometry;
+    case model::NodeKind::runtimeEntity:
+    case model::NodeKind::light:
+    case model::NodeKind::physics:
+        return FilterGroup::entities;
+    case model::NodeKind::spawnGroup:
+    case model::NodeKind::spawnSet:
+    case model::NodeKind::spawnPoint:
+        return FilterGroup::spawns;
+    case model::NodeKind::trigger:
+        return FilterGroup::triggers;
+    case model::NodeKind::audio:
+        return FilterGroup::audio;
+    default:
+        return FilterGroup::entities;
+    }
+}
+
+[[nodiscard]] bool is_structural(model::NodeKind kind) noexcept {
+    return kind == model::NodeKind::world || kind == model::NodeKind::source
+           || kind == model::NodeKind::activity || kind == model::NodeKind::destination
+           || kind == model::NodeKind::unresolved;
+}
+
+[[nodiscard]] bool filter_enabled(FilterGroup group) noexcept {
+    switch (group) {
+    case FilterGroup::geometry:
+        return g_state.showGeometry;
+    case FilterGroup::entities:
+        return g_state.showEntities;
+    case FilterGroup::spawns:
+        return g_state.showSpawns;
+    case FilterGroup::triggers:
+        return g_state.showTriggers;
+    case FilterGroup::audio:
+        return g_state.showAudio;
+    }
+    return true;
+}
+
+[[nodiscard]] bool filter_present(FilterGroup group) noexcept {
+    return std::ranges::any_of(world().graph.nodes(), [group](const model::Node& node) {
+        return !is_structural(node.kind) && filter_group(node.kind) == group;
+    });
+}
+
+[[nodiscard]] bool node_admitted_by_filters(const model::Node& node,
+                                            const model::Query& query) noexcept {
+    if (!is_structural(node.kind) && !filter_enabled(filter_group(node.kind))) {
+        return false;
+    }
+    if (!g_state.showHidden && hidden(node.id)) {
+        return false;
+    }
+    if (g_state.errorsOnly && node.status != model::Status::failed) {
+        return false;
+    }
+    return model::matches(node, query);
+}
+
+void admit_with_ancestors(const model::Graph& graph,
+                          model::NodeId id,
+                          std::unordered_set<std::uint64_t>& admitted) {
+    std::size_t guard = 0;
+    while (id && guard++ <= graph.nodes().size()) {
+        if (!admitted.insert(id.value).second) {
+            return;
+        }
+        const model::Node* node = graph.node(id);
+        if (node == nullptr) {
+            return;
+        }
+        id = node->parent;
+    }
+}
+
+[[nodiscard]] std::string row_label(const model::Node& node,
+                                    HierarchyMode mode,
+                                    const provider::WorldSnapshot& snapshot) {
+    if (node.id == snapshot.graph.root()) {
+        return root_label(mode, snapshot);
+    }
+    if (mode == HierarchyMode::source && node.kind == model::NodeKind::spawnSet
+        && !node.source.mapStem.empty()) {
+        return node.source.mapStem + " / " + node.name;
+    }
+    if (mode == HierarchyMode::activity && node.kind == model::NodeKind::spawnSet
+        && node.source.activityIndex.has_value()) {
+        std::array<char, 96> text{};
+        const int written = std::snprintf(text.data(),
+                                          text.size(),
+                                          "Destination %d / %s",
+                                          *node.source.activityIndex,
+                                          node.name.c_str());
+        if (written > 0 && static_cast<std::size_t>(written) < text.size()) {
+            return std::string(text.data(), static_cast<std::size_t>(written));
+        }
+    }
+    return node.name;
+}
+
+void append_rows(const model::Graph& graph,
+                 model::NodeId id,
+                 const std::unordered_set<std::uint64_t>& admitted,
+                 bool searching,
+                 std::uint8_t depth,
+                 const provider::WorldSnapshot& snapshot) {
+    if (!id || !admitted.contains(id.value)) {
+        return;
+    }
+    const model::Node* node = graph.node(id);
+    if (node == nullptr) {
+        return;
+    }
+
+    bool hasChildren = false;
+    for (const model::NodeId child : node->children) {
+        if (admitted.contains(child.value)) {
+            hasChildren = true;
+            break;
+        }
+    }
+    g_state.rows.push_back(
+        TreeRow{id, row_label(*node, g_state.hierarchyMode, snapshot), depth, hasChildren});
+
+    if (!searching && g_state.collapsed.contains(id.value)) {
+        return;
+    }
+    const std::uint8_t childDepth =
+        depth == (std::numeric_limits<std::uint8_t>::max)() ? depth
+                                                            : static_cast<std::uint8_t>(depth + 1U);
+    for (const model::NodeId child : node->children) {
+        append_rows(graph, child, admitted, searching, childDepth, snapshot);
+    }
+}
+
 void rebuild_rows() {
     const provider::WorldSnapshot& snapshot = world();
     const std::string queryText(g_state.search.data());
@@ -325,44 +491,16 @@ void rebuild_rows() {
     g_state.rows.clear();
     const model::Query query = model::parse_query(queryText);
     const bool searching = !query.terms.empty();
-    const model::Node* root = snapshot.graph.node(snapshot.graph.root());
-    const model::Node* set = snapshot.graph.node(snapshot.spawnSetNode);
-    std::vector<model::NodeId> points;
-    if (g_state.showSpawns && set != nullptr) {
-        points.reserve(set->children.size());
-        for (const model::NodeId id : set->children) {
-            const model::Node* node = snapshot.graph.node(id);
-            if (node == nullptr || node->kind != model::NodeKind::spawnPoint
-                || (!g_state.showHidden && hidden(id))
-                || (g_state.errorsOnly && node->status != model::Status::failed)
-                || !model::matches(*node, query)) {
-                continue;
-            }
-            points.push_back(id);
+    std::unordered_set<std::uint64_t> admitted;
+    admitted.reserve(snapshot.graph.nodes().size());
+
+    for (const model::Node& node : snapshot.graph.nodes()) {
+        if (node_admitted_by_filters(node, query)) {
+            admit_with_ancestors(snapshot.graph, node.id, admitted);
         }
     }
 
-    const bool rootMatches = root != nullptr && model::matches(*root, query);
-    const bool setMatches = set != nullptr && model::matches(*set, query);
-    const bool showBranch = !searching || rootMatches || setMatches || !points.empty();
-    if (root != nullptr && showBranch) {
-        g_state.rows.push_back(
-            TreeRow{root->id, root_label(g_state.hierarchyMode, snapshot), 0, set != nullptr});
-    }
-    const bool rootOpen = root != nullptr
-                          && (searching || !g_state.collapsed.contains(root->id.value));
-    if (set != nullptr && showBranch && rootOpen) {
-        g_state.rows.push_back(TreeRow{set->id, set->name, 1, !set->children.empty()});
-        const bool setOpen = searching || !g_state.collapsed.contains(set->id.value);
-        if (setOpen) {
-            for (const model::NodeId id : points) {
-                const model::Node* node = snapshot.graph.node(id);
-                if (node != nullptr) {
-                    g_state.rows.push_back(TreeRow{id, node->name, 2, false});
-                }
-            }
-        }
-    }
+    append_rows(snapshot.graph, snapshot.graph.root(), admitted, searching, 0, snapshot);
 
     g_state.cachedGeneration = snapshot.graph.generation();
     g_state.cachedSearch = queryText;
@@ -371,23 +509,27 @@ void rebuild_rows() {
     g_state.rowsValid = true;
 }
 
-[[nodiscard]] bool chip(const char* label, bool active, bool enabled = true) noexcept {
+[[nodiscard]] bool chip(const char* label,
+                        bool active,
+                        bool enabled,
+                        const char* unavailableTooltip) noexcept {
     if (!enabled) {
         ImGui::BeginDisabled();
     }
-    if (active) {
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(kSelection.x, kSelection.y, kSelection.z, 0.28F));
+    if (active && enabled) {
+        ImGui::PushStyleColor(ImGuiCol_Button,
+                              ImVec4(kSelection.x, kSelection.y, kSelection.z, 0.28F));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
                               ImVec4(kSelection.x, kSelection.y, kSelection.z, 0.42F));
     }
     const bool pressed = ImGui::SmallButton(label);
-    if (active) {
+    if (active && enabled) {
         ImGui::PopStyleColor(2);
     }
     if (!enabled) {
         ImGui::EndDisabled();
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-            ImGui::SetTooltip("Provider unavailable in this build");
+            ImGui::SetTooltip("%s", unavailableTooltip);
         }
     }
     return enabled && pressed;
@@ -411,51 +553,56 @@ void hierarchy_tabs() noexcept {
 
     const float width = ImGui::GetContentRegionAvail().x / 3.0F;
     ImGui::BeginGroup();
-    ImGui::PushItemWidth(width);
-    const float start = ImGui::GetCursorPosX();
-    ImGui::SetCursorPosX(start);
-    ImGui::BeginChild("##hierarchy_world", {width, scaled(22.0F)}, false,
+    ImGui::BeginChild("##hierarchy_world",
+                      {width, scaled(22.0F)},
+                      false,
                       ImGuiWindowFlags_NoScrollbar);
     tab("World", HierarchyMode::world);
     ImGui::EndChild();
     ImGui::SameLine(0.0F, 0.0F);
-    ImGui::BeginChild("##hierarchy_source", {width, scaled(22.0F)}, false,
+    ImGui::BeginChild("##hierarchy_source",
+                      {width, scaled(22.0F)},
+                      false,
                       ImGuiWindowFlags_NoScrollbar);
     tab("Source", HierarchyMode::source);
     ImGui::EndChild();
     ImGui::SameLine(0.0F, 0.0F);
-    ImGui::BeginChild("##hierarchy_activity", {0.0F, scaled(22.0F)}, false,
+    ImGui::BeginChild("##hierarchy_activity",
+                      {0.0F, scaled(22.0F)},
+                      false,
                       ImGuiWindowFlags_NoScrollbar);
     tab("Activity", HierarchyMode::activity);
     ImGui::EndChild();
-    ImGui::PopItemWidth();
     ImGui::EndGroup();
 }
 
 void quick_filters() noexcept {
-    ImGui::BeginDisabled();
-    (void)chip("Geometry", false, false);
-    ImGui::SameLine();
-    (void)chip("Entities", false, false);
-    ImGui::EndDisabled();
-    ImGui::SameLine();
-    if (chip("Spawns", g_state.showSpawns)) {
-        g_state.showSpawns = !g_state.showSpawns;
-        g_state.rowsValid = false;
-    }
-    ImGui::SameLine();
-    ImGui::BeginDisabled();
-    (void)chip("Triggers", false, false);
-    ImGui::SameLine();
-    (void)chip("Audio", false, false);
-    ImGui::EndDisabled();
+    const auto filterChip = [](const char* label,
+                               FilterGroup group,
+                               bool& value) noexcept {
+        const bool present = filter_present(group);
+        if (chip(label, value, present, "No matching objects are present in this snapshot.")) {
+            value = !value;
+            g_state.rowsValid = false;
+        }
+    };
 
-    if (chip("Hidden", g_state.showHidden)) {
+    filterChip("Geometry", FilterGroup::geometry, g_state.showGeometry);
+    ImGui::SameLine();
+    filterChip("Entities", FilterGroup::entities, g_state.showEntities);
+    ImGui::SameLine();
+    filterChip("Spawns", FilterGroup::spawns, g_state.showSpawns);
+    ImGui::SameLine();
+    filterChip("Triggers", FilterGroup::triggers, g_state.showTriggers);
+    ImGui::SameLine();
+    filterChip("Audio", FilterGroup::audio, g_state.showAudio);
+
+    if (chip("Hidden", g_state.showHidden, true, "")) {
         g_state.showHidden = !g_state.showHidden;
         g_state.rowsValid = false;
     }
     ImGui::SameLine();
-    if (chip("Errors", g_state.errorsOnly)) {
+    if (chip("Errors", g_state.errorsOnly, true, "")) {
         g_state.errorsOnly = !g_state.errorsOnly;
         g_state.rowsValid = false;
     }
@@ -517,18 +664,25 @@ model::NodeId draw_tree() noexcept {
             const float indent = scaled(kTreeIndent) * static_cast<float>(row.depth);
             ImDrawList* drawList = ImGui::GetWindowDrawList();
             for (std::uint8_t depth = 0; depth < row.depth; ++depth) {
-                const float x = rowStart.x + scaled(kTreeIndent) * (static_cast<float>(depth) + 0.5F);
-                drawList->AddLine({x, rowStart.y}, {x, rowStart.y + rowHeight}, kGuideColor);
+                const float x =
+                    rowStart.x + scaled(kTreeIndent) * (static_cast<float>(depth) + 0.5F);
+                drawList->AddLine({x, rowStart.y},
+                                  {x, rowStart.y + rowHeight},
+                                  kGuideColor);
             }
             ImGui::SetCursorScreenPos({rowStart.x + indent, rowStart.y});
             draw_disclosure(row, {rowStart.x + indent, rowStart.y}, rowHeight);
             ImGui::SameLine(0.0F, 1.0F);
+
             const bool selected = g_state.selection.selected() == row.id;
             const model::Node* node = world().graph.node(row.id);
-            if (node != nullptr && node->kind == model::NodeKind::spawnPoint) {
+            const bool helper = node != nullptr
+                                && model::supports(node->actions, model::Action::hide);
+            if (helper) {
                 ImGui::PushStyleColor(ImGuiCol_Text, hidden(row.id) ? kMuted : kSpawn);
             }
-            if (ImGui::Selectable(row.label.c_str(), selected,
+            if (ImGui::Selectable(row.label.c_str(),
+                                  selected,
                                   ImGuiSelectableFlags_AllowDoubleClick,
                                   {0.0F, rowHeight})) {
                 g_state.selection.select(row.id);
@@ -536,7 +690,7 @@ model::NodeId draw_tree() noexcept {
                     focus(row.id);
                 }
             }
-            if (node != nullptr && node->kind == model::NodeKind::spawnPoint) {
+            if (helper) {
                 ImGui::PopStyleColor();
             }
             if (ImGui::IsItemHovered()) {
@@ -556,6 +710,10 @@ model::NodeId draw_tree() noexcept {
 void draw_outliner() noexcept {
     ImGui::TextDisabled("SCENE TREE");
     hierarchy_tabs();
+    if (g_state.focusSearch) {
+        ImGui::SetKeyboardFocusHere();
+        g_state.focusSearch = false;
+    }
     ImGui::SetNextItemWidth(-1.0F);
     if (ImGui::InputTextWithHint("##world_search",
                                  "Search or type:spawn  tag:80806730",
@@ -565,6 +723,23 @@ void draw_outliner() noexcept {
     }
     quick_filters();
     ImGui::Separator();
+
+    if (ImGui::SmallButton("Expand all")) {
+        g_state.collapsed.clear();
+        g_state.rowsValid = false;
+    }
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Collapse all")) {
+        g_state.collapsed.clear();
+        for (const model::Node& node : world().graph.nodes()) {
+            if (!node.children.empty()) {
+                g_state.collapsed.insert(node.id.value);
+            }
+        }
+        g_state.rowsValid = false;
+    }
+    ImGui::Separator();
+
     const model::NodeId hovered = draw_tree();
     if (hovered) {
         g_state.selection.hover(hovered);
@@ -581,7 +756,10 @@ void property_row(const char* name, const char* value) noexcept {
 
 void property_u64(const char* name, std::uint64_t value, int width = 16) noexcept {
     std::array<char, 32> text{};
-    (void)std::snprintf(text.data(), text.size(), "0x%0*llX", width,
+    (void)std::snprintf(text.data(),
+                        text.size(),
+                        "0x%0*llX",
+                        width,
                         static_cast<unsigned long long>(value));
     property_row(name, text.data());
 }
@@ -592,20 +770,27 @@ void property_i32(const char* name, std::int32_t value) noexcept {
     property_row(name, text.data());
 }
 
-void begin_properties() noexcept {
-    ImGui::BeginTable("##properties", 2,
-                      ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_RowBg
-                          | ImGuiTableFlags_BordersInnerH);
+[[nodiscard]] bool begin_properties(const char* id) noexcept {
+    if (!ImGui::BeginTable(id,
+                           2,
+                           ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_RowBg
+                               | ImGuiTableFlags_BordersInnerH)) {
+        return false;
+    }
     ImGui::TableSetupColumn("Field", ImGuiTableColumnFlags_WidthFixed, scaled(112.0F));
     ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch);
+    return true;
 }
 
 void draw_identity(const model::Node& node) noexcept {
-    if (!ImGui::CollapsingHeader("Identity", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (!ImGui::CollapsingHeader("Identity", ImGuiTreeNodeFlags_DefaultOpen)
+        || !begin_properties("##identity_properties")) {
         return;
     }
-    begin_properties();
     property_u64("Inspection ID", node.id.value);
+    if (node.parent) {
+        property_u64("Parent", node.parent.value);
+    }
     property_row("Type", model::kind_name(node.kind));
     property_row("Status", model::status_name(node.status));
     if (node.runtimeEntity.has_value()) {
@@ -623,37 +808,75 @@ void draw_identity(const model::Node& node) noexcept {
     if (node.nameHash.has_value()) {
         property_u64("Name hash", *node.nameHash, 8);
     }
+    property_i32("Children", static_cast<std::int32_t>(node.children.size()));
     ImGui::EndTable();
 }
 
 void draw_transform(const model::Node& node) noexcept {
     if (!node.transform.has_value()
-        || !ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
+        || !ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen)
+        || !begin_properties("##transform_properties")) {
         return;
     }
-    const auto& position = node.transform->position;
+
+    const auto formatVector = [](const std::array<float, 3>& vector,
+                                 std::array<char, 96>& text) noexcept {
+        (void)std::snprintf(text.data(),
+                            text.size(),
+                            "%.4f, %.4f, %.4f",
+                            static_cast<double>(vector[0]),
+                            static_cast<double>(vector[1]),
+                            static_cast<double>(vector[2]));
+    };
+
+    std::array<char, 96> text{};
+    formatVector(node.transform->position, text);
+    property_row("Position", text.data());
+    if (node.transform->hasRotation) {
+        formatVector(node.transform->rotation, text);
+        property_row("Rotation", text.data());
+    }
+    if (node.transform->hasScale) {
+        formatVector(node.transform->scale, text);
+        property_row("Scale", text.data());
+    }
+    ImGui::EndTable();
+}
+
+void draw_bounds(const model::Node& node) noexcept {
+    if (!node.bounds.has_value()
+        || !ImGui::CollapsingHeader("Bounds", ImGuiTreeNodeFlags_DefaultOpen)
+        || !begin_properties("##bounds_properties")) {
+        return;
+    }
     std::array<char, 96> text{};
     (void)std::snprintf(text.data(),
                         text.size(),
                         "%.4f, %.4f, %.4f",
-                        static_cast<double>(position[0]),
-                        static_cast<double>(position[1]),
-                        static_cast<double>(position[2]));
-    begin_properties();
-    property_row("Position", text.data());
+                        static_cast<double>(node.bounds->minimum[0]),
+                        static_cast<double>(node.bounds->minimum[1]),
+                        static_cast<double>(node.bounds->minimum[2]));
+    property_row("Minimum", text.data());
+    (void)std::snprintf(text.data(),
+                        text.size(),
+                        "%.4f, %.4f, %.4f",
+                        static_cast<double>(node.bounds->maximum[0]),
+                        static_cast<double>(node.bounds->maximum[1]),
+                        static_cast<double>(node.bounds->maximum[2]));
+    property_row("Maximum", text.data());
     ImGui::EndTable();
 }
 
 void draw_source(const model::Node& node) noexcept {
     const model::Source& source = node.source;
     if (source.packageName.empty() && source.mapStem.empty() && !source.scenarioTag.has_value()
-        && !source.spawnSetHash.has_value()) {
+        && !source.spawnSetHash.has_value() && !source.bubble.has_value()) {
         return;
     }
-    if (!ImGui::CollapsingHeader("Source", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (!ImGui::CollapsingHeader("Source", ImGuiTreeNodeFlags_DefaultOpen)
+        || !begin_properties("##source_properties")) {
         return;
     }
-    begin_properties();
     if (!source.packageName.empty()) {
         property_row("Package", source.packageName.c_str());
     }
@@ -677,18 +900,18 @@ void draw_activity(const model::Node& node) noexcept {
     if (!source.activitySession.has_value() && !source.activityIndex.has_value()) {
         return;
     }
-    if (!ImGui::CollapsingHeader("Activity", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (!ImGui::CollapsingHeader("Activity", ImGuiTreeNodeFlags_DefaultOpen)
+        || !begin_properties("##activity_properties")) {
         return;
     }
-    begin_properties();
     if (source.activitySession.has_value()) {
         property_u64("Session", *source.activitySession);
     }
     if (source.activityIndex.has_value()) {
         property_i32("Definition index", *source.activityIndex);
     }
-    property_row("Relationship", source.spawnSetHash.has_value() ? "Destination spawn-set hash"
-                                                                 : "Unknown");
+    property_row("Relationship",
+                 source.spawnSetHash.has_value() ? "Destination spawn-set hash" : "Unknown");
     ImGui::EndTable();
 }
 
@@ -706,24 +929,35 @@ void draw_rendering(const model::Node& node) noexcept {
 
 void draw_inspector_actions(const model::Node& node) noexcept {
     const camera::Status status = camera::status();
+    bool sameLine = false;
+
+    const auto button = [&sameLine](const char* label) noexcept {
+        if (sameLine) {
+            ImGui::SameLine();
+        }
+        sameLine = true;
+        return ImGui::SmallButton(label);
+    };
+
     if (model::supports(node.actions, model::Action::focus)) {
         ImGui::BeginDisabled(!status.active || !node.transform.has_value());
-        if (ImGui::SmallButton("Focus")) {
+        if (button("Focus")) {
             focus(node.id);
         }
         ImGui::EndDisabled();
     }
-    if (model::supports(node.actions, model::Action::hide)) {
-        ImGui::SameLine();
-        if (ImGui::SmallButton(hidden(node.id) ? "Show" : "Hide")) {
-            toggle_hidden(node.id);
-        }
+    if (model::supports(node.actions, model::Action::hide) && button(hidden(node.id) ? "Show" : "Hide")) {
+        toggle_hidden(node.id);
     }
-    if (model::supports(node.actions, model::Action::isolate)) {
-        ImGui::SameLine();
-        if (ImGui::SmallButton("Isolate")) {
-            isolate(node.id);
-        }
+    if (model::supports(node.actions, model::Action::isolate) && button("Isolate")) {
+        isolate(node.id);
+    }
+    if (model::supports(node.actions, model::Action::copyId) && button("Copy ID")) {
+        copy_id(node.id);
+    }
+    if (node.transform.has_value() && model::supports(node.actions, model::Action::copyPosition)
+        && button("Copy position")) {
+        copy_position(*node.transform);
     }
 }
 
@@ -745,38 +979,140 @@ void draw_inspector() noexcept {
     ImGui::Separator();
     draw_identity(*node);
     draw_transform(*node);
+    draw_bounds(*node);
     draw_rendering(*node);
     draw_activity(*node);
     draw_source(*node);
 }
 
+void graph_reference_row(const char* relation, const model::Node& node) noexcept {
+    ImGui::PushID(static_cast<int>(node.id.value));
+    if (ImGui::Selectable(node.name.c_str(),
+                          g_state.selection.selected() == node.id,
+                          ImGuiSelectableFlags_AllowDoubleClick)) {
+        select_node(node.id);
+        if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+            focus(node.id);
+        }
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("%s | %s", relation, model::kind_name(node.kind));
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("%s", world().graph.breadcrumb(node.id).c_str());
+    }
+    ImGui::PopID();
+}
+
+void draw_references() noexcept {
+    const model::Node* node = selected_node();
+    if (node == nullptr) {
+        ImGui::TextDisabled("Select an object to inspect graph relationships.");
+        return;
+    }
+
+    ImGui::TextUnformatted("Graph Relationships");
+    ImGui::TextDisabled(
+        "These are inspection-graph relationships. Raw serialized reference edges are not retained "
+        "by the current provider.");
+    ImGui::Spacing();
+
+    ImGui::TextUnformatted("Parent");
+    if (node->parent) {
+        if (const model::Node* parent = world().graph.node(node->parent); parent != nullptr) {
+            graph_reference_row("parent", *parent);
+        } else {
+            ImGui::TextDisabled("Parent is no longer present in this snapshot.");
+        }
+    } else {
+        ImGui::TextDisabled("Root node");
+    }
+
+    ImGui::Spacing();
+    ImGui::Text("Children (%zu)", node->children.size());
+    if (node->children.empty()) {
+        ImGui::TextDisabled("No graph children.");
+    } else {
+        for (const model::NodeId childId : node->children) {
+            if (const model::Node* child = world().graph.node(childId); child != nullptr) {
+                graph_reference_row("child", *child);
+            }
+        }
+    }
+
+    const model::Source& source = node->source;
+    if (source.scenarioTag.has_value() || source.spawnSetHash.has_value()
+        || source.activitySession.has_value()) {
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::TextUnformatted("Provenance Keys");
+        if (source.scenarioTag.has_value()) {
+            ImGui::Text("Scenario tag  0x%08X", *source.scenarioTag);
+        }
+        if (source.spawnSetHash.has_value()) {
+            ImGui::Text("Spawn set     0x%08X", *source.spawnSetHash);
+        }
+        if (source.activitySession.has_value()) {
+            ImGui::Text("Activity      0x%016llX",
+                        static_cast<unsigned long long>(*source.activitySession));
+        }
+    }
+}
+
+[[nodiscard]] ImVec4 provenance_color(const char* origin) noexcept {
+    return std::string_view(origin) == "runtime" ? kSpawn
+           : std::string_view(origin) == "catalog" ? kSelection
+                                                    : kMuted;
+}
+
 void data_row(const char* field,
               const char* type,
               const char* value,
-              const char* status = "known") noexcept {
+              const char* origin = "derived") noexcept {
     ImGui::TableNextRow();
     ImGui::TableNextColumn();
     ImGui::TextUnformatted(field);
     ImGui::TableNextColumn();
     ImGui::TextDisabled("%s", type);
     ImGui::TableNextColumn();
-    ImGui::TextDisabled("-");
-    ImGui::TableNextColumn();
-    ImGui::TextDisabled("-");
-    ImGui::TableNextColumn();
     ImGui::TextUnformatted(value);
     ImGui::TableNextColumn();
-    ImGui::TextColored(std::strcmp(status, "known") == 0 ? kSelection : kWarning,
-                       "%s",
-                       status);
+    ImGui::TextColored(provenance_color(origin), "%s", origin);
 }
 
-void draw_references() noexcept {
-    ImGui::TextUnformatted("Referenced By");
-    ImGui::TextDisabled("No proven incoming references are retained by this provider.");
-    ImGui::Spacing();
-    ImGui::TextUnformatted("References");
-    ImGui::TextDisabled("No proven outgoing references are retained by this provider.");
+void data_u64(const char* field,
+              const char* type,
+              std::uint64_t value,
+              int width,
+              const char* origin) noexcept {
+    std::array<char, 32> text{};
+    (void)std::snprintf(text.data(),
+                        text.size(),
+                        "0x%0*llX",
+                        width,
+                        static_cast<unsigned long long>(value));
+    data_row(field, type, text.data(), origin);
+}
+
+void data_i32(const char* field,
+              const char* type,
+              std::int32_t value,
+              const char* origin) noexcept {
+    std::array<char, 32> text{};
+    (void)std::snprintf(text.data(), text.size(), "%d", value);
+    data_row(field, type, text.data(), origin);
+}
+
+void data_vec3(const char* field,
+               const std::array<float, 3>& value,
+               const char* origin) noexcept {
+    std::array<char, 96> text{};
+    (void)std::snprintf(text.data(),
+                        text.size(),
+                        "%.4f, %.4f, %.4f",
+                        static_cast<double>(value[0]),
+                        static_cast<double>(value[1]),
+                        static_cast<double>(value[2]));
+    data_row(field, "vec3", text.data(), origin);
 }
 
 void draw_data() noexcept {
@@ -786,7 +1122,7 @@ void draw_data() noexcept {
         return;
     }
     if (!ImGui::BeginTable("##data_table",
-                           6,
+                           4,
                            ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInner
                                | ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY)) {
         return;
@@ -794,37 +1130,78 @@ void draw_data() noexcept {
     ImGui::TableSetupScrollFreeze(0, 1);
     ImGui::TableSetupColumn("Field");
     ImGui::TableSetupColumn("Type");
-    ImGui::TableSetupColumn("Offset");
-    ImGui::TableSetupColumn("Size");
     ImGui::TableSetupColumn("Value");
-    ImGui::TableSetupColumn("Status");
+    ImGui::TableSetupColumn("Origin");
     ImGui::TableHeadersRow();
 
-    std::array<char, 96> value{};
-    (void)std::snprintf(value.data(), value.size(), "0x%016llX",
-                        static_cast<unsigned long long>(node->id.value));
-    data_row("inspection_id", "u64", value.data());
-    data_row("kind", "enum", model::kind_name(node->kind));
+    data_u64("inspection_id", "u64", node->id.value, 16, "derived");
+    if (node->parent) {
+        data_u64("parent_id", "u64", node->parent.value, 16, "derived");
+    }
+    data_row("name", "string", node->name.c_str(), "derived");
+    data_row("kind", "enum", model::kind_name(node->kind), "derived");
+    data_row("status", "enum", model::status_name(node->status), "derived");
+    data_i32("child_count",
+             "u32",
+             static_cast<std::int32_t>(node->children.size()),
+             "derived");
+
+    if (node->runtimeEntity.has_value()) {
+        data_u64("runtime_entity", "u64", *node->runtimeEntity, 16, "runtime");
+    }
+    if (node->worldId.has_value()) {
+        data_u64("world_id", "u64", *node->worldId, 16, "runtime");
+    }
+    if (node->tag.has_value()) {
+        data_u64("tag_hash", "tag32", *node->tag, 8, "catalog");
+    }
+    if (node->classHash.has_value()) {
+        data_u64("class_hash", "hash32", *node->classHash, 8, "catalog");
+    }
     if (node->nameHash.has_value()) {
-        (void)std::snprintf(value.data(), value.size(), "0x%08X", *node->nameHash);
-        data_row("name_hash", "fnv32", value.data());
+        data_u64("name_hash", "fnv32", *node->nameHash, 8, "catalog");
     }
+
     if (node->transform.has_value()) {
-        const auto& position = node->transform->position;
-        (void)std::snprintf(value.data(),
-                            value.size(),
-                            "%.4f, %.4f, %.4f",
-                            static_cast<double>(position[0]),
-                            static_cast<double>(position[1]),
-                            static_cast<double>(position[2]));
-        data_row("position", "vec3", value.data());
+        data_vec3("position", node->transform->position, "catalog");
+        if (node->transform->hasRotation) {
+            data_vec3("rotation", node->transform->rotation, "catalog");
+        }
+        if (node->transform->hasScale) {
+            data_vec3("scale", node->transform->scale, "catalog");
+        }
     }
-    if (node->source.scenarioTag.has_value()) {
-        (void)std::snprintf(value.data(), value.size(), "0x%08X", *node->source.scenarioTag);
-        data_row("scenario_tag", "tag32", value.data());
+    if (node->bounds.has_value()) {
+        data_vec3("bounds_min", node->bounds->minimum, "runtime");
+        data_vec3("bounds_max", node->bounds->maximum, "runtime");
     }
+
+    const model::Source& source = node->source;
+    if (!source.packageName.empty()) {
+        data_row("package", "string", source.packageName.c_str(), "catalog");
+    }
+    if (!source.mapStem.empty()) {
+        data_row("map_stem", "string", source.mapStem.c_str(), "catalog");
+    }
+    if (source.scenarioTag.has_value()) {
+        data_u64("scenario_tag", "tag32", *source.scenarioTag, 8, "catalog");
+    }
+    if (source.spawnSetHash.has_value()) {
+        data_u64("spawn_set_hash", "fnv32", *source.spawnSetHash, 8, "catalog");
+    }
+    if (source.activitySession.has_value()) {
+        data_u64("activity_session", "u64", *source.activitySession, 16, "runtime");
+    }
+    if (source.activityIndex.has_value()) {
+        data_i32("activity_index", "i32", *source.activityIndex, "runtime");
+    }
+    if (source.bubble.has_value()) {
+        data_i32("bubble", "u16", *source.bubble, "runtime");
+    }
+
     ImGui::EndTable();
-    ImGui::TextDisabled("Source offsets and encoded sizes are unavailable in the reduced catalog.");
+    ImGui::TextDisabled(
+        "Raw package offsets and encoded sizes are unavailable in the current reduced catalog.");
 }
 
 void draw_diagnostics() noexcept {
@@ -862,12 +1239,24 @@ void draw_bottom_dock() noexcept {
             ImGui::PopStyleColor();
         }
     };
+
     tab("References", BottomTab::references);
     ImGui::SameLine(0.0F, 0.0F);
     tab("Data", BottomTab::data);
     ImGui::SameLine(0.0F, 0.0F);
     tab("Diagnostics", BottomTab::diagnostics);
+
+    const char* hide = "Hide";
+    const float hideWidth = ImGui::CalcTextSize(hide).x + ImGui::GetStyle().FramePadding.x * 2.0F;
+    ImGui::SameLine((std::max)(ImGui::GetCursorPosX(),
+                              ImGui::GetWindowWidth() - hideWidth - scaled(8.0F)));
+    if (ImGui::SmallButton(hide)) {
+        g_state.bottomCollapsed = true;
+        persist_layout();
+    }
+
     ImGui::Separator();
+    ImGui::BeginChild("##bottom_content", {0.0F, 0.0F}, false);
     switch (g_state.bottomTab) {
     case BottomTab::references:
         draw_references();
@@ -879,6 +1268,7 @@ void draw_bottom_dock() noexcept {
         draw_diagnostics();
         break;
     }
+    ImGui::EndChild();
 }
 
 void draw_node_context_menu() noexcept {
@@ -890,6 +1280,7 @@ void draw_node_context_menu() noexcept {
         ImGui::EndPopup();
         return;
     }
+
     const camera::Status status = camera::status();
     if (model::supports(node->actions, model::Action::focus)) {
         ImGui::BeginDisabled(!status.active || !node->transform.has_value());
@@ -898,10 +1289,9 @@ void draw_node_context_menu() noexcept {
         }
         ImGui::EndDisabled();
     }
-    if (model::supports(node->actions, model::Action::hide)) {
-        if (ImGui::MenuItem(hidden(node->id) ? "Show" : "Hide", "H")) {
-            toggle_hidden(node->id);
-        }
+    if (model::supports(node->actions, model::Action::hide)
+        && ImGui::MenuItem(hidden(node->id) ? "Show" : "Hide", "H")) {
+        toggle_hidden(node->id);
     }
     if (model::supports(node->actions, model::Action::isolate)
         && ImGui::MenuItem("Isolate", "Shift+H")) {
@@ -910,9 +1300,10 @@ void draw_node_context_menu() noexcept {
     if (!g_state.hidden.empty() && ImGui::MenuItem("Show All", "Alt+H")) {
         show_all();
     }
+
     ImGui::Separator();
     if (model::supports(node->actions, model::Action::copyId)
-        && ImGui::MenuItem("Copy ID")) {
+        && ImGui::MenuItem("Copy ID", "Ctrl+C")) {
         copy_id(node->id);
     }
     if (node->tag.has_value() && model::supports(node->actions, model::Action::copyTag)
@@ -921,9 +1312,16 @@ void draw_node_context_menu() noexcept {
     }
     if (node->transform.has_value()
         && model::supports(node->actions, model::Action::copyPosition)
-        && ImGui::MenuItem("Copy Position")) {
+        && ImGui::MenuItem("Copy Position", "Ctrl+Shift+C")) {
         copy_position(*node->transform);
     }
+
+    ImGui::Separator();
+    ImGui::BeginDisabled(!node->parent);
+    if (ImGui::MenuItem("Select Parent")) {
+        select_node(node->parent);
+    }
+    ImGui::EndDisabled();
     ImGui::EndPopup();
 }
 
@@ -932,7 +1330,23 @@ void handle_shortcuts() noexcept {
     if (io.WantTextInput) {
         return;
     }
+
     const model::NodeId selected = g_state.selection.selected();
+    const model::Node* node = world().graph.node(selected);
+
+    if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_F)) {
+        g_state.focusSearch = true;
+        return;
+    }
+    if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_C) && node != nullptr) {
+        if (io.KeyShift && node->transform.has_value()
+            && model::supports(node->actions, model::Action::copyPosition)) {
+            copy_position(*node->transform);
+        } else if (model::supports(node->actions, model::Action::copyId)) {
+            copy_id(node->id);
+        }
+        return;
+    }
     if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
         g_state.selection.clear();
     }
@@ -964,7 +1378,9 @@ void draw_toolbar(const camera::Status& status) noexcept {
                                   ImGui::GetColorU32(world().stale ? kWarning : kSpawn));
         ImGui::Dummy({scaled(12.0F), 0.0F});
         ImGui::SameLine();
-        const char* package = world().packageName.empty() ? "No world" : world().packageName.c_str();
+
+        const char* package =
+            world().packageName.empty() ? "No world" : world().packageName.c_str();
         ImGui::TextUnformatted(package);
         if (world().bubble.has_value()) {
             ImGui::SameLine();
@@ -979,10 +1395,6 @@ void draw_toolbar(const camera::Status& status) noexcept {
         if (ImGui::MenuItem(status.requested ? "Viewer: On" : "Viewer: Off")) {
             camera::request_active(!status.requested);
         }
-        ImGui::BeginDisabled();
-        (void)ImGui::MenuItem("Perspective");
-        (void)ImGui::MenuItem("Fitted game view");
-        ImGui::EndDisabled();
         if (ImGui::BeginMenu("Overlays")) {
             if (ImGui::MenuItem("Spawn helpers", nullptr, &g_state.showSpawns)) {
                 g_state.rowsValid = false;
@@ -995,6 +1407,9 @@ void draw_toolbar(const camera::Status& status) noexcept {
                 g_state.bottomCollapsed = !g_state.bottomCollapsed;
                 persist_layout();
             }
+            if (ImGui::MenuItem("Focus search", "Ctrl+F")) {
+                g_state.focusSearch = true;
+            }
             if (ImGui::MenuItem("Reset layout")) {
                 reset_layout();
             }
@@ -1006,6 +1421,7 @@ void draw_toolbar(const camera::Status& status) noexcept {
         }
         ImGui::EndMenuBar();
     }
+
     const ImVec2 minimum = ImGui::GetWindowPos();
     const ImVec2 size = ImGui::GetWindowSize();
     ImGui::GetWindowDrawList()->AddLine({minimum.x, minimum.y + size.y - 1.0F},
@@ -1015,13 +1431,14 @@ void draw_toolbar(const camera::Status& status) noexcept {
     ImGui::EndChild();
 }
 
-void splitter(const char* id,
-              float length,
-              bool vertical,
-              float& value,
-              float direction,
-              float minimum,
-              float maximum) noexcept {
+SplitterResult splitter(const char* id,
+                        float length,
+                        bool vertical,
+                        float& value,
+                        float direction,
+                        float minimum,
+                        float maximum) noexcept {
+    SplitterResult result{};
     const ImVec2 size = vertical ? ImVec2{scaled(kSplitterThickness), length}
                                  : ImVec2{length, scaled(kSplitterThickness)};
     ImGui::InvisibleButton(id, size);
@@ -1031,12 +1448,22 @@ void splitter(const char* id,
     if (ImGui::IsItemHovered() || ImGui::IsItemActive()) {
         ImGui::SetMouseCursor(vertical ? ImGuiMouseCursor_ResizeEW : ImGuiMouseCursor_ResizeNS);
     }
-    if (ImGui::IsItemActive()) {
-        const float delta = vertical ? ImGui::GetIO().MouseDelta.x : ImGui::GetIO().MouseDelta.y;
-        value = std::clamp(value + delta * direction, minimum, maximum);
-        g_state.layoutDirty = true;
+    if (ImGui::IsItemActive() && maximum >= minimum) {
+        const float delta =
+            vertical ? ImGui::GetIO().MouseDelta.x : ImGui::GetIO().MouseDelta.y;
+        if (delta != 0.0F) {
+            const float next = std::clamp(value + delta * direction, minimum, maximum);
+            result.changed = next != value;
+            value = next;
+            g_state.layoutDirty = g_state.layoutDirty || result.changed;
+        }
     }
-    if (g_state.layoutDirty && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+    result.released = ImGui::IsItemDeactivated();
+    return result;
+}
+
+void finish_splitter(const SplitterResult& result) noexcept {
+    if (result.released && g_state.layoutDirty) {
         persist_layout();
     }
 }
@@ -1073,9 +1500,11 @@ void draw_status(const camera::Status& status) noexcept {
         ImGui::SameLine();
         ImGui::TextDisabled("| %s", model::kind_name(selected->kind));
     }
+
     const char* readOnly = "READ ONLY";
     const float width = ImGui::CalcTextSize(readOnly).x;
-    ImGui::SameLine((std::max)(ImGui::GetCursorPosX(), ImGui::GetWindowWidth() - width - scaled(10.0F)));
+    ImGui::SameLine(
+        (std::max)(ImGui::GetCursorPosX(), ImGui::GetWindowWidth() - width - scaled(10.0F)));
     ImGui::TextColored(kSelection, "%s", readOnly);
     ImGui::EndChild();
 }
@@ -1097,14 +1526,17 @@ void push_editor_style() noexcept {
     ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.165F, 0.192F, 0.227F, 1.0F));
     ImGui::PushStyleColor(ImGuiCol_Separator, ImVec4(0.165F, 0.192F, 0.227F, 1.0F));
     ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.102F, 0.118F, 0.141F, 1.0F));
-    ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(0.145F, 0.169F, 0.200F, 1.0F));
-    ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(kSelection.x, kSelection.y, kSelection.z, 0.22F));
+    ImGui::PushStyleColor(ImGuiCol_FrameBgHovered,
+                          ImVec4(0.145F, 0.169F, 0.200F, 1.0F));
+    ImGui::PushStyleColor(ImGuiCol_Header,
+                          ImVec4(kSelection.x, kSelection.y, kSelection.z, 0.22F));
     ImGui::PushStyleColor(ImGuiCol_HeaderHovered,
                           ImVec4(kSelection.x, kSelection.y, kSelection.z, 0.31F));
     ImGui::PushStyleColor(ImGuiCol_HeaderActive,
                           ImVec4(kSelection.x, kSelection.y, kSelection.z, 0.38F));
     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.102F, 0.118F, 0.141F, 1.0F));
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.145F, 0.169F, 0.200F, 1.0F));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+                          ImVec4(0.145F, 0.169F, 0.200F, 1.0F));
     ImGui::PushStyleColor(ImGuiCol_CheckMark, kSelection);
 }
 
@@ -1174,11 +1606,13 @@ bool render(bool uiVisible) noexcept {
     const camera::Status cameraStatus = camera::status();
     const renderer::frame_capture::View capturedFrame = renderer::captured_frame_locked();
     push_editor_style();
+
     const ImVec2 displaySize = ImGui::GetIO().DisplaySize;
     if (displaySize.x <= 0.0F || displaySize.y <= 0.0F) {
         pop_editor_style();
         return false;
     }
+
     ImGui::SetNextWindowPos({0.0F, 0.0F}, ImGuiCond_Always);
     ImGui::SetNextWindowSize(displaySize, ImGuiCond_Always);
     const bool submit = ImGui::Begin("World Inspector", nullptr, kWorkspaceFlags);
@@ -1188,37 +1622,49 @@ bool render(bool uiVisible) noexcept {
         const ImVec2 contentOrigin = ImGui::GetCursorScreenPos();
         const float statusHeight = scaled(kStatusHeight);
         const float splitterSize = scaled(kSplitterThickness);
-        const float availableHeight = ImGui::GetContentRegionAvail().y;
-        const float availableWidth = ImGui::GetContentRegionAvail().x;
-        const float bottomSplit = g_state.bottomCollapsed ? 0.0F : splitterSize;
+        const float availableHeight = (std::max)(0.0F, ImGui::GetContentRegionAvail().y);
+        const float availableWidth = (std::max)(1.0F, ImGui::GetContentRegionAvail().x);
+
         const float maximumVisibleBottom =
             (std::max)(0.0F,
-                       availableHeight - statusHeight - scaled(140.0F) - bottomSplit);
-        const float bottomHeight = g_state.bottomCollapsed
-                                       ? 0.0F
-                                       : (std::min)(g_state.bottomHeight, maximumVisibleBottom);
+                       availableHeight - statusHeight - scaled(kMinimumMainHeight) - splitterSize);
+        const bool bottomVisible =
+            !g_state.bottomCollapsed && maximumVisibleBottom >= scaled(kMinimumBottomUsableHeight);
+        const float minimumBottom =
+            bottomVisible
+                ? (std::min)(scaled(client::viewer::kMinimumInspectorBottomHeight),
+                             maximumVisibleBottom)
+                : 0.0F;
+        float bottomHeight =
+            bottomVisible
+                ? std::clamp(g_state.bottomHeight, minimumBottom, maximumVisibleBottom)
+                : 0.0F;
+        const float bottomSplit = bottomVisible ? splitterSize : 0.0F;
         const float mainHeight =
             (std::max)(1.0F, availableHeight - statusHeight - bottomHeight - bottomSplit);
+
         const float minimumLeft = scaled(client::viewer::kMinimumInspectorLeftWidth);
         const float maximumLeft = scaled(client::viewer::kMaximumInspectorLeftWidth);
         const float minimumRight = scaled(client::viewer::kMinimumInspectorRightWidth);
         const float maximumRight = scaled(client::viewer::kMaximumInspectorRightWidth);
         const float minimumCenter = scaled(kMinimumViewportWidth);
-        g_state.leftWidth = std::clamp(g_state.leftWidth,
-                                       minimumLeft,
-                                       (std::max)(minimumLeft,
-                                                  availableWidth - minimumCenter - minimumRight
-                                                      - splitterSize * 2.0F));
-        g_state.rightWidth = std::clamp(g_state.rightWidth,
-                                        minimumRight,
-                                        (std::max)(minimumRight,
-                                                   availableWidth - minimumCenter - g_state.leftWidth
-                                                       - splitterSize * 2.0F));
-        g_state.leftWidth = (std::min)(g_state.leftWidth, maximumLeft);
-        g_state.rightWidth = (std::min)(g_state.rightWidth, maximumRight);
-        const float centerWidth = (std::max)(1.0F,
-                                             availableWidth - g_state.leftWidth - g_state.rightWidth
-                                                 - splitterSize * 2.0F);
+
+        const float leftLimit =
+            (std::max)(minimumLeft,
+                       availableWidth - minimumCenter - minimumRight - splitterSize * 2.0F);
+        g_state.leftWidth =
+            std::clamp(g_state.leftWidth, minimumLeft, (std::min)(maximumLeft, leftLimit));
+
+        const float rightLimit =
+            (std::max)(minimumRight,
+                       availableWidth - minimumCenter - g_state.leftWidth - splitterSize * 2.0F);
+        g_state.rightWidth =
+            std::clamp(g_state.rightWidth, minimumRight, (std::min)(maximumRight, rightLimit));
+
+        const float centerWidth =
+            (std::max)(1.0F,
+                       availableWidth - g_state.leftWidth - g_state.rightWidth
+                           - splitterSize * 2.0F);
 
         ImGui::SetCursorScreenPos(contentOrigin);
         ImGui::BeginChild("##world_outliner",
@@ -1228,13 +1674,13 @@ bool render(bool uiVisible) noexcept {
         ImGui::EndChild();
 
         ImGui::SetCursorScreenPos({contentOrigin.x + g_state.leftWidth, contentOrigin.y});
-        splitter("##left_splitter",
-                 mainHeight,
-                 true,
-                 g_state.leftWidth,
-                 1.0F,
-                 minimumLeft,
-                 maximumLeft);
+        finish_splitter(splitter("##left_splitter",
+                                 mainHeight,
+                                 true,
+                                 g_state.leftWidth,
+                                 1.0F,
+                                 minimumLeft,
+                                 maximumLeft));
 
         const float viewportX = contentOrigin.x + g_state.leftWidth + splitterSize;
         ImGui::SetCursorScreenPos({viewportX, contentOrigin.y});
@@ -1247,15 +1693,17 @@ bool render(bool uiVisible) noexcept {
                           ImGuiChildFlags_Borders,
                           capturedFrame ? ImGuiWindowFlags_None : ImGuiWindowFlags_NoBackground);
         const viewport::Options overlayOptions{g_state.showSpawns, g_state.showLabels};
-        const viewport::Result interaction = viewport::draw(world().graph,
-                                                              g_state.selection.selected(),
-                                                              g_state.hidden,
-                                                              cameraStatus,
-                                                              capturedFrame,
-                                                              overlayOptions,
-                                                              g_state.viewportNavigation);
+        const viewport::Result interaction =
+            viewport::draw(world().graph,
+                           g_state.selection.selected(),
+                           g_state.hidden,
+                           cameraStatus,
+                           capturedFrame,
+                           overlayOptions,
+                           g_state.viewportNavigation);
         ImGui::EndChild();
         ImGui::PopStyleColor();
+
         g_state.viewportNavigation = interaction.navigation;
         viewer_input::set_workspace_navigation(g_state.viewportNavigation);
         if (interaction.hovered) {
@@ -1275,13 +1723,14 @@ bool render(bool uiVisible) noexcept {
 
         const float rightSplitterX = viewportX + centerWidth;
         ImGui::SetCursorScreenPos({rightSplitterX, contentOrigin.y});
-        splitter("##right_splitter",
-                 mainHeight,
-                 true,
-                 g_state.rightWidth,
-                 -1.0F,
-                 minimumRight,
-                 maximumRight);
+        finish_splitter(splitter("##right_splitter",
+                                 mainHeight,
+                                 true,
+                                 g_state.rightWidth,
+                                 -1.0F,
+                                 minimumRight,
+                                 maximumRight));
+
         ImGui::SetCursorScreenPos({rightSplitterX + splitterSize, contentOrigin.y});
         ImGui::BeginChild("##world_properties",
                           {g_state.rightWidth, mainHeight},
@@ -1290,15 +1739,23 @@ bool render(bool uiVisible) noexcept {
         ImGui::EndChild();
 
         float statusY = contentOrigin.y + mainHeight;
-        if (!g_state.bottomCollapsed) {
+        if (bottomVisible) {
             ImGui::SetCursorScreenPos({contentOrigin.x, statusY});
-            splitter("##bottom_splitter",
-                     availableWidth,
-                     false,
-                     g_state.bottomHeight,
-                     -1.0F,
-                     scaled(client::viewer::kMinimumInspectorBottomHeight),
-                     scaled(client::viewer::kMaximumInspectorBottomHeight));
+            float draggedBottomHeight = bottomHeight;
+            const SplitterResult bottomResult =
+                splitter("##bottom_splitter",
+                         availableWidth,
+                         false,
+                         draggedBottomHeight,
+                         -1.0F,
+                         minimumBottom,
+                         maximumVisibleBottom);
+            if (bottomResult.changed) {
+                g_state.bottomHeight = draggedBottomHeight;
+                bottomHeight = draggedBottomHeight;
+            }
+            finish_splitter(bottomResult);
+
             statusY += splitterSize;
             ImGui::SetCursorScreenPos({contentOrigin.x, statusY});
             ImGui::BeginChild("##world_bottom",
@@ -1308,8 +1765,10 @@ bool render(bool uiVisible) noexcept {
             ImGui::EndChild();
             statusY += bottomHeight;
         }
+
         ImGui::SetCursorScreenPos({contentOrigin.x, statusY});
         draw_status(cameraStatus);
+
         if (g_state.contextRequested) {
             ImGui::OpenPopup("##world_inspector_context");
             g_state.contextRequested = false;
