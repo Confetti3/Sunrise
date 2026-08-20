@@ -147,13 +147,13 @@ Pull Requests are welcome. Please follow these rules:
 ### Testing:
 
 - [Ferr](https://x.com/light_fades_awy)
-- [gage](https://x.com/light_fades_awy)
+- [gage](https://x.com/_Quolu_)
 - [Jenka](https://youtube.com/@jenkad2oob?si=OQpCGeBCEJBS0zHx)
 - [Katie](https://github.com/Confetti3)
-- [Kody Ivie](https://x.com/KodyIvie)
+- [Kody Ivie](https://x.com/Kody_Ivie)
 - [Solus](https://www.youtube.com/@Solus-yt)
 - Breshi
-- [Deltadog55](https://www.youtube.com/@Deltadog55)
+- [Deltadog55](https://www.youtube.com/@deltadog55)
 - Moosh
 - [MoveableFormula](https://youtube.com/@movableformula)
 - Z
