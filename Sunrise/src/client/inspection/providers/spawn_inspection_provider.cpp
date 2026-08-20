@@ -41,6 +41,30 @@ package_name(const activity::destination::DestinationSelection& destination) {
                : std::string(prefix);
 }
 
+[[nodiscard]] std::string session_label(std::uint64_t value) {
+    std::array<char, 64> text{};
+    const int written =
+        std::snprintf(text.data(),
+                      text.size(),
+                      "Activity session 0x%016llX",
+                      static_cast<unsigned long long>(value));
+    return written > 0 && static_cast<std::size_t>(written) < text.size()
+               ? std::string(text.data(), static_cast<std::size_t>(written))
+               : std::string("Activity session");
+}
+
+[[nodiscard]] std::string destination_label(std::int32_t activityIndex) {
+    if (activityIndex < 0) {
+        return "Destination";
+    }
+    std::array<char, 48> text{};
+    const int written =
+        std::snprintf(text.data(), text.size(), "Destination %d", activityIndex);
+    return written > 0 && static_cast<std::size_t>(written) < text.size()
+               ? std::string(text.data(), static_cast<std::size_t>(written))
+               : std::string("Destination");
+}
+
 [[nodiscard]] std::string spawn_label(std::size_t ordinal) {
     std::array<char, 48> text{};
     const int written = std::snprintf(text.data(), text.size(), "Spawn point %04zu", ordinal + 1);
@@ -50,14 +74,22 @@ package_name(const activity::destination::DestinationSelection& destination) {
 }
 
 void add_capability_diagnostics(std::vector<Diagnostic>& diagnostics) {
-    diagnostics.push_back({Diagnostic::Severity::information,
-                           "Runtime entity enumeration is unavailable in this build."});
-    diagnostics.push_back({Diagnostic::Severity::information,
-                           "Object bounds and depth-assisted surface picking are unavailable."});
-    diagnostics.push_back({Diagnostic::Severity::information,
-                           "Hide and isolate affect inspector helpers, not game rendering."});
-    diagnostics.push_back({Diagnostic::Severity::information,
-                           "Raw source offsets and reference edges are not retained by the spawn catalog."});
+    diagnostics.push_back(
+        {Diagnostic::Severity::information,
+         "Inspector provider coverage is activity, destination, scenario, and spawn-catalog data."});
+    diagnostics.push_back(
+        {Diagnostic::Severity::information,
+         "Runtime entities, geometry, triggers, audio placements, and physics objects are not "
+         "enumerated by the current provider."});
+    diagnostics.push_back(
+        {Diagnostic::Severity::information,
+         "Object bounds and depth-assisted surface picking are unavailable."});
+    diagnostics.push_back(
+        {Diagnostic::Severity::information,
+         "Hide and isolate affect inspector helpers, not game rendering."});
+    diagnostics.push_back(
+        {Diagnostic::Severity::information,
+         "Raw source offsets and serialized reference edges are not retained by the spawn catalog."});
 }
 
 } // namespace
@@ -149,30 +181,86 @@ void SpawnInspectionProvider::rebuild(const Key& key) {
         snapshot_.bubble = static_cast<std::uint16_t>(key.bubble);
     }
 
+    Source source;
+    source.packageName = key.packageName;
+    source.mapStem = key.mapStem;
+    if (key.scenarioTag != 0) {
+        source.scenarioTag = key.scenarioTag;
+    }
+    if (key.spawnSetHash != 0) {
+        source.spawnSetHash = key.spawnSetHash;
+    }
+    if (key.activitySession != 0) {
+        source.activitySession = key.activitySession;
+    }
+    if (key.activityIndex >= 0) {
+        source.activityIndex = key.activityIndex;
+    }
+    if (key.bubble >= 0) {
+        source.bubble = static_cast<std::uint16_t>(key.bubble);
+    }
+
     Node root;
     root.name = key.packageName.empty() ? "World" : key.packageName;
     root.kind = NodeKind::world;
     root.status = key.stale ? Status::deferred
                            : (key.sessionPresent ? Status::known : Status::unknownSemantic);
-    root.source.packageName = key.packageName;
-    root.source.mapStem = key.mapStem;
-    if (key.scenarioTag != 0) {
-        root.tag = key.scenarioTag;
-        root.source.scenarioTag = key.scenarioTag;
-        root.actions = Action::copyId | Action::copyTag;
-    } else {
-        root.actions = Action::copyId;
-    }
-    if (key.activitySession != 0) {
-        root.source.activitySession = key.activitySession;
-    }
-    if (key.activityIndex >= 0) {
-        root.source.activityIndex = key.activityIndex;
-    }
-    if (key.bubble >= 0) {
-        root.source.bubble = static_cast<std::uint16_t>(key.bubble);
-    }
+    root.source = source;
+    root.actions = Action::copyId;
     const NodeId rootId = snapshot_.graph.add(std::move(root));
+    if (!rootId) {
+        snapshot_.diagnostics.push_back(
+            {Diagnostic::Severity::error, "The inspection graph could not create its world root."});
+        return;
+    }
+
+    NodeId graphParent = rootId;
+
+    if (key.sessionPresent) {
+        Node activityNode;
+        activityNode.name = session_label(key.activitySession);
+        activityNode.kind = NodeKind::activity;
+        activityNode.status = key.stale ? Status::deferred : Status::known;
+        activityNode.source = source;
+        activityNode.actions = Action::copyId;
+        const NodeId activityId = snapshot_.graph.add(std::move(activityNode), graphParent);
+        if (activityId) {
+            graphParent = activityId;
+        }
+
+        Node destinationNode;
+        destinationNode.name = destination_label(key.activityIndex);
+        destinationNode.kind = NodeKind::destination;
+        destinationNode.status = key.stale ? Status::deferred : Status::known;
+        destinationNode.source = source;
+        destinationNode.actions = Action::copyId;
+        const NodeId destinationId = snapshot_.graph.add(std::move(destinationNode), graphParent);
+        if (destinationId) {
+            graphParent = destinationId;
+        }
+    }
+
+    if (key.scenarioReady || key.scenarioPresent || key.scenarioTag != 0 || !key.mapStem.empty()) {
+        Node scenarioNode;
+        scenarioNode.name =
+            key.scenarioTag != 0 ? hex_label("Scenario", key.scenarioTag) : std::string("Scenario");
+        scenarioNode.kind = NodeKind::source;
+        scenarioNode.status = !key.scenarioReady
+                                  ? Status::deferred
+                                  : (key.scenarioPresent ? Status::known
+                                                         : Status::unknownSemantic);
+        scenarioNode.source = source;
+        if (key.scenarioTag != 0) {
+            scenarioNode.tag = key.scenarioTag;
+            scenarioNode.actions = Action::copyId | Action::copyTag;
+        } else {
+            scenarioNode.actions = Action::copyId;
+        }
+        const NodeId scenarioId = snapshot_.graph.add(std::move(scenarioNode), graphParent);
+        if (scenarioId) {
+            graphParent = scenarioId;
+        }
+    }
 
     add_capability_diagnostics(snapshot_.diagnostics);
     if (!key.sessionPresent) {
@@ -240,10 +328,15 @@ void SpawnInspectionProvider::rebuild(const Key& key) {
     setNode.kind = NodeKind::spawnSet;
     setNode.status = Status::known;
     setNode.nameHash = key.spawnSetHash;
-    setNode.source = snapshot_.graph.node(rootId)->source;
+    setNode.source = source;
     setNode.source.spawnSetHash = key.spawnSetHash;
     setNode.actions = Action::copyId;
-    snapshot_.spawnSetNode = snapshot_.graph.add(std::move(setNode), rootId);
+    snapshot_.spawnSetNode = snapshot_.graph.add(std::move(setNode), graphParent);
+    if (!snapshot_.spawnSetNode) {
+        snapshot_.diagnostics.push_back(
+            {Diagnostic::Severity::error, "The inspection graph could not create the spawn set."});
+        return;
+    }
 
     const std::size_t pointCount = spawn_sets::point_count();
     std::vector<spawn_sets::Point> points(pointCount);
@@ -267,7 +360,8 @@ void SpawnInspectionProvider::rebuild(const Key& key) {
         node.status = Status::known;
         node.nameHash = point.nameHash;
         node.transform = Transform{point.position};
-        node.source = snapshot_.graph.node(snapshot_.spawnSetNode)->source;
+        node.source = source;
+        node.source.spawnSetHash = key.spawnSetHash;
         node.actions = Action::focus | Action::hide | Action::isolate | Action::copyId
                        | Action::copyPosition;
         if (!snapshot_.graph.add(std::move(node), snapshot_.spawnSetNode)) {
