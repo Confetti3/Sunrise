@@ -29,6 +29,7 @@ namespace {
         items::Definition item{};
         items::Definition completedPlug{};
         items::Definition effect{};
+        items::Definition acquisition{};
         items::details::Definition detail{};
         items::details::Definition effectDetail{};
         const auto released = std::lower_bound(facts.releasedWeaponHashes.begin(),
@@ -63,6 +64,7 @@ namespace {
         if (catalyst.availability != items::catalysts::Availability::unsupported
             && (!items::find_index(catalyst.completedPlugDefinitionIndex, completedPlug)
                 || !items::find_index(catalyst.effectDefinitionIndex, effect)
+                || !items::find_index(catalyst.acquisitionDefinitionIndex, acquisition)
                 || !items::details::find(catalyst.effectDefinitionIndex, effectDetail)
                 || effectDetail.definitionHash != effect.definitionHash
                 || completedPlug.plugCategoryHash == 0
@@ -91,6 +93,8 @@ bool derive_exotic_catalysts(
     std::span<const items::socket_plugs::Rule> socketPlugRules,
     std::span<const items::socket_plugs::Pool> socketPlugPools,
     std::span<const items::socket_plugs::Member> socketPlugMembers,
+    std::span<const items::catalysts::CompletionCondition> completionConditions,
+    std::span<const items::catalysts::AcquisitionGate> acquisitionGates,
     std::span<items::catalysts::Definition> output,
     std::size_t& count,
     items::catalysts::Report& report) noexcept {
@@ -111,7 +115,9 @@ bool derive_exotic_catalysts(
                                           itemDetails,
                                           socketPlugRules,
                                           socketPlugPools,
-                                          socketPlugMembers};
+                                          socketPlugMembers,
+                                          completionConditions,
+                                          acquisitionGates};
     return items::catalysts::derive(
         source, items::catalysts::generated_facts(), output, count, report);
 }
@@ -130,6 +136,10 @@ items::catalysts::ApplyResult complete_exotic_catalyst(
     std::uint32_t& flags,
     std::span<std::optional<std::uint16_t>> plugs) noexcept {
     return items::catalysts::apply_completed(itemDefinitionIndex, flags, plugs);
+}
+
+bool complete_exotic_catalyst_investment(Family5State& family) noexcept {
+    return items::catalysts::append_investment_overrides(family);
 }
 
 std::uint16_t resolve_exotic_catalyst_effect(std::uint16_t itemDefinitionIndex,

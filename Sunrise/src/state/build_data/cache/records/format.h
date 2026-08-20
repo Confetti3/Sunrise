@@ -30,7 +30,7 @@ inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', '
  * Bump it when a stored shape changes, and when the extraction filling it changes what it writes.
  * A cached row survives a code change, so a corrected walk keeps publishing the old rows.
  */
-inline constexpr std::uint32_t kCacheFormatVersion = 46;
+inline constexpr std::uint32_t kCacheFormatVersion = 47;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */
@@ -211,10 +211,11 @@ struct ExoticCatalystRecord {
     std::uint16_t itemDefinitionIndex{};
     std::uint16_t completedPlugDefinitionIndex{};
     std::uint16_t effectDefinitionIndex{};
+    std::uint16_t acquisitionDefinitionIndex{};
+    std::uint16_t completionValueIndex{};
     std::uint8_t socketLane{};
     std::uint8_t availability{};
-    /** Must remain zero so all unused bytes have one canonical value. */
-    std::uint16_t reserved{};
+    std::int32_t completionValue{};
 };
 
 /** Disk form of one inventory-bucket array-routing descriptor. */
@@ -508,7 +509,8 @@ static_assert(sizeof(SocketPlugRuleRecord)
 static_assert(sizeof(SocketPlugPoolRecord) == 2 * sizeof(std::uint32_t));
 static_assert(sizeof(SocketPlugMemberRecord) == sizeof(std::uint16_t));
 static_assert(sizeof(ExoticCatalystRecord)
-              == sizeof(std::uint32_t) + 4 * sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t));
+              == 2 * sizeof(std::uint32_t) + 5 * sizeof(std::uint16_t)
+                     + 2 * sizeof(std::uint8_t));
 static_assert(sizeof(InventoryBucketRecord)
               == 4 * sizeof(std::uint8_t) + 2 * sizeof(std::uint16_t));
 static_assert(sizeof(SocketEntryListRecord)

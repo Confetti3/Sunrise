@@ -7,6 +7,7 @@
 #include <span>
 #include <string_view>
 
+#include "../investment/investment.h"
 #include "abilities/definition.h"
 #include "collectibles/collectible_catalog.h"
 #include "constants/definition.h"
@@ -202,6 +203,8 @@ publish_socket_plug_rules(std::span<const items::socket_plugs::Rule> rules,
  * @param socketPlugRules Complete item-and-lane rule table.
  * @param socketPlugPools Complete interned plug-pool table.
  * @param socketPlugMembers Complete plug-pool member table.
+ * @param completionConditions Dense item-indexed catalyst completion expressions.
+ * @param acquisitionGates Dense socket-type-indexed acquired-state gates.
  * @param output Fixed storage that receives the catalyst catalog.
  * @param count Receives the used output row count.
  * @param report Receives catalog counts and the first unsafe released relation.
@@ -213,6 +216,8 @@ publish_socket_plug_rules(std::span<const items::socket_plugs::Rule> rules,
     std::span<const items::socket_plugs::Rule> socketPlugRules,
     std::span<const items::socket_plugs::Pool> socketPlugPools,
     std::span<const items::socket_plugs::Member> socketPlugMembers,
+    std::span<const items::catalysts::CompletionCondition> completionConditions,
+    std::span<const items::catalysts::AcquisitionGate> acquisitionGates,
     std::span<items::catalysts::Definition> output,
     std::size_t& count,
     items::catalysts::Report& report) noexcept;
@@ -234,6 +239,9 @@ publish_socket_plug_rules(std::span<const items::socket_plugs::Rule> rules,
     std::uint16_t itemDefinitionIndex,
     std::uint32_t& flags,
     std::span<std::optional<std::uint16_t>> plugs) noexcept;
+
+/** Adds all released catalyst acquisition and completion overrides to one Family-5 snapshot. */
+[[nodiscard]] bool complete_exotic_catalyst_investment(Family5State& family) noexcept;
 
 /**
  * Resolves the item row that supplies one socketed catalyst's native perks and stat changes.

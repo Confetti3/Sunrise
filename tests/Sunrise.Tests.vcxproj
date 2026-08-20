@@ -71,6 +71,7 @@
     <ClCompile Include="exotic_catalyst_regression_tests.cpp" />
     <ClCompile Include="loadout_catalyst_regression_tests.cpp" />
     <ClCompile Include="opcode406_item_state_regression_tests.cpp" />
+    <ClCompile Include="..\Sunrise\src\client\content\items\packages\package_catalyst_condition_reader.cpp" />
     <ClCompile Include="..\Sunrise\src\core\settings\json_number.cpp" />
     <ClCompile Include="..\Sunrise\src\core\settings\json_scalar.cpp" />
     <ClCompile Include="..\Sunrise\src\core\settings\json_structure.cpp" />
@@ -113,6 +114,7 @@
     <ClCompile Include="..\Sunrise\src\state\build_data\inventory\buckets\inventory_bucket_catalog.cpp" />
     <ClCompile Include="..\Sunrise\src\state\build_data\socket_entry_lists\socket_entry_list_catalog.cpp" />
     <ClCompile Include="..\Sunrise\src\middleware\encoding\bit_reader.cpp" />
+    <ClCompile Include="..\Sunrise\src\middleware\content\packages\tables\definition_index_table.cpp" />
     <ClCompile Include="..\Sunrise\src\middleware\web_service\messages\opcode406_codec.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

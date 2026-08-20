@@ -131,7 +131,7 @@ bool valid_exotic_catalyst_links(
         pools,
         members,
     };
-    return items::catalysts::matches_derived(source, facts, catalysts);
+    return items::catalysts::matches_cached(source, facts, catalysts);
 }
 
 } // namespace sunrise::state::build_data::cache::records

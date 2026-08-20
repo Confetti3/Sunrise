@@ -15,6 +15,7 @@
 #include "../../../../state/build_data/collectibles/collectible_catalog.h"
 #include "../../../../state/build_data/constants/definition.h"
 #include "../../../../state/build_data/inventory/buckets/definition.h"
+#include "../../../../state/build_data/items/catalysts/definition.h"
 #include "../../../../state/build_data/items/details/definition.h"
 #include "../../../../state/build_data/items/item_catalog.h"
 #include "../../../../state/build_data/material_requirements/material_requirement_catalog.h"
@@ -61,6 +62,12 @@ struct Storage {
     std::vector<std::byte> definition{};
     /** Shared reusable/randomized plug-set table read from investment-root slot 51. */
     std::vector<std::byte> plugSetTable{};
+    /** Dense item-indexed legacy catalyst completion expressions for this package pass. */
+    std::vector<state::build_data::items::catalysts::CompletionCondition>
+        catalystCompletionConditions{};
+    /** Dense socket-type-indexed acquired-state gates for this package pass. */
+    std::vector<state::build_data::items::catalysts::AcquisitionGate>
+        catalystAcquisitionGates{};
     /** Compact 0..3 special plug-category code of every dense installed item row. */
     std::array<std::uint8_t, state::build_data::items::kDefinitionCapacity> specialPlugCategories{};
     /** Inventory routing rows held until the paired bucket-definition table is resolved. */

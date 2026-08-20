@@ -8,6 +8,10 @@ namespace sunrise::state::build_data::items::catalysts {
 
 /** The target build contains fewer than 128 exotic weapon catalyst-shaped sockets. */
 inline constexpr std::size_t kDefinitionCapacity = 128;
+/** All bits set mark a catalyst relation with no completion-value requirement. */
+inline constexpr std::uint16_t kUnavailableCompletionValueIndex = 0xFFFFU;
+/** All bits set mark a catalyst relation with no acquired-state gate. */
+inline constexpr std::uint16_t kUnavailableAcquisitionIndex = 0xFFFFU;
 
 /** Release status from the build-scoped Season 11 availability data. */
 enum class Availability : std::uint8_t {
@@ -27,6 +31,8 @@ enum class Error : std::uint8_t {
     invalidSocket,
     invalidPlug,
     invalidEffect,
+    invalidAcquisition,
+    invalidCompletion,
     invalidItemState,
 };
 
@@ -54,6 +60,10 @@ enum class Error : std::uint8_t {
         return "invalid_plug";
     case Error::invalidEffect:
         return "invalid_effect";
+    case Error::invalidAcquisition:
+        return "invalid_acquisition";
+    case Error::invalidCompletion:
+        return "invalid_completion";
     case Error::invalidItemState:
         return "invalid_item_state";
     }
@@ -68,10 +78,14 @@ struct Definition {
     std::uint16_t completedPlugDefinitionIndex{};
     /** Item row that supplies the completed catalyst's native perks and stat changes. */
     std::uint16_t effectDefinitionIndex{};
+    /** Family-5 acquired-state slot that makes the catalyst socket visible. */
+    std::uint16_t acquisitionDefinitionIndex{kUnavailableAcquisitionIndex};
+    /** Family-5 value slot used by legacy catalyst completion expressions. */
+    std::uint16_t completionValueIndex{kUnavailableCompletionValueIndex};
     std::uint8_t socketLane{};
     Availability availability{Availability::unsupported};
-    /** Must remain zero so the cache form stays canonical. */
-    std::uint16_t reserved{};
+    /** Required value for a legacy completion expression; zero when no value is needed. */
+    std::int32_t completionValue{};
 };
 
 /** The only state a released catalyst exposes to callers. */
@@ -79,6 +93,38 @@ struct CompletedCatalyst {
     std::uint8_t socketLane{};
     std::uint16_t completedPlugDefinitionIndex{};
     std::uint16_t effectDefinitionIndex{};
+    std::uint16_t acquisitionDefinitionIndex{kUnavailableAcquisitionIndex};
+    std::uint16_t completionValueIndex{kUnavailableCompletionValueIndex};
+    std::int32_t completionValue{};
+};
+
+/** Result of scanning one effect item's postfix completion expressions. */
+enum class CompletionConditionState : std::uint8_t {
+    absent = 0,
+    present = 1,
+    ambiguous = 2,
+};
+
+/** One item definition's build-derived legacy completion value. */
+struct CompletionCondition {
+    std::uint16_t itemDefinitionIndex{};
+    std::uint16_t valueIndex{kUnavailableCompletionValueIndex};
+    std::int32_t value{};
+    CompletionConditionState state{CompletionConditionState::absent};
+};
+
+/** Result of reading one socket type's acquired-state rule. */
+enum class AcquisitionState : std::uint8_t {
+    absent = 0,
+    present = 1,
+    ambiguous = 2,
+};
+
+/** One socket type's build-derived Family-5 acquisition gate. */
+struct AcquisitionGate {
+    std::uint16_t socketType{};
+    std::uint16_t definitionIndex{kUnavailableAcquisitionIndex};
+    AcquisitionState state{AcquisitionState::absent};
 };
 
 /** One resolver result. Errors never carry a completed state. */

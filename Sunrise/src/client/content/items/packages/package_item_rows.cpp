@@ -55,6 +55,15 @@ bool build_item_rows(const reader::Source& source,
     if (retainDetails && storage.details.size() != kDetailCapacity) {
         storage.details.assign(kDetailCapacity, build_details::Definition{});
     }
+    if (needCatalysts) {
+        storage.catalystCompletionConditions.assign(
+            static_cast<std::size_t>(table.count),
+            state::build_data::items::catalysts::CompletionCondition{});
+        for (std::size_t item = 0; item < storage.catalystCompletionConditions.size(); ++item) {
+            storage.catalystCompletionConditions[item].itemDefinitionIndex =
+                static_cast<std::uint16_t>(item);
+        }
+    }
     const bool detailStorageReady = !retainDetails || storage.details.size() == kDetailCapacity;
     const std::span<const std::byte> container{storage.child};
     reason = "rows";
@@ -147,6 +156,13 @@ bool build_item_rows(const reader::Source& source,
             if (retainDetails) {
                 storage.details[builtDetailCount++] = detail;
             }
+            if (needCatalysts
+                && detail.definitionIndex < storage.catalystCompletionConditions.size()) {
+                read_catalyst_completion_condition(
+                    std::span<const std::byte>{storage.definition},
+                    detail.definitionIndex,
+                    storage.catalystCompletionConditions[detail.definitionIndex]);
+            }
             if (needSocketRows) {
                 (void)socketPlugBuild.append(item,
                                              std::span<const std::byte>{storage.definition},
@@ -172,6 +188,8 @@ bool build_item_rows(const reader::Source& source,
                 socketPlugBuild.rules(),
                 socketPlugBuild.pools(),
                 socketPlugBuild.members(),
+                storage.catalystCompletionConditions,
+                storage.catalystAcquisitionGates,
                 catalystRows,
                 catalystCount,
                 catalystReport);

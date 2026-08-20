@@ -157,7 +157,15 @@ void test_resolved_catalyst_output() noexcept {
         socket_lists::Definition{0x12345678U, 0, 0, 0},
     };
     const std::array catalystRows{
-        catalysts::Definition{kWeaponHash, 0, 3, 4, 7, catalysts::Availability::released, 0},
+        catalysts::Definition{kWeaponHash,
+                              0,
+                              3,
+                              4,
+                              500,
+                              600,
+                              7,
+                              catalysts::Availability::released,
+                              4},
     };
 
     const bool ready = items::replace(itemRows) && details::replace(detailRows)
@@ -182,8 +190,8 @@ void test_resolved_catalyst_output() noexcept {
                authored, character, itemRows.size(), socketListRows.size(), output),
            "resolved client item accepts catalyst completion");
     expect(output.item.flags == 7, "resolved client item carries all item-state bits");
-    expect(output.item.instance.ordinarySockets.plugs[7] == 3,
-           "resolved client item carries the completed catalyst plug");
+    expect(output.item.instance.ordinarySockets.plugs[7] == 4,
+           "resolved client item carries the native catalyst effect plug");
 
     loadout::ResolvedInstances instances{};
     instances.itemCount = 1;

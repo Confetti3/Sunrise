@@ -15,8 +15,11 @@ constexpr std::int8_t kLastWeaponSlot = 9;
 struct LaneResult {
     bool catalyst{};
     Error error{Error::none};
-    std::uint16_t completedPlugDefinitionIndex{};
-    std::uint16_t effectDefinitionIndex{};
+    std::uint16_t completedPlugDefinitionIndex{details::kUnavailableItemIndex};
+    std::uint16_t effectDefinitionIndex{details::kUnavailableItemIndex};
+    std::uint16_t acquisitionDefinitionIndex{kUnavailableAcquisitionIndex};
+    std::uint16_t completionValueIndex{kUnavailableCompletionValueIndex};
+    std::int32_t completionValue{};
 };
 
 /**
@@ -70,19 +73,66 @@ find_detail(std::span<const details::Definition> definitions, std::uint16_t inde
     return found != definitions.end() && found->definitionIndex == index ? &*found : nullptr;
 }
 
+/** Finds one dense or sorted completion-condition row. */
+[[nodiscard]] const CompletionCondition*
+find_completion_condition(std::span<const CompletionCondition> definitions,
+                          std::uint16_t index) noexcept {
+    if (static_cast<std::size_t>(index) < definitions.size()
+        && definitions[index].itemDefinitionIndex == index) {
+        return &definitions[index];
+    }
+    const auto found = std::lower_bound(
+        definitions.begin(),
+        definitions.end(),
+        index,
+        [](const CompletionCondition& value, auto key) {
+            return value.itemDefinitionIndex < key;
+        });
+    return found != definitions.end() && found->itemDefinitionIndex == index ? &*found : nullptr;
+}
+
+/** Finds one dense or sorted socket-type acquisition row. */
+[[nodiscard]] const AcquisitionGate*
+find_acquisition_gate(std::span<const AcquisitionGate> definitions,
+                      std::uint16_t socketType) noexcept {
+    if (static_cast<std::size_t>(socketType) < definitions.size()
+        && definitions[socketType].socketType == socketType) {
+        return &definitions[socketType];
+    }
+    const auto found = std::lower_bound(
+        definitions.begin(),
+        definitions.end(),
+        socketType,
+        [](const AcquisitionGate& value, auto key) { return value.socketType < key; });
+    return found != definitions.end() && found->socketType == socketType ? &*found : nullptr;
+}
+
 /**
  * Resolves the exotic item row that owns one completed plug's native perks and stat changes.
  * Later catalysts use that item as their socket plug. Legacy sockets use a display-only plug in
  * the same category, so the unique exotic stackable item in that category supplies the effect.
  * @param source Parsed target-build tables.
- * @param completedPlugDefinitionIndex Completed socket plug.
+ * @param completedPlugDefinitionIndex Completed display or active plug from the socket pool.
+ * @param socketType Native socket type that owns the acquired-state gate.
  * @return Completed lane relation, or an effect mapping error.
  */
 [[nodiscard]] LaneResult complete_lane(const Source& source,
-                                       std::uint16_t completedPlugDefinitionIndex) noexcept {
+                                       std::uint16_t completedPlugDefinitionIndex,
+                                       std::uint16_t socketType) noexcept {
     const items::Definition* completed = find_item(source.items, completedPlugDefinitionIndex);
     if (completed == nullptr || completed->plugCategoryHash == 0) {
-        return {true, Error::invalidEffect, completedPlugDefinitionIndex, 0};
+        return {.catalyst = true,
+                .error = Error::invalidEffect,
+                .completedPlugDefinitionIndex = completedPlugDefinitionIndex};
+    }
+
+    const AcquisitionGate* acquisition =
+        find_acquisition_gate(source.acquisitionGates, socketType);
+    if (acquisition == nullptr || acquisition->state != AcquisitionState::present
+        || acquisition->definitionIndex == kUnavailableAcquisitionIndex) {
+        return {.catalyst = true,
+                .error = Error::invalidAcquisition,
+                .completedPlugDefinitionIndex = completedPlugDefinitionIndex};
     }
 
     std::optional<std::uint16_t> effect;
@@ -99,16 +149,42 @@ find_detail(std::span<const details::Definition> definitions, std::uint16_t inde
             continue;
         }
         if (effect.has_value()) {
-            return {true, Error::invalidEffect, completedPlugDefinitionIndex, 0};
+            return {.catalyst = true,
+                    .error = Error::invalidEffect,
+                    .completedPlugDefinitionIndex = completedPlugDefinitionIndex};
         }
         effect = candidate.definitionIndex;
     }
-    return effect.has_value()
-               ? LaneResult{true,
-                            Error::none,
-                            completedPlugDefinitionIndex,
-                            *effect}
-               : LaneResult{true, Error::invalidEffect, completedPlugDefinitionIndex, 0};
+    if (!effect.has_value()) {
+        return {.catalyst = true,
+                .error = Error::invalidEffect,
+                .completedPlugDefinitionIndex = completedPlugDefinitionIndex};
+    }
+
+    std::uint16_t completionValueIndex = kUnavailableCompletionValueIndex;
+    std::int32_t completionValue = 0;
+    if (*effect != completedPlugDefinitionIndex) {
+        const CompletionCondition* condition =
+            find_completion_condition(source.completionConditions, *effect);
+        if (condition == nullptr || condition->state != CompletionConditionState::present
+            || condition->valueIndex == kUnavailableCompletionValueIndex
+            || condition->value <= 0) {
+            return {.catalyst = true,
+                    .error = Error::invalidCompletion,
+                    .completedPlugDefinitionIndex = completedPlugDefinitionIndex,
+                    .effectDefinitionIndex = *effect,
+                    .acquisitionDefinitionIndex = acquisition->definitionIndex};
+        }
+        completionValueIndex = condition->valueIndex;
+        completionValue = condition->value;
+    }
+    return {.catalyst = true,
+            .error = Error::none,
+            .completedPlugDefinitionIndex = completedPlugDefinitionIndex,
+            .effectDefinitionIndex = *effect,
+            .acquisitionDefinitionIndex = acquisition->definitionIndex,
+            .completionValueIndex = completionValueIndex,
+            .completionValue = completionValue};
 }
 
 /**
@@ -168,12 +244,12 @@ released_index(std::span<const std::uint32_t> released, std::uint32_t hash) noex
         return {};
     }
     if (rule->reserved != 0 || rule->poolIndex >= source.socketPlugPools.size()) {
-        return {true, Error::invalidSocket, 0, 0};
+        return {.catalyst = true, .error = Error::invalidSocket};
     }
     const socket_plugs::Pool& pool = source.socketPlugPools[rule->poolIndex];
     if (pool.memberOffset > source.socketPlugMembers.size()
         || pool.memberCount > source.socketPlugMembers.size() - pool.memberOffset) {
-        return {true, Error::invalidSocket, 0, 0};
+        return {.catalyst = true, .error = Error::invalidSocket};
     }
 
     const auto members = source.socketPlugMembers.subspan(pool.memberOffset, pool.memberCount);
@@ -201,14 +277,14 @@ released_index(std::span<const std::uint32_t> released, std::uint32_t hash) noex
         return {};
     }
     if (invalidMember) {
-        return {true, Error::invalidPlug, 0, 0};
+        return {.catalyst = true, .error = Error::invalidPlug};
     }
 
     const std::uint16_t defaultIndex = detail.initialPlugIndices[lane];
     const items::Definition* defaultPlug = find_item(source.items, defaultIndex);
     if (defaultIndex == details::kUnavailableItemIndex || defaultPlug == nullptr
         || std::find(members.begin(), members.end(), defaultIndex) == members.end()) {
-        return {true, Error::invalidPlug, 0, 0};
+        return {.catalyst = true, .error = Error::invalidPlug};
     }
 
     if (members.size() == 2 && hasEmpty && legacyCount == 0
@@ -217,14 +293,15 @@ released_index(std::span<const std::uint32_t> released, std::uint32_t hash) noex
             std::find_if(members.begin(), members.end(), [defaultIndex](auto member) {
                 return member != defaultIndex;
             });
-        return active != members.end() ? complete_lane(source, *active)
-                                       : LaneResult{true, Error::ambiguousLifecycle, 0, 0};
+        return active != members.end()
+                   ? complete_lane(source, *active, detail.socketTypes[lane])
+                   : LaneResult{.catalyst = true, .error = Error::ambiguousLifecycle};
     }
     if (members.size() == 3 && !hasEmpty && legacyCount == 1
         && legacyCompletionIndex != defaultIndex) {
-        return complete_lane(source, legacyCompletionIndex);
+        return complete_lane(source, legacyCompletionIndex, detail.socketTypes[lane]);
     }
-    return {true, Error::ambiguousLifecycle, 0, 0};
+    return {.catalyst = true, .error = Error::ambiguousLifecycle};
 }
 
 /**
@@ -317,8 +394,12 @@ bool derive(const Source& source,
                 unclear = Error::ambiguousLifecycle;
                 continue;
             }
-            completed = CompletedCatalyst{
-                lane, result.completedPlugDefinitionIndex, result.effectDefinitionIndex};
+            completed = CompletedCatalyst{lane,
+                                          result.completedPlugDefinitionIndex,
+                                          result.effectDefinitionIndex,
+                                          result.acquisitionDefinitionIndex,
+                                          result.completionValueIndex,
+                                          result.completionValue};
         }
         if (!completed.has_value() && !unclear.has_value()) {
             continue;
@@ -344,6 +425,8 @@ bool derive(const Source& source,
                                          item->definitionIndex,
                                          details::kUnavailableItemIndex,
                                          details::kUnavailableItemIndex,
+                                         kUnavailableAcquisitionIndex,
+                                         kUnavailableCompletionValueIndex,
                                          detectedLane,
                                          Availability::unsupported,
                                          0};
@@ -376,10 +459,12 @@ bool derive(const Source& source,
                                      item->definitionIndex,
                                      completed->completedPlugDefinitionIndex,
                                      completed->effectDefinitionIndex,
+                                     completed->acquisitionDefinitionIndex,
+                                     completed->completionValueIndex,
                                      completed->socketLane,
                                      release.has_value() ? Availability::released
                                                          : Availability::placeholder,
-                                     0};
+                                     completed->completionValue};
     }
 
     for (std::size_t index = 0; index < facts.releasedWeaponHashes.size(); ++index) {
@@ -417,10 +502,86 @@ bool matches_derived(const Source& source,
                    && left.itemDefinitionIndex == right.itemDefinitionIndex
                    && left.completedPlugDefinitionIndex == right.completedPlugDefinitionIndex
                    && left.effectDefinitionIndex == right.effectDefinitionIndex
+                   && left.acquisitionDefinitionIndex == right.acquisitionDefinitionIndex
+                   && left.completionValueIndex == right.completionValueIndex
                    && left.socketLane == right.socketLane
                    && left.availability == right.availability
-                   && left.reserved == right.reserved;
+                   && left.completionValue == right.completionValue;
         });
+}
+
+bool matches_cached(const Source& source,
+                    const Facts& facts,
+                    std::span<const Definition> definitions) noexcept {
+    std::array<CompletionCondition, kDefinitionCapacity> completionConditions{};
+    std::array<AcquisitionGate, kDefinitionCapacity> acquisitionGates{};
+    std::size_t completionCount = 0;
+    std::size_t acquisitionCount = 0;
+    for (const Definition& definition : definitions) {
+        if (definition.availability == Availability::unsupported) {
+            continue;
+        }
+        const details::Definition* detail = find_detail(source.details,
+                                                        definition.itemDefinitionIndex);
+        if (detail == nullptr || definition.socketLane >= detail->ordinarySocketCount
+            || find_item(source.items, definition.acquisitionDefinitionIndex) == nullptr) {
+            return false;
+        }
+
+        const std::uint16_t socketType = detail->socketTypes[definition.socketLane];
+        const auto priorGate = std::find_if(
+            acquisitionGates.begin(),
+            acquisitionGates.begin() + acquisitionCount,
+            [socketType](const AcquisitionGate& gate) { return gate.socketType == socketType; });
+        if (priorGate != acquisitionGates.begin() + acquisitionCount) {
+            if (priorGate->definitionIndex != definition.acquisitionDefinitionIndex) {
+                return false;
+            }
+        } else if (acquisitionCount >= acquisitionGates.size()) {
+            return false;
+        } else {
+            acquisitionGates[acquisitionCount++] = {
+                socketType, definition.acquisitionDefinitionIndex, AcquisitionState::present};
+        }
+
+        if (definition.completionValueIndex == kUnavailableCompletionValueIndex) {
+            continue;
+        }
+        const auto priorCondition = std::find_if(
+            completionConditions.begin(),
+            completionConditions.begin() + completionCount,
+            [&definition](const CompletionCondition& condition) {
+                return condition.itemDefinitionIndex == definition.effectDefinitionIndex;
+            });
+        if (priorCondition != completionConditions.begin() + completionCount) {
+            if (priorCondition->valueIndex != definition.completionValueIndex
+                || priorCondition->value != definition.completionValue) {
+                return false;
+            }
+        } else if (completionCount >= completionConditions.size()) {
+            return false;
+        } else {
+            completionConditions[completionCount++] = {
+                definition.effectDefinitionIndex,
+                definition.completionValueIndex,
+                definition.completionValue,
+                CompletionConditionState::present};
+        }
+    }
+    std::sort(completionConditions.begin(),
+              completionConditions.begin() + completionCount,
+              [](const CompletionCondition& left, const CompletionCondition& right) {
+                  return left.itemDefinitionIndex < right.itemDefinitionIndex;
+              });
+    std::sort(acquisitionGates.begin(),
+              acquisitionGates.begin() + acquisitionCount,
+              [](const AcquisitionGate& left, const AcquisitionGate& right) {
+                  return left.socketType < right.socketType;
+              });
+    Source rebuilt = source;
+    rebuilt.completionConditions = std::span(completionConditions).first(completionCount);
+    rebuilt.acquisitionGates = std::span(acquisitionGates).first(acquisitionCount);
+    return matches_derived(rebuilt, facts, definitions);
 }
 
 } // namespace sunrise::state::build_data::items::catalysts

@@ -42,6 +42,70 @@ find(std::span<const Definition> definitions, std::uint16_t itemDefinitionIndex)
                : nullptr;
 }
 
+/** Sets one acquired-state slot and removes duplicate authored rows for that slot. */
+[[nodiscard]] bool upsert_acquisition(state::Family5State& family,
+                                      std::uint16_t slot) noexcept {
+    const std::size_t oldCount = family.flagCount;
+    std::size_t write = 0;
+    bool found = false;
+    for (std::size_t read = 0; read < oldCount; ++read) {
+        const state::UnlockFlagOverride row = family.flags[read];
+        if (row.slot == slot) {
+            if (!found) {
+                family.flags[write++] = {slot, 2};
+                found = true;
+            }
+            continue;
+        }
+        family.flags[write++] = row;
+    }
+    if (!found) {
+        if (write >= family.flags.size()) {
+            return false;
+        }
+        family.flags[write++] = {slot, 2};
+    }
+    for (std::size_t index = write; index < oldCount; ++index) {
+        family.flags[index] = {};
+    }
+    family.flagCount = write;
+    return true;
+}
+
+/** Raises one signed value slot and removes duplicate authored rows for that slot. */
+[[nodiscard]] bool upsert_completion_value(state::Family5State& family,
+                                           std::uint16_t slot,
+                                           std::int32_t minimum) noexcept {
+    const std::size_t oldCount = family.valueCount;
+    std::size_t write = 0;
+    std::optional<std::size_t> mergedIndex;
+    for (std::size_t read = 0; read < oldCount; ++read) {
+        const state::UnlockValueOverride row = family.values[read];
+        if (row.slot == slot) {
+            if (!mergedIndex.has_value()) {
+                mergedIndex = write;
+                family.values[write++] = {slot, (std::max)(row.value, minimum)};
+            } else {
+                state::UnlockValueOverride& merged = family.values[*mergedIndex];
+                merged.value = (std::max)(merged.value, row.value);
+            }
+            continue;
+        }
+        family.values[write++] = row;
+    }
+    if (!mergedIndex.has_value()) {
+        if (write >= family.values.size()) {
+            return false;
+        }
+        family.values[write++] = {slot, minimum};
+    }
+    for (std::size_t index = write; index < oldCount; ++index) {
+        family.values[index] = {};
+    }
+    family.valueCount = write;
+    return true;
+}
+
 } // namespace
 
 void clear() noexcept {
@@ -69,16 +133,24 @@ bool valid(std::span<const Definition> definitions) noexcept {
             definition.completedPlugDefinitionIndex != details::kUnavailableItemIndex;
         const bool hasEffect =
             definition.effectDefinitionIndex != details::kUnavailableItemIndex;
+        const bool hasAcquisition =
+            definition.acquisitionDefinitionIndex != kUnavailableAcquisitionIndex;
+        const bool hasCompletionValue =
+            definition.completionValueIndex != kUnavailableCompletionValueIndex;
         if (definition.itemDefinitionHash == 0
             || definition.socketLane >= details::kInitialPlugCapacity
-            || definition.reserved != 0
             || (definition.availability != Availability::released
                 && definition.availability != Availability::placeholder
                 && definition.availability != Availability::unsupported)
             || (definition.availability == Availability::unsupported
-                && (hasCompletedPlug || hasEffect))
+                && (hasCompletedPlug || hasEffect || hasAcquisition || hasCompletionValue
+                    || definition.completionValue != 0))
             || (definition.availability != Availability::unsupported
-                && (!hasCompletedPlug || !hasEffect))
+                && (!hasCompletedPlug || !hasEffect || !hasAcquisition))
+            || (hasCompletionValue != (definition.completionValue > 0))
+            || ((definition.completedPlugDefinitionIndex
+                 != definition.effectDefinitionIndex)
+                != hasCompletionValue)
             || (index != 0 && !less(definitions[index - 1], definition))) {
             return false;
         }
@@ -124,7 +196,10 @@ Result resolve(std::uint16_t itemDefinitionIndex) noexcept {
             Availability::released,
             {definition->socketLane,
              definition->completedPlugDefinitionIndex,
-             definition->effectDefinitionIndex}};
+             definition->effectDefinitionIndex,
+             definition->acquisitionDefinitionIndex,
+             definition->completionValueIndex,
+             definition->completionValue}};
 }
 
 std::uint16_t resolve_effect(std::uint16_t itemDefinitionIndex,
@@ -134,7 +209,8 @@ std::uint16_t resolve_effect(std::uint16_t itemDefinitionIndex,
     const Definition* definition = find(g_definitions.rows(), itemDefinitionIndex);
     if (definition == nullptr || definition->availability != Availability::released
         || definition->socketLane != socketLane
-        || definition->completedPlugDefinitionIndex != plugDefinitionIndex
+        || (definition->completedPlugDefinitionIndex != plugDefinitionIndex
+            && definition->effectDefinitionIndex != plugDefinitionIndex)
         || definition->effectDefinitionIndex == details::kUnavailableItemIndex) {
         return plugDefinitionIndex;
     }
@@ -160,16 +236,47 @@ ApplyResult apply_completed(std::uint16_t itemDefinitionIndex,
     if (result.error != Error::none
         || !account::inventory::valid_item_state(flags)
         || result.completed.socketLane >= plugs.size()
-        || result.completed.completedPlugDefinitionIndex == details::kUnavailableItemIndex) {
+        || result.completed.effectDefinitionIndex == details::kUnavailableItemIndex) {
         return ApplyResult::failed;
     }
 
     const std::uint32_t completedFlags = flags | account::inventory::kMasterworkItemFlag;
-    const std::optional<std::uint16_t> completedPlug =
-        result.completed.completedPlugDefinitionIndex;
+    const std::optional<std::uint16_t> completedPlug = result.completed.effectDefinitionIndex;
     plugs[result.completed.socketLane] = completedPlug;
     flags = completedFlags;
     return ApplyResult::completed;
+}
+
+bool append_investment_overrides(state::Family5State& family) noexcept {
+    if (!completion_enabled()) {
+        return true;
+    }
+    if (family.flagCount > family.flags.size() || family.valueCount > family.values.size()) {
+        return false;
+    }
+
+    state::Family5State candidate = family;
+    const Lock::Shared guard(g_lock);
+    for (const Definition& definition : g_definitions.rows()) {
+        if (definition.availability != Availability::released) {
+            continue;
+        }
+
+        if (!upsert_acquisition(candidate, definition.acquisitionDefinitionIndex)) {
+            return false;
+        }
+
+        if (definition.completionValueIndex == kUnavailableCompletionValueIndex) {
+            continue;
+        }
+        if (!upsert_completion_value(candidate,
+                                     definition.completionValueIndex,
+                                     definition.completionValue)) {
+            return false;
+        }
+    }
+    family = candidate;
+    return true;
 }
 
 bool snapshot(std::span<Definition> output,

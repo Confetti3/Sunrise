@@ -5,6 +5,7 @@
 #include <optional>
 #include <span>
 
+#include "../../../investment/investment.h"
 #include "definition.h"
 
 namespace sunrise::state::build_data::items::catalysts {
@@ -68,6 +69,15 @@ void set_completion_enabled(bool enabled) noexcept;
 apply_completed(std::uint16_t itemDefinitionIndex,
                 std::uint32_t& flags,
                 std::span<std::optional<std::uint16_t>> plugs) noexcept;
+
+/**
+ * Adds the acquired-state gates and legacy completion values for all released catalysts.
+ * Existing authored rows with the same slot are raised to the required value. The input stays
+ * unchanged when either fixed override bank cannot hold the complete deduplicated result.
+ * @param family Candidate Family-5 state.
+ * @return True when completion is disabled or every released override fits atomically.
+ */
+[[nodiscard]] bool append_investment_overrides(state::Family5State& family) noexcept;
 
 /**
  * Copies the complete catalog under its shared lock.
