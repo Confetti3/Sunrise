@@ -51,7 +51,8 @@ constexpr float kSplitterThickness = 5.0F;
 constexpr float kMinimumViewportWidth = 360.0F;
 constexpr float kMinimumMainHeight = 140.0F;
 constexpr float kMinimumBottomUsableHeight = 40.0F;
-constexpr float kTreeRowHeight = 24.0F;
+constexpr float kMinimumTreeRowHeight = 28.0F;
+constexpr float kInspectorRowPadding = 6.0F;
 constexpr float kTreeIndent = 14.0F;
 constexpr float kControlHeight = 24.0F;
 constexpr std::size_t kSearchCapacity = 256;
@@ -65,6 +66,55 @@ constexpr ImVec4 kMuted{0.50F, 0.55F, 0.61F, 1.0F};
 constexpr ImGuiWindowFlags kWorkspaceFlags =
     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize
     | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus;
+
+[[nodiscard]] constexpr float padded_row_height(float textHeight,
+                                                float verticalPadding,
+                                                float minimumHeight) noexcept {
+    return (std::max)(minimumHeight, textHeight + verticalPadding * 2.0F);
+}
+
+[[nodiscard]] constexpr bool fully_visible(float minimum,
+                                           float maximum,
+                                           float clipMinimum,
+                                           float clipMaximum) noexcept {
+    return minimum >= clipMinimum && maximum <= clipMaximum;
+}
+
+[[nodiscard]] constexpr float snap_scroll(float value,
+                                          float rowHeight,
+                                          float maximum) noexcept {
+    const float clamped = std::clamp(value, 0.0F, (std::max)(0.0F, maximum));
+    if (rowHeight <= 0.0F) {
+        return clamped;
+    }
+    const auto row = static_cast<std::uint64_t>(clamped / rowHeight + 0.5F);
+    return (std::min)(static_cast<float>(row) * rowHeight, maximum);
+}
+
+[[nodiscard]] constexpr float aligned_scroll_padding(float contentHeight,
+                                                      float visibleHeight,
+                                                      float rowHeight) noexcept {
+    if (rowHeight <= 0.0F || visibleHeight <= 0.0F) {
+        return 0.0F;
+    }
+    const float rawMaximum = (std::max)(0.0F, contentHeight - visibleHeight);
+    auto rows = static_cast<std::uint64_t>(rawMaximum / rowHeight);
+    if (static_cast<float>(rows) * rowHeight < rawMaximum) {
+        ++rows;
+    }
+    const float alignedMaximum = static_cast<float>(rows) * rowHeight;
+    return (std::max)(0.0F, alignedMaximum + visibleHeight - contentHeight);
+}
+
+static_assert(padded_row_height(16.0F, 6.0F, 28.0F) == 28.0F);
+static_assert(padded_row_height(20.0F, 6.0F, 28.0F) == 32.0F);
+static_assert(fully_visible(10.0F, 20.0F, 10.0F, 20.0F));
+static_assert(!fully_visible(9.0F, 20.0F, 10.0F, 20.0F));
+static_assert(!fully_visible(10.0F, 21.0F, 10.0F, 20.0F));
+static_assert(snap_scroll(13.0F, 28.0F, 196.0F) == 0.0F);
+static_assert(snap_scroll(15.0F, 28.0F, 196.0F) == 28.0F);
+static_assert(snap_scroll(250.0F, 28.0F, 196.0F) == 196.0F);
+static_assert(aligned_scroll_padding(280.0F, 100.0F, 28.0F) == 16.0F);
 
 struct VerticalLayout final {
     float mainHeight{};
@@ -242,6 +292,18 @@ WorkspaceState g_state{};
 
 [[nodiscard]] float scaled(float value) noexcept {
     return dpi::pixels(value);
+}
+
+[[nodiscard]] bool fully_visible(const ImVec2& minimum, const ImVec2& maximum) noexcept {
+    const ImDrawList* drawList = ImGui::GetWindowDrawList();
+    const ImVec2 clipMinimum = drawList->GetClipRectMin();
+    const ImVec2 clipMaximum = drawList->GetClipRectMax();
+    return fully_visible(minimum.y, maximum.y, clipMinimum.y, clipMaximum.y);
+}
+
+[[nodiscard]] bool next_item_fully_visible(float height) noexcept {
+    const ImVec2 minimum = ImGui::GetCursorScreenPos();
+    return fully_visible(minimum, {minimum.x, minimum.y + height});
 }
 
 [[nodiscard]] const provider::WorldSnapshot& world() noexcept {
@@ -873,7 +935,9 @@ model::NodeId draw_tree() noexcept {
         return hovered;
     }
 
-    const float rowHeight = scaled(kTreeRowHeight);
+    const float rowHeight = padded_row_height(ImGui::GetTextLineHeight(),
+                                              scaled(kInspectorRowPadding),
+                                              scaled(kMinimumTreeRowHeight));
     bool scrollAdjusted = false;
     if (g_state.revealSelection && g_state.selection.selected()) {
         const auto iterator = std::find_if(g_state.rows.begin(),
@@ -884,7 +948,7 @@ model::NodeId draw_tree() noexcept {
         if (iterator != g_state.rows.end()) {
             const float index = static_cast<float>(iterator - g_state.rows.begin());
             const float target = index * rowHeight - ImGui::GetWindowHeight() * 0.45F;
-            ImGui::SetScrollY((std::max)(0.0F, target));
+            ImGui::SetScrollY(snap_scroll(target, rowHeight, ImGui::GetScrollMaxY()));
             scrollAdjusted = true;
         }
         g_state.revealSelection = false;
@@ -897,12 +961,24 @@ model::NodeId draw_tree() noexcept {
             });
         if (iterator != g_state.rows.end()) {
             const float index = static_cast<float>(iterator - g_state.rows.begin());
-            ImGui::SetScrollY((std::max)(0.0F, index * rowHeight + g_state.treeAnchorOffset));
+            ImGui::SetScrollY(snap_scroll(index * rowHeight,
+                                          rowHeight,
+                                          ImGui::GetScrollMaxY()));
             scrollAdjusted = true;
         }
         g_state.restoreTreeScroll = false;
+    } else {
+        const float scrollY = ImGui::GetScrollY();
+        const float snapped = snap_scroll(scrollY, rowHeight, ImGui::GetScrollMaxY());
+        if (std::abs(snapped - scrollY) > 0.01F) {
+            ImGui::SetScrollY(snapped);
+            scrollAdjusted = true;
+        }
     }
 
+    const ImVec2 itemSpacing = ImGui::GetStyle().ItemSpacing;
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {itemSpacing.x, 0.0F});
+    ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, {0.0F, 0.5F});
     ImGuiListClipper clipper;
     clipper.Begin(static_cast<int>(g_state.rows.size()), rowHeight);
     while (clipper.Step()) {
@@ -910,6 +986,11 @@ model::NodeId draw_tree() noexcept {
             const TreeRow& row = g_state.rows[static_cast<std::size_t>(index)];
             ImGui::PushID(index);
             const ImVec2 rowStart = ImGui::GetCursorScreenPos();
+            if (!fully_visible(rowStart, {rowStart.x, rowStart.y + rowHeight})) {
+                ImGui::Dummy({0.0F, rowHeight});
+                ImGui::PopID();
+                continue;
+            }
             const float indent = scaled(kTreeIndent) * static_cast<float>(row.depth);
             ImDrawList* drawList = ImGui::GetWindowDrawList();
             for (std::uint8_t depth = 0; depth < row.depth; ++depth) {
@@ -960,6 +1041,15 @@ model::NodeId draw_tree() noexcept {
             ImGui::PopID();
         }
     }
+    const ImDrawList* drawList = ImGui::GetWindowDrawList();
+    const float visibleHeight =
+        (std::max)(0.0F, drawList->GetClipRectMax().y - drawList->GetClipRectMin().y);
+    const float contentHeight = static_cast<float>(g_state.rows.size()) * rowHeight;
+    const float endPadding = aligned_scroll_padding(contentHeight, visibleHeight, rowHeight);
+    if (endPadding > 0.0F) {
+        ImGui::Dummy({0.0F, endPadding});
+    }
+    ImGui::PopStyleVar(2);
     if (!scrollAdjusted) {
         const float scrollY = ImGui::GetScrollY();
         const std::size_t anchorIndex = (std::min)(
@@ -967,7 +1057,7 @@ model::NodeId draw_tree() noexcept {
             g_state.rows.size() - 1U);
         const model::Node* anchorNode = world().graph.node(g_state.rows[anchorIndex].id);
         g_state.treeAnchor = node_identity(anchorNode);
-        g_state.treeAnchorOffset = scrollY - static_cast<float>(anchorIndex) * rowHeight;
+        g_state.treeAnchorOffset = 0.0F;
     }
     return hovered;
 }
@@ -1016,12 +1106,93 @@ void draw_outliner() noexcept {
     ImGui::EndChild();
 }
 
+[[nodiscard]] bool inspector_header(const char* label,
+                                    ImGuiTreeNodeFlags flags) noexcept {
+    const ImVec2 padding{ImGui::GetStyle().FramePadding.x, scaled(kInspectorRowPadding)};
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, padding);
+    const bool visible = next_item_fully_visible(ImGui::GetTextLineHeight() + padding.y * 2.0F);
+    if (!visible) {
+        ImGui::BeginDisabled();
+        ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.0F);
+    }
+    const bool open = ImGui::CollapsingHeader(label, flags);
+    if (!visible) {
+        ImGui::PopStyleVar();
+        ImGui::EndDisabled();
+    }
+    ImGui::PopStyleVar();
+    return open;
+}
+
+void inspector_text(const char* text, bool disabled = false) noexcept {
+    const float height = ImGui::GetTextLineHeight();
+    if (!next_item_fully_visible(height)) {
+        ImGui::Dummy({0.0F, height});
+        return;
+    }
+    if (disabled) {
+        ImGui::TextDisabled("%s", text);
+    } else {
+        ImGui::TextUnformatted(text);
+    }
+}
+
+void inspector_title(const model::Node& node) noexcept {
+    const float height = ImGui::GetTextLineHeight();
+    if (!next_item_fully_visible(height)) {
+        ImGui::Dummy({0.0F, height});
+        return;
+    }
+    ImGui::TextUnformatted(node.name.c_str());
+    ImGui::SameLine();
+    ImGui::TextColored(kMuted, "%s", model::kind_name(node.kind));
+}
+
+[[nodiscard]] bool inspector_checkbox(const char* label, bool& value) noexcept {
+    const float height = ImGui::GetFrameHeight();
+    if (next_item_fully_visible(height)) {
+        return ImGui::Checkbox(label, &value);
+    }
+    const float width = height + ImGui::GetStyle().ItemInnerSpacing.x
+                        + ImGui::CalcTextSize(label).x;
+    ImGui::Dummy({width, height});
+    return false;
+}
+
 void property_row(const char* name, const char* value) noexcept {
     ImGui::TableNextRow();
     ImGui::TableSetColumnIndex(0);
-    ImGui::TextDisabled("%s", name);
+    const ImVec2 contentMinimum = ImGui::GetCursorScreenPos();
+    const float fieldWidth = (std::max)(1.0F, ImGui::GetContentRegionAvail().x);
+    const float fieldHeight = ImGui::CalcTextSize(name, nullptr, false, fieldWidth).y;
     ImGui::TableSetColumnIndex(1);
-    ImGui::TextWrapped("%s", value);
+    const float wrapWidth = (std::max)(1.0F, ImGui::GetContentRegionAvail().x);
+    const float valueHeight = ImGui::CalcTextSize(value, nullptr, false, wrapWidth).y;
+    const float contentHeight =
+        (std::max)({ImGui::GetTextLineHeight(), fieldHeight, valueHeight});
+    const float padding = ImGui::GetStyle().CellPadding.y;
+    const ImVec2 rowMinimum{contentMinimum.x, contentMinimum.y - padding};
+    const ImVec2 rowMaximum{contentMinimum.x,
+                            contentMinimum.y + contentHeight + padding};
+    const bool visible = fully_visible(rowMinimum, rowMaximum);
+    if (!visible) {
+        ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, IM_COL32(0, 0, 0, 0));
+        ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1, IM_COL32(0, 0, 0, 0));
+    }
+    ImGui::TableSetColumnIndex(0);
+    if (visible) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+        ImGui::TextWrapped("%s", name);
+        ImGui::PopStyleColor();
+    } else {
+        ImGui::Dummy({0.0F, contentHeight});
+    }
+    ImGui::TableSetColumnIndex(1);
+    if (visible) {
+        ImGui::TextWrapped("%s", value);
+    } else {
+        ImGui::Dummy({0.0F, contentHeight});
+    }
 }
 
 void property_u64(const char* name, std::uint64_t value, int width = 16) noexcept {
@@ -1041,10 +1212,14 @@ void property_i32(const char* name, std::int32_t value) noexcept {
 }
 
 [[nodiscard]] bool begin_properties(const char* id) noexcept {
+    const ImVec2 cellPadding{ImGui::GetStyle().CellPadding.x,
+                             scaled(kInspectorRowPadding)};
+    ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, cellPadding);
     if (!ImGui::BeginTable(id,
                            2,
                            ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_RowBg
                                | ImGuiTableFlags_BordersInnerH)) {
+        ImGui::PopStyleVar();
         return false;
     }
     ImGui::TableSetupColumn("Field", ImGuiTableColumnFlags_WidthFixed, scaled(112.0F));
@@ -1052,8 +1227,13 @@ void property_i32(const char* name, std::int32_t value) noexcept {
     return true;
 }
 
+void end_properties() noexcept {
+    ImGui::EndTable();
+    ImGui::PopStyleVar();
+}
+
 void draw_identity(const model::Node& node) noexcept {
-    if (!ImGui::CollapsingHeader("Identity", ImGuiTreeNodeFlags_DefaultOpen)
+    if (!inspector_header("Identity", ImGuiTreeNodeFlags_DefaultOpen)
         || !begin_properties("##identity_properties")) {
         return;
     }
@@ -1100,12 +1280,12 @@ void draw_identity(const model::Node& node) noexcept {
         property_u64("Name hash", *node.nameHash, 8);
     }
     property_i32("Children", static_cast<std::int32_t>(node.children.size()));
-    ImGui::EndTable();
+    end_properties();
 }
 
 void draw_transform(const model::Node& node) noexcept {
     if (!node.transform.has_value()
-        || !ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen)
+        || !inspector_header("Transform", ImGuiTreeNodeFlags_DefaultOpen)
         || !begin_properties("##transform_properties")) {
         return;
     }
@@ -1135,12 +1315,12 @@ void draw_transform(const model::Node& node) noexcept {
         formatVector(*node.linearVelocity, text);
         property_row("Linear velocity", text.data());
     }
-    ImGui::EndTable();
+    end_properties();
 }
 
 void draw_bounds(const model::Node& node) noexcept {
     if (!node.bounds.has_value()
-        || !ImGui::CollapsingHeader("Bounds", ImGuiTreeNodeFlags_DefaultOpen)
+        || !inspector_header("Bounds", ImGuiTreeNodeFlags_DefaultOpen)
         || !begin_properties("##bounds_properties")) {
         return;
     }
@@ -1159,7 +1339,7 @@ void draw_bounds(const model::Node& node) noexcept {
                         static_cast<double>(node.bounds->maximum[1]),
                         static_cast<double>(node.bounds->maximum[2]));
     property_row("Maximum", text.data());
-    ImGui::EndTable();
+    end_properties();
 }
 
 void draw_source(const model::Node& node) noexcept {
@@ -1168,7 +1348,7 @@ void draw_source(const model::Node& node) noexcept {
         && !source.spawnSetHash.has_value() && !source.bubble.has_value()) {
         return;
     }
-    if (!ImGui::CollapsingHeader("Source", ImGuiTreeNodeFlags_DefaultOpen)
+    if (!inspector_header("Source", ImGuiTreeNodeFlags_DefaultOpen)
         || !begin_properties("##source_properties")) {
         return;
     }
@@ -1187,7 +1367,7 @@ void draw_source(const model::Node& node) noexcept {
     if (source.bubble.has_value()) {
         property_i32("Bubble", *source.bubble);
     }
-    ImGui::EndTable();
+    end_properties();
 }
 
 void draw_activity(const model::Node& node) noexcept {
@@ -1195,7 +1375,7 @@ void draw_activity(const model::Node& node) noexcept {
     if (!source.activitySession.has_value() && !source.activityIndex.has_value()) {
         return;
     }
-    if (!ImGui::CollapsingHeader("Activity", ImGuiTreeNodeFlags_DefaultOpen)
+    if (!inspector_header("Activity", ImGuiTreeNodeFlags_DefaultOpen)
         || !begin_properties("##activity_properties")) {
         return;
     }
@@ -1207,19 +1387,19 @@ void draw_activity(const model::Node& node) noexcept {
     }
     property_row("Relationship",
                  source.spawnSetHash.has_value() ? "Destination spawn-set hash" : "Unknown");
-    ImGui::EndTable();
+    end_properties();
 }
 
 void draw_rendering(const model::Node& node) noexcept {
     if (!model::supports(node.actions, model::Action::hide)
-        || !ImGui::CollapsingHeader("Rendering", ImGuiTreeNodeFlags_DefaultOpen)) {
+        || !inspector_header("Rendering", ImGuiTreeNodeFlags_DefaultOpen)) {
         return;
     }
     bool visible = !hidden(node.id);
-    if (ImGui::Checkbox("Inspector helper visible", &visible)) {
+    if (inspector_checkbox("Inspector helper visible", visible)) {
         toggle_hidden(node.id);
     }
-    ImGui::TextDisabled("Game-render visibility is unavailable.");
+    inspector_text("Game-render visibility is unavailable.", true);
 }
 
 void draw_inspector_actions(const model::Node& node) noexcept {
@@ -1227,9 +1407,9 @@ void draw_inspector_actions(const model::Node& node) noexcept {
     bool sameLine = false;
 
     const auto button = [&sameLine](const char* label) noexcept {
+        const float buttonWidth =
+            ImGui::CalcTextSize(label).x + ImGui::GetStyle().FramePadding.x * 2.0F;
         if (sameLine) {
-            const float buttonWidth =
-                ImGui::CalcTextSize(label).x + ImGui::GetStyle().FramePadding.x * 2.0F;
             const float contentRight =
                 ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
             const float nextRight = ImGui::GetItemRectMax().x + ImGui::GetStyle().ItemSpacing.x
@@ -1239,7 +1419,12 @@ void draw_inspector_actions(const model::Node& node) noexcept {
             }
         }
         sameLine = true;
-        return ImGui::Button(label, {0.0F, scaled(kControlHeight)});
+        const float buttonHeight = scaled(kControlHeight);
+        if (!next_item_fully_visible(buttonHeight)) {
+            ImGui::Dummy({buttonWidth, buttonHeight});
+            return false;
+        }
+        return ImGui::Button(label, {buttonWidth, buttonHeight});
     };
 
     if (model::supports(node.actions, model::Action::focus)) {
@@ -1278,10 +1463,8 @@ void draw_inspector() noexcept {
     }
 
     const std::string breadcrumb = world().graph.breadcrumb(node->id);
-    ImGui::TextDisabled("%s", breadcrumb.c_str());
-    ImGui::TextUnformatted(node->name.c_str());
-    ImGui::SameLine();
-    ImGui::TextColored(kMuted, "%s", model::kind_name(node->kind));
+    inspector_text(breadcrumb.c_str(), true);
+    inspector_title(*node);
     draw_inspector_actions(*node);
     ImGui::Separator();
     draw_identity(*node);
