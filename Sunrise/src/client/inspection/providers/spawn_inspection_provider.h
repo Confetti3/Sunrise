@@ -61,6 +61,8 @@ struct WorldSnapshot final {
     bool physicsTruncated{};
     bool spawnCatalogReady{};
     bool stale{};
+    /** Activity-scoped identity epoch for runtime producer handles. */
+    std::uint32_t producerEpoch{1};
 };
 
 class SpawnInspectionProvider final {
@@ -126,6 +128,7 @@ private:
     WorldSnapshot snapshot_{};
     Key key_{};
     std::uint32_t generation_{};
+    std::uint32_t producerEpoch_{};
     bool keyPresent_{};
 };
 

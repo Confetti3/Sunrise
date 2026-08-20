@@ -7,6 +7,7 @@
 namespace sunrise::client::viewer::camera {
 
 inline constexpr std::size_t kVectorLanes = 3;
+inline constexpr std::size_t kMaximumPlaybackKeyframes = 64;
 using Vector = std::array<float, kVectorLanes>;
 
 struct Pose {
@@ -40,6 +41,40 @@ struct Status {
     bool requested{};
     bool active{};
     bool applied{};
+};
+
+struct PlaybackKeyframe final {
+    Pose pose{};
+    std::array<char, 97> label{};
+    float travelSeconds{1.0F};
+    float dwellSeconds{};
+    bool captureSnapshot{};
+};
+
+struct PlaybackPath final {
+    std::array<PlaybackKeyframe, kMaximumPlaybackKeyframes> keyframes{};
+    std::size_t keyframeCount{};
+    std::uint64_t activitySession{};
+    std::uint64_t activityRevision{};
+    std::array<char, 65> name{};
+    bool loop{};
+};
+
+struct PlaybackStatus final {
+    float elapsedSeconds{};
+    float durationSeconds{};
+    std::size_t keyframeIndex{};
+    bool playing{};
+    bool paused{};
+};
+
+struct SnapshotCaptureRequest final {
+    std::uint64_t sequence{};
+    std::uint64_t cameraSession{};
+    std::size_t keyframeIndex{};
+    Pose pose{};
+    std::array<char, 65> pathName{};
+    std::array<char, 97> keyframeLabel{};
 };
 
 /** Resolves and attaches the copied camera-pose and FOV boundaries. */
@@ -80,6 +115,14 @@ void request_active(bool active) noexcept;
 
 /** @return One coherent copied runtime snapshot. */
 [[nodiscard]] Status status() noexcept;
+
+/** Queues a copied path for camera-thread playback. */
+[[nodiscard]] bool request_playback(const PlaybackPath& path) noexcept;
+void request_playback_pause(bool paused) noexcept;
+void request_playback_stop() noexcept;
+void request_playback_scrub(float seconds) noexcept;
+[[nodiscard]] PlaybackStatus playback_status() noexcept;
+[[nodiscard]] bool consume_snapshot_capture_request(SnapshotCaptureRequest& request) noexcept;
 
 /** @return A stable label for one failure value. */
 [[nodiscard]] const char* failure_name(Failure failure) noexcept;

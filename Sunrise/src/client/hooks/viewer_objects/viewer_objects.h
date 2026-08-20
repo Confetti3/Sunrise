@@ -36,7 +36,11 @@ void observe_physics_component(void* component) noexcept;
 /** Periodically publishes a bounded copy of every occupied object datum. */
 void poll() noexcept;
 
+/** Clears activity-scoped copied positions so recycled handles cannot inherit stale transforms. */
+void reset_activity() noexcept;
+
 /** Copies the latest pointer-free object observation. */
 [[nodiscard]] bool snapshot(Snapshot& output) noexcept;
+[[nodiscard]] bool installed() noexcept;
 
 } // namespace sunrise::client::viewer::objects

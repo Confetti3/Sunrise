@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <limits>
+#include <numbers>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -17,6 +18,7 @@
 #include "../../../core/logging/log.h"
 #include "../../../core/ui/runtime/ui_visibility_runtime.h"
 #include "../../../state/account/account_state.h"
+#include "../../../state/activity/runtime.h"
 #include "../../../state/runtime/runtime.h"
 #include "../../hooking/detour.h"
 #include "../../input/window_focus.h"
@@ -55,6 +57,12 @@ constexpr std::uint64_t kMaximumFrameMilliseconds = 50;
 constexpr float kMinimumVectorLengthSquared = 0.000001F;
 constexpr float kPitchLimit = 1.55334303427495F;
 
+[[nodiscard]] constexpr float smoothstep(float value) noexcept {
+    return value * value * (3.0F - 2.0F * value);
+}
+static_assert(smoothstep(0.0F) == 0.0F);
+static_assert(smoothstep(1.0F) == 1.0F);
+
 using FovCopy = float(__fastcall*)();
 using PoseCopy = bool(__fastcall*)(float*, float*, float*);
 
@@ -75,6 +83,14 @@ struct RuntimeState {
     std::uint64_t generation{};
     std::uint64_t activeSession{};
     std::uint64_t lastTick{};
+    PlaybackPath playback{};
+    float playbackElapsed{};
+    float playbackScrub{-1.0F};
+    std::size_t playbackKeyframe{};
+    bool playbackPlaying{};
+    bool playbackPaused{};
+    bool playbackStartRequested{};
+    bool playbackStopRequested{};
     bool active{};
     bool applied{};
     bool toggleDown{};
@@ -110,6 +126,13 @@ std::atomic_uint32_t g_framePlayer{kInvalidPlayer};
 std::atomic_long g_mouseX{};
 std::atomic_long g_mouseY{};
 std::atomic<float> g_configuredFov{kNativeFov};
+std::atomic<float> g_playbackFov{kNativeFov};
+std::atomic_bool g_playbackFovActive{};
+SRWLOCK g_captureLock{SRWLOCK_INIT};
+std::array<SnapshotCaptureRequest, kMaximumPlaybackKeyframes> g_captureRequests{};
+std::size_t g_captureHead{};
+std::size_t g_captureCount{};
+std::uint64_t g_captureSequence{};
 std::atomic<float> g_outputFov{};
 std::atomic<Failure> g_failure{Failure::none};
 SRWLOCK g_stateLock{SRWLOCK_INIT};
@@ -197,6 +220,122 @@ void rebuild_basis(Pose& pose) noexcept {
     (void)normalize(pose.up);
 }
 
+[[nodiscard]] float playback_duration(const PlaybackPath& path) noexcept {
+    if (path.keyframeCount == 0) {
+        return 0.0F;
+    }
+    float duration = path.keyframes[path.keyframeCount - 1].dwellSeconds;
+    for (std::size_t index = 0; index + 1 < path.keyframeCount; ++index) {
+        duration += path.keyframes[index].dwellSeconds + path.keyframes[index].travelSeconds;
+    }
+    return duration;
+}
+
+[[nodiscard]] bool valid_playback(const PlaybackPath& path) noexcept {
+    if (path.keyframeCount == 0 || path.keyframeCount > path.keyframes.size()) {
+        return false;
+    }
+    for (std::size_t index = 0; index < path.keyframeCount; ++index) {
+        const PlaybackKeyframe& keyframe = path.keyframes[index];
+        if (!finite(keyframe.pose.position) || !std::isfinite(keyframe.pose.yaw)
+            || !std::isfinite(keyframe.pose.pitch) || !std::isfinite(keyframe.pose.fov)
+            || keyframe.pose.pitch < -kPitchLimit || keyframe.pose.pitch > kPitchLimit
+            || keyframe.pose.fov < kMinimumFov || keyframe.pose.fov > kMaximumFov
+            || !std::isfinite(keyframe.travelSeconds) || keyframe.travelSeconds < 0.0F
+            || !std::isfinite(keyframe.dwellSeconds) || keyframe.dwellSeconds < 0.0F) {
+            return false;
+        }
+    }
+    const float duration = playback_duration(path);
+    return std::isfinite(duration) && (!path.loop || duration > 0.0F);
+}
+
+[[nodiscard]] Pose playback_pose(const PlaybackPath& path,
+                                 float elapsed,
+                                 std::size_t& keyframeIndex) noexcept {
+    Pose result = path.keyframes[0].pose;
+    keyframeIndex = 0;
+    float remaining = (std::max)(0.0F, elapsed);
+    for (std::size_t index = 0; index < path.keyframeCount; ++index) {
+        const PlaybackKeyframe& from = path.keyframes[index];
+        if (remaining <= from.dwellSeconds || index + 1 == path.keyframeCount) {
+            keyframeIndex = index;
+            return from.pose;
+        }
+        remaining -= from.dwellSeconds;
+        const float travel = from.travelSeconds;
+        if (remaining <= travel) {
+            const PlaybackKeyframe& to = path.keyframes[index + 1];
+            const float linear = travel <= 0.0F ? 1.0F : std::clamp(remaining / travel, 0.0F, 1.0F);
+            const float blend = smoothstep(linear);
+            for (std::size_t lane = 0; lane < result.position.size(); ++lane) {
+                result.position[lane] = from.pose.position[lane]
+                                        + (to.pose.position[lane] - from.pose.position[lane]) * blend;
+            }
+            const float yawDelta = std::remainder(to.pose.yaw - from.pose.yaw,
+                                                  2.0F * std::numbers::pi_v<float>);
+            result.yaw = from.pose.yaw + yawDelta * blend;
+            result.pitch = std::clamp(from.pose.pitch + (to.pose.pitch - from.pose.pitch) * blend,
+                                      -kPitchLimit, kPitchLimit);
+            result.fov = from.pose.fov + (to.pose.fov - from.pose.fov) * blend;
+            rebuild_basis(result);
+            keyframeIndex = index;
+            return result;
+        }
+        remaining -= travel;
+    }
+    keyframeIndex = path.keyframeCount - 1;
+    return path.keyframes[keyframeIndex].pose;
+}
+
+void clear_playback_locked() noexcept {
+    g_state.playback = {};
+    g_state.playbackElapsed = 0.0F;
+    g_state.playbackScrub = -1.0F;
+    g_state.playbackKeyframe = 0;
+    g_state.playbackPlaying = false;
+    g_state.playbackPaused = false;
+    g_state.playbackStartRequested = false;
+    g_state.playbackStopRequested = false;
+    g_playbackFovActive.store(false, std::memory_order_release);
+}
+
+void enqueue_capture(std::size_t keyframeIndex) noexcept {
+    AcquireSRWLockExclusive(&g_captureLock);
+    if (g_captureCount == g_captureRequests.size()) {
+        g_captureHead = (g_captureHead + 1U) % g_captureRequests.size();
+        --g_captureCount;
+    }
+    const std::size_t tail = (g_captureHead + g_captureCount) % g_captureRequests.size();
+    SnapshotCaptureRequest& request = g_captureRequests[tail];
+    request = {};
+    request.sequence = ++g_captureSequence;
+    request.cameraSession = g_state.activeSession;
+    request.keyframeIndex = keyframeIndex;
+    request.pose = g_state.playback.keyframes[keyframeIndex].pose;
+    request.pathName = g_state.playback.name;
+    request.keyframeLabel = g_state.playback.keyframes[keyframeIndex].label;
+    ++g_captureCount;
+    ReleaseSRWLockExclusive(&g_captureLock);
+}
+
+void enqueue_capture_range(const PlaybackPath& path,
+                           float after,
+                           float through,
+                           bool includeFirst) noexcept {
+    float arrival = 0.0F;
+    for (std::size_t index = 0; index < path.keyframeCount; ++index) {
+        const bool crossed = (includeFirst && arrival == 0.0F)
+                             || (arrival > after && arrival <= through);
+        if (crossed && path.keyframes[index].captureSnapshot) {
+            enqueue_capture(index);
+        }
+        if (index + 1 < path.keyframeCount) {
+            arrival += path.keyframes[index].dwellSeconds + path.keyframes[index].travelSeconds;
+        }
+    }
+}
+
 [[nodiscard]] bool
 valid_pose(const Vector& position, const Vector& forward, const Vector& up) noexcept {
     Vector normalizedForward = forward;
@@ -208,7 +347,9 @@ valid_pose(const Vector& position, const Vector& forward, const Vector& up) noex
 /** Publishes the lock-owned pose through the same seqlock pattern as player position. */
 void publish_pose_locked() noexcept {
     Pose pose = g_state.pose;
-    pose.fov = g_outputFov.load(std::memory_order_acquire);
+    pose.fov = g_playbackFovActive.load(std::memory_order_acquire)
+                   ? g_playbackFov.load(std::memory_order_acquire)
+                   : g_outputFov.load(std::memory_order_acquire);
     g_poseSequence.fetch_add(1, std::memory_order_acq_rel);
     g_publishedPose = pose;
     g_poseSequence.fetch_add(1, std::memory_order_release);
@@ -242,7 +383,9 @@ float __fastcall copy_fov() noexcept {
     }
     float output = native;
     if (!g_stopping.load(std::memory_order_acquire) && g_active.load(std::memory_order_acquire)) {
-        const float configured = g_configuredFov.load(std::memory_order_acquire);
+        const float configured = g_playbackFovActive.load(std::memory_order_acquire)
+                                     ? g_playbackFov.load(std::memory_order_acquire)
+                                     : g_configuredFov.load(std::memory_order_acquire);
         if (configured >= kMinimumFov && configured <= kMaximumFov) {
             output = configured;
         }
@@ -460,6 +603,7 @@ void stop_runtime(Failure failure) noexcept {
     g_state.cameraIdentity = {};
     g_state.activeSession = 0;
     g_state.lastTick = 0;
+    clear_playback_locked();
     ++g_state.generation;
     publish_pose_locked();
     ReleaseSRWLockExclusive(&g_stateLock);
@@ -512,6 +656,78 @@ void update_motion(const client::viewer::Settings& settings, bool uiVisible) noe
     const std::uint64_t elapsed =
         g_state.lastTick == 0 ? 0 : std::min(now - g_state.lastTick, kMaximumFrameMilliseconds);
     g_state.lastTick = now;
+    bool playbackStarted = false;
+    bool playbackScrubbed = false;
+    if (g_state.playbackStopRequested) {
+        clear_playback_locked();
+    }
+    if (g_state.playbackStartRequested) {
+        g_state.playbackStartRequested = false;
+        g_state.playbackElapsed = 0.0F;
+        g_state.playbackKeyframe = 0;
+        g_state.playbackPlaying = true;
+        g_state.playbackPaused = false;
+        playbackStarted = true;
+    }
+    if (g_state.playbackScrub >= 0.0F && g_state.playbackPlaying) {
+        g_state.playbackElapsed = std::clamp(g_state.playbackScrub, 0.0F,
+                                             playback_duration(g_state.playback));
+        g_state.playbackScrub = -1.0F;
+        playbackScrubbed = true;
+    }
+
+    bool movementDown = false;
+    if (read_bindings()) {
+        for (std::size_t index = 0; index < kMovementActions.size(); ++index) {
+            movementDown = movementDown || action_down(index);
+        }
+    }
+    if (g_state.playbackPlaying && (mouseX != 0 || mouseY != 0 || movementDown)) {
+        clear_playback_locked();
+    }
+    if (g_state.playbackPlaying) {
+        if (!window_input::game_focused()) {
+            ReleaseSRWLockExclusive(&g_stateLock);
+            return;
+        }
+        const float duration = playback_duration(g_state.playback);
+        const float previousElapsed = g_state.playbackElapsed;
+        if (!g_state.playbackPaused) {
+            g_state.playbackElapsed += static_cast<float>(elapsed) / 1000.0F;
+        }
+        bool wrapped = false;
+        if (g_state.playbackElapsed >= duration) {
+            if (g_state.playback.loop && duration > 0.0F) {
+                g_state.playbackElapsed = std::fmod(g_state.playbackElapsed, duration);
+                wrapped = true;
+            } else {
+                g_state.playbackElapsed = duration;
+            }
+        }
+        g_state.pose = playback_pose(g_state.playback, g_state.playbackElapsed,
+                                     g_state.playbackKeyframe);
+        if (!playbackScrubbed) {
+            if (wrapped) {
+                enqueue_capture_range(g_state.playback, previousElapsed, duration,
+                                      playbackStarted);
+                enqueue_capture_range(g_state.playback, -1.0F, g_state.playbackElapsed, true);
+            } else {
+                enqueue_capture_range(g_state.playback, previousElapsed, g_state.playbackElapsed,
+                                      playbackStarted);
+            }
+        }
+        g_playbackFov.store(g_state.pose.fov, std::memory_order_release);
+        g_playbackFovActive.store(true, std::memory_order_release);
+        publish_pose_locked();
+        const bool finished = !g_state.playback.loop && g_state.playbackElapsed >= duration;
+        if (finished) {
+            g_state.playbackPlaying = false;
+            g_state.playbackPaused = false;
+            g_playbackFovActive.store(false, std::memory_order_release);
+        }
+        ReleaseSRWLockExclusive(&g_stateLock);
+        return;
+    }
     if ((uiVisible && !workspace_input::workspace_navigation())
         || !window_input::game_focused()) {
         ReleaseSRWLockExclusive(&g_stateLock);
@@ -640,6 +856,11 @@ bool uninstall() noexcept {
     g_installed.store(false, std::memory_order_release);
     g_bindings = {};
     g_bindingsRead = false;
+    AcquireSRWLockExclusive(&g_captureLock);
+    g_captureRequests = {};
+    g_captureHead = 0;
+    g_captureCount = 0;
+    ReleaseSRWLockExclusive(&g_captureLock);
     report("uninstall", "ok");
     return true;
 }
@@ -693,6 +914,17 @@ void poll(std::uint32_t playerIndex) noexcept {
         finish_exit(Failure::playerChanged);
         return;
     }
+    AcquireSRWLockShared(&g_stateLock);
+    const PlaybackPath playback = g_state.playback;
+    const bool playbackPending = g_state.playbackPlaying || g_state.playbackStartRequested;
+    ReleaseSRWLockShared(&g_stateLock);
+    if (playbackPending && playback.activitySession != 0) {
+        state::activity::SessionSnapshot session{};
+        if (!state::activity::snapshot_session(playback.activitySession, session)
+            || session.binding.createdRevision != playback.activityRevision) {
+            request_playback_stop();
+        }
+    }
     const bool inputReady = publish_claimed_keys(settings);
     if (!inputReady) {
         g_failure.store(Failure::inputBindings, std::memory_order_release);
@@ -735,6 +967,7 @@ bool move_to(const Pose& pose) noexcept {
         ReleaseSRWLockExclusive(&g_stateLock);
         return false;
     }
+    clear_playback_locked();
     g_state.pose.position = pose.position;
     g_state.pose.yaw = pose.yaw;
     g_state.pose.pitch = std::clamp(pose.pitch, -kPitchLimit, kPitchLimit);
@@ -755,6 +988,7 @@ bool return_to_player() noexcept {
         ReleaseSRWLockExclusive(&g_stateLock);
         return false;
     }
+    clear_playback_locked();
     g_state.pose.position = player.position;
     ++g_state.generation;
     publish_pose_locked();
@@ -795,7 +1029,9 @@ Status status() noexcept {
     Status snapshot{};
     AcquireSRWLockShared(&g_stateLock);
     snapshot.pose = g_state.pose;
-    snapshot.pose.fov = g_outputFov.load(std::memory_order_acquire);
+    snapshot.pose.fov = g_playbackFovActive.load(std::memory_order_acquire)
+                            ? g_playbackFov.load(std::memory_order_acquire)
+                            : g_outputFov.load(std::memory_order_acquire);
     snapshot.generation = g_state.generation;
     snapshot.activeSession = g_state.activeSession;
     snapshot.active = g_state.active;
@@ -805,6 +1041,77 @@ Status status() noexcept {
     snapshot.installed = g_installed.load(std::memory_order_acquire);
     snapshot.requested = g_requested.load(std::memory_order_acquire);
     return snapshot;
+}
+
+bool request_playback(const PlaybackPath& path) noexcept {
+    if (!valid_playback(path)) {
+        return false;
+    }
+    AcquireSRWLockExclusive(&g_stateLock);
+    if (!g_state.active) {
+        ReleaseSRWLockExclusive(&g_stateLock);
+        return false;
+    }
+    g_state.playback = path;
+    g_state.playbackElapsed = 0.0F;
+    g_state.playbackScrub = -1.0F;
+    g_state.playbackStartRequested = true;
+    g_state.playbackStopRequested = false;
+    ReleaseSRWLockExclusive(&g_stateLock);
+    return true;
+}
+
+void request_playback_pause(bool paused) noexcept {
+    AcquireSRWLockExclusive(&g_stateLock);
+    if (g_state.playbackPlaying) {
+        g_state.playbackPaused = paused;
+    }
+    ReleaseSRWLockExclusive(&g_stateLock);
+}
+
+void request_playback_stop() noexcept {
+    AcquireSRWLockExclusive(&g_stateLock);
+    if (g_state.playbackPlaying || g_state.playbackStartRequested) {
+        g_state.playbackStopRequested = true;
+    }
+    ReleaseSRWLockExclusive(&g_stateLock);
+}
+
+void request_playback_scrub(float seconds) noexcept {
+    if (!std::isfinite(seconds)) {
+        return;
+    }
+    AcquireSRWLockExclusive(&g_stateLock);
+    if (g_state.playbackPlaying) {
+        g_state.playbackScrub = seconds;
+    }
+    ReleaseSRWLockExclusive(&g_stateLock);
+}
+
+PlaybackStatus playback_status() noexcept {
+    PlaybackStatus result{};
+    AcquireSRWLockShared(&g_stateLock);
+    result.elapsedSeconds = g_state.playbackElapsed;
+    result.durationSeconds = playback_duration(g_state.playback);
+    result.keyframeIndex = g_state.playbackKeyframe;
+    result.playing = g_state.playbackPlaying || g_state.playbackStartRequested;
+    result.paused = g_state.playbackPaused;
+    ReleaseSRWLockShared(&g_stateLock);
+    return result;
+}
+
+bool consume_snapshot_capture_request(SnapshotCaptureRequest& request) noexcept {
+    AcquireSRWLockExclusive(&g_captureLock);
+    if (g_captureCount == 0) {
+        ReleaseSRWLockExclusive(&g_captureLock);
+        request = {};
+        return false;
+    }
+    request = g_captureRequests[g_captureHead];
+    g_captureHead = (g_captureHead + 1U) % g_captureRequests.size();
+    --g_captureCount;
+    ReleaseSRWLockExclusive(&g_captureLock);
+    return true;
 }
 
 const char* failure_name(Failure failure) noexcept {

@@ -9,7 +9,9 @@
 #include <cstdio>
 #include <imgui.h>
 #include <limits>
+#include <string>
 #include <string_view>
+#include <utility>
 #include <system_error>
 
 #include "../../../core/settings/settings.h"
@@ -29,6 +31,7 @@
 #include "../../hooks/viewer_camera/viewer_camera.h"
 #include "../../player/player_position.h"
 #include "../../viewer/viewer_camera_settings_store.h"
+#include "../../viewer/viewer_camera_path_store.h"
 #include "../components/key_picker/client_key_picker.h"
 #include "../world_inspector/world_inspector.h"
 
@@ -39,6 +42,7 @@ namespace activity = state::activity;
 namespace camera = client::viewer::camera;
 namespace clipboard = core::ui::modules::logs;
 namespace key_picker = client::ui::components::key_picker;
+namespace camera_paths = client::viewer::paths;
 namespace label = core::ui::components::label;
 namespace layouts = state::build_data::scenarios;
 namespace spawn_sets = state::build_data::spawn_sets;
@@ -543,6 +547,189 @@ void draw_bookmarks(camera::Status status,
     }
 }
 
+[[nodiscard]] camera::PlaybackPath runtime_path(const camera_paths::CameraPath& path,
+                                                const WorldContext& world) noexcept {
+    camera::PlaybackPath result{};
+    result.keyframeCount = (std::min)(path.keyframes.size(), result.keyframes.size());
+    result.loop = path.loop;
+    std::snprintf(result.name.data(), result.name.size(), "%s", path.name.c_str());
+    if (world.sessionPresent) {
+        result.activitySession = world.activity.binding.sessionId;
+        result.activityRevision = world.activity.binding.createdRevision;
+    }
+    for (std::size_t index = 0; index < result.keyframeCount; ++index) {
+        const camera_paths::Keyframe& source = path.keyframes[index];
+        camera::PlaybackKeyframe& destination = result.keyframes[index];
+        destination.pose.position = source.position;
+        destination.pose.yaw = source.yaw;
+        destination.pose.pitch = source.pitch;
+        destination.pose.fov = source.fov;
+        std::snprintf(destination.label.data(), destination.label.size(), "%s",
+                      source.label.c_str());
+        destination.travelSeconds = source.travelSeconds;
+        destination.dwellSeconds = source.dwellSeconds;
+        destination.captureSnapshot = source.captureSnapshot;
+    }
+    return result;
+}
+
+void draw_camera_paths(const camera::Status& status, const WorldContext& world) noexcept {
+    static std::size_t selectedPath = 0;
+    camera_paths::Library library = camera_paths::get();
+    if (selectedPath >= library.paths.size()) {
+        selectedPath = library.paths.empty() ? 0 : library.paths.size() - 1;
+    }
+
+    ImGui::Spacing();
+    ImGui::TextUnformatted("Camera Paths");
+    ImGui::Separator();
+    if (ImGui::Button("New path") && library.paths.size() < camera_paths::kMaximumPathCount) {
+        camera_paths::CameraPath path{};
+        path.name = "Path " + std::to_string(library.paths.size() + 1);
+        library.paths.push_back(std::move(path));
+        if (camera_paths::publish(library)) {
+            selectedPath = library.paths.size() - 1;
+        }
+    }
+    if (library.paths.empty()) {
+        ImGui::TextDisabled("Create a path, then record the current Viewer pose.");
+        return;
+    }
+
+    ImGui::SameLine();
+    std::array<const char*, camera_paths::kMaximumPathCount> names{};
+    for (std::size_t index = 0; index < library.paths.size(); ++index) {
+        names[index] = library.paths[index].name.c_str();
+    }
+    int selected = static_cast<int>(selectedPath);
+    ImGui::SetNextItemWidth(220.0F);
+    if (ImGui::Combo("##camera_path", &selected, names.data(),
+                     static_cast<int>(library.paths.size()))) {
+        selectedPath = static_cast<std::size_t>(selected);
+    }
+
+    camera_paths::CameraPath& path = library.paths[selectedPath];
+    bool persist = false;
+    std::array<char, camera_paths::kMaximumPathNameBytes + 1> name{};
+    std::snprintf(name.data(), name.size(), "%s", path.name.c_str());
+    ImGui::SetNextItemWidth(220.0F);
+    if (ImGui::InputText("Name##camera_path_name", name.data(), name.size())) {
+        path.name = name.data();
+        persist = true;
+    }
+    ImGui::SameLine();
+    persist = ImGui::Checkbox("Loop##camera_path_loop", &path.loop) || persist;
+    ImGui::SameLine();
+    if (ImGui::Button("Delete path")) {
+        library.paths.erase(library.paths.begin() + static_cast<std::ptrdiff_t>(selectedPath));
+        selectedPath = 0;
+        (void)camera_paths::publish(library);
+        camera::request_playback_stop();
+        return;
+    }
+
+    ImGui::BeginDisabled(!status.active
+                         || path.keyframes.size() >= camera_paths::kMaximumKeyframeCount);
+    if (ImGui::Button("Record current pose")) {
+        camera_paths::Keyframe keyframe{};
+        keyframe.position = status.pose.position;
+        keyframe.yaw = status.pose.yaw;
+        keyframe.pitch = status.pose.pitch;
+        keyframe.fov = std::clamp(status.pose.fov, camera_paths::kMinimumKeyframeFov,
+                                  camera_paths::kMaximumKeyframeFov);
+        keyframe.label = "Keyframe " + std::to_string(path.keyframes.size() + 1);
+        world_inspector::SelectionIdentity selection{};
+        if (world_inspector::selected_identity(selection)) {
+            keyframe.selection = camera_paths::SelectionIdentity{selection.producerEpoch,
+                                                                  selection.nativeKey,
+                                                                  selection.producer,
+                                                                  selection.kind};
+        }
+        path.keyframes.push_back(std::move(keyframe));
+        persist = true;
+    }
+    ImGui::EndDisabled();
+
+    const camera::PlaybackStatus playback = camera::playback_status();
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!status.active || path.keyframes.empty());
+    if (ImGui::Button("Play")) {
+        (void)camera::request_playback(runtime_path(path, world));
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!playback.playing);
+    if (ImGui::Button(playback.paused ? "Resume" : "Pause")) {
+        camera::request_playback_pause(!playback.paused);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Stop")) {
+        camera::request_playback_stop();
+    }
+    ImGui::EndDisabled();
+    if (playback.playing && playback.durationSeconds > 0.0F) {
+        float scrub = playback.elapsedSeconds;
+        ImGui::SetNextItemWidth((std::max)(160.0F, ImGui::GetContentRegionAvail().x));
+        if (ImGui::SliderFloat("Scrub##camera_path", &scrub, 0.0F,
+                               playback.durationSeconds, "%.2fs")) {
+            camera::request_playback_scrub(scrub);
+        }
+    }
+
+    for (std::size_t index = 0; index < path.keyframes.size(); ++index) {
+        ImGui::PushID(static_cast<int>(index));
+        camera_paths::Keyframe& keyframe = path.keyframes[index];
+        std::array<char, camera_paths::kMaximumKeyframeLabelBytes + 1> labelText{};
+        std::snprintf(labelText.data(), labelText.size(), "%s", keyframe.label.c_str());
+        ImGui::Separator();
+        ImGui::Text("%zu", index + 1);
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(180.0F);
+        if (ImGui::InputText("##keyframe_label", labelText.data(), labelText.size())) {
+            keyframe.label = labelText.data();
+            persist = true;
+        }
+        ImGui::SameLine();
+        persist = ImGui::DragFloat("Travel", &keyframe.travelSeconds, 0.05F, 0.0F,
+                                   camera_paths::kMaximumSegmentSeconds, "%.2fs") || persist;
+        ImGui::SameLine();
+        persist = ImGui::DragFloat("Dwell", &keyframe.dwellSeconds, 0.05F, 0.0F,
+                                   camera_paths::kMaximumSegmentSeconds, "%.2fs") || persist;
+        persist = ImGui::Checkbox("Capture snapshot", &keyframe.captureSnapshot) || persist;
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Up") && index > 0) {
+            std::swap(path.keyframes[index], path.keyframes[index - 1]);
+            persist = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Down") && index + 1 < path.keyframes.size()) {
+            std::swap(path.keyframes[index], path.keyframes[index + 1]);
+            persist = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Duplicate")
+            && path.keyframes.size() < camera_paths::kMaximumKeyframeCount) {
+            const camera_paths::Keyframe copy = keyframe;
+            path.keyframes.insert(path.keyframes.begin() + static_cast<std::ptrdiff_t>(index + 1),
+                                  copy);
+            persist = true;
+            ImGui::PopID();
+            break;
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Delete")) {
+            path.keyframes.erase(path.keyframes.begin() + static_cast<std::ptrdiff_t>(index));
+            persist = true;
+            ImGui::PopID();
+            break;
+        }
+        ImGui::PopID();
+    }
+    if (persist) {
+        (void)camera_paths::publish(library);
+    }
+}
+
 void draw_world_context(const WorldContext& context) noexcept {
     ImGui::Spacing();
     ImGui::TextUnformatted("World Context");
@@ -823,6 +1010,7 @@ void draw() noexcept {
 
     draw_pose(status);
     draw_bookmarks(status, settings, changed);
+    draw_camera_paths(status, world);
     draw_world_context(world);
 
     if (changed && !client::viewer::publish(settings)) {

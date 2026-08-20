@@ -222,6 +222,8 @@ inline void collect(const layouts::Definition& layout,
         "partial entity coverage authored scenario roster package-backed placed objects";
     groupNode.kind = NodeKind::placedObject;
     groupNode.status = Status::known;
+    groupNode.producer = Producer::catalog;
+    groupNode.provenance = Provenance::catalog;
     groupNode.source = source;
     groupNode.actions = Action::copyId;
     result.groupNode = graph.add(std::move(groupNode), parent);
@@ -234,11 +236,16 @@ inline void collect(const layouts::Definition& layout,
 
     for (const Snapshot& object : objects) {
         const std::string objectSearch = object_search(object);
+        const std::uint64_t objectNativeKey =
+            (static_cast<std::uint64_t>(object.objectTag) << 32U) | object.registryKey;
         Node objectNode;
         objectNode.name = object_label(object);
         objectNode.searchText = objectSearch;
         objectNode.kind = NodeKind::placedObject;
         objectNode.status = Status::unknownSemantic;
+        objectNode.producer = Producer::catalog;
+        objectNode.provenance = Provenance::catalog;
+        objectNode.nativeKey = objectNativeKey;
         objectNode.source = source;
         objectNode.tag = object.objectTag;
         objectNode.classHash = tables::kObjectClass;
@@ -263,6 +270,11 @@ inline void collect(const layouts::Definition& layout,
             slotNode.searchText.append(slotNode.name);
             slotNode.kind = NodeKind::componentSlot;
             slotNode.status = Status::known;
+            slotNode.producer = Producer::catalog;
+            slotNode.provenance = Provenance::catalog;
+            slotNode.nativeKey = objectNativeKey
+                                 ^ (0x9E3779B97F4A7C15ULL + value.index
+                                    + (objectNativeKey << 6U) + (objectNativeKey >> 2U));
             slotNode.source = source;
             slotNode.actions = Action::copyId;
             if (!graph.add(std::move(slotNode), objectId)) {

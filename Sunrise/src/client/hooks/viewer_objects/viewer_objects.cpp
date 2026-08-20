@@ -178,6 +178,19 @@ void uninstall() noexcept {
     clear();
 }
 
+void reset_activity() noexcept {
+    AcquireSRWLockExclusive(&g_lock);
+    g_positions = {};
+    g_positionCount = 0;
+    for (std::size_t index = 0; index < g_snapshot.objectCount; ++index) {
+        g_snapshot.objects[index].position = {};
+        g_snapshot.objects[index].positionPresent = false;
+    }
+    ++g_sequence;
+    g_snapshot.sequence = g_sequence;
+    ReleaseSRWLockExclusive(&g_lock);
+}
+
 void observe_physics_component(void* component) noexcept {
     if (!g_installed.load(std::memory_order_acquire) || component == nullptr) {
         return;
@@ -265,6 +278,10 @@ bool snapshot(Snapshot& output) noexcept {
     output = g_snapshot;
     ReleaseSRWLockShared(&g_lock);
     return output.present;
+}
+
+bool installed() noexcept {
+    return g_installed.load(std::memory_order_acquire);
 }
 
 } // namespace sunrise::client::viewer::objects

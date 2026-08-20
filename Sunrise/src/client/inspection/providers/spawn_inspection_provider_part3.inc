@@ -6,6 +6,7 @@ void SpawnInspectionProvider::rebuild(const Key& key,
                                       const observed::PhysicsSnapshot& physics) {
     snapshot_ = {};
     snapshot_.graph.reset(generation_);
+    snapshot_.producerEpoch = producerEpoch_ == 0 ? 1 : producerEpoch_;
     snapshot_.packageName = key.packageName;
     snapshot_.mapStem = key.mapStem;
     snapshot_.activitySession = key.activitySession;
@@ -64,6 +65,9 @@ void SpawnInspectionProvider::rebuild(const Key& key,
     Node root;
     root.name = key.packageName.empty() ? "World" : key.packageName;
     root.kind = NodeKind::world;
+    root.producer = Producer::graph;
+    root.provenance = Provenance::derived;
+    root.nativeKey = key.activitySession;
     root.status = key.stale ? Status::deferred
                             : (key.sessionPresent ? Status::known : Status::unknownSemantic);
     root.source = source;
@@ -81,6 +85,9 @@ void SpawnInspectionProvider::rebuild(const Key& key,
         Node activityNode;
         activityNode.name = session_label(key.activitySession);
         activityNode.kind = NodeKind::activity;
+        activityNode.producer = Producer::graph;
+        activityNode.provenance = Provenance::derived;
+        activityNode.nativeKey = key.activitySession;
         activityNode.status = key.stale ? Status::deferred : Status::known;
         activityNode.source = source;
         activityNode.actions = Action::copyId;
@@ -92,6 +99,9 @@ void SpawnInspectionProvider::rebuild(const Key& key,
         Node destinationNode;
         destinationNode.name = destination_label(key.activityIndex);
         destinationNode.kind = NodeKind::destination;
+        destinationNode.producer = Producer::catalog;
+        destinationNode.provenance = Provenance::catalog;
+        destinationNode.nativeKey = static_cast<std::uint32_t>(key.activityIndex);
         destinationNode.status = key.stale ? Status::deferred : Status::known;
         destinationNode.source = source;
         destinationNode.actions = Action::copyId;
@@ -106,6 +116,9 @@ void SpawnInspectionProvider::rebuild(const Key& key,
         scenarioNode.name =
             key.scenarioTag != 0 ? hex_label("Scenario", key.scenarioTag) : std::string("Scenario");
         scenarioNode.kind = NodeKind::source;
+        scenarioNode.producer = Producer::catalog;
+        scenarioNode.provenance = Provenance::catalog;
+        scenarioNode.nativeKey = key.scenarioTag;
         scenarioNode.status = !key.scenarioReady
                                   ? Status::deferred
                                   : (key.scenarioPresent ? Status::known : Status::unknownSemantic);

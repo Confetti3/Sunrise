@@ -225,7 +225,9 @@
     <ClCompile Include="src\client\ui\world_inspector\world_inspector_viewport.cpp" />
     <ClCompile Include="src\client\inspection\world_inspection_model.cpp" />
     <ClCompile Include="src\client\inspection\providers\spawn_inspection_provider.cpp" />
+    <ClCompile Include="src\client\inspection\inspection_capture.cpp" />
     <ClCompile Include="src\client\viewer\viewer_camera_settings_store.cpp" />
+    <ClCompile Include="src\client\viewer\viewer_camera_path_store.cpp" />
     <ClCompile Include="src\client\viewer\viewer_input_ownership.cpp" />
     <ClCompile Include="src\client\movement\movement_settings_store.cpp" />
     <ClCompile Include="src\client\inactivity\inactivity_settings_store.cpp" />
@@ -920,9 +922,11 @@
     <ClInclude Include="src\client\runtime\runtime.h" />
     <ClInclude Include="src\client\movement\movement_settings_store.h" />
     <ClInclude Include="src\client\viewer\viewer_camera_settings_store.h" />
+    <ClInclude Include="src\client\viewer\viewer_camera_path_store.h" />
     <ClInclude Include="src\client\viewer\viewer_input_ownership.h" />
     <ClInclude Include="src\client\inspection\world_inspection_model.h" />
     <ClInclude Include="src\client\inspection\providers\spawn_inspection_provider.h" />
+    <ClInclude Include="src\client\inspection\inspection_capture.h" />
     <ClInclude Include="src\client\inspection\providers\runtime_observation_inspection.h" />
     <ClInclude Include="src\client\ui\world_inspector\world_inspector.h" />
     <ClInclude Include="src\client\ui\world_inspector\world_inspector_viewport.h" />

@@ -42,6 +42,7 @@ struct PhysicsObservationSnapshot final {
  * Slot values identify array locations in that snapshot, not durable body or entity identities.
  */
 [[nodiscard]] bool physics_observation_snapshot(PhysicsObservationSnapshot& output) noexcept;
+[[nodiscard]] bool installed() noexcept;
 
 /**
  * Reads a live rigid body's world position.

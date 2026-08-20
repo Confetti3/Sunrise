@@ -138,6 +138,8 @@ inline void append_objects(Graph& graph,
     group.searchText = "live runtime object system official occupied datum iterator";
     group.kind = NodeKind::runtimeEntity;
     group.status = snapshot.truncated ? Status::deferred : Status::known;
+    group.producer = Producer::objectSystem;
+    group.provenance = Provenance::runtime;
     group.source = source;
     group.actions = Action::copyId;
     result.objectGroup = graph.add(std::move(group), parent);
@@ -156,6 +158,9 @@ inline void append_objects(Graph& graph,
                           + object_type_name(observation.type);
         node.kind = object_kind(observation.type);
         node.status = object_type_known(observation.type) ? Status::known : Status::unknownSemantic;
+        node.producer = Producer::objectSystem;
+        node.provenance = Provenance::runtime;
+        node.nativeKey = observation.handle;
         node.source = source;
         node.runtimeEntity = observation.handle;
         node.objectSystemType = observation.type;
@@ -239,8 +244,11 @@ inline void append_audio(Graph& graph,
     node.searchText = "runtime audio primary wwise listener copied effective position";
     node.kind = NodeKind::audio;
     node.status = Status::known;
+    node.producer = Producer::audioListener;
+    node.provenance = Provenance::runtime;
     node.source = source;
     node.observationId = 0;
+    node.nativeKey = 1;
     node.transform = Transform{snapshot.position};
     node.transformRuntime = true;
     node.actions =
@@ -279,6 +287,8 @@ inline void append_triggers(Graph& graph,
     group.searchText = "runtime native trigger event component";
     group.kind = NodeKind::trigger;
     group.status = snapshot.truncated ? Status::deferred : Status::known;
+    group.producer = Producer::trigger;
+    group.provenance = Provenance::runtime;
     group.source = source;
     group.actions = Action::copyId;
     result.triggerGroup = graph.add(std::move(group), parent);
@@ -309,8 +319,11 @@ inline void append_triggers(Graph& graph,
         node.searchText = "runtime native trigger event component active enabled selector source";
         node.kind = NodeKind::trigger;
         node.status = Status::known;
+        node.producer = Producer::trigger;
+        node.provenance = Provenance::runtime;
         node.source = source;
         node.observationId = trigger_identity(observation);
+        node.nativeKey = *node.observationId;
         if (observation.kind == triggers::Kind::event) {
             node.triggerSelector = observation.selector;
             node.triggerSourceHash = observation.sourceHash;
@@ -382,6 +395,8 @@ inline void append_physics(Graph& graph,
     group.searchText = "runtime havok physics bounded copied snapshot body slots";
     group.kind = NodeKind::physics;
     group.status = snapshot.truncated ? Status::deferred : Status::known;
+    group.producer = Producer::physics;
+    group.provenance = Provenance::runtime;
     group.source = source;
     group.actions = Action::copyId;
     result.physicsGroup = graph.add(std::move(group), parent);
@@ -401,8 +416,11 @@ inline void append_physics(Graph& graph,
             "runtime havok physics copied body snapshot slot unknown identity position velocity";
         node.kind = NodeKind::physics;
         node.status = Status::unknownSemantic;
+        node.producer = Producer::physics;
+        node.provenance = Provenance::runtime;
         node.source = source;
         node.observationId = observation.slot;
+        node.nativeKey = observation.slot;
         node.transform = Transform{observation.position};
         node.transformRuntime = true;
         node.linearVelocity = observation.velocity;

@@ -39,6 +39,16 @@ struct Projected final {
     bool hidden{};
 };
 
+struct LabelPlacement final {
+    const inspection::Node* node{};
+    const Projected* projected{};
+    ImU32 color{};
+    ImVec2 minimum{};
+    ImVec2 maximum{};
+    float desiredY{};
+    int priority{};
+};
+
 [[nodiscard]] ImU32 helper_color(inspection::NodeKind kind) noexcept {
     switch (kind) {
     case inspection::NodeKind::geometry:
@@ -189,20 +199,85 @@ void draw_marker(ImDrawList& drawList,
     }
 }
 
-void draw_label(ImDrawList& drawList,
-                const inspection::Node& node,
-                const Projected& projected,
-                ImU32 color) noexcept {
+[[nodiscard]] LabelPlacement make_label(const inspection::Node& node,
+                                        const Projected& projected,
+                                        ImU32 color,
+                                        const ImVec2& imageMinimum,
+                                        const ImVec2& imageMaximum,
+                                        int priority) noexcept {
     const ImVec2 textSize = ImGui::CalcTextSize(node.name.c_str());
-    const ImVec2 minimum{projected.screen.x + scaled(12.0F),
-                         projected.screen.y - textSize.y * 0.5F - scaled(3.0F)};
-    const ImVec2 maximum{minimum.x + textSize.x + scaled(8.0F),
-                         minimum.y + textSize.y + scaled(6.0F)};
-    drawList.AddRectFilled(minimum, maximum, kLabelBackground, scaled(2.0F));
-    drawList.AddRect(minimum, maximum, color, scaled(2.0F));
-    drawList.AddText({minimum.x + scaled(4.0F), minimum.y + scaled(3.0F)},
-                     color,
-                     node.name.c_str());
+    const float width = textSize.x + scaled(8.0F);
+    const float height = textSize.y + scaled(6.0F);
+    float x = projected.screen.x + scaled(12.0F);
+    if (x + width > imageMaximum.x) {
+        x = projected.screen.x - scaled(12.0F) - width;
+    }
+    x = std::clamp(x, imageMinimum.x, (std::max)(imageMinimum.x, imageMaximum.x - width));
+    const float desiredY = projected.screen.y - height * 0.5F;
+    const float y = std::clamp(desiredY,
+                               imageMinimum.y,
+                               (std::max)(imageMinimum.y, imageMaximum.y - height));
+    return {&node, &projected, color, {x, y}, {x + width, y + height}, desiredY, priority};
+}
+
+[[nodiscard]] bool horizontal_overlap(const LabelPlacement& left,
+                                      const LabelPlacement& right,
+                                      float gap) noexcept {
+    return left.minimum.x < right.maximum.x + gap && left.maximum.x + gap > right.minimum.x;
+}
+
+[[nodiscard]] bool vertical_overlap(float minimum,
+                                    float maximum,
+                                    const LabelPlacement& other,
+                                    float gap) noexcept {
+    return minimum < other.maximum.y + gap && maximum + gap > other.minimum.y;
+}
+
+[[nodiscard]] bool place_label(LabelPlacement& label,
+                               const std::vector<LabelPlacement>& placed,
+                               const ImVec2& imageMinimum,
+                               const ImVec2& imageMaximum) {
+    const float gap = scaled(2.0F);
+    const float height = label.maximum.y - label.minimum.y;
+    const float maximumY = (std::max)(imageMinimum.y, imageMaximum.y - height);
+    std::vector<float> candidates{std::clamp(label.desiredY, imageMinimum.y, maximumY)};
+    candidates.reserve(placed.size() * 2U + 1U);
+    for (const LabelPlacement& other : placed) {
+        if (!horizontal_overlap(label, other, gap)) {
+            continue;
+        }
+        candidates.push_back(other.maximum.y + gap);
+        candidates.push_back(other.minimum.y - height - gap);
+    }
+    std::ranges::sort(candidates, [&label](float left, float right) {
+        const float leftDistance = std::abs(left - label.desiredY);
+        const float rightDistance = std::abs(right - label.desiredY);
+        return leftDistance == rightDistance ? left < right : leftDistance < rightDistance;
+    });
+
+    for (float candidate : candidates) {
+        if (candidate < imageMinimum.y || candidate > maximumY) {
+            continue;
+        }
+        const bool blocked = std::ranges::any_of(placed, [&](const LabelPlacement& other) {
+            return horizontal_overlap(label, other, gap)
+                   && vertical_overlap(candidate, candidate + height, other, gap);
+        });
+        if (!blocked) {
+            label.minimum.y = candidate;
+            label.maximum.y = candidate + height;
+            return true;
+        }
+    }
+    return false;
+}
+
+void draw_label(ImDrawList& drawList, const LabelPlacement& label) noexcept {
+    drawList.AddRectFilled(label.minimum, label.maximum, kLabelBackground, scaled(2.0F));
+    drawList.AddRect(label.minimum, label.maximum, label.color, scaled(2.0F));
+    drawList.AddText({label.minimum.x + scaled(4.0F), label.minimum.y + scaled(3.0F)},
+                     label.color,
+                     label.node->name.c_str());
 }
 
 void draw_bounds_tooltip(const inspection::Bounds& bounds) noexcept {
@@ -368,6 +443,9 @@ Result draw(const inspection::Graph& graph,
                                 scaled(2.0F));
         drawList->AddText(textPosition, kHiddenColor, message);
     }
+    static std::vector<LabelPlacement> labels;
+    labels.clear();
+    labels.reserve(projected.size());
     for (const Projected& marker : projected) {
         const bool selectedNode = marker.id == selected;
         const bool hoveredNode = marker.id == result.hovered;
@@ -379,8 +457,31 @@ Result draw(const inspection::Graph& graph,
                                     : selectedNode ? kSelectionColor
                                     : hoveredNode  ? kHoverColor
                                                    : helper_color(marker.kind);
-                draw_label(*drawList, *node, marker, color);
+                labels.push_back(make_label(*node,
+                                            marker,
+                                            color,
+                                            imageMinimum,
+                                            imageMaximum,
+                                            selectedNode ? 2 : (hoveredNode ? 1 : 0)));
             }
+        }
+    }
+    std::ranges::stable_sort(labels, [](const LabelPlacement& left, const LabelPlacement& right) {
+        if (left.priority != right.priority) {
+            return left.priority > right.priority;
+        }
+        if (left.projected->depth != right.projected->depth) {
+            return left.projected->depth < right.projected->depth;
+        }
+        return left.projected->id.value < right.projected->id.value;
+    });
+    static std::vector<LabelPlacement> placedLabels;
+    placedLabels.clear();
+    placedLabels.reserve(labels.size());
+    for (LabelPlacement& label : labels) {
+        if (place_label(label, placedLabels, imageMinimum, imageMaximum)) {
+            placedLabels.push_back(label);
+            draw_label(*drawList, label);
         }
     }
     drawList->PopClipRect();

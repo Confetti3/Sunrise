@@ -21,6 +21,7 @@
 #include "../hooks/viewer_camera/viewer_camera.h"
 #include "../hooks/viewer_objects/viewer_objects.h"
 #include "../hooks/viewer_triggers/viewer_triggers.h"
+#include "../inspection/inspection_capture.h"
 #include "../inactivity/inactivity_settings_store.h"
 #include "../movement/movement_settings_store.h"
 #include "../player/player_settings_store.h"
@@ -28,6 +29,7 @@
 #include "../targets/steam_targets.h"
 #include "../ui/runtime/client_ui_module_runtime.h"
 #include "../viewer/viewer_camera_settings_store.h"
+#include "../viewer/viewer_camera_path_store.h"
 #include "internal.h"
 #include "runtime.h"
 
@@ -40,6 +42,8 @@ bool initialize(void* module) noexcept {
     player::initialize(module);
     inactivity::initialize(module);
     viewer::initialize(module);
+    viewer::paths::initialize(module);
+    inspection::capture::initialize(module);
     return ui::runtime::initialize();
 }
 
@@ -208,6 +212,8 @@ bool shutdown() noexcept {
     runtime::g_platformStage = runtime::StageState::pending;
     ui::runtime::shutdown();
     // The reverse of the order the stores initialize in.
+    inspection::capture::shutdown();
+    viewer::paths::shutdown();
     viewer::shutdown();
     inactivity::shutdown();
     player::shutdown();

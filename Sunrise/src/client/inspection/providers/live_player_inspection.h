@@ -67,6 +67,9 @@ struct AppendResult final {
         "live runtime local player controlled object handle physics rigid body position";
     node.kind = NodeKind::runtimeEntity;
     node.status = snapshot.positionPresent ? Status::known : Status::deferred;
+    node.producer = Producer::localPlayer;
+    node.provenance = Provenance::runtime;
+    node.nativeKey = snapshot.controlledHandle;
     node.source = source;
     node.runtimeEntity = snapshot.controlledHandle;
     if (snapshot.positionPresent) {

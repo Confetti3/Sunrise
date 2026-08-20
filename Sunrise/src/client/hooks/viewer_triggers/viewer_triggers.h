@@ -42,5 +42,6 @@ struct Snapshot final {
 
 /** Copies the current bounded, pointer-free trigger observations. */
 [[nodiscard]] bool snapshot(Snapshot& output) noexcept;
+[[nodiscard]] bool installed() noexcept;
 
 } // namespace sunrise::client::viewer::triggers

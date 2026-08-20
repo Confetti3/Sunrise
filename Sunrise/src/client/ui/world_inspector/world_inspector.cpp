@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <limits>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -22,8 +23,10 @@
 #include "../../hooks/graphics/renderer/renderer.h"
 #include "../../hooks/viewer_camera/viewer_camera.h"
 #include "../../inspection/providers/spawn_inspection_provider.h"
+#include "../../inspection/inspection_capture.h"
 #include "../../inspection/world_inspection_model.h"
 #include "../../viewer/viewer_camera_settings_store.h"
+#include "../../viewer/viewer_camera_path_store.h"
 #include "../../viewer/viewer_input_ownership.h"
 #include "world_inspector_viewport.h"
 
@@ -34,11 +37,13 @@ namespace camera = client::viewer::camera;
 namespace clipboard = core::ui::modules::logs;
 namespace dpi = core::ui::scaling::dpi;
 namespace model = client::inspection;
+namespace capture = client::inspection::capture;
 namespace provider = client::inspection::providers;
 namespace renderer = client::hooks::graphics::renderer;
 namespace section = core::ui::components::section;
 namespace textures = core::ui::textures;
 namespace viewer_input = client::viewer::input;
+namespace camera_paths = client::viewer::paths;
 
 constexpr float kToolbarHeight = 30.0F;
 constexpr float kStatusHeight = 30.0F;
@@ -145,6 +150,8 @@ enum class HierarchyMode : std::uint8_t {
 enum class BottomTab : std::uint8_t {
     references,
     data,
+    events,
+    compare,
     diagnostics,
 };
 
@@ -154,6 +161,8 @@ enum class FilterGroup : std::uint8_t {
     spawns,
     triggers,
     audio,
+    rendering,
+    navigation,
 };
 
 struct TreeRow final {
@@ -183,11 +192,16 @@ struct SplitterResult final {
 
 struct WorkspaceState final {
     provider::SpawnInspectionProvider provider;
+    capture::History history;
+    std::optional<capture::InspectionSnapshot> comparisonBaseline;
+    std::vector<capture::ChangeEvent> comparisonEvents;
+    capture::ExportResult lastExport{};
     model::Selection selection;
     std::unordered_set<std::uint64_t> hidden;
     std::unordered_set<std::uint64_t> collapsed;
     std::vector<TreeRow> rows;
     std::array<char, kSearchCapacity> search{};
+    std::array<char, kSearchCapacity> eventFilter{};
     std::string cachedSearch;
     model::NodeId contextTarget{};
     HierarchyMode hierarchyMode{HierarchyMode::world};
@@ -207,6 +221,8 @@ struct WorkspaceState final {
     bool showSpawns{true};
     bool showTriggers{true};
     bool showAudio{true};
+    bool showRendering{true};
+    bool showNavigation{true};
     bool showHidden{true};
     bool errorsOnly{};
     bool showLabels{};
@@ -499,10 +515,8 @@ void refresh_layout_scale() noexcept {
 [[nodiscard]] FilterGroup filter_group(model::NodeKind kind) noexcept {
     switch (kind) {
     case model::NodeKind::geometry:
-    case model::NodeKind::terrain:
         return FilterGroup::geometry;
     case model::NodeKind::runtimeEntity:
-    case model::NodeKind::light:
     case model::NodeKind::physics:
         return FilterGroup::entities;
     case model::NodeKind::spawnGroup:
@@ -513,6 +527,11 @@ void refresh_layout_scale() noexcept {
         return FilterGroup::triggers;
     case model::NodeKind::audio:
         return FilterGroup::audio;
+    case model::NodeKind::light:
+    case model::NodeKind::terrain:
+        return FilterGroup::rendering;
+    case model::NodeKind::navigation:
+        return FilterGroup::navigation;
     default:
         return FilterGroup::entities;
     }
@@ -536,6 +555,10 @@ void refresh_layout_scale() noexcept {
         return g_state.showTriggers;
     case FilterGroup::audio:
         return g_state.showAudio;
+    case FilterGroup::rendering:
+        return g_state.showRendering;
+    case FilterGroup::navigation:
+        return g_state.showNavigation;
     }
     return true;
 }
@@ -769,6 +792,10 @@ void quick_filters() noexcept {
     filterChip("Triggers", FilterGroup::triggers, g_state.showTriggers);
     ImGui::SameLine();
     filterChip("Audio", FilterGroup::audio, g_state.showAudio);
+    ImGui::SameLine();
+    filterChip("Rendering", FilterGroup::rendering, g_state.showRendering);
+    ImGui::SameLine();
+    filterChip("Navigation", FilterGroup::navigation, g_state.showNavigation);
     ImGui::SameLine();
     if (chip("Hidden", g_state.showHidden, true, "")) {
         g_state.showHidden = !g_state.showHidden;
@@ -1564,6 +1591,103 @@ void draw_diagnostics() noexcept {
     }
 }
 
+void select_event_node(std::string_view identity) noexcept {
+    for (const model::Node& node : world().graph.nodes()) {
+        if (capture::stable_identity(world(), node) == identity) {
+            g_state.selection.select(node.id);
+            g_state.revealSelection = true;
+            return;
+        }
+    }
+}
+
+void draw_export_status() noexcept {
+    if (g_state.lastExport.success) {
+        ImGui::TextWrapped("Exported: %ls", g_state.lastExport.path.data());
+    } else if (g_state.lastExport.error[0] != '\0') {
+        ImGui::TextColored(kFailure, "Export failed: %s", g_state.lastExport.error.data());
+    }
+}
+
+void draw_event_rows(std::span<const capture::ChangeEvent> events) noexcept {
+    const std::string_view filter(g_state.eventFilter.data());
+    for (const capture::ChangeEvent& event : events) {
+        if (!filter.empty() && event.identity.find(filter) == std::string::npos
+            && event.field.find(filter) == std::string::npos
+            && event.before.find(filter) == std::string::npos
+            && event.after.find(filter) == std::string::npos) {
+            continue;
+        }
+        std::array<char, 768> label{};
+        const int written = std::snprintf(label.data(), label.size(), "#%llu %s  %s  %s -> %s",
+                                          static_cast<unsigned long long>(event.sequence),
+                                          capture::change_kind_name(event.kind), event.field.c_str(),
+                                          event.before.c_str(), event.after.c_str());
+        if (written > 0 && ImGui::Selectable(label.data(), false)) {
+            select_event_node(event.identity);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("%s\nprovenance: %s", event.identity.c_str(),
+                              event.provenance.c_str());
+        }
+    }
+}
+
+void draw_events() noexcept {
+    const bool recording = g_state.history.recording();
+    if (control_button(recording ? "Pause recording" : "Start recording",
+                       {0.0F, scaled(kControlHeight)}, recording, true)) {
+        g_state.history.set_recording(!recording, world());
+    }
+    ImGui::SameLine();
+    if (control_button("Clear", {0.0F, scaled(kControlHeight)}, false, true)) {
+        g_state.history.clear();
+    }
+    ImGui::SameLine();
+    if (control_button("Export events", {0.0F, scaled(kControlHeight)}, false, true)) {
+        g_state.lastExport = capture::export_events(g_state.history.events(),
+                                                     capture::make_snapshot(world()));
+    }
+    ImGui::SameLine();
+    if (control_button("Snapshot JSON", {0.0F, scaled(kControlHeight)}, false, true)) {
+        g_state.lastExport = capture::export_json(capture::make_snapshot(world()));
+    }
+    ImGui::SameLine();
+    if (control_button("Node CSV", {0.0F, scaled(kControlHeight)}, false, true)) {
+        g_state.lastExport = capture::export_csv(capture::make_snapshot(world()));
+    }
+    ImGui::SetNextItemWidth((std::max)(180.0F, ImGui::GetContentRegionAvail().x));
+    ImGui::InputTextWithHint("##event_filter", "Filter identity, field, or value",
+                             g_state.eventFilter.data(), g_state.eventFilter.size());
+    draw_export_status();
+    ImGui::Separator();
+    ImGui::TextDisabled("%zu / %zu events", g_state.history.events().size(),
+                        capture::kEventCapacity);
+    draw_event_rows(g_state.history.events());
+}
+
+void draw_compare() noexcept {
+    if (control_button("Set baseline", {0.0F, scaled(kControlHeight)}, false, true)) {
+        g_state.comparisonBaseline = capture::make_snapshot(world());
+        g_state.comparisonEvents.clear();
+    }
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!g_state.comparisonBaseline.has_value());
+    if (control_button("Compare now", {0.0F, scaled(kControlHeight)}, false, true)) {
+        g_state.comparisonEvents = capture::compare(
+            *g_state.comparisonBaseline, capture::make_snapshot(world()));
+    }
+    ImGui::EndDisabled();
+    if (!g_state.comparisonBaseline.has_value()) {
+        ImGui::TextDisabled("Capture a baseline to compare complete pointer-free snapshots.");
+        return;
+    }
+    ImGui::TextDisabled("Baseline tick: %llu, changes: %zu",
+                        static_cast<unsigned long long>(g_state.comparisonBaseline->capturedTick),
+                        g_state.comparisonEvents.size());
+    draw_event_rows(g_state.comparisonEvents);
+}
+
 void draw_bottom_dock() noexcept {
     const float contentWidth = (std::max)(1.0F, ImGui::GetContentRegionAvail().x);
     const float spacing = ImGui::GetStyle().ItemSpacing.x;
@@ -1573,10 +1697,10 @@ void draw_bottom_dock() noexcept {
     const float headerGap = scaled(8.0F);
     const float minimumTabWidth = scaled(76.0F);
     const bool compactHeader =
-        contentWidth < hideWidth + headerGap + minimumTabWidth * 3.0F + spacing * 2.0F;
+        contentWidth < hideWidth + headerGap + minimumTabWidth * 5.0F + spacing * 4.0F;
     const float tabArea = compactHeader ? contentWidth
                                         : (std::max)(1.0F, contentWidth - hideWidth - headerGap);
-    const float tabWidth = (std::max)(1.0F, (tabArea - spacing * 2.0F) / 3.0F);
+    const float tabWidth = (std::max)(1.0F, (tabArea - spacing * 4.0F) / 5.0F);
 
     const auto tab = [tabWidth](const char* label, BottomTab tabValue) noexcept {
         if (tab_button(label, g_state.bottomTab == tabValue, tabWidth)) {
@@ -1587,6 +1711,10 @@ void draw_bottom_dock() noexcept {
     tab("References", BottomTab::references);
     ImGui::SameLine();
     tab("Data", BottomTab::data);
+    ImGui::SameLine();
+    tab("Events", BottomTab::events);
+    ImGui::SameLine();
+    tab("Compare", BottomTab::compare);
     ImGui::SameLine();
     tab("Diagnostics", BottomTab::diagnostics);
 
@@ -1622,6 +1750,12 @@ void draw_bottom_dock() noexcept {
         break;
     case BottomTab::data:
         draw_data();
+        break;
+    case BottomTab::events:
+        draw_events();
+        break;
+    case BottomTab::compare:
+        draw_compare();
         break;
     case BottomTab::diagnostics:
         draw_diagnostics();
@@ -1753,6 +1887,80 @@ void draw_toolbar(const camera::Status& status) noexcept {
         ImGui::Separator();
         if (ImGui::MenuItem(status.requested ? "Viewer: On" : "Viewer: Off")) {
             camera::request_active(!status.requested);
+        }
+        if (ImGui::BeginMenu("Camera Path")) {
+            static std::size_t selectedPath = 0;
+            camera_paths::Library library = camera_paths::get();
+            if (selectedPath >= library.paths.size()) {
+                selectedPath = 0;
+            }
+            for (std::size_t index = 0; index < library.paths.size(); ++index) {
+                if (ImGui::MenuItem(library.paths[index].name.c_str(), nullptr,
+                                    selectedPath == index)) {
+                    selectedPath = index;
+                }
+            }
+            ImGui::Separator();
+            const bool pathPresent = selectedPath < library.paths.size();
+            ImGui::BeginDisabled(!status.active || !pathPresent
+                                 || library.paths[selectedPath].keyframes.empty());
+            if (ImGui::MenuItem("Play")) {
+                const camera_paths::CameraPath& stored = library.paths[selectedPath];
+                camera::PlaybackPath path{};
+                path.keyframeCount = (std::min)(stored.keyframes.size(), path.keyframes.size());
+                path.loop = stored.loop;
+                std::snprintf(path.name.data(), path.name.size(), "%s", stored.name.c_str());
+                path.activitySession = world().activitySession;
+                path.activityRevision = world().activityRevision;
+                for (std::size_t index = 0; index < path.keyframeCount; ++index) {
+                    const camera_paths::Keyframe& source = stored.keyframes[index];
+                    path.keyframes[index].pose.position = source.position;
+                    path.keyframes[index].pose.yaw = source.yaw;
+                    path.keyframes[index].pose.pitch = source.pitch;
+                    path.keyframes[index].pose.fov = source.fov;
+                    std::snprintf(path.keyframes[index].label.data(),
+                                  path.keyframes[index].label.size(), "%s", source.label.c_str());
+                    path.keyframes[index].travelSeconds = source.travelSeconds;
+                    path.keyframes[index].dwellSeconds = source.dwellSeconds;
+                    path.keyframes[index].captureSnapshot = source.captureSnapshot;
+                }
+                (void)camera::request_playback(path);
+            }
+            ImGui::EndDisabled();
+            ImGui::BeginDisabled(!status.active || !pathPresent
+                                 || library.paths[selectedPath].keyframes.size()
+                                        >= camera_paths::kMaximumKeyframeCount);
+            if (ImGui::MenuItem("Record current pose")) {
+                camera_paths::Keyframe keyframe{};
+                keyframe.position = status.pose.position;
+                keyframe.yaw = status.pose.yaw;
+                keyframe.pitch = status.pose.pitch;
+                keyframe.fov = std::clamp(status.pose.fov, camera_paths::kMinimumKeyframeFov,
+                                          camera_paths::kMaximumKeyframeFov);
+                keyframe.label = "Keyframe "
+                                 + std::to_string(library.paths[selectedPath].keyframes.size() + 1);
+                const model::Node* selected = selected_node();
+                if (selected != nullptr) {
+                    keyframe.selection = camera_paths::SelectionIdentity{
+                        world().producerEpoch,
+                        capture::stable_native_key(world(), *selected),
+                        static_cast<std::uint32_t>(selected->producer),
+                        static_cast<std::uint32_t>(selected->kind)};
+                }
+                library.paths[selectedPath].keyframes.push_back(std::move(keyframe));
+                (void)camera_paths::publish(library);
+            }
+            ImGui::EndDisabled();
+            const camera::PlaybackStatus playback = camera::playback_status();
+            ImGui::BeginDisabled(!playback.playing);
+            if (ImGui::MenuItem(playback.paused ? "Resume" : "Pause")) {
+                camera::request_playback_pause(!playback.paused);
+            }
+            if (ImGui::MenuItem("Stop")) {
+                camera::request_playback_stop();
+            }
+            ImGui::EndDisabled();
+            ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Overlays")) {
             if (ImGui::MenuItem("Spawn helpers", nullptr, &g_state.showSpawns)) {
@@ -1984,6 +2192,7 @@ bool render(bool uiVisible) noexcept {
     const NodeIdentity previousSelectionIdentity =
         node_identity(world().graph.node(previousSelection));
     const bool rebuilt = g_state.provider.refresh();
+    g_state.history.observe(world());
     if (rebuilt) {
         if (world().graph.generation() != previousGeneration) {
             g_state.hidden.clear();
@@ -2222,6 +2431,49 @@ bool render(bool uiVisible) noexcept {
     ImGui::End();
     pop_workspace_style();
     return true;
+}
+
+bool selected_identity(SelectionIdentity& identity) noexcept {
+    const model::Node* node = selected_node();
+    if (node == nullptr) {
+        identity = {};
+        return false;
+    }
+    identity.producerEpoch = world().producerEpoch;
+    identity.nativeKey = capture::stable_native_key(world(), *node);
+    identity.producer = static_cast<std::uint32_t>(node->producer);
+    identity.kind = static_cast<std::uint32_t>(node->kind);
+    return identity.nativeKey != 0;
+}
+
+void service_camera_path_captures() noexcept {
+    camera::SnapshotCaptureRequest request{};
+    while (camera::consume_snapshot_capture_request(request)) {
+        const std::uint32_t previousGeneration = world().graph.generation();
+        const bool rebuilt = g_state.provider.refresh();
+        if (rebuilt) {
+            if (world().graph.generation() != previousGeneration) {
+                g_state.hidden.clear();
+                g_state.collapsed.clear();
+                ++g_state.hiddenRevision;
+            }
+            g_state.selection.reconcile(world().graph);
+            g_state.rowsValid = false;
+        }
+        g_state.history.observe(world());
+        capture::RouteCaptureMetadata metadata{};
+        metadata.pathName = request.pathName.data();
+        metadata.keyframeLabel = request.keyframeLabel.data();
+        metadata.position = request.pose.position;
+        metadata.cameraSession = request.cameraSession;
+        metadata.captureSequence = request.sequence;
+        metadata.keyframeIndex = request.keyframeIndex;
+        metadata.yaw = request.pose.yaw;
+        metadata.pitch = request.pose.pitch;
+        metadata.fov = request.pose.fov;
+        g_state.lastExport =
+            capture::export_route_json(capture::make_snapshot(world()), metadata);
+    }
 }
 
 } // namespace sunrise::client::ui::world_inspector

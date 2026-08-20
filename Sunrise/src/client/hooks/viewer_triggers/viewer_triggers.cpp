@@ -302,4 +302,8 @@ bool snapshot(Snapshot& output) noexcept {
     return true;
 }
 
+bool installed() noexcept {
+    return g_installed.load(std::memory_order_acquire);
+}
+
 } // namespace sunrise::client::viewer::triggers

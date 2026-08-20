@@ -36,6 +36,7 @@ enum class NodeKind : std::uint8_t {
     trigger,
     audio,
     physics,
+    navigation,
     unresolved,
 };
 
@@ -44,6 +45,27 @@ enum class Status : std::uint8_t {
     unknownSemantic,
     deferred,
     failed,
+};
+
+/** Owns the copied values represented by one inspection node. */
+enum class Producer : std::uint8_t {
+    graph,
+    catalog,
+    localPlayer,
+    objectSystem,
+    trigger,
+    audioListener,
+    physics,
+    audioEmitter,
+    navigation,
+    light,
+    terrain,
+};
+
+enum class Provenance : std::uint8_t {
+    derived,
+    catalog,
+    runtime,
 };
 
 enum class Action : std::uint32_t {
@@ -72,11 +94,13 @@ struct Transform final {
     std::array<float, 3> scale{1.0F, 1.0F, 1.0F};
     bool hasRotation{};
     bool hasScale{};
+    [[nodiscard]] friend bool operator==(const Transform&, const Transform&) noexcept = default;
 };
 
 struct Bounds final {
     std::array<float, 3> minimum{};
     std::array<float, 3> maximum{};
+    [[nodiscard]] friend bool operator==(const Bounds&, const Bounds&) noexcept = default;
 };
 
 struct Source final {
@@ -87,6 +111,7 @@ struct Source final {
     std::optional<std::uint64_t> activitySession;
     std::optional<std::int32_t> activityIndex;
     std::optional<std::uint16_t> bubble;
+    [[nodiscard]] friend bool operator==(const Source&, const Source&) noexcept = default;
 };
 
 struct Node final {
@@ -97,6 +122,10 @@ struct Node final {
     std::string searchText;
     NodeKind kind{NodeKind::unresolved};
     Status status{Status::unknownSemantic};
+    Producer producer{Producer::graph};
+    Provenance provenance{Provenance::derived};
+    /** Producer-owned scalar identity. Zero means the graph derives a stable structural key. */
+    std::uint64_t nativeKey{};
     Source source{};
     std::optional<std::uint64_t> runtimeEntity;
     std::optional<std::uint8_t> objectSystemType;
@@ -173,6 +202,8 @@ struct Query final {
 [[nodiscard]] bool matches(const Node& node, const Query& query) noexcept;
 [[nodiscard]] const char* kind_name(NodeKind kind) noexcept;
 [[nodiscard]] const char* status_name(Status status) noexcept;
+[[nodiscard]] const char* producer_name(Producer producer) noexcept;
+[[nodiscard]] const char* provenance_name(Provenance provenance) noexcept;
 
 class Selection final {
 public:

@@ -117,7 +117,16 @@ bool SpawnInspectionProvider::refresh() {
     };
     clearRuntimeObservations(structuralNext);
     clearRuntimeObservations(structuralCurrent);
+    const bool producerReset = !keyPresent_ || next.activitySession != key_.activitySession
+                               || next.activityRevision != key_.activityRevision;
     const bool structuralChanged = !keyPresent_ || structuralNext != structuralCurrent;
+    if (producerReset) {
+        client::viewer::objects::reset_activity();
+        ++producerEpoch_;
+        if (producerEpoch_ == 0) {
+            producerEpoch_ = 1;
+        }
+    }
     key_ = next;
     keyPresent_ = true;
     if (structuralChanged) {

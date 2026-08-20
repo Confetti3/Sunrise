@@ -52,6 +52,9 @@
     Node setNode;
     setNode.name = hex_label("Spawn set", key.spawnSetHash);
     setNode.kind = NodeKind::spawnSet;
+    setNode.producer = Producer::catalog;
+    setNode.provenance = Provenance::catalog;
+    setNode.nativeKey = key.spawnSetHash;
     setNode.status = Status::known;
     setNode.nameHash = key.spawnSetHash;
     setNode.source = source;
@@ -83,6 +86,10 @@
         Node node;
         node.name = spawn_label(ordinal);
         node.kind = NodeKind::spawnPoint;
+        node.producer = Producer::catalog;
+        node.provenance = Provenance::catalog;
+        node.nativeKey = (static_cast<std::uint64_t>(point.nameHash) << 32U)
+                         ^ static_cast<std::uint64_t>(ordinal + 1U);
         node.status = Status::known;
         node.nameHash = point.nameHash;
         node.transform = Transform{point.position};
@@ -130,6 +137,10 @@ void SpawnInspectionProvider::reset() noexcept {
     snapshot_ = {};
     key_ = {};
     generation_ = 0;
+    ++producerEpoch_;
+    if (producerEpoch_ == 0) {
+        producerEpoch_ = 1;
+    }
     keyPresent_ = false;
 }
 

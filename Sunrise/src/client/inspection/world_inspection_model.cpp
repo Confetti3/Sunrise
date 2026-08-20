@@ -327,6 +327,8 @@ const char* kind_name(NodeKind kind) noexcept {
         return "Audio";
     case NodeKind::physics:
         return "Physics";
+    case NodeKind::navigation:
+        return "Navigation";
     case NodeKind::unresolved:
         return "Unresolved";
     }
@@ -345,6 +347,32 @@ const char* status_name(Status status) noexcept {
         return "Failed";
     }
     return "Unknown";
+}
+
+const char* producer_name(Producer producer) noexcept {
+    switch (producer) {
+    case Producer::graph: return "graph";
+    case Producer::catalog: return "catalog";
+    case Producer::localPlayer: return "local-player";
+    case Producer::objectSystem: return "object-system";
+    case Producer::trigger: return "trigger";
+    case Producer::audioListener: return "audio-listener";
+    case Producer::physics: return "physics";
+    case Producer::audioEmitter: return "audio-emitter";
+    case Producer::navigation: return "navigation";
+    case Producer::light: return "light";
+    case Producer::terrain: return "terrain";
+    }
+    return "graph";
+}
+
+const char* provenance_name(Provenance provenance) noexcept {
+    switch (provenance) {
+    case Provenance::derived: return "derived";
+    case Provenance::catalog: return "catalog";
+    case Provenance::runtime: return "runtime";
+    }
+    return "derived";
 }
 
 void Selection::reconcile(const Graph& graph) noexcept {

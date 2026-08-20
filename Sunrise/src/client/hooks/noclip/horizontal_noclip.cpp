@@ -527,6 +527,10 @@ bool physics_observation_snapshot(PhysicsObservationSnapshot& output) noexcept {
     return recent;
 }
 
+bool installed() noexcept {
+    return g_installed.load(std::memory_order_acquire);
+}
+
 /** Reads a live rigid body's world position. */
 void read_body_position(void* body, Vector& position) noexcept {
     copy_lanes(field<std::array<float, kVectorLanes>>(static_cast<std::byte*>(body), kBodyPosition),
