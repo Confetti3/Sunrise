@@ -49,6 +49,12 @@ bool find(std::uint16_t definitionIndex, Definition& definition) noexcept {
     return true;
 }
 
+/** Copies every row in native record order. */
+bool snapshot(std::span<Definition> output, std::size_t& count) noexcept {
+    const Lock::Shared guard(g_lock);
+    return g_definitions.snapshot(output, count);
+}
+
 /** @return Number of generated record definitions, read under the lock. */
 std::size_t count() noexcept {
     const Lock::Shared guard(g_lock);
