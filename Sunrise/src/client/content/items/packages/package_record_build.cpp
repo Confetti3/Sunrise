@@ -1,10 +1,26 @@
+#include <array>
+#include <cstdio>
 #include <cstring>
+
+#include "../../../../core/logging/log.h"
 
 #include "../../../../state/build_data/runtime.h"
 #include "internal.h"
 
 namespace sunrise::client::content::items::packages {
 namespace {
+
+/** Reports where the record pass stopped, so a silent miss cannot look like a working claim. */
+void report(const char* stage, unsigned long long detail) noexcept {
+    std::array<char, 128> line{};
+    const int count = std::snprintf(
+        line.data(), line.size(), "ev=pkg stage=records result=%s detail=%llu", stage, detail);
+    if (count > 0) {
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::info,
+                         {line.data(), static_cast<std::size_t>(count)});
+    }
+}
 
 /** A record with no completion flag carries a non-positive slot, which addresses nothing. */
 [[nodiscard]] constexpr bool addressable_slot(std::int16_t slot) noexcept {
@@ -43,6 +59,7 @@ bool build_records(const reader::Source& source,
         || mapRows.dataOffset
                    + static_cast<std::size_t>(mapRows.count) * tables::kUnlockMapRowStride
                > blob.size()) {
+        report("flag_map_fail", mapTag);
         return false;
     }
 
@@ -76,6 +93,7 @@ bool build_records(const reader::Source& source,
         || rows.count == 0 || rows.count > output.size()
         || rows.dataOffset + static_cast<std::size_t>(rows.count) * tables::kRecordRowStride
                > blob.size()) {
+        report("record_table_fail", tableTag);
         return false;
     }
 
@@ -94,6 +112,7 @@ bool build_records(const reader::Source& source,
         }
         ++count;
     }
+    report("ok", static_cast<unsigned long long>(count));
     return count != 0;
 }
 

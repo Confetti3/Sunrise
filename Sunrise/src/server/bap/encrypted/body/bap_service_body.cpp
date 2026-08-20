@@ -198,6 +198,7 @@ bool process(const ServiceRoute& route,
             return false;
         }
         outcome.hasSubscription = webOutcome.hasSubscription;
+        outcome.hasRecordClaim = webOutcome.hasRecordClaim;
         outcome.subscription = webOutcome.subscription;
         const auto* equipmentSwap =
             web_service::mutation_if<state::PendingEquipmentSwap>(webOutcome);

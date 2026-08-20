@@ -849,7 +849,6 @@ void claim_record(const middleware::web_service::Message& message, Outcome& outc
     // Deliberately no mutation. The shared reply path answers an action that prepares nothing with
     // the refusal status, so preparing a placeholder here would turn a silently-accepted claim into
     // an explicitly rejected one. Attach the transition here once claimed state is identified.
-    (void)outcome;
     namespace records = state::build_data::records;
     middleware::web_service::messages::opcode1801::Request request{};
     if (!middleware::web_service::messages::opcode1801::parse_request(message, request)) {
@@ -878,6 +877,8 @@ void claim_record(const middleware::web_service::Message& message, Outcome& outc
                             definition.completionFlagIndex);
         return;
     }
+    // The claim is already in the store, so the account image only has to be sent again.
+    outcome.hasRecordClaim = true;
     report_record_claim(
         message, "ok", "claimed", request.recordIndex, definition.completionFlagIndex);
 }
