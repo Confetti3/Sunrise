@@ -6,12 +6,17 @@
 #include <limits>
 #include <vector>
 
+#include "../../../core/ui/scaling/dpi/ui_dpi_scaling.h"
+
 namespace sunrise::client::ui::world_inspector::viewport {
 namespace {
+
+namespace dpi = core::ui::scaling::dpi;
 
 constexpr float kNearDepth = 0.01F;
 constexpr float kPickRadius = 9.0F;
 constexpr float kMarkerRadius = 4.5F;
+constexpr float kHoverRadius = 7.0F;
 constexpr float kSelectedRadius = 10.0F;
 constexpr ImU32 kSpawnColor = IM_COL32(230, 184, 74, 235);
 constexpr ImU32 kSelectionColor = IM_COL32(66, 184, 231, 255);
@@ -25,6 +30,10 @@ struct Projected final {
     float depth{};
     bool hidden{};
 };
+
+[[nodiscard]] float scaled(float value) noexcept {
+    return dpi::pixels(value);
+}
 
 [[nodiscard]] float dot(const std::array<float, 3>& left,
                         const std::array<float, 3>& right) noexcept {
@@ -87,7 +96,9 @@ struct Projected final {
     return std::isfinite(screen.x) && std::isfinite(screen.y);
 }
 
-[[nodiscard]] bool inside(const ImVec2& point, const ImVec2& minimum, const ImVec2& maximum) noexcept {
+[[nodiscard]] bool inside(const ImVec2& point,
+                          const ImVec2& minimum,
+                          const ImVec2& maximum) noexcept {
     return point.x >= minimum.x && point.x <= maximum.x && point.y >= minimum.y
            && point.y <= maximum.y;
 }
@@ -126,17 +137,18 @@ void draw_marker(ImDrawList& drawList,
                          : selected       ? kSelectionColor
                          : hovered        ? kHoverColor
                                           : kSpawnColor;
-    const float radius = selected ? kSelectedRadius : (hovered ? 7.0F : kMarkerRadius);
+    const float radius = selected ? scaled(kSelectedRadius)
+                                   : (hovered ? scaled(kHoverRadius) : scaled(kMarkerRadius));
     if (selected) {
-        drawList.AddCircle(projected.screen, radius, color, 20, 2.0F);
-        drawList.AddLine({projected.screen.x - radius - 3.0F, projected.screen.y},
-                         {projected.screen.x + radius + 3.0F, projected.screen.y},
+        drawList.AddCircle(projected.screen, radius, color, 20, scaled(2.0F));
+        drawList.AddLine({projected.screen.x - radius - scaled(3.0F), projected.screen.y},
+                         {projected.screen.x + radius + scaled(3.0F), projected.screen.y},
                          color,
-                         1.5F);
-        drawList.AddLine({projected.screen.x, projected.screen.y - radius - 3.0F},
-                         {projected.screen.x, projected.screen.y + radius + 3.0F},
+                         scaled(1.5F));
+        drawList.AddLine({projected.screen.x, projected.screen.y - radius - scaled(3.0F)},
+                         {projected.screen.x, projected.screen.y + radius + scaled(3.0F)},
                          color,
-                         1.5F);
+                         scaled(1.5F));
     } else {
         const std::array<ImVec2, 4> diamond{
             ImVec2{projected.screen.x, projected.screen.y - radius},
@@ -153,11 +165,26 @@ void draw_label(ImDrawList& drawList,
                 const Projected& projected,
                 ImU32 color) noexcept {
     const ImVec2 textSize = ImGui::CalcTextSize(node.name.c_str());
-    const ImVec2 minimum{projected.screen.x + 12.0F, projected.screen.y - textSize.y * 0.5F - 3.0F};
-    const ImVec2 maximum{minimum.x + textSize.x + 8.0F, minimum.y + textSize.y + 6.0F};
-    drawList.AddRectFilled(minimum, maximum, kLabelBackground, 2.0F);
-    drawList.AddRect(minimum, maximum, color, 2.0F);
-    drawList.AddText({minimum.x + 4.0F, minimum.y + 3.0F}, color, node.name.c_str());
+    const ImVec2 minimum{projected.screen.x + scaled(12.0F),
+                         projected.screen.y - textSize.y * 0.5F - scaled(3.0F)};
+    const ImVec2 maximum{minimum.x + textSize.x + scaled(8.0F),
+                         minimum.y + textSize.y + scaled(6.0F)};
+    drawList.AddRectFilled(minimum, maximum, kLabelBackground, scaled(2.0F));
+    drawList.AddRect(minimum, maximum, color, scaled(2.0F));
+    drawList.AddText({minimum.x + scaled(4.0F), minimum.y + scaled(3.0F)},
+                     color,
+                     node.name.c_str());
+}
+
+void draw_bounds_tooltip(const inspection::Bounds& bounds) noexcept {
+    ImGui::Text("Bounds min %.3f  %.3f  %.3f",
+                static_cast<double>(bounds.minimum[0]),
+                static_cast<double>(bounds.minimum[1]),
+                static_cast<double>(bounds.minimum[2]));
+    ImGui::Text("Bounds max %.3f  %.3f  %.3f",
+                static_cast<double>(bounds.maximum[0]),
+                static_cast<double>(bounds.maximum[1]),
+                static_cast<double>(bounds.maximum[2]));
 }
 
 } // namespace
@@ -229,6 +256,7 @@ Result draw(const inspection::Graph& graph,
 
     float closestDistance = (std::numeric_limits<float>::max)();
     float closestDepth = (std::numeric_limits<float>::max)();
+    const float pickRadius = scaled(kPickRadius);
     if (viewportHovered) {
         for (const Projected& marker : projected) {
             if (marker.hidden) {
@@ -237,7 +265,7 @@ Result draw(const inspection::Graph& graph,
             const float x = pointer.x - marker.screen.x;
             const float y = pointer.y - marker.screen.y;
             const float distance = x * x + y * y;
-            if (distance > kPickRadius * kPickRadius) {
+            if (distance > pickRadius * pickRadius) {
                 continue;
             }
             if (distance < closestDistance
@@ -252,7 +280,9 @@ Result draw(const inspection::Graph& graph,
     }
 
     if (viewportHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-        if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+        if (!result.hovered) {
+            result.clearSelection = true;
+        } else if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
             result.focused = result.hovered;
         } else {
             result.selected = result.hovered;
@@ -261,7 +291,8 @@ Result draw(const inspection::Graph& graph,
     if (viewportHovered && ImGui::IsMouseReleased(ImGuiMouseButton_Right)
         && result.hovered) {
         const ImVec2 drag = ImGui::GetMouseDragDelta(ImGuiMouseButton_Right);
-        if (drag.x * drag.x + drag.y * drag.y <= 16.0F) {
+        const float contextThreshold = scaled(4.0F);
+        if (drag.x * drag.x + drag.y * drag.y <= contextThreshold * contextThreshold) {
             result.context = result.hovered;
         }
     }
@@ -276,12 +307,13 @@ Result draw(const inspection::Graph& graph,
         const ImVec2 textSize = ImGui::CalcTextSize(message);
         const float imageWidth = imageMaximum.x - imageMinimum.x;
         const ImVec2 textPosition{imageMinimum.x + (imageWidth - textSize.x) * 0.5F,
-                                  imageMinimum.y + 12.0F};
-        drawList->AddRectFilled({textPosition.x - 8.0F, textPosition.y - 5.0F},
-                                {textPosition.x + textSize.x + 8.0F,
-                                 textPosition.y + textSize.y + 5.0F},
+                                  imageMinimum.y + scaled(12.0F)};
+        drawList->AddRectFilled({textPosition.x - scaled(8.0F),
+                                 textPosition.y - scaled(5.0F)},
+                                {textPosition.x + textSize.x + scaled(8.0F),
+                                 textPosition.y + textSize.y + scaled(5.0F)},
                                 kLabelBackground,
-                                2.0F);
+                                scaled(2.0F));
         drawList->AddText(textPosition, kHiddenColor, message);
     }
     for (const Projected& marker : projected) {
@@ -313,7 +345,11 @@ Result draw(const inspection::Graph& graph,
                         static_cast<double>(position[0]),
                         static_cast<double>(position[1]),
                         static_cast<double>(position[2]));
-            ImGui::TextDisabled("Bounds unavailable");
+            if (node->bounds.has_value()) {
+                draw_bounds_tooltip(*node->bounds);
+            } else {
+                ImGui::TextDisabled("Bounds unavailable");
+            }
             ImGui::EndTooltip();
         }
     }
