@@ -19,59 +19,94 @@ Destiny 2 Offline Exploration Mod
 
 ## Sunrise Viewer
 
-The `sunrise-viewer` branch adds an editor-style, read-only world inspection workflow directly to
-Sunrise. It builds on Sunrise's existing graphics hooks, runtime state, package/content systems, and
-Viewer camera; it is not a separate map renderer or an Alkahest port.
+> **Current branch:** `sunrise-inspect`. Viewer targets the exact Destiny 2 build 86657 image. It is
+> read-only with respect to game-world objects: detached camera movement and inspector-helper
+> rendering are allowed, but inspection never moves the player or mutates an entity. Offline builds
+> and signature checks do not replace in-game validation.
 
-Viewer Camera provides detached movement and mouse look with configurable movement speed, boost and
-precision movement, persistent Viewer settings, focus-to-selection support, camera coordinates and
-copy-position support. HUD and weapon presentation controls remain independent.
+Sunrise Viewer is an editor-style investigation workspace built on Sunrise's existing graphics
+hooks, runtime snapshots, package catalogs, and detached camera. It is not a separate map renderer
+or an Alkahest port.
 
-World Inspector provides World, Source, and Activity hierarchy modes, structured search, quick
-filters, a captured live game viewport with projected runtime and spawn markers, selection/focus/hide/isolate
-operations, a property inspector, and References/Data/Diagnostics bottom-dock views. The Entities
-filter includes every occupied live object datum, the local controlled object, package-backed
-placed roster objects, and their component-slot descriptors. StaticMesh and Speedtree object types
-also populate Geometry. Hide and isolate affect inspector helpers only; inspection does not mutate
-Destiny world objects.
+### Inspecting a destination
 
-Current inspection coverage is evidence-backed and intentionally explicit:
+1. Enable **Viewer Camera** from the Viewer panel.
+2. Open **Workspace** and choose the World, Source, or Activity hierarchy.
+3. Filter or search the scene tree, then select a row or a viewport marker.
+4. Use **References** and **Data** for copied fields, **Events** for recording changes, **Compare**
+   for a point-in-time diff, and **Diagnostics** for producer readiness and truncation.
+
+The captured game viewport projects runtime and spawn helpers over the current frame. Selection,
+focus, copy, hide, and isolate operate on Viewer state only. Labels are kept inside the viewport and
+are placed without covering higher-priority selected or hovered labels.
+
+### Recording and exporting inspection data
+
+The Events tab records only after **Start recording** is pressed. It retains at most 4,096 added,
+removed, and field-level changed events in memory; recording can be paused, cleared, filtered, and
+exported. Selecting an event attempts to reveal the related node in the current graph. The Compare
+tab captures an in-memory baseline and compares it with a later complete snapshot.
+
+Snapshot nodes carry explicit producer and provenance values. Runtime continuity uses
+`{producer, producer_epoch, native_key}` so a recycled native handle is not treated as the same
+object after an activity transition or producer reset. Havok array slots are exported but excluded
+from change continuity because they are observations rather than proven durable identities.
+
+Exports are written atomically beneath the installed DLL directory, normally `bin\x64\Sunrise`:
+
+| File | Contents |
+| --- | --- |
+| `viewer-inspection.json` | Versioned pointer-free graph, world identity, image hash, producer status, provenance, and truncation metadata |
+| `viewer-inspection.csv` | Flattened node table for spreadsheet or data-tool analysis |
+| `viewer-events.json` | Current bounded change history plus capture metadata |
+| `viewer-route-*.json` | Uniquely named snapshot captured at a camera-path keyframe |
+| `viewer-paths.json` | Camera paths persisted separately from ordinary Viewer settings |
+
+The UI reports the final export path or a precise failure. Nothing is written continuously merely
+because Viewer is open.
+
+### Replaying camera paths
+
+Camera Paths supports up to 32 named paths and 64 keyframes per path. A keyframe stores the camera
+pose, FOV, travel time, dwell time, label, optional selected-node identity, and optional snapshot
+capture. Paths can be reordered, duplicated, deleted, looped, paused, stopped, and scrubbed.
+
+Playback interpolates position and FOV smoothly and takes the shortest yaw arc. Manual movement or
+mouse input cancels playback immediately while preserving that input. Viewer exit, destination or
+session changes, player/camera identity changes, and invalid path data also stop playback and clear
+its FOV override. Camera playback never moves the player or a world object.
+
+### Current inspection coverage
+
+Coverage is evidence-backed and intentionally explicit:
 
 | Capability | Status |
 | --- | --- |
-| Activity / destination / scenario / bubble context | Supported |
-| Spawn set and spawn-point inspection | Supported |
-| Live local controlled-object handle and physics position | Supported when the player observer is ready |
-| Primary Wwise listener position | Supported as a copied runtime observation |
-| Havok rigid-body positions and velocities | Supported as a bounded copied slot snapshot; slots are not durable body or entity identities |
-| Package-backed roster placement inspection | Supported for destination-wide and current-bubble groups |
-| Roster component-slot metadata | Supported; bounded child preview with full declared counts |
-| General live object-system enumeration | Supported as a bounded copy from the engine's occupied-datum iterator |
+| Activity, destination, scenario, and bubble context | Supported |
+| Spawn sets and spawn points | Supported |
+| Local controlled-object handle and copied physics position | Supported when the player observer is ready |
+| General live object-system enumeration | Supported as a bounded copy from the occupied-datum iterator |
 | Live object-system type classification | Supported; unknown byte values remain explicit |
-| Simulation-entity enumeration | Not currently enumerated separately from object-system handles |
-| Havok trigger volumes | Supported as copied positions and overlap counts; shape bounds and authored semantics remain unavailable |
-| Stable physics body/controller identity and shapes | Not currently enumerated |
-| StaticMesh / Speedtree object geometry | Supported as live object classifications; mesh resources and bounds are not enumerated |
-| Terrain enumeration | Not currently enumerated |
-| Light enumeration | Not currently enumerated |
-| Audio emitter/voice/graph enumeration | Not currently enumerated |
+| Package-backed roster placements and component-slot metadata | Supported with declared and bounded copied counts |
+| Primary Wwise listener position | Supported as a copied runtime observation |
+| Havok positions and velocities | Supported as bounded copied slot observations; slots are not durable identities |
+| Havok trigger observations | Supported with copied positions and overlap counts; authored shape semantics remain unavailable |
+| StaticMesh and Speedtree classification | Supported; mesh resources, materials, LODs, and bounds are unavailable |
+| Complete entity quaternion, parent/owner handles, world identifier, and bounds | Unavailable; the required ownership and copied layout are not proven |
+| Simulation-entity enumeration | Not enumerated separately from object-system handles |
+| Audio emitters, voices, buses, and graph edges | Unavailable; only the primary listener producer is enabled |
+| Navigation tiles, polygons, and queries | Unavailable |
+| Lights and render-owned light parameters | Unavailable |
+| Terrain tiles, residency, and LOD | Unavailable |
 
-Package-backed placement nodes use the dedicated `Placed Object` kind and `Unknown semantic` status.
-They represent authored catalog records and do not claim that a live object-system handle or
-simulation entity exists. They intentionally have no transform, bounds, runtime identity, or
-world-render mutation actions. The live local-player row is separate: it carries only the scalar
-controlled-object handle and copied physics position that Sunrise already publishes without
-retaining a gameplay pointer. General live-object rows are rebuilt from the engine's official
-occupied-datum iterator and receive copied positions only when the existing physics-sync hook sees
-that object. Audio and Havok observation rows likewise copy only scalar data while their existing
-runtime hooks own the native objects; they never retain Wwise, Havok, object, or component pointers.
+Package-backed placement nodes describe authored catalog records and do not claim that a live
+object-system handle or simulation entity exists. Runtime rows contain copied scalar data only;
+Viewer does not retain Wwise, Havok, object, component, or other native gameplay pointers.
+Unsupported fields remain absent instead of receiving synthesized values.
 
-The Diagnostics view reports provider coverage and the exact world snapshot identity used to build
-the graph, including package/map, activity session and revision, activity index, region, bubble,
-map-bubble, scenario tag, spawn-set hash, local-player availability, placed-object and slot counts,
-primary-listener availability, bounded Havok observation counts, stale/deferred state, and catalog
-readiness. Unknown or unsupported runtime semantics are left
-unknown rather than assigned speculative names.
+Each optional producer reports `installed`, `ready`, `sequence`, `declared_count`, `copied_count`,
+`truncated`, and failure state. One unavailable or failed producer does not prevent Viewer from
+starting or disable the rest of the inspection graph.
 
 ## WIP
 
