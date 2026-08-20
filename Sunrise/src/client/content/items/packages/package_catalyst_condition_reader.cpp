@@ -19,6 +19,12 @@ constexpr std::size_t kCompletionExpressionTokenCount = 3;
 
 } // namespace
 
+/**
+ * Finds the unique three-token `value >= literal` completion rule in one effect item.
+ * @param definition Complete installed definition of the catalyst effect item.
+ * @param itemDefinitionIndex Native index of the catalyst effect item.
+ * @param output Receives the unique condition or its absent or ambiguous state.
+ */
 void read_catalyst_completion_condition(
     std::span<const std::byte> definition,
     std::uint16_t itemDefinitionIndex,

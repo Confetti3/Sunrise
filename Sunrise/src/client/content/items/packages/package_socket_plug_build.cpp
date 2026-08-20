@@ -56,6 +56,15 @@ struct VisitorContext {
 
 } // namespace
 
+/**
+ * Reads the dense socket-type table and extracts each type's acquired-state gate.
+ * @param source Installed package source.
+ * @param scratch Shared package reader scratch.
+ * @param root Investment root bytes.
+ * @param blob Scratch storage for the socket-type table.
+ * @param output Receives one row per native socket type.
+ * @return True when the fixed table shape and every row extent are valid.
+ */
 bool read_catalyst_acquisition_gates(
     const reader::Source& source,
     reader::Scratch& scratch,

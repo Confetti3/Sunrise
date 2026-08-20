@@ -152,7 +152,12 @@ bool resolve_equipped(const family4::loadout::SlottedInstance& slotted,
     return true;
 }
 
-/** Resolves one socketed plug to the item row that supplies its perks and stats. */
+/**
+ * Resolves one socketed plug to the item row that supplies its perks and stats.
+ * @param equipped Equipped base item and its visible socket plugs.
+ * @param lane Zero-based ordinary socket lane.
+ * @return Effective plug definition, or the unavailable sentinel for an invalid lane.
+ */
 std::uint16_t resolve_effective_plug(const Equipped& equipped, std::size_t lane) noexcept {
     if (lane >= equipped.laneCount || lane >= equipped.plugs.size()) {
         return details::kUnavailableItemIndex;

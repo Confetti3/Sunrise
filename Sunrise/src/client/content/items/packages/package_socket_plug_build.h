@@ -39,6 +39,9 @@ namespace catalysts = state::build_data::items::catalysts;
  * Finds the unique three-token `value >= literal` completion rule in one effect item.
  * Duplicate expressions with the same values remain one condition. Distinct matches are marked
  * ambiguous so a released catalyst fails before publication.
+ * @param definition Complete installed definition of the catalyst effect item.
+ * @param itemDefinitionIndex Native index of the catalyst effect item.
+ * @param output Receives the unique condition or its absent or ambiguous state.
  */
 void read_catalyst_completion_condition(
     std::span<const std::byte> definition,
