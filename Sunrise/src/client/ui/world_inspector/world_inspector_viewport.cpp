@@ -282,12 +282,15 @@ void draw_bounds_tooltip(const inspection::Bounds& bounds) noexcept {
 [[nodiscard]] bool visible(inspection::NodeKind kind, const Options& options) noexcept {
     switch (kind) {
     case inspection::NodeKind::geometry:
-    case inspection::NodeKind::terrain:
         return options.showGeometry;
     case inspection::NodeKind::runtimeEntity:
-    case inspection::NodeKind::light:
     case inspection::NodeKind::physics:
         return options.showEntities;
+    case inspection::NodeKind::terrain:
+    case inspection::NodeKind::light:
+        return options.showRendering;
+    case inspection::NodeKind::navigation:
+        return options.showNavigation;
     case inspection::NodeKind::spawnGroup:
     case inspection::NodeKind::spawnSet:
     case inspection::NodeKind::spawnPoint:
@@ -306,6 +309,7 @@ void draw_bounds_tooltip(const inspection::Bounds& bounds) noexcept {
 Result draw(const inspection::Graph& graph,
             inspection::NodeId selected,
             const std::unordered_set<std::uint64_t>& hidden,
+            const std::unordered_set<std::uint64_t>& admitted,
             const client::viewer::camera::Status& camera,
             const client::hooks::graphics::renderer::frame_capture::View& frame,
             const Options& options,
@@ -357,7 +361,8 @@ Result draw(const inspection::Graph& graph,
             const bool selectedNode = node.id == selected;
             const bool hiddenNode = hidden.contains(node.id.value);
             const bool categoryEnabled = visible(node.kind, options);
-            if ((!categoryEnabled || hiddenNode) && !selectedNode) {
+            const bool admittedNode = admitted.contains(node.id.value);
+            if ((!admittedNode || !categoryEnabled || hiddenNode) && !selectedNode) {
                 continue;
             }
             const bool knownBounds =
@@ -368,7 +373,6 @@ Result draw(const inspection::Graph& graph,
             const bool drawCenter = node.transform.has_value()
                                     && (node.kind != inspection::NodeKind::trigger
                                         || options.showTriggerCenters
-                                        || (unknownShape && options.showUnknownShapeMarkers)
                                         || selectedNode);
             if (!drawBounds && !drawCenter) {
                 continue;
@@ -482,7 +486,9 @@ Result draw(const inspection::Graph& graph,
                                 scaled(2.0F));
         drawList->AddText(textPosition, kHiddenColor, message);
     } else {
-        const char* disclosure = "X-ray overlay - no scene depth";
+        const char* disclosure = edges.empty()
+                                     ? "Position helpers - no scene depth; no known bounds in view"
+                                     : "Known bounds x-ray - no scene depth";
         drawList->AddText({imageMinimum.x + scaled(8.0F), imageMinimum.y + scaled(8.0F)},
                           kHiddenColor,
                           disclosure);

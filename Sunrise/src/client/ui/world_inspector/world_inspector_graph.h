@@ -19,6 +19,7 @@ struct State final {
     std::uint32_t cachedGeneration{};
     std::uint64_t cachedAdmissionRevision{};
     inspection::NodeId cachedRoot{};
+    inspection::NodeId centerRequested{};
     std::vector<LayoutNode> layout;
     bool fitRequested{true};
 };

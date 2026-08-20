@@ -205,8 +205,20 @@ void append_vector_json(std::string& output, const std::array<float, 3>& value) 
 }
 
 [[nodiscard]] bool position_changed(const std::array<float, 3>& left,
-                                    const std::array<float, 3>& right) noexcept {
-    return left != right;
+                                    const std::array<float, 3>& right,
+                                    float epsilon) noexcept {
+    if (epsilon <= 0.0F) {
+        return left != right;
+    }
+    float squared = 0.0F;
+    for (std::size_t lane = 0; lane < left.size(); ++lane) {
+        const float delta = right[lane] - left[lane];
+        if (!std::isfinite(delta)) {
+            return left != right;
+        }
+        squared += delta * delta;
+    }
+    return squared > epsilon * epsilon;
 }
 
 template <typename Value>
@@ -271,6 +283,13 @@ template <typename Value>
     return hash == 0 ? 1 : hash;
 }
 
+[[nodiscard]] std::uint32_t identity_epoch(const providers::WorldSnapshot& snapshot,
+                                                  const Node& node) noexcept {
+    // The optional activity catalog is immutable browse metadata loaded once at startup.
+    // It must not churn identity merely because the live activity producer epoch changes.
+    return node.producer == Producer::activityCatalog ? 0U : snapshot.producerEpoch;
+}
+
 [[nodiscard]] std::string make_identity(const providers::WorldSnapshot& snapshot,
                                         const Node& node) {
     std::array<char, 160> text{};
@@ -279,7 +298,7 @@ template <typename Value>
                       text.size(),
                       "%s:%u:%016llX:%u",
                       producer_name(node.producer),
-                      snapshot.producerEpoch,
+                      identity_epoch(snapshot, node),
                       static_cast<unsigned long long>(structural_key(snapshot, node)),
                       static_cast<unsigned>(node.kind));
     return written > 0 && static_cast<std::size_t>(written) < text.size()
@@ -304,6 +323,8 @@ template <typename Value>
     event.producerEpoch = producerEpoch;
     event.kind = ChangeKind::changed;
     event.identity = std::move(identity);
+    event.nodeName = after.name;
+    event.nodeKind = kind_name(after.kind);
     event.field = std::move(field);
     event.before = std::move(oldValue);
     event.after = std::move(newValue);
@@ -427,7 +448,7 @@ void append_node_json(std::string& output,
     output.append(", \"producer\": ");
     append_json_string(output, producer_name(node.producer));
     output.append(", \"producer_epoch\": ");
-    append_number(output, snapshot.producerEpoch);
+    append_number(output, identity_epoch(snapshot, node));
     output.append(", \"native_key\": ");
     append_number(output, structural_key(snapshot, node));
     output.append(", \"provenance\": ");
@@ -746,7 +767,7 @@ void append_node_json(std::string& output,
         output.push_back(',');
         append_csv(output, producer_name(node.producer));
         output.push_back(',');
-        append_number(output, snapshot.world.producerEpoch);
+        append_number(output, identity_epoch(snapshot.world, node));
         output.push_back(',');
         append_number(output, structural_key(snapshot.world, node));
         output.push_back(',');
@@ -918,6 +939,10 @@ void append_node_json(std::string& output,
         append_json_string(output, change_kind_name(event.kind));
         output.append(", \"identity\": ");
         append_json_string(output, event.identity);
+        output.append(", \"node_name\": ");
+        append_json_string(output, event.nodeName);
+        output.append(", \"node_kind\": ");
+        append_json_string(output, event.nodeKind);
         output.append(", \"field\": ");
         append_json_string(output, event.field);
         output.append(", \"before\": ");
@@ -935,13 +960,17 @@ void append_node_json(std::string& output,
 
 } // namespace
 
-History::StateMap History::collect(const providers::WorldSnapshot& snapshot) {
+History::StateMap History::collect(const providers::WorldSnapshot& snapshot) const {
     StateMap state;
     state.reserve(snapshot.graph.nodes().size());
     for (const Node& node : snapshot.graph.nodes()) {
         // Havok array slots are observations, not durable body identities. Export them, but do not
         // claim continuity for change history until a producer can prove a lifetime key.
-        if (node.producer == Producer::physics) {
+        // Browse-only activity metadata is immutable and would only waste the bounded event bank.
+        if (node.producer == Producer::physics || node.producer == Producer::activityCatalog) {
+            continue;
+        }
+        if (options_.runtimeOnly && node.provenance != Provenance::runtime) {
             continue;
         }
         NodeState value{node, make_identity(snapshot, node)};
@@ -965,6 +994,21 @@ void History::set_recording(bool recording, const providers::WorldSnapshot& snap
     previous_ = recording ? collect(snapshot) : StateMap{};
 }
 
+void History::set_options(ChangeTrackingOptions options,
+                          const providers::WorldSnapshot& snapshot) {
+    if (!std::isfinite(options.positionEpsilon) || options.positionEpsilon < 0.0F) {
+        options.positionEpsilon = 0.05F;
+    }
+    if (options == options_) {
+        return;
+    }
+    options_ = options;
+    if (recording_) {
+        // Changing scope/fields establishes a fresh baseline rather than manufacturing events.
+        previous_ = collect(snapshot);
+    }
+}
+
 void History::observe(const providers::WorldSnapshot& snapshot) {
     if (!recording_) {
         return;
@@ -983,6 +1027,8 @@ void History::observe(const providers::WorldSnapshot& snapshot) {
         event.producerEpoch = snapshot.producerEpoch;
         event.kind = ChangeKind::removed;
         event.identity = identity;
+        event.nodeName = oldState.node.name;
+        event.nodeKind = kind_name(oldState.node.kind);
         event.field = "node";
         event.before = oldState.node.name;
         event.provenance = provenance_name(oldState.node.provenance);
@@ -999,6 +1045,8 @@ void History::observe(const providers::WorldSnapshot& snapshot) {
             event.producerEpoch = snapshot.producerEpoch;
             event.kind = ChangeKind::added;
             event.identity = identity;
+            event.nodeName = newState.node.name;
+            event.nodeKind = kind_name(newState.node.kind);
             event.field = "node";
             event.after = newState.node.name;
             event.provenance = provenance_name(newState.node.provenance);
@@ -1012,7 +1060,7 @@ void History::observe(const providers::WorldSnapshot& snapshot) {
                 append(changed_event(++sequence_,
                                      tick,
                                      snapshot.activityRevision,
-                                     snapshot.producerEpoch,
+                                     identity_epoch(snapshot, after),
                                      after,
                                      identity,
                                      std::move(field),
@@ -1056,44 +1104,49 @@ void History::observe(const providers::WorldSnapshot& snapshot) {
                           optional_text(before.objectSystemType),
                           optional_text(after.objectSystemType));
         }
-        if (before.transform.has_value() != after.transform.has_value()) {
-            field_changed("transform",
-                          before.transform.has_value() ? "present" : "absent",
-                          after.transform.has_value() ? "present" : "absent");
-        } else if (before.transform.has_value()
-                   && position_changed(before.transform->position, after.transform->position)) {
-            field_changed("position",
-                          vector_text(before.transform->position),
-                          vector_text(after.transform->position));
-        }
-        if (before.transform.has_value() && after.transform.has_value()) {
-            if (before.transform->rotation != after.transform->rotation
-                || before.transform->hasRotation != after.transform->hasRotation) {
-                field_changed("rotation",
-                              before.transform->hasRotation
-                                  ? vector_text(before.transform->rotation)
-                                  : "absent",
-                              after.transform->hasRotation ? vector_text(after.transform->rotation)
-                                                           : "absent");
+        if (options_.trackTransforms) {
+            if (before.transform.has_value() != after.transform.has_value()) {
+                field_changed("transform",
+                              before.transform.has_value() ? "present" : "absent",
+                              after.transform.has_value() ? "present" : "absent");
+            } else if (before.transform.has_value()
+                       && position_changed(before.transform->position,
+                                           after.transform->position,
+                                           options_.positionEpsilon)) {
+                field_changed("position",
+                              vector_text(before.transform->position),
+                              vector_text(after.transform->position));
             }
-            if (before.transform->scale != after.transform->scale
-                || before.transform->hasScale != after.transform->hasScale) {
+            if (before.transform.has_value() && after.transform.has_value()) {
+                if (before.transform->rotation != after.transform->rotation
+                    || before.transform->hasRotation != after.transform->hasRotation) {
+                    field_changed("rotation",
+                                  before.transform->hasRotation
+                                      ? vector_text(before.transform->rotation)
+                                      : "absent",
+                                  after.transform->hasRotation
+                                      ? vector_text(after.transform->rotation)
+                                      : "absent");
+                }
+                if (before.transform->scale != after.transform->scale
+                    || before.transform->hasScale != after.transform->hasScale) {
+                    field_changed(
+                        "scale",
+                        before.transform->hasScale ? vector_text(before.transform->scale) : "absent",
+                        after.transform->hasScale ? vector_text(after.transform->scale) : "absent");
+                }
+            }
+            if (before.transformRuntime != after.transformRuntime) {
+                field_changed("transform_runtime",
+                              before.transformRuntime ? "true" : "false",
+                              after.transformRuntime ? "true" : "false");
+            }
+            if (before.linearVelocity != after.linearVelocity) {
                 field_changed(
-                    "scale",
-                    before.transform->hasScale ? vector_text(before.transform->scale) : "absent",
-                    after.transform->hasScale ? vector_text(after.transform->scale) : "absent");
+                    "linear_velocity",
+                    before.linearVelocity.has_value() ? vector_text(*before.linearVelocity) : "absent",
+                    after.linearVelocity.has_value() ? vector_text(*after.linearVelocity) : "absent");
             }
-        }
-        if (before.transformRuntime != after.transformRuntime) {
-            field_changed("transform_runtime",
-                          before.transformRuntime ? "true" : "false",
-                          after.transformRuntime ? "true" : "false");
-        }
-        if (before.linearVelocity != after.linearVelocity) {
-            field_changed(
-                "linear_velocity",
-                before.linearVelocity.has_value() ? vector_text(*before.linearVelocity) : "absent",
-                after.linearVelocity.has_value() ? vector_text(*after.linearVelocity) : "absent");
         }
         if (before.bounds != after.bounds) {
             field_changed("bounds", bounds_text(before.bounds), bounds_text(after.bounds));
@@ -1178,6 +1231,10 @@ void History::clear() noexcept {
 
 bool History::recording() const noexcept {
     return recording_;
+}
+
+ChangeTrackingOptions History::options() const noexcept {
+    return options_;
 }
 
 std::span<const ChangeEvent> History::events() const noexcept {
@@ -1387,6 +1444,7 @@ ExportResult export_events(std::span<const ChangeEvent> events,
 std::vector<ChangeEvent> compare(const InspectionSnapshot& before,
                                  const InspectionSnapshot& after) {
     History history;
+    history.set_options(ChangeTrackingOptions{false, true, 0.0F}, before.world);
     history.set_recording(true, before.world);
     history.observe(after.world);
     return {history.events().begin(), history.events().end()};

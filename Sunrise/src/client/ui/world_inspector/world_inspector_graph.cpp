@@ -141,6 +141,13 @@ Result draw(const inspection::Graph& graph,
     if (state.fitRequested) {
         fit(state, size);
     }
+    if (state.centerRequested) {
+        if (const LayoutNode* target = layout_for(state, state.centerRequested); target != nullptr) {
+            state.pan = {size.x * 0.5F - target->position[0] * state.zoom,
+                         size.y * 0.5F - target->position[1] * state.zoom};
+        }
+        state.centerRequested = {};
+    }
 
     if (hoveredCanvas && ImGui::GetIO().MouseWheel != 0.0F) {
         const ImVec2 pointer = ImGui::GetIO().MousePos;
@@ -205,6 +212,10 @@ Result draw(const inspection::Graph& graph,
             continue;
         }
         const auto rect = card_rect(layout);
+        if (rect[1].x < minimum.x || rect[0].x > maximum.x
+            || rect[1].y < minimum.y || rect[0].y > maximum.y) {
+            continue;
+        }
         if (inside(pointer, rect[0], rect[1])) {
             result.hovered = layout.id;
         }
@@ -217,7 +228,7 @@ Result draw(const inspection::Graph& graph,
                                 {rect[0].x + scaled(4.0F), rect[1].y},
                                 kind_color(node->kind),
                                 scaled(2.0F));
-        const float textScale = state.zoom < 0.55F ? 0.0F : 1.0F;
+        const float textScale = state.zoom < 0.40F ? 0.0F : 1.0F;
         if (textScale != 0.0F) {
             drawList->AddText({rect[0].x + scaled(10.0F), rect[0].y + scaled(8.0F)},
                               kText,
@@ -237,10 +248,9 @@ Result draw(const inspection::Graph& graph,
 
     if (hoveredCanvas && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
         if (result.hovered) {
+            result.selected = result.hovered;
             if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-                result.focused = result.hovered;
-            } else {
-                result.selected = result.hovered;
+                state.centerRequested = result.hovered;
             }
         } else {
             result.clearSelection = true;
@@ -255,7 +265,7 @@ Result draw(const inspection::Graph& graph,
     if (!state.layout.empty()) {
         drawList->AddText({minimum.x + scaled(8.0F), minimum.y + scaled(8.0F)},
                           kMuted,
-                          "Ownership graph - drag middle mouse, wheel to zoom");
+                          "Ownership graph - double-click centers, middle-drag pans, wheel zooms");
     } else {
         drawList->AddText({minimum.x + scaled(12.0F), minimum.y + scaled(12.0F)},
                           kMuted,

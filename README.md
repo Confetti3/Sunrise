@@ -42,7 +42,7 @@ are placed without covering higher-priority selected or hovered labels.
 
 ### Recording and exporting inspection data
 
-The Events tab records only after **Start recording** is pressed. It retains at most 4,096 added,
+The Changes tab tracks only after **Start tracking** is pressed. Interactive tracking defaults to runtime nodes and suppresses transform noise unless **Track transforms** is enabled. It retains at most 4,096 added,
 removed, and field-level changed events in memory; recording can be paused, cleared, filtered, and
 exported. Selecting an event attempts to reveal the related node in the current graph. The Compare
 tab captures an in-memory baseline and compares it with a later complete snapshot.
@@ -115,10 +115,10 @@ The center workspace has three modes:
 | Mode | Behavior |
 | --- | --- |
 | **World** | Draws the captured game image with projected pointer-free helpers. |
-| **Node Graph** | Shows the current ownership tree with deterministic layered layout. |
-| **Activity Map** | Browses optional authored activity-graph positions without treating them as live world transforms. |
+| **Node Graph** | Shows a selected-node neighborhood by default, with an option for all filtered ownership nodes. Double-click centers a card instead of moving the game camera. |
+| **Activity Map** | Browses exactly one optional authored activity graph at a time, with graph navigation and browse-only build disclosure. |
 
-World helpers are an **X-ray overlay — no scene depth**. Known AABBs are drawn only when a producer
+World helpers are an **X-ray overlay — no scene depth** only when validated AABBs actually exist; otherwise the UI reports position helpers and disables the unavailable bounds toggle. Known AABBs are drawn only when a producer
 supplies a finite, non-inverted bound. Trigger observations currently provide a center and state only;
 the UI labels them **Shape unavailable; center observation only** and never invents extents. Native
 engine debug-draw calls, global wireframe mode, depth-aware occlusion, and Havok shape retention are

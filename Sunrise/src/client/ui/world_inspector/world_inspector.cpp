@@ -204,6 +204,11 @@ enum class CenterMode : std::uint8_t {
     activityMap,
 };
 
+enum class GraphScope : std::uint8_t {
+    selectionNeighborhood,
+    filteredHierarchy,
+};
+
 enum class BottomTab : std::uint8_t {
     references,
     data,
@@ -258,11 +263,13 @@ struct WorkspaceState final {
     std::unordered_set<std::uint64_t> collapsed;
     std::vector<TreeRow> rows;
     std::unordered_set<std::uint64_t> admitted;
+    std::unordered_set<std::uint64_t> graphAdmitted;
     std::uint64_t admissionRevision{};
     graph::State graphState;
     std::array<char, kSearchCapacity> search{};
     std::array<char, kSearchCapacity> eventFilter{};
     CenterMode centerMode{CenterMode::world};
+    GraphScope graphScope{GraphScope::selectionNeighborhood};
     std::uint32_t selectedActivityGraphHash{};
     std::string cachedSearch;
     model::NodeId contextTarget{};
@@ -285,12 +292,13 @@ struct WorkspaceState final {
     bool showAudio{true};
     bool showKnownBounds{true};
     bool showTriggerCenters{true};
-    bool showUnknownShapeMarkers{true};
     bool showRendering{true};
     bool showNavigation{true};
     bool showHidden{true};
     bool errorsOnly{};
     bool showLabels{};
+    bool trackRuntimeOnly{true};
+    bool trackTransforms{};
     bool bottomCollapsed{};
     bool viewportNavigation{};
     bool layoutDirty{};
@@ -323,6 +331,47 @@ WorkspaceState g_state{};
 
 [[nodiscard]] const provider::WorldSnapshot& world() noexcept {
     return g_state.provider.snapshot();
+}
+
+struct InspectorCapabilities final {
+    std::size_t liveNodes{};
+    std::size_t spatialNodes{};
+    std::size_t knownBounds{};
+    std::size_t triggerCenters{};
+    std::size_t triggerShapes{};
+    std::size_t warnings{};
+    std::size_t errors{};
+};
+
+[[nodiscard]] InspectorCapabilities capabilities() noexcept {
+    InspectorCapabilities result{};
+    for (const model::Node& node : world().graph.nodes()) {
+        if (node.producer == model::Producer::activityCatalog) {
+            continue;
+        }
+        ++result.liveNodes;
+        if (model::has_spatial_data(node)) {
+            ++result.spatialNodes;
+        }
+        const bool bounds = node.bounds.has_value() && model::bounds_valid(*node.bounds);
+        if (bounds) {
+            ++result.knownBounds;
+        }
+        if (node.kind == model::NodeKind::trigger && node.transform.has_value()) {
+            ++result.triggerCenters;
+            if (bounds) {
+                ++result.triggerShapes;
+            }
+        }
+    }
+    for (const model::Diagnostic& diagnostic : world().diagnostics) {
+        if (diagnostic.severity == model::Diagnostic::Severity::warning) {
+            ++result.warnings;
+        } else if (diagnostic.severity == model::Diagnostic::Severity::error) {
+            ++result.errors;
+        }
+    }
+    return result;
 }
 
 [[nodiscard]] model::NodeId first_observation_node(
@@ -510,9 +559,27 @@ void focus(model::NodeId id) noexcept {
 void select_node(model::NodeId id) noexcept {
     if (const model::Node* node = world().graph.node(id); node != nullptr) {
         g_state.selection.select(id);
-        g_state.selectedActivityGraphHash =
-            node->activityMetadata.has_value() ? node->activityMetadata->graphHash : 0;
+        if (node->activityMetadata.has_value() && node->activityMetadata->graphHash != 0) {
+            g_state.selectedActivityGraphHash = node->activityMetadata->graphHash;
+        }
         g_state.revealSelection = true;
+    }
+}
+
+void open_activity_graph(std::uint32_t graphHash) noexcept {
+    if (graphHash == 0) {
+        return;
+    }
+    g_state.selectedActivityGraphHash = graphHash;
+    g_state.centerMode = CenterMode::activityMap;
+    for (const model::Node& candidate : world().graph.nodes()) {
+        if (candidate.producer == model::Producer::activityCatalog
+            && candidate.kind == model::NodeKind::activityGraph
+            && candidate.activityMetadata.has_value()
+            && candidate.activityMetadata->graphHash == graphHash) {
+            select_node(candidate.id);
+            break;
+        }
     }
 }
 
@@ -663,12 +730,18 @@ void refresh_layout_scale() noexcept {
 
 [[nodiscard]] bool filter_present(FilterGroup group) noexcept {
     return std::ranges::any_of(world().graph.nodes(), [group](const model::Node& node) {
-        return !is_structural(node.kind) && filter_group(node.kind) == group;
+        return node.producer != model::Producer::activityCatalog
+               && !is_structural(node.kind) && filter_group(node.kind) == group;
     });
 }
 
 [[nodiscard]] bool node_admitted_by_filters(const model::Node& node,
                                             const model::Query& query) noexcept {
+    // Activity graphs are a separate browse dataset. Keeping them out of live admission prevents
+    // hundreds of static catalog rows from overwhelming the Scene Tree and ownership graph.
+    if (node.producer == model::Producer::activityCatalog) {
+        return false;
+    }
     if (!is_structural(node.kind) && !filter_enabled(filter_group(node.kind))) {
         return false;
     }
@@ -737,6 +810,48 @@ void admit_with_ancestors(const model::Graph& graph,
         }
     }
     return snapshot.graph.root();
+}
+
+[[nodiscard]] model::NodeId prepare_graph_admission() {
+    g_state.graphAdmitted.clear();
+    if (g_state.graphScope == GraphScope::filteredHierarchy) {
+        g_state.graphAdmitted = g_state.admitted;
+        return hierarchy_root(world());
+    }
+
+    const model::NodeId selectedId = g_state.selection.selected();
+    const model::Node* selected = world().graph.node(selectedId);
+    if (selected == nullptr || selected->producer == model::Producer::activityCatalog
+        || !g_state.admitted.contains(selectedId.value)) {
+        g_state.graphAdmitted = g_state.admitted;
+        return hierarchy_root(world());
+    }
+
+    const auto admit = [](model::NodeId id) {
+        if (id && g_state.admitted.contains(id.value)) {
+            g_state.graphAdmitted.insert(id.value);
+        }
+    };
+    model::NodeId root = selectedId;
+    if (selected->parent && g_state.admitted.contains(selected->parent.value)) {
+        root = selected->parent;
+    }
+    admit(root);
+    if (const model::Node* rootNode = world().graph.node(root); rootNode != nullptr) {
+        for (const model::NodeId child : rootNode->children) {
+            admit(child);
+        }
+    }
+    admit(selectedId);
+    for (const model::NodeId child : selected->children) {
+        admit(child);
+        if (const model::Node* childNode = world().graph.node(child); childNode != nullptr) {
+            for (const model::NodeId grandchild : childNode->children) {
+                admit(grandchild);
+            }
+        }
+    }
+    return root;
 }
 
 void append_rows(const model::Graph& graph,
@@ -1060,7 +1175,7 @@ model::NodeId draw_tree() noexcept {
                                   selected,
                                   ImGuiSelectableFlags_AllowDoubleClick,
                                   {itemWidth, rowHeight})) {
-                g_state.selection.select(row.id);
+                select_node(row.id);
                 if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
                     focus(row.id);
                 }
@@ -1074,7 +1189,7 @@ model::NodeId draw_tree() noexcept {
                     ImGui::SetTooltip("%s", row.label.c_str());
                 }
                 if (ImGui::IsMouseReleased(ImGuiMouseButton_Right)) {
-                    g_state.selection.select(row.id);
+                    select_node(row.id);
                     g_state.contextTarget = row.id;
                     g_state.contextRequested = true;
                 }
@@ -1276,6 +1391,12 @@ void draw_identity(const model::Node& node) noexcept {
         return;
     }
     property_u64("Inspection ID", node.id.value);
+    property_row("Producer", model::producer_name(node.producer));
+    property_row("Provenance", model::provenance_name(node.provenance));
+    property_u64("Native key", capture::stable_native_key(world(), node));
+    property_u64("Graph generation", world().graph.generation(), 8);
+    const std::string stableIdentity = capture::stable_identity(world(), node);
+    property_row("Stable identity", stableIdentity.c_str());
     if (node.parent) {
         property_u64("Parent", node.parent.value);
     }
@@ -1498,14 +1619,7 @@ void draw_activity_metadata(const model::Node& node) noexcept {
         std::snprintf(label.data(), label.size(), "Open graph 0x%08X", graphHash);
         ImGui::PushID(static_cast<int>(graphHash));
         if (ImGui::Button(label.data())) {
-            for (const model::Node& candidate : world().graph.nodes()) {
-                if (candidate.kind == model::NodeKind::activityGraph
-                    && candidate.activityMetadata.has_value()
-                    && candidate.activityMetadata->graphHash == graphHash) {
-                    select_node(candidate.id);
-                    break;
-                }
-            }
+            open_activity_graph(graphHash);
         }
         ImGui::PopID();
     }
@@ -1566,6 +1680,12 @@ void draw_inspector_actions(const model::Node& node) noexcept {
     }
     if (model::supports(node.actions, model::Action::copyId) && button("Copy ID")) {
         copy_id(node.id);
+    }
+    if (button("Copy stable ID")) {
+        copy_text(capture::stable_identity(world(), node));
+    }
+    if (button("Copy breadcrumb")) {
+        copy_text(world().graph.breadcrumb(node.id));
     }
     if (node.tag.has_value() && model::supports(node.actions, model::Action::copyTag)
         && button("Copy tag")) {
@@ -1757,6 +1877,15 @@ void draw_data() noexcept {
     ImGui::TableHeadersRow();
 
     data_u64("inspection_id", "u64", node->id.value, 16, "derived");
+    data_row("producer", "enum", model::producer_name(node->producer), "derived");
+    data_row("provenance", "enum", model::provenance_name(node->provenance), "derived");
+    data_u64("native_key",
+             "u64",
+             capture::stable_native_key(world(), *node),
+             16,
+             "derived");
+    const std::string stableIdentity = capture::stable_identity(world(), *node);
+    data_row("stable_identity", "string", stableIdentity.c_str(), "derived");
     if (node->parent) {
         data_u64("parent_id", "u64", node->parent.value, 16, "derived");
     }
@@ -1909,8 +2038,7 @@ void draw_diagnostics() noexcept {
 void select_event_node(std::string_view identity) noexcept {
     for (const model::Node& node : world().graph.nodes()) {
         if (capture::stable_identity(world(), node) == identity) {
-            g_state.selection.select(node.id);
-            g_state.revealSelection = true;
+            select_node(node.id);
             return;
         }
     }
@@ -1928,16 +2056,24 @@ void draw_event_rows(std::span<const capture::ChangeEvent> events) noexcept {
     const std::string_view filter(g_state.eventFilter.data());
     for (const capture::ChangeEvent& event : events) {
         if (!filter.empty() && event.identity.find(filter) == std::string::npos
+            && event.nodeName.find(filter) == std::string::npos
+            && event.nodeKind.find(filter) == std::string::npos
             && event.field.find(filter) == std::string::npos
             && event.before.find(filter) == std::string::npos
             && event.after.find(filter) == std::string::npos) {
             continue;
         }
         std::array<char, 768> label{};
-        const int written = std::snprintf(label.data(), label.size(), "#%llu %s  %s  %s -> %s",
+        const int written = std::snprintf(label.data(),
+                                          label.size(),
+                                          "#%llu %s  %s [%s]  %s  %s -> %s",
                                           static_cast<unsigned long long>(event.sequence),
-                                          capture::change_kind_name(event.kind), event.field.c_str(),
-                                          event.before.c_str(), event.after.c_str());
+                                          capture::change_kind_name(event.kind),
+                                          event.nodeName.c_str(),
+                                          event.nodeKind.c_str(),
+                                          event.field.c_str(),
+                                          event.before.c_str(),
+                                          event.after.c_str());
         if (written > 0 && ImGui::Selectable(label.data(), false)) {
             select_event_node(event.identity);
         }
@@ -1950,7 +2086,7 @@ void draw_event_rows(std::span<const capture::ChangeEvent> events) noexcept {
 
 void draw_events() noexcept {
     const bool recording = g_state.history.recording();
-    if (control_button(recording ? "Pause recording" : "Start recording",
+    if (control_button(recording ? "Pause tracking" : "Start tracking",
                        {0.0F, scaled(kControlHeight)}, recording, true)) {
         g_state.history.set_recording(!recording, world());
     }
@@ -1971,8 +2107,20 @@ void draw_events() noexcept {
     if (control_button("Node CSV", {0.0F, scaled(kControlHeight)}, false, true)) {
         g_state.lastExport = capture::export_csv(capture::make_snapshot(world()));
     }
+    bool optionsChanged = false;
+    optionsChanged = ImGui::Checkbox("Runtime only", &g_state.trackRuntimeOnly) || optionsChanged;
+    ImGui::SameLine();
+    optionsChanged = ImGui::Checkbox("Track transforms", &g_state.trackTransforms) || optionsChanged;
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Transform changes use a 5 cm position threshold to suppress frame noise.");
+    }
+    if (optionsChanged) {
+        g_state.history.set_options(
+            capture::ChangeTrackingOptions{g_state.trackRuntimeOnly, g_state.trackTransforms, 0.05F},
+            world());
+    }
     ImGui::SetNextItemWidth((std::max)(180.0F, ImGui::GetContentRegionAvail().x));
-    ImGui::InputTextWithHint("##event_filter", "Filter identity, field, or value",
+    ImGui::InputTextWithHint("##event_filter", "Filter node, kind, identity, field, or value",
                              g_state.eventFilter.data(), g_state.eventFilter.size());
     draw_export_status();
     ImGui::Separator();
@@ -2027,7 +2175,7 @@ void draw_bottom_dock() noexcept {
     ImGui::SameLine();
     tab("Data", BottomTab::data);
     ImGui::SameLine();
-    tab("Events", BottomTab::events);
+    tab("Changes", BottomTab::events);
     ImGui::SameLine();
     tab("Compare", BottomTab::compare);
     ImGui::SameLine();
@@ -2178,6 +2326,72 @@ void handle_shortcuts() noexcept {
 
 viewport::Result draw_activity_map() noexcept {
     viewport::Result result{};
+
+    static std::vector<std::uint32_t> graphs;
+    graphs.clear();
+    for (const model::Node& node : world().graph.nodes()) {
+        if (node.producer == model::Producer::activityCatalog
+            && node.kind == model::NodeKind::activityGraph && node.activityMetadata.has_value()
+            && node.activityMetadata->graphHash != 0) {
+            graphs.push_back(node.activityMetadata->graphHash);
+        }
+    }
+    std::ranges::sort(graphs);
+    graphs.erase(std::unique(graphs.begin(), graphs.end()), graphs.end());
+
+    if (graphs.empty()) {
+        ImGui::TextDisabled("Activity catalog is not loaded or contains no graph records.");
+        return result;
+    }
+    if (std::ranges::find(graphs, g_state.selectedActivityGraphHash) == graphs.end()) {
+        g_state.selectedActivityGraphHash = graphs.front();
+    }
+    auto current = std::ranges::find(graphs, g_state.selectedActivityGraphHash);
+    std::size_t graphIndex = static_cast<std::size_t>(current - graphs.begin());
+
+    ImGui::BeginDisabled(graphIndex == 0);
+    if (control_button("Previous graph", {0.0F, scaled(kControlHeight)}, false, graphIndex != 0)) {
+        open_activity_graph(graphs[graphIndex - 1]);
+        --graphIndex;
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    std::array<char, 80> preview{};
+    std::snprintf(preview.data(),
+                  preview.size(),
+                  "Graph 0x%08X (%zu/%zu)",
+                  g_state.selectedActivityGraphHash,
+                  graphIndex + 1,
+                  graphs.size());
+    ImGui::SetNextItemWidth(scaled(220.0F));
+    if (ImGui::BeginCombo("##activity_graph_selector", preview.data())) {
+        for (std::size_t index = 0; index < graphs.size(); ++index) {
+            std::array<char, 48> label{};
+            std::snprintf(label.data(), label.size(), "0x%08X", graphs[index]);
+            if (ImGui::Selectable(label.data(), index == graphIndex)) {
+                open_activity_graph(graphs[index]);
+                graphIndex = index;
+            }
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::SameLine();
+    const bool hasNext = graphIndex + 1 < graphs.size();
+    ImGui::BeginDisabled(!hasNext);
+    if (control_button("Next graph", {0.0F, scaled(kControlHeight)}, false, hasNext)) {
+        open_activity_graph(graphs[graphIndex + 1]);
+        ++graphIndex;
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::TextDisabled("%s / build %u / target %u / %s",
+                        world().activityCatalogVersion.c_str(),
+                        world().activityCatalogBuild,
+                        activity_catalog::kTargetContentBuild,
+                        world().activityCatalogBuildMatch ? "Target build" : "Browse only");
+    ImGui::TextDisabled("Authored positions only; each canvas is one graph coordinate space. No node connections are present in this catalog.");
+    ImGui::Separator();
+
     ImVec2 size = ImGui::GetContentRegionAvail();
     size.x = (std::max)(size.x, 1.0F);
     size.y = (std::max)(size.y, 1.0F);
@@ -2192,15 +2406,13 @@ viewport::Result draw_activity_map() noexcept {
     static std::vector<const model::Node*> nodes;
     nodes.clear();
     for (const model::Node& node : world().graph.nodes()) {
-        if (node.kind == model::NodeKind::activityGraphNode && node.activityMetadata.has_value()
-            && g_state.admitted.contains(node.id.value)) {
+        if (node.producer == model::Producer::activityCatalog
+            && node.kind == model::NodeKind::activityGraphNode && node.activityMetadata.has_value()
+            && node.activityMetadata->graphHash == g_state.selectedActivityGraphHash) {
             nodes.push_back(&node);
         }
     }
     std::ranges::stable_sort(nodes, [](const model::Node* left, const model::Node* right) {
-        if (left->activityMetadata->graphHash != right->activityMetadata->graphHash) {
-            return left->activityMetadata->graphHash < right->activityMetadata->graphHash;
-        }
         return left->activityMetadata->nodeHash < right->activityMetadata->nodeHash;
     });
 
@@ -2210,9 +2422,7 @@ viewport::Result draw_activity_map() noexcept {
     if (nodes.empty()) {
         drawList->AddText({minimum.x + scaled(12.0F), minimum.y + scaled(12.0F)},
                           ImGui::GetColorU32(kMuted),
-                          world().activityCatalogPresent
-                              ? "No authored graph nodes are admitted."
-                              : "Activity catalog is not loaded.");
+                          "This activity graph has no authored nodes.");
         drawList->PopClipRect();
         return result;
     }
@@ -2245,62 +2455,89 @@ viewport::Result draw_activity_map() noexcept {
                       minimum.y + margin + (1.0F - y) * usableHeight + cardHeight * 0.5F};
     };
 
+    struct ActivityCard final {
+        const model::Node* node{};
+        ImVec2 minimum{};
+        ImVec2 maximum{};
+    };
+    static std::vector<ActivityCard> cards;
+    cards.clear();
+    cards.reserve(nodes.size());
     for (const model::Node* node : nodes) {
         const ImVec2 center = screen(*node);
-        const ImVec2 cardMinimum{center.x - cardWidth * 0.5F, center.y - cardHeight * 0.5F};
-        const ImVec2 cardMaximum{center.x + cardWidth * 0.5F, center.y + cardHeight * 0.5F};
-        const bool isHovered = !result.hovered && pointer.x >= cardMinimum.x
-                                && pointer.x <= cardMaximum.x && pointer.y >= cardMinimum.y
-                                && pointer.y <= cardMaximum.y;
-        if (isHovered) {
-            result.hovered = node->id;
+        cards.push_back({node,
+                         {center.x - cardWidth * 0.5F, center.y - cardHeight * 0.5F},
+                         {center.x + cardWidth * 0.5F, center.y + cardHeight * 0.5F}});
+    }
+
+    static std::size_t coincidentCycle{};
+    static std::uint32_t coincidentGraph{};
+    static std::array<float, 2> coincidentPosition{};
+    static std::vector<std::size_t> hits;
+    hits.clear();
+    if (hoveredCanvas) {
+        for (std::size_t index = cards.size(); index-- > 0;) {
+            const ActivityCard& card = cards[index];
+            if (pointer.x >= card.minimum.x && pointer.x <= card.maximum.x
+                && pointer.y >= card.minimum.y && pointer.y <= card.maximum.y) {
+                hits.push_back(index);
+            }
         }
-        const bool selected = node->id == g_state.selection.selected();
-        drawList->AddRectFilled(cardMinimum,
-                                cardMaximum,
+    }
+    if (!hits.empty()) {
+        const auto position = cards[hits.front()].node->activityMetadata->authoredPosition;
+        if (coincidentGraph != g_state.selectedActivityGraphHash || coincidentPosition != position) {
+            coincidentGraph = g_state.selectedActivityGraphHash;
+            coincidentPosition = position;
+            coincidentCycle = 0;
+        }
+        coincidentCycle %= hits.size();
+        result.hovered = cards[hits[coincidentCycle]].node->id;
+    }
+
+    for (const ActivityCard& card : cards) {
+        const bool selected = card.node->id == g_state.selection.selected();
+        const bool isHovered = card.node->id == result.hovered;
+        drawList->AddRectFilled(card.minimum,
+                                card.maximum,
                                 selected ? IM_COL32(54, 48, 35, 250)
                                          : (isHovered ? IM_COL32(42, 44, 56, 250)
                                                       : IM_COL32(25, 27, 35, 245)),
                                 scaled(3.0F));
-        drawList->AddRect(cardMinimum,
-                          cardMaximum,
+        drawList->AddRect(card.minimum,
+                          card.maximum,
                           selected ? IM_COL32(228, 181, 79, 255) : IM_COL32(52, 55, 68, 255),
                           scaled(3.0F));
-        drawList->AddText({cardMinimum.x + scaled(8.0F), cardMinimum.y + scaled(7.0F)},
+        drawList->AddText({card.minimum.x + scaled(8.0F), card.minimum.y + scaled(7.0F)},
                           IM_COL32(231, 231, 224, 255),
-                          node->name.c_str());
-        std::array<char, 96> detail{};
+                          card.node->name.c_str());
+        std::array<char, 64> detail{};
         std::snprintf(detail.data(),
                       detail.size(),
-                      "Graph 0x%08X / %u refs",
-                      node->activityMetadata->graphHash,
-                      node->activityMetadata->referenceCount);
-        drawList->AddText({cardMinimum.x + scaled(8.0F), cardMinimum.y + scaled(27.0F)},
+                      "%u activity refs",
+                      card.node->activityMetadata->referenceCount);
+        drawList->AddText({card.minimum.x + scaled(8.0F), card.minimum.y + scaled(27.0F)},
                           IM_COL32(145, 149, 158, 255),
                           detail.data());
     }
-    drawList->AddText({minimum.x + scaled(8.0F), minimum.y + scaled(8.0F)},
-                      IM_COL32(145, 149, 158, 255),
-                      "Authored positions only; no node connections in this catalog");
-    std::array<char, 128> version{};
-    std::snprintf(version.data(),
-                  version.size(),
-                  "Catalog %s / build %u / target %u / %s",
-                  world().activityCatalogVersion.c_str(),
-                  world().activityCatalogBuild,
-                  activity_catalog::kTargetContentBuild,
-                  world().activityCatalogBuildMatch ? "Target build" : "Browse only");
-    drawList->AddText({minimum.x + scaled(8.0F), maximum.y - scaled(22.0F)},
-                      IM_COL32(145, 149, 158, 255),
-                      version.data());
     drawList->PopClipRect();
+
+    if (!hits.empty() && hits.size() > 1 && hoveredCanvas) {
+        ImGui::BeginTooltip();
+        ImGui::Text("%zu nodes share this authored position", hits.size());
+        ImGui::TextDisabled("Repeated clicks cycle the coincident nodes without moving their authored coordinates.");
+        for (std::size_t index = 0; index < (std::min)(hits.size(), std::size_t{8}); ++index) {
+            const model::Node* node = cards[hits[index]].node;
+            ImGui::Text("%s%s", node->id == result.hovered ? "> " : "  ", node->name.c_str());
+        }
+        ImGui::EndTooltip();
+    }
 
     if (hoveredCanvas && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
         if (result.hovered) {
-            if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-                result.focused = result.hovered;
-            } else {
-                result.selected = result.hovered;
+            result.selected = result.hovered;
+            if (hits.size() > 1) {
+                coincidentCycle = (coincidentCycle + 1U) % hits.size();
             }
         } else {
             result.clearSelection = true;
@@ -2386,7 +2623,7 @@ void draw_toolbar(const camera::Status& status) noexcept {
             ImGui::BeginDisabled(!status.active || !pathPresent
                                  || library.paths[selectedPath].keyframes.size()
                                         >= camera_paths::kMaximumKeyframeCount);
-            if (ImGui::MenuItem("Record current pose")) {
+            if (ImGui::MenuItem("Add keyframe from current camera")) {
                 camera_paths::Keyframe keyframe{};
                 keyframe.position = status.pose.position;
                 keyframe.yaw = status.pose.yaw;
@@ -2438,16 +2675,44 @@ void draw_toolbar(const camera::Status& status) noexcept {
             if (ImGui::MenuItem("Fit Node Graph")) {
                 g_state.graphState.fitRequested = true;
             }
+            if (ImGui::MenuItem("Center selected node")) {
+                g_state.graphState.centerRequested = g_state.selection.selected();
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Selected neighborhood",
+                                nullptr,
+                                g_state.graphScope == GraphScope::selectionNeighborhood)) {
+                g_state.graphScope = GraphScope::selectionNeighborhood;
+                g_state.graphState.fitRequested = true;
+            }
+            if (ImGui::MenuItem("All filtered nodes",
+                                nullptr,
+                                g_state.graphScope == GraphScope::filteredHierarchy)) {
+                g_state.graphScope = GraphScope::filteredHierarchy;
+                g_state.graphState.fitRequested = true;
+            }
             ImGui::EndDisabled();
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Overlays")) {
+            const InspectorCapabilities available = capabilities();
             if (ImGui::MenuItem("Spawn helpers", nullptr, &g_state.showSpawns)) {
                 g_state.rowsValid = false;
             }
+            ImGui::BeginDisabled(available.knownBounds == 0);
             ImGui::MenuItem("Known bounds (x-ray)", nullptr, &g_state.showKnownBounds);
+            ImGui::EndDisabled();
+            if (available.knownBounds == 0
+                && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                ImGui::SetTooltip("No current producer supplies a validated AABB. The overlay never guesses bounds.");
+            }
+            ImGui::BeginDisabled(available.triggerCenters == 0);
             ImGui::MenuItem("Trigger centers", nullptr, &g_state.showTriggerCenters);
-            ImGui::MenuItem("Unknown trigger shapes", nullptr, &g_state.showUnknownShapeMarkers);
+            ImGui::EndDisabled();
+            if (available.triggerCenters == 0
+                && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                ImGui::SetTooltip("No trigger center observations are present in this snapshot.");
+            }
             ImGui::MenuItem("Helper labels", nullptr, &g_state.showLabels);
             ImGui::EndMenu();
         }
@@ -2544,10 +2809,31 @@ void draw_status(const camera::Status& status) noexcept {
             copy_camera_position(status.pose);
         }
     }
+    const InspectorCapabilities available = capabilities();
     ImGui::SameLine();
     ImGui::TextDisabled("| %.0f FPS", static_cast<double>(ImGui::GetIO().Framerate));
     ImGui::SameLine();
-    ImGui::TextDisabled("| %zu objects", world().graph.nodes().size());
+    ImGui::TextDisabled("| %zu nodes | %zu spatial | %zu bounds",
+                        available.liveNodes,
+                        available.spatialNodes,
+                        available.knownBounds);
+    if (available.triggerCenters != 0) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("| triggers %zu centers / %zu shapes",
+                            available.triggerCenters,
+                            available.triggerShapes);
+    }
+    if (available.errors != 0 || available.warnings != 0) {
+        ImGui::SameLine();
+        ImGui::TextColored(available.errors != 0 ? kFailure : kWarning,
+                           "| %zu errors / %zu warnings",
+                           available.errors,
+                           available.warnings);
+    }
+    if (world().activityCatalogPresent && !world().activityCatalogBuildMatch) {
+        ImGui::SameLine();
+        ImGui::TextColored(kWarning, "| catalog browse-only");
+    }
     if (g_state.bottomCollapsed) {
         ImGui::SameLine();
         if (control_button("Show bottom", {0.0F, scaled(kControlHeight)}, false, true)) {
@@ -2818,24 +3104,32 @@ bool render(bool uiVisible) noexcept {
                                                    g_state.showSpawns,
                                                    g_state.showTriggers,
                                                    g_state.showAudio,
+                                                   g_state.showRendering,
+                                                   g_state.showNavigation,
                                                    g_state.showLabels,
                                                    g_state.showKnownBounds,
-                                                   g_state.showTriggerCenters,
-                                                   g_state.showUnknownShapeMarkers};
+                                                   g_state.showTriggerCenters};
             interaction = viewport::draw(world().graph,
                                          g_state.selection.selected(),
                                          g_state.hidden,
+                                         g_state.admitted,
                                          cameraStatus,
                                          capturedFrame,
                                          overlayOptions,
                                          g_state.viewportNavigation);
         } else if (g_state.centerMode == CenterMode::nodeGraph) {
+            const model::NodeId graphRoot = prepare_graph_admission();
+            const std::uint64_t graphRevision =
+                g_state.admissionRevision ^ g_state.selection.selected().value
+                ^ (g_state.graphScope == GraphScope::selectionNeighborhood
+                       ? 0x8000000000000000ULL
+                       : 0ULL);
             const graph::Result graphInteraction =
                 graph::draw(world().graph,
-                            hierarchy_root(world()),
+                            graphRoot,
                             g_state.selection.selected(),
-                            g_state.admitted,
-                            g_state.admissionRevision,
+                            g_state.graphAdmitted,
+                            graphRevision,
                             g_state.graphState);
             interaction.hovered = graphInteraction.hovered;
             interaction.selected = graphInteraction.selected;
@@ -2861,7 +3155,11 @@ bool render(bool uiVisible) noexcept {
             select_node(interaction.selected);
         }
         if (interaction.focused) {
-            select_and_focus(interaction.focused);
+            if (g_state.centerMode == CenterMode::world) {
+                select_and_focus(interaction.focused);
+            } else {
+                select_node(interaction.focused);
+            }
         }
         if (interaction.context) {
             select_node(interaction.context);

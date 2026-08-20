@@ -12,7 +12,7 @@
 
 namespace sunrise::client::inspection::capture {
 
-inline constexpr std::uint32_t kSchemaVersion = 3;
+inline constexpr std::uint32_t kSchemaVersion = 4;
 inline constexpr std::size_t kEventCapacity = 4096;
 
 enum class ChangeKind : std::uint8_t {
@@ -50,6 +50,8 @@ struct ChangeEvent final {
     std::uint32_t producerEpoch{};
     ChangeKind kind{ChangeKind::changed};
     std::string identity;
+    std::string nodeName;
+    std::string nodeKind;
     std::string field;
     std::string before;
     std::string after;
@@ -74,13 +76,27 @@ struct RouteCaptureMetadata final {
     float fov{};
 };
 
+struct ChangeTrackingOptions final {
+    // Runtime-only is the useful interactive default. Full snapshot Compare overrides this.
+    bool runtimeOnly{true};
+    // High-frequency transforms are opt-in so movement cannot drown structural/state changes.
+    bool trackTransforms{};
+    float positionEpsilon{0.05F};
+
+    [[nodiscard]] friend bool operator==(const ChangeTrackingOptions&,
+                                         const ChangeTrackingOptions&) noexcept = default;
+};
+
 class History final {
 public:
     void set_recording(bool recording, const providers::WorldSnapshot& snapshot);
+    void set_options(ChangeTrackingOptions options,
+                     const providers::WorldSnapshot& snapshot);
     void observe(const providers::WorldSnapshot& snapshot);
     void clear() noexcept;
 
     [[nodiscard]] bool recording() const noexcept;
+    [[nodiscard]] ChangeTrackingOptions options() const noexcept;
     [[nodiscard]] std::span<const ChangeEvent> events() const noexcept;
 
 private:
@@ -91,12 +107,13 @@ private:
 
     using StateMap = std::unordered_map<std::string, NodeState>;
 
-    [[nodiscard]] static StateMap collect(const providers::WorldSnapshot& snapshot);
+    [[nodiscard]] StateMap collect(const providers::WorldSnapshot& snapshot) const;
     void append(ChangeEvent event);
 
     StateMap previous_;
     std::vector<ChangeEvent> events_;
     std::uint64_t sequence_{};
+    ChangeTrackingOptions options_{};
     bool recording_{};
 };
 

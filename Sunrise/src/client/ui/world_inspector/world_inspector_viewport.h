@@ -17,10 +17,11 @@ struct Options final {
     bool showSpawns{true};
     bool showTriggers{true};
     bool showAudio{true};
+    bool showRendering{true};
+    bool showNavigation{true};
     bool showLabels{};
     bool showKnownBounds{true};
     bool showTriggerCenters{true};
-    bool showUnknownShapeMarkers{true};
 };
 
 struct Result final {
@@ -35,6 +36,7 @@ struct Result final {
 Result draw(const inspection::Graph& graph,
             inspection::NodeId selected,
             const std::unordered_set<std::uint64_t>& hidden,
+            const std::unordered_set<std::uint64_t>& admitted,
             const client::viewer::camera::Status& camera,
             const client::hooks::graphics::renderer::frame_capture::View& frame,
             const Options& options,

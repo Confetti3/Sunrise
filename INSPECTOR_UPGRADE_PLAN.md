@@ -6,7 +6,7 @@
 - **Branch:** `sunrise-inspect`
 - **Planning baseline:** commit `a83a2393491373a781eaa40eb1da5126d7ce6c5d`
 - **Scope:** world-render helper overlays, trigger/box visualization, safe wireframe-like debug drawing, node graph, and activity graph browsing.
-- **Current state:** planning only; no implementation changes have been made.
+- **Current state:** implementation landed on `sunrise-inspect`; this file is retained as design and acceptance context.
 - **Important:** do not modify the supplied PE, PDB, pdata, manifest ZIP, or existing IDA databases.
 
 ## Context and verified evidence
