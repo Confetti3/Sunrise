@@ -25,7 +25,9 @@ struct WorldSnapshot final {
     std::optional<std::uint16_t> bubble;
     std::optional<std::uint16_t> mapBubble;
     bool sessionPresent{};
+    bool scenarioCatalogReady{};
     bool scenarioPresent{};
+    bool scenarioTruncated{};
     bool spawnCatalogReady{};
     bool stale{};
 };
@@ -49,9 +51,11 @@ private:
         std::int32_t activityIndex{-1};
         std::int32_t region{-1};
         std::int32_t bubble{-1};
+        std::int32_t mapBubble{-1};
         bool sessionPresent{};
         bool scenarioReady{};
         bool scenarioPresent{};
+        bool scenarioTruncated{};
         bool spawnCatalogReady{};
         bool stale{};
 

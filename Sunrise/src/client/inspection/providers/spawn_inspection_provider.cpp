@@ -79,6 +79,9 @@ void add_capability_diagnostics(std::vector<Diagnostic>& diagnostics) {
          "Inspector provider coverage is activity, destination, scenario, and spawn-catalog data."});
     diagnostics.push_back(
         {Diagnostic::Severity::information,
+         "Spawn inspection is supported; availability depends on the current scenario and spawn catalogs."});
+    diagnostics.push_back(
+        {Diagnostic::Severity::information,
          "Runtime entities, geometry, triggers, audio placements, and physics objects are not "
          "enumerated by the current provider."});
     diagnostics.push_back(
@@ -90,6 +93,42 @@ void add_capability_diagnostics(std::vector<Diagnostic>& diagnostics) {
     diagnostics.push_back(
         {Diagnostic::Severity::information,
          "Raw source offsets and serialized reference edges are not retained by the spawn catalog."});
+}
+
+void add_world_context_diagnostics(WorldSnapshot& snapshot) {
+    const int bubble = snapshot.bubble ? static_cast<int>(*snapshot.bubble) : -1;
+    const int mapBubble = snapshot.mapBubble ? static_cast<int>(*snapshot.mapBubble) : -1;
+    const char* state = snapshot.stale ? "stale/deferred"
+                                       : (snapshot.sessionPresent ? "current" : "unavailable");
+
+    std::array<char, 640> text{};
+    const int written = std::snprintf(
+        text.data(),
+        text.size(),
+        "World context: package='%s' map='%s' session=0x%016llX revision=%llu activity=%d "
+        "region=%d bubble=%d mapBubble=%d scenario=0x%08X spawnSet=0x%08X state=%s.",
+        snapshot.packageName.c_str(),
+        snapshot.mapStem.c_str(),
+        static_cast<unsigned long long>(snapshot.activitySession),
+        static_cast<unsigned long long>(snapshot.activityRevision),
+        snapshot.activityIndex,
+        snapshot.region,
+        bubble,
+        mapBubble,
+        snapshot.scenarioTag,
+        snapshot.spawnSetHash,
+        state);
+    if (written > 0 && static_cast<std::size_t>(written) < text.size()) {
+        snapshot.diagnostics.push_back(
+            {Diagnostic::Severity::information,
+             std::string(text.data(), static_cast<std::size_t>(written))});
+    }
+
+    snapshot.diagnostics.push_back(
+        {Diagnostic::Severity::information,
+         std::string("Catalog readiness: scenario=")
+             + (snapshot.scenarioCatalogReady ? "ready" : "not ready") + ", spawns="
+             + (snapshot.spawnCatalogReady ? "ready" : "not ready") + "."});
 }
 
 } // namespace
@@ -125,11 +164,13 @@ bool SpawnInspectionProvider::refresh() {
         if (next.scenarioPresent) {
             next.scenarioTag = layout.tag;
             next.mapStem = stem_name(layout);
+            next.scenarioTruncated = layout.truncated != 0;
             if (next.region >= 0) {
                 const std::size_t bubble =
                     static_cast<std::size_t>(next.region) / tables::kSliceSetIndexFactor;
                 if (bubble < layout.bubbleCount) {
                     next.bubble = static_cast<std::int32_t>(bubble);
+                    next.mapBubble = static_cast<std::int32_t>(layout.bubbleMapIndices[bubble]);
                 }
             }
         }
@@ -174,11 +215,16 @@ void SpawnInspectionProvider::rebuild(const Key& key) {
     snapshot_.activityIndex = key.activityIndex;
     snapshot_.region = key.region;
     snapshot_.sessionPresent = key.sessionPresent;
+    snapshot_.scenarioCatalogReady = key.scenarioReady;
     snapshot_.scenarioPresent = key.scenarioPresent;
+    snapshot_.scenarioTruncated = key.scenarioTruncated;
     snapshot_.spawnCatalogReady = key.spawnCatalogReady;
     snapshot_.stale = key.stale;
     if (key.bubble >= 0) {
         snapshot_.bubble = static_cast<std::uint16_t>(key.bubble);
+    }
+    if (key.mapBubble >= 0) {
+        snapshot_.mapBubble = static_cast<std::uint16_t>(key.mapBubble);
     }
 
     Source source;
@@ -263,6 +309,7 @@ void SpawnInspectionProvider::rebuild(const Key& key) {
     }
 
     add_capability_diagnostics(snapshot_.diagnostics);
+    add_world_context_diagnostics(snapshot_);
     if (!key.sessionPresent) {
         snapshot_.diagnostics.push_back(
             {Diagnostic::Severity::warning, "No committed activity session is available."});
@@ -282,19 +329,9 @@ void SpawnInspectionProvider::rebuild(const Key& key) {
             {Diagnostic::Severity::warning, "No scenario layout matches the current package."});
         return;
     }
-
-    layouts::Definition layout{};
-    if (!layouts::find(key.packageName, layout)) {
-        snapshot_.diagnostics.push_back(
-            {Diagnostic::Severity::warning, "The current scenario changed during graph rebuild."});
-        return;
-    }
-    if (layout.truncated != 0) {
+    if (key.scenarioTruncated) {
         snapshot_.diagnostics.push_back(
             {Diagnostic::Severity::warning, "The scenario bubble list is capacity-limited."});
-    }
-    if (key.bubble >= 0 && static_cast<std::size_t>(key.bubble) < layout.bubbleCount) {
-        snapshot_.mapBubble = layout.bubbleMapIndices[static_cast<std::size_t>(key.bubble)];
     }
     if (key.mapStem.empty()) {
         snapshot_.diagnostics.push_back(
