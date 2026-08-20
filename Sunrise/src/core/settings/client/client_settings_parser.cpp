@@ -11,6 +11,7 @@ bool Parser::client_settings(client::Settings& output) noexcept {
     bool hasUserInterface = false;
     bool hasExternalServer = false;
     bool hasFadeRelease = false;
+    bool hasSkipProfileSetup = false;
     bool hasRegionPrivate = false;
     bool hasSkipOrbitCinematicWait = false;
     bool hasSuppressPeerRelay = false;
@@ -43,6 +44,11 @@ bool Parser::client_settings(client::Settings& output) noexcept {
                 return false;
             }
             hasFadeRelease = true;
+        } else if (key == "skip_profile_setup") {
+            if (hasSkipProfileSetup || !boolean(candidate.skipProfileSetup)) {
+                return false;
+            }
+            hasSkipProfileSetup = true;
         } else if (key == "region_private") {
             if (hasRegionPrivate || !boolean(candidate.regionPrivate)) {
                 return false;

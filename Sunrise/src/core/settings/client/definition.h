@@ -25,6 +25,12 @@ struct Settings {
      */
     bool fadeRelease{true};
     /**
+     * Skips the one-time profile setup bootflow screens.
+     * Off by default: the server-authored account completion byte should drive normal behavior.
+     * Keep this only as a fallback for incomplete profile-state implementations.
+     */
+    bool skipProfileSetup{false};
+    /**
      * Reports a public region as private to the region transition.
      * On, a public region loads solo. Off, it waits for a public activity host, which is the
      * route to the citizen join. A forced destination loads solo either way.

@@ -6,6 +6,7 @@
 #include <string_view>
 
 #include "../../../core/logging/log.h"
+#include "../../../core/settings/settings.h"
 #include "../../hooking/detour.h"
 #include "internal.h"
 
@@ -72,7 +73,13 @@ std::atomic_bool g_reported{false};
  */
 __declspec(noinline) char __fastcall update(std::byte* step) noexcept {
     const Update original = g_original.load(std::memory_order_acquire);
-    if (step != nullptr) {
+    if (!core::settings::get().client.skipProfileSetup) {
+        if (!g_reported.exchange(true, std::memory_order_relaxed)) {
+            core::log::write(core::log::Channel::client,
+                             core::log::Level::info,
+                             "ev=bootflow stage=profile_setup result=disabled");
+        }
+    } else if (step != nullptr) {
         std::uint32_t state = 0;
         std::memcpy(&state, step + StepLayout::state, sizeof state);
         if (is_waiting(state)) {
