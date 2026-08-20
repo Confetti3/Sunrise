@@ -121,6 +121,7 @@ struct WorkspaceState final {
     bool layoutDirty{};
     bool contextRequested{};
     bool focusSearch{};
+    bool revealSelection{};
 };
 
 std::atomic_bool g_open{};
@@ -244,12 +245,13 @@ void focus(model::NodeId id) noexcept {
 void select_node(model::NodeId id) noexcept {
     if (world().graph.node(id) != nullptr) {
         g_state.selection.select(id);
+        g_state.revealSelection = true;
     }
 }
 
 void select_and_focus(model::NodeId id) noexcept {
     if (world().graph.node(id) != nullptr) {
-        g_state.selection.select(id);
+        select_node(id);
         focus(id);
     }
 }
@@ -422,7 +424,9 @@ void admit_with_ancestors(const model::Graph& graph,
 [[nodiscard]] std::string row_label(const model::Node& node,
                                     HierarchyMode mode,
                                     const provider::WorldSnapshot& snapshot) {
-    if (node.id == snapshot.graph.root()) {
+    if (node.id == snapshot.graph.root()
+        || (mode == HierarchyMode::source && node.kind == model::NodeKind::source)
+        || (mode == HierarchyMode::activity && node.kind == model::NodeKind::activity)) {
         return root_label(mode, snapshot);
     }
     if (mode == HierarchyMode::source && node.kind == model::NodeKind::spawnSet
@@ -442,6 +446,21 @@ void admit_with_ancestors(const model::Graph& graph,
         }
     }
     return node.name;
+}
+
+[[nodiscard]] model::NodeId hierarchy_root(const provider::WorldSnapshot& snapshot) noexcept {
+    if (g_state.hierarchyMode == HierarchyMode::world) {
+        return snapshot.graph.root();
+    }
+    const model::NodeKind wanted = g_state.hierarchyMode == HierarchyMode::source
+                                       ? model::NodeKind::source
+                                       : model::NodeKind::activity;
+    for (const model::Node& node : snapshot.graph.nodes()) {
+        if (node.kind == wanted) {
+            return node.id;
+        }
+    }
+    return snapshot.graph.root();
 }
 
 void append_rows(const model::Graph& graph,
@@ -500,7 +519,7 @@ void rebuild_rows() {
         }
     }
 
-    append_rows(snapshot.graph, snapshot.graph.root(), admitted, searching, 0, snapshot);
+    append_rows(snapshot.graph, hierarchy_root(snapshot), admitted, searching, 0, snapshot);
 
     g_state.cachedGeneration = snapshot.graph.generation();
     g_state.cachedSearch = queryText;
@@ -592,11 +611,11 @@ void quick_filters() noexcept {
     filterChip("Entities", FilterGroup::entities, g_state.showEntities);
     ImGui::SameLine();
     filterChip("Spawns", FilterGroup::spawns, g_state.showSpawns);
-    ImGui::SameLine();
+
     filterChip("Triggers", FilterGroup::triggers, g_state.showTriggers);
     ImGui::SameLine();
     filterChip("Audio", FilterGroup::audio, g_state.showAudio);
-
+    ImGui::SameLine();
     if (chip("Hidden", g_state.showHidden, true, "")) {
         g_state.showHidden = !g_state.showHidden;
         g_state.rowsValid = false;
@@ -653,14 +672,28 @@ model::NodeId draw_tree() noexcept {
         return hovered;
     }
 
+    const float rowHeight = scaled(kTreeRowHeight);
+    if (g_state.revealSelection && g_state.selection.selected()) {
+        const auto iterator = std::find_if(g_state.rows.begin(),
+                                           g_state.rows.end(),
+                                           [](const TreeRow& row) {
+                                               return row.id == g_state.selection.selected();
+                                           });
+        if (iterator != g_state.rows.end()) {
+            const float index = static_cast<float>(iterator - g_state.rows.begin());
+            const float target = index * rowHeight - ImGui::GetWindowHeight() * 0.45F;
+            ImGui::SetScrollY((std::max)(0.0F, target));
+        }
+        g_state.revealSelection = false;
+    }
+
     ImGuiListClipper clipper;
-    clipper.Begin(static_cast<int>(g_state.rows.size()), scaled(kTreeRowHeight));
+    clipper.Begin(static_cast<int>(g_state.rows.size()), rowHeight);
     while (clipper.Step()) {
         for (int index = clipper.DisplayStart; index < clipper.DisplayEnd; ++index) {
             const TreeRow& row = g_state.rows[static_cast<std::size_t>(index)];
             ImGui::PushID(index);
             const ImVec2 rowStart = ImGui::GetCursorScreenPos();
-            const float rowHeight = scaled(kTreeRowHeight);
             const float indent = scaled(kTreeIndent) * static_cast<float>(row.depth);
             ImDrawList* drawList = ImGui::GetWindowDrawList();
             for (std::uint8_t depth = 0; depth < row.depth; ++depth) {
@@ -740,10 +773,12 @@ void draw_outliner() noexcept {
     }
     ImGui::Separator();
 
+    ImGui::BeginChild("##scene_tree_scroll", {0.0F, 0.0F}, false);
     const model::NodeId hovered = draw_tree();
     if (hovered) {
         g_state.selection.hover(hovered);
     }
+    ImGui::EndChild();
 }
 
 void property_row(const char* name, const char* value) noexcept {
@@ -986,8 +1021,17 @@ void draw_inspector() noexcept {
 }
 
 void graph_reference_row(const char* relation, const model::Node& node) noexcept {
+    std::string label;
+    label.reserve(node.name.size() + 48);
+    label.append(relation);
+    label.append("  ");
+    label.append(node.name);
+    label.append("  [");
+    label.append(model::kind_name(node.kind));
+    label.push_back(']');
+
     ImGui::PushID(static_cast<int>(node.id.value));
-    if (ImGui::Selectable(node.name.c_str(),
+    if (ImGui::Selectable(label.c_str(),
                           g_state.selection.selected() == node.id,
                           ImGuiSelectableFlags_AllowDoubleClick)) {
         select_node(node.id);
@@ -995,8 +1039,6 @@ void graph_reference_row(const char* relation, const model::Node& node) noexcept
             focus(node.id);
         }
     }
-    ImGui::SameLine();
-    ImGui::TextDisabled("%s | %s", relation, model::kind_name(node.kind));
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("%s", world().graph.breadcrumb(node.id).c_str());
     }
@@ -1710,13 +1752,13 @@ bool render(bool uiVisible) noexcept {
             g_state.selection.hover(interaction.hovered);
         }
         if (interaction.selected) {
-            g_state.selection.select(interaction.selected);
+            select_node(interaction.selected);
         }
         if (interaction.focused) {
             select_and_focus(interaction.focused);
         }
         if (interaction.context) {
-            g_state.selection.select(interaction.context);
+            select_node(interaction.context);
             g_state.contextTarget = interaction.context;
             g_state.contextRequested = true;
         }
