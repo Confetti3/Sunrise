@@ -104,9 +104,13 @@ bool build_records(const reader::Source& source,
         std::memcpy(&slot,
                     blob.data() + at + tables::kRecordCompletionFlagOffset,
                     sizeof slot);
+        std::uint32_t score = 0;
+        std::memcpy(&score, blob.data() + at + tables::kRecordScoreOffset, sizeof score);
         domain::Definition& definition = output[static_cast<std::size_t>(row)];
         definition = {};
         definition.definitionIndex = static_cast<std::uint16_t>(row);
+        // The shipped table tops out at 500, so anything wider is not a score and is dropped.
+        definition.scoreValue = score <= 0xFFFFU ? static_cast<std::uint16_t>(score) : 0U;
         if (addressable_slot(slot) && static_cast<std::size_t>(slot) < kSlotSpace) {
             definition.completionFlagIndex = indexBySlot[static_cast<std::size_t>(slot)];
         }
