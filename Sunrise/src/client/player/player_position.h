@@ -1,13 +1,17 @@
 #pragma once
 
+#include <cstdint>
+
 #include "../hooks/teleport/runtime.h"
 
 namespace sunrise::client::player::position {
 
-/** The local player's world position, or nothing when they have not been seen. */
+/** The local player's world position and controlled-object identity, or nothing when unseen. */
 struct Snapshot {
     hooks::teleport::Vector position{};
     bool present{};
+    std::uint32_t controlledHandle{};
+    bool controlledHandlePresent{};
 };
 
 /** Publishes the position of the component the physics sync is running for. */
@@ -25,7 +29,7 @@ void reset() noexcept;
  */
 [[nodiscard]] void* component_candidate() noexcept;
 
-/** @return The last published position, which any thread may read. */
+/** @return The last published position and scalar controlled-object identity. */
 [[nodiscard]] Snapshot snapshot() noexcept;
 
 } // namespace sunrise::client::player::position

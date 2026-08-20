@@ -30,6 +30,8 @@ enum class NodeKind : std::uint8_t {
     geometry,
     terrain,
     runtimeEntity,
+    placedObject,
+    componentSlot,
     light,
     trigger,
     audio,

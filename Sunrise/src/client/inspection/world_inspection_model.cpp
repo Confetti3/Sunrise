@@ -315,6 +315,10 @@ const char* kind_name(NodeKind kind) noexcept {
         return "Terrain";
     case NodeKind::runtimeEntity:
         return "Runtime Entity";
+    case NodeKind::placedObject:
+        return "Placed Object";
+    case NodeKind::componentSlot:
+        return "Component Slot";
     case NodeKind::light:
         return "Light";
     case NodeKind::trigger:

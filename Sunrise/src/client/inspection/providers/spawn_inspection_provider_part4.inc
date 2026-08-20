@@ -1,0 +1,117 @@
+    if (!key.sessionPresent) {
+        snapshot_.diagnostics.push_back(
+            {Diagnostic::Severity::warning, "No committed activity session is available."});
+        return;
+    }
+    if (key.stale) {
+        snapshot_.diagnostics.push_back(
+            {Diagnostic::Severity::warning, "The activity binding changed while it was sampled."});
+    }
+    if (!key.scenarioReady) {
+        snapshot_.diagnostics.push_back(
+            {Diagnostic::Severity::warning, "The scenario catalog is not ready."});
+        return;
+    }
+    if (!key.scenarioPresent) {
+        snapshot_.diagnostics.push_back(
+            {Diagnostic::Severity::warning, "No scenario layout matches the current package."});
+        return;
+    }
+    if (key.scenarioTruncated) {
+        snapshot_.diagnostics.push_back(
+            {Diagnostic::Severity::warning, "The scenario bubble list is capacity-limited."});
+    }
+    if (key.mapStem.empty()) {
+        snapshot_.diagnostics.push_back(
+            {Diagnostic::Severity::warning, "The current scenario has no map-package stem."});
+        return;
+    }
+    if (key.spawnSetHash == 0) {
+        snapshot_.diagnostics.push_back(
+            {Diagnostic::Severity::warning, "The current destination has no usable spawn-set hash."});
+        return;
+    }
+    if (!key.spawnCatalogReady) {
+        snapshot_.diagnostics.push_back(
+            {Diagnostic::Severity::warning, "The spawn catalog is not ready."});
+        return;
+    }
+
+    spawn_sets::NameHash set{};
+    if (!spawn_sets::find_hash(key.mapStem, key.spawnSetHash, set)) {
+        snapshot_.diagnostics.push_back(
+            {Diagnostic::Severity::warning, "The current spawn-set hash is absent from this map."});
+        return;
+    }
+    if (set.activityPackageOverflow != 0) {
+        snapshot_.diagnostics.push_back(
+            {Diagnostic::Severity::warning, "The spawn set's activity-package list is truncated."});
+    }
+
+    Node setNode;
+    setNode.name = hex_label("Spawn set", key.spawnSetHash);
+    setNode.kind = NodeKind::spawnSet;
+    setNode.status = Status::known;
+    setNode.nameHash = key.spawnSetHash;
+    setNode.source = source;
+    setNode.source.spawnSetHash = key.spawnSetHash;
+    setNode.actions = Action::copyId;
+    snapshot_.spawnSetNode = snapshot_.graph.add(std::move(setNode), graphParent);
+    if (!snapshot_.spawnSetNode) {
+        snapshot_.diagnostics.push_back(
+            {Diagnostic::Severity::error, "The inspection graph could not create the spawn set."});
+        return;
+    }
+
+    const std::size_t pointCount = spawn_sets::point_count();
+    std::vector<spawn_sets::Point> points(pointCount);
+    std::size_t copied = 0;
+    if (!spawn_sets::snapshot_points(points, copied) || copied != pointCount) {
+        snapshot_.diagnostics.push_back(
+            {Diagnostic::Severity::error, "The spawn point bank could not be copied coherently."});
+        return;
+    }
+
+    std::size_t ordinal = 0;
+    for (std::size_t index = 0; index < copied; ++index) {
+        const spawn_sets::Point& point = points[index];
+        if (point.stemIndex != set.stemIndex || point.nameHash != key.spawnSetHash) {
+            continue;
+        }
+
+        Node node;
+        node.name = spawn_label(ordinal);
+        node.kind = NodeKind::spawnPoint;
+        node.status = Status::known;
+        node.nameHash = point.nameHash;
+        node.transform = Transform{point.position};
+        node.source = source;
+        node.source.spawnSetHash = key.spawnSetHash;
+        node.actions = Action::focus | Action::hide | Action::isolate | Action::copyId
+                       | Action::copyPosition;
+        if (!snapshot_.graph.add(std::move(node), snapshot_.spawnSetNode)) {
+            snapshot_.diagnostics.push_back(
+                {Diagnostic::Severity::error, "The inspection graph reached its node-id capacity."});
+            break;
+        }
+        ++ordinal;
+    }
+
+    if (ordinal == 0) {
+        snapshot_.diagnostics.push_back(
+            {Diagnostic::Severity::warning, "The selected spawn set contains no copied points."});
+    }
+}
+
+const WorldSnapshot& SpawnInspectionProvider::snapshot() const noexcept {
+    return snapshot_;
+}
+
+void SpawnInspectionProvider::reset() noexcept {
+    snapshot_ = {};
+    key_ = {};
+    generation_ = 0;
+    keyPresent_ = false;
+}
+
+} // namespace sunrise::client::inspection::providers

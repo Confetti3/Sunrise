@@ -7,19 +7,26 @@
 #include <vector>
 
 #include "../world_inspection_model.h"
+#include "live_player_inspection.h"
+#include "placed_object_inspection.h"
 
 namespace sunrise::client::inspection::providers {
 
 struct WorldSnapshot final {
     Graph graph;
     std::vector<Diagnostic> diagnostics;
+    NodeId localPlayerNode{};
+    NodeId placedObjectGroupNode{};
     NodeId spawnSetNode{};
     std::string packageName;
     std::string mapStem;
+    std::size_t placedObjectCount{};
+    std::size_t placedObjectSlotCount{};
     std::uint64_t activitySession{};
     std::uint64_t activityRevision{};
     std::uint32_t scenarioTag{};
     std::uint32_t spawnSetHash{};
+    std::uint32_t localPlayerHandle{};
     std::int32_t activityIndex{-1};
     std::int32_t region{-1};
     std::optional<std::uint16_t> bubble;
@@ -28,6 +35,9 @@ struct WorldSnapshot final {
     bool scenarioCatalogReady{};
     bool scenarioPresent{};
     bool scenarioTruncated{};
+    bool localPlayerPresent{};
+    bool localPlayerPositionPresent{};
+    bool placedObjectSlotsTruncated{};
     bool spawnCatalogReady{};
     bool stale{};
 };
@@ -44,10 +54,12 @@ private:
     struct Key final {
         std::string packageName;
         std::string mapStem;
+        std::vector<placed_objects::Snapshot> placedObjects;
         std::uint64_t activitySession{};
         std::uint64_t activityRevision{};
         std::uint32_t scenarioTag{};
         std::uint32_t spawnSetHash{};
+        std::uint32_t localPlayerHandle{};
         std::int32_t activityIndex{-1};
         std::int32_t region{-1};
         std::int32_t bubble{-1};
@@ -56,13 +68,15 @@ private:
         bool scenarioReady{};
         bool scenarioPresent{};
         bool scenarioTruncated{};
+        bool localPlayerPresent{};
+        bool localPlayerPositionPresent{};
         bool spawnCatalogReady{};
         bool stale{};
 
         [[nodiscard]] friend bool operator==(const Key&, const Key&) noexcept = default;
     };
 
-    void rebuild(const Key& key);
+    void rebuild(const Key& key, const live_player::Snapshot& livePlayer);
 
     WorldSnapshot snapshot_{};
     Key key_{};
