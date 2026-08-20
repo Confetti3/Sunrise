@@ -21,6 +21,7 @@ struct Result final {
     inspection::NodeId selected{};
     inspection::NodeId focused{};
     inspection::NodeId context{};
+    bool clearSelection{};
     bool navigation{};
 };
 
