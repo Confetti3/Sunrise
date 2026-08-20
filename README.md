@@ -23,11 +23,6 @@ The `sunrise-viewer` branch adds an editor-style, read-only world inspection wor
 Sunrise. It builds on Sunrise's existing graphics hooks, runtime state, package/content systems, and
 Viewer camera; it is not a separate map renderer or an Alkahest port.
 
-Detailed documentation:
-
-- [Using and maintaining Sunrise Viewer](docs/sunrise-viewer.md)
-- [Destiny 2 Viewer symbol research](docs/research/2026-08-20-destiny2-viewer-symbols.md)
-
 Viewer Camera provides detached movement and mouse look with configurable movement speed, boost and
 precision movement, persistent Viewer settings, focus-to-selection support, camera coordinates and
 copy-position support. HUD and weapon presentation controls remain independent.
