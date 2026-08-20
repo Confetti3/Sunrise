@@ -1690,41 +1690,57 @@ bool render(bool uiVisible) noexcept {
         const float minimumRight = scaled(client::viewer::kMinimumInspectorRightWidth);
         const float maximumRight = scaled(client::viewer::kMaximumInspectorRightWidth);
         const float minimumCenter = scaled(kMinimumViewportWidth);
+        const float horizontalBudget =
+            (std::max)(1.0F, availableWidth - splitterSize * 2.0F);
 
-        const float leftLimit =
-            (std::max)(minimumLeft,
-                       availableWidth - minimumCenter - minimumRight - splitterSize * 2.0F);
-        g_state.leftWidth =
-            std::clamp(g_state.leftWidth, minimumLeft, (std::min)(maximumLeft, leftLimit));
+        float leftWidth = std::clamp(g_state.leftWidth, minimumLeft, maximumLeft);
+        float rightWidth = std::clamp(g_state.rightWidth, minimumRight, maximumRight);
+        const bool sideMinimumsFit =
+            horizontalBudget >= minimumCenter + minimumLeft + minimumRight;
+        if (sideMinimumsFit) {
+            const float leftLimit =
+                (std::min)(maximumLeft, horizontalBudget - minimumCenter - minimumRight);
+            leftWidth = std::clamp(leftWidth, minimumLeft, leftLimit);
+            const float rightLimit =
+                (std::min)(maximumRight, horizontalBudget - minimumCenter - leftWidth);
+            rightWidth = std::clamp(rightWidth, minimumRight, rightLimit);
+        } else {
+            const float sideBudget = (std::max)(0.0F, horizontalBudget - 1.0F);
+            const float preferredTotal = (std::max)(1.0F, leftWidth + rightWidth);
+            const float leftRatio = std::clamp(leftWidth / preferredTotal, 0.2F, 0.8F);
+            leftWidth = sideBudget * leftRatio;
+            rightWidth = (std::max)(0.0F, sideBudget - leftWidth);
+        }
 
-        const float rightLimit =
-            (std::max)(minimumRight,
-                       availableWidth - minimumCenter - g_state.leftWidth - splitterSize * 2.0F);
-        g_state.rightWidth =
-            std::clamp(g_state.rightWidth, minimumRight, (std::min)(maximumRight, rightLimit));
-
-        const float centerWidth =
-            (std::max)(1.0F,
-                       availableWidth - g_state.leftWidth - g_state.rightWidth
-                           - splitterSize * 2.0F);
+        float centerWidth =
+            (std::max)(1.0F, horizontalBudget - leftWidth - rightWidth);
 
         ImGui::SetCursorScreenPos(contentOrigin);
         ImGui::BeginChild("##world_outliner",
-                          {g_state.leftWidth, mainHeight},
+                          {leftWidth, mainHeight},
                           ImGuiChildFlags_Borders);
         draw_outliner();
         ImGui::EndChild();
 
-        ImGui::SetCursorScreenPos({contentOrigin.x + g_state.leftWidth, contentOrigin.y});
-        finish_splitter(splitter("##left_splitter",
-                                 mainHeight,
-                                 true,
-                                 g_state.leftWidth,
-                                 1.0F,
-                                 minimumLeft,
-                                 maximumLeft));
+        ImGui::SetCursorScreenPos({contentOrigin.x + leftWidth, contentOrigin.y});
+        const float leftDragMaximum = sideMinimumsFit
+                                          ? (std::min)(maximumLeft,
+                                                       horizontalBudget - minimumCenter - rightWidth)
+                                          : 0.0F;
+        const SplitterResult leftResult = splitter("##left_splitter",
+                                                   mainHeight,
+                                                   true,
+                                                   leftWidth,
+                                                   1.0F,
+                                                   minimumLeft,
+                                                   leftDragMaximum);
+        if (leftResult.changed) {
+            g_state.leftWidth = leftWidth;
+        }
+        finish_splitter(leftResult);
+        centerWidth = (std::max)(1.0F, horizontalBudget - leftWidth - rightWidth);
 
-        const float viewportX = contentOrigin.x + g_state.leftWidth + splitterSize;
+        const float viewportX = contentOrigin.x + leftWidth + splitterSize;
         ImGui::SetCursorScreenPos({viewportX, contentOrigin.y});
         const ImVec4 viewportBackground = capturedFrame
                                               ? ImVec4(0.025F, 0.029F, 0.035F, 1.0F)
@@ -1751,6 +1767,10 @@ bool render(bool uiVisible) noexcept {
         if (interaction.hovered) {
             g_state.selection.hover(interaction.hovered);
         }
+        if (interaction.clearSelection) {
+            g_state.selection.clear();
+            g_state.revealSelection = false;
+        }
         if (interaction.selected) {
             select_node(interaction.selected);
         }
@@ -1765,17 +1785,25 @@ bool render(bool uiVisible) noexcept {
 
         const float rightSplitterX = viewportX + centerWidth;
         ImGui::SetCursorScreenPos({rightSplitterX, contentOrigin.y});
-        finish_splitter(splitter("##right_splitter",
-                                 mainHeight,
-                                 true,
-                                 g_state.rightWidth,
-                                 -1.0F,
-                                 minimumRight,
-                                 maximumRight));
+        const float rightDragMaximum = sideMinimumsFit
+                                           ? (std::min)(maximumRight,
+                                                        horizontalBudget - minimumCenter - leftWidth)
+                                           : 0.0F;
+        const SplitterResult rightResult = splitter("##right_splitter",
+                                                    mainHeight,
+                                                    true,
+                                                    rightWidth,
+                                                    -1.0F,
+                                                    minimumRight,
+                                                    rightDragMaximum);
+        if (rightResult.changed) {
+            g_state.rightWidth = rightWidth;
+        }
+        finish_splitter(rightResult);
 
         ImGui::SetCursorScreenPos({rightSplitterX + splitterSize, contentOrigin.y});
         ImGui::BeginChild("##world_properties",
-                          {g_state.rightWidth, mainHeight},
+                          {rightWidth, mainHeight},
                           ImGuiChildFlags_Borders);
         draw_inspector();
         ImGui::EndChild();
