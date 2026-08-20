@@ -1013,8 +1013,7 @@ model::NodeId draw_tree() noexcept {
             }
             const float textWidth = ImGui::CalcTextSize(row.label.c_str()).x;
             const float availableWidth = ImGui::GetContentRegionAvail().x;
-            const float itemWidth =
-                (std::max)(availableWidth, textWidth + ImGui::GetStyle().FramePadding.x * 2.0F);
+            const float itemWidth = (std::max)(1.0F, availableWidth);
             if (ImGui::Selectable(row.label.c_str(),
                                   selected,
                                   ImGuiSelectableFlags_AllowDoubleClick,
@@ -1095,10 +1094,7 @@ void draw_outliner() noexcept {
     }
     ImGui::Separator();
 
-    ImGui::BeginChild("##scene_tree_scroll",
-                      {0.0F, 0.0F},
-                      false,
-                      ImGuiWindowFlags_HorizontalScrollbar);
+    ImGui::BeginChild("##scene_tree_scroll", {0.0F, 0.0F}, false);
     const model::NodeId hovered = draw_tree();
     if (hovered) {
         g_state.selection.hover(hovered);
