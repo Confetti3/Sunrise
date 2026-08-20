@@ -106,6 +106,9 @@ bool encode(const state::AccountState& state, std::span<std::byte> output) noexc
         auto& score = object.objectiveValues[state::build_data::records::kTriumphScoreValueIndex];
         score += static_cast<std::int32_t>(state::record_claims::total_score());
     }
+    // A node's progress bar reads a value slot and shows whatever it holds, so the claimed children
+    // have to be counted into it here or the bar never moves.
+    (void)state::record_claims::apply_node_progress(object.objectiveValues);
     for (layout::CharacterUnlockBlock& block : object.characterUnlocks) {
         block.flags = unlocks.characterFlags;
     }

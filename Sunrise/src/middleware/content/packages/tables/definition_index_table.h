@@ -97,6 +97,33 @@ inline constexpr std::size_t kRecordCompletionFlagOffset = 100;
 /** Points the record is worth. Zero for lore and for the interval records that score per step. */
 inline constexpr std::size_t kRecordScoreOffset = 92;
 
+/** Investment root slot of the presentation node table. */
+inline constexpr std::size_t kPresentationNodeTableSlot = 63;
+/** One node row. Measured from the spacing of four known node hashes, not divided out of the blob. */
+inline constexpr std::size_t kNodeRowStride = 168;
+/** A node's expression sits at one of these two fields, never both. */
+inline constexpr std::size_t kNodeExpressionFieldPrimary = 64;
+inline constexpr std::size_t kNodeExpressionFieldAlternate = 48;
+/** Records a node owns, four bytes each as a row then a gate. */
+inline constexpr std::size_t kNodeChildRecordField = 136;
+inline constexpr std::size_t kNodeChildRecordStride = 4;
+/** No node expression seen is longer than this. */
+inline constexpr std::int64_t kNodeExpressionCapacity = 32;
+
+/** One unlock expression instruction: an opcode then its operand. */
+inline constexpr std::size_t kUnlockInstructionStride = 8;
+/** Opcodes run to fifteen; anything wider means the field is not an expression. */
+inline constexpr std::uint32_t kUnlockOpcodeCeiling = 20;
+/** The opcode that reads a value slot. */
+inline constexpr std::uint32_t kUnlockReadValueOpcode = 10;
+/** Array payloads begin after a sixteen byte header. */
+inline constexpr std::size_t kHeaderSkip = 16;
+
+/** Investment root slot of the four unlock value mapping tables. */
+inline constexpr std::size_t kUnlockValueMapTableSlot = 113;
+/** Array descriptor of the account object's value mapping table. */
+inline constexpr std::size_t kAccountValueMapDescriptor = 8;
+
 /** Investment root slot of the five unlock flag mapping tables. */
 inline constexpr std::size_t kUnlockFlagMapTableSlot = 111;
 /** Array descriptor of the account object's flag mapping table, the bank flag runs author. */

@@ -17,6 +17,7 @@
 #include "items/socket_plugs/definition.h"
 #include "material_requirements/material_requirement_catalog.h"
 #include "progressions/definition.h"
+#include "nodes/definition.h"
 #include "records/definition.h"
 #include "scenarios/definition.h"
 #include "socket_entry_buckets/definition.h"
@@ -207,6 +208,17 @@ publish_socket_plug_rules(std::span<const items::socket_plugs::Rule> rules,
  */
 [[nodiscard]] bool is_consumed_on_apply(std::uint16_t itemDefinitionIndex,
                                         std::uint8_t bucketId) noexcept;
+
+/** @return True when the whole presentation node table is in State. */
+[[nodiscard]] bool node_definitions_ready() noexcept;
+
+/**
+ * Publishes the whole presentation node table in one step.
+ * @param definitions Complete dense rows in native node order.
+ * @return True when the rows pass the domain checks and fit fixed State storage.
+ */
+[[nodiscard]] bool
+publish_node_definitions(std::span<const nodes::Definition> definitions) noexcept;
 
 /** @return True when the whole record definition table is in State. */
 [[nodiscard]] bool record_definitions_ready() noexcept;

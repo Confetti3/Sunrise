@@ -11,6 +11,9 @@
 
 #include "../../core/filesystem/path.h"
 #include "../../core/logging/log.h"
+#include "../build_data/nodes/definition.h"
+#include "../build_data/nodes/node_catalog.h"
+#include "../build_data/runtime.h"
 #include "../unlocks/definition.h"
 
 namespace sunrise::state::record_claims {
@@ -231,6 +234,68 @@ std::size_t apply(std::span<std::uint8_t> accountFlags) noexcept {
         }
     }
     return changed;
+}
+
+namespace {
+
+/** Carries the bank and a tally through the node walk, which takes a plain function pointer. */
+struct NodeProgress {
+    std::span<std::int32_t> values;
+    std::size_t written;
+};
+
+/** True when this account flag bank row is held. The caller owns the claim lock. */
+[[nodiscard]] bool claimed_locked(std::uint16_t flagIndex) noexcept {
+    if (static_cast<std::size_t>(flagIndex) >= kIndexCapacity) {
+        return false;
+    }
+    const std::size_t word = static_cast<std::size_t>(flagIndex) / kWordBits;
+    const std::uint64_t bit = std::uint64_t{1} << (static_cast<std::size_t>(flagIndex) % kWordBits);
+    return (g_claimed[word] & bit) != 0;
+}
+
+} // namespace
+
+/** Writes each node's claimed-child count into the value slot its bar reads. */
+std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcept {
+    NodeProgress progress{objectiveValues, 0};
+    // The claim lock is taken first and the node lock inside the walk. Nothing takes them the other
+    // way round, so the order cannot close a cycle.
+    const std::lock_guard<std::mutex> guard(g_lock);
+    build_data::nodes::for_each_driving(
+        &progress, [](void* context, const build_data::nodes::Definition& node) noexcept {
+            auto* state = static_cast<NodeProgress*>(context);
+            std::int32_t claimed = 0;
+            for (std::size_t child = 0; child < node.childCount; ++child) {
+                build_data::records::Definition record{};
+                if (!build_data::find_record_definition(node.children[child], record)
+                    || record.completionFlagIndex
+                           == build_data::records::kUnavailableFlagIndex) {
+                    continue;
+                }
+                if (claimed_locked(record.completionFlagIndex)) {
+                    ++claimed;
+                }
+            }
+            if (static_cast<std::size_t>(node.valueIndex) < state->values.size()) {
+                state->values[node.valueIndex] = claimed;
+                ++state->written;
+                // TEMPORARY: name every node driven, so a bar that does not move can be told from
+                // a node that was never counted.
+                std::array<char, 160> line{};
+                const int written = std::snprintf(
+                    line.data(), line.size(),
+                    "ev=nodeprog node=%u value_index=%u children=%u claimed=%d",
+                    static_cast<unsigned>(node.definitionIndex),
+                    static_cast<unsigned>(node.valueIndex),
+                    static_cast<unsigned>(node.childCount), claimed);
+                if (written > 0) {
+                    core::log::write(core::log::Channel::state, core::log::Level::info,
+                                     {line.data(), static_cast<std::size_t>(written)});
+                }
+            }
+        });
+    return progress.written;
 }
 
 /** @return Total score of every held claim. */

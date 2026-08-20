@@ -44,6 +44,16 @@ void clear() noexcept;
  */
 std::size_t apply(std::span<std::uint8_t> accountFlags) noexcept;
 
+/**
+ * Writes each presentation node's claimed-child count into the value slot its bar reads.
+ *
+ * A node's progress bar is not derived by the client from its children: the node names a value slot
+ * and shows whatever it holds. Counting here is what makes claiming a chapter move its book.
+ * @param objectiveValues Account value bank, already filled from the authored policy.
+ * @return Number of nodes whose slot was written.
+ */
+std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcept;
+
 /** @return Total score of every held claim. */
 [[nodiscard]] std::uint32_t total_score() noexcept;
 
