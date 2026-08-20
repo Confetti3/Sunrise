@@ -17,6 +17,7 @@ constexpr std::size_t kWordCount = (kIndexCapacity + kWordBits - 1) / kWordBits;
 std::mutex g_lock;
 std::array<std::uint64_t, kWordCount> g_claimed{};
 std::size_t g_count{};
+std::uint32_t g_score{};
 
 } // namespace
 
@@ -25,10 +26,11 @@ void clear() noexcept {
     const std::lock_guard<std::mutex> guard(g_lock);
     g_claimed.fill(0);
     g_count = 0;
+    g_score = 0;
 }
 
 /** Marks one account flag bank index claimed. */
-bool claim(std::uint16_t flagIndex) noexcept {
+bool claim(std::uint16_t flagIndex, std::uint16_t scoreValue) noexcept {
     if (static_cast<std::size_t>(flagIndex) >= kIndexCapacity) {
         return false;
     }
@@ -38,6 +40,8 @@ bool claim(std::uint16_t flagIndex) noexcept {
     if ((g_claimed[word] & bit) == 0) {
         g_claimed[word] |= bit;
         ++g_count;
+        // Only a first claim scores, so a repeated click cannot inflate the total.
+        g_score += scoreValue;
     }
     return true;
 }
@@ -63,6 +67,12 @@ std::size_t apply(std::span<std::uint8_t> accountFlags) noexcept {
         }
     }
     return changed;
+}
+
+/** @return Total score of every record claimed since boot. */
+std::uint32_t total_score() noexcept {
+    const std::lock_guard<std::mutex> guard(g_lock);
+    return g_score;
 }
 
 /** @return Number of distinct indices claimed since boot. */

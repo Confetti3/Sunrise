@@ -5,6 +5,7 @@
 #include <limits>
 
 #include "../../../../state/build_data/runtime.h"
+#include "../../../../state/build_data/records/definition.h"
 #include "../../../../state/record_claims/record_claims.h"
 #include "../../../../state/unlocks/unlocks_runtime.h"
 #include "../progression/progression_bank_keys.h"
@@ -99,6 +100,12 @@ bool encode(const state::AccountState& state, std::span<std::byte> output) noexc
     (void)state::record_claims::apply(object.acquiredFlags);
     object.profileUnlockFlags = unlocks.profileFlags;
     object.objectiveValues = unlocks.objectiveValues;
+    // Triumph Score is a plain replicated value the client never derives, so total the claims made
+    // this session over whatever the policy authored and publish the sum.
+    if (state::build_data::records::kTriumphScoreValueIndex < object.objectiveValues.size()) {
+        auto& score = object.objectiveValues[state::build_data::records::kTriumphScoreValueIndex];
+        score += static_cast<std::int32_t>(state::record_claims::total_score());
+    }
     for (layout::CharacterUnlockBlock& block : object.characterUnlocks) {
         block.flags = unlocks.characterFlags;
     }

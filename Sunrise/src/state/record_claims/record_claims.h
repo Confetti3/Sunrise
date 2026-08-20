@@ -19,11 +19,16 @@ namespace sunrise::state::record_claims {
 void clear() noexcept;
 
 /**
- * Marks one account flag bank index claimed.
+ * Marks one account flag bank index claimed and adds its record's score to the total.
+ * A repeated claim of the same index is held once and scores once.
  * @param flagIndex Mapping-table row whose object byte feeds the record's completion flag.
+ * @param scoreValue Points the record is worth, counted only on the first claim.
  * @return True when the index is in range and the claim is now held.
  */
-[[nodiscard]] bool claim(std::uint16_t flagIndex) noexcept;
+[[nodiscard]] bool claim(std::uint16_t flagIndex, std::uint16_t scoreValue) noexcept;
+
+/** @return Total score of every record claimed since boot. */
+[[nodiscard]] std::uint32_t total_score() noexcept;
 
 /**
  * Lays every held claim over one account flag bank.

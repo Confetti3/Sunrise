@@ -8,6 +8,15 @@ namespace sunrise::state::build_data::records {
 /** The shipped build declares 2242 records and lore entries. The domain leaves room above that. */
 inline constexpr std::size_t kDefinitionCapacity = 4096;
 
+/**
+ * Account value bank row that holds Triumph Score.
+ *
+ * Found by authoring every account value slot to `100000 + its own row` and reading the score back
+ * as 102115. It is a plain replicated value, not a progression and not derived by the client, so a
+ * server that wants a score has to total one itself.
+ */
+inline constexpr std::uint16_t kTriumphScoreValueIndex = 2115U;
+
 /** A record whose completion flag no mapping table addresses carries this instead of an index. */
 inline constexpr std::uint16_t kUnavailableFlagIndex = 0xFFFFU;
 
@@ -23,6 +32,8 @@ struct Definition {
     std::uint16_t definitionIndex{};
     /** Account flag bank mapping row, or kUnavailableFlagIndex when the slot is unaddressable. */
     std::uint16_t completionFlagIndex{kUnavailableFlagIndex};
+    /** Points this record is worth, which the shipped table keeps at 500 or below. */
+    std::uint16_t scoreValue{};
 };
 
 } // namespace sunrise::state::build_data::records

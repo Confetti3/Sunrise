@@ -869,7 +869,7 @@ void claim_record(const middleware::web_service::Message& message, Outcome& outc
             records::kUnavailableFlagIndex);
         return;
     }
-    if (!state::record_claims::claim(definition.completionFlagIndex)) {
+    if (!state::record_claims::claim(definition.completionFlagIndex, definition.scoreValue)) {
         report_record_claim(message,
                             "fail",
                             "flag_index_range",

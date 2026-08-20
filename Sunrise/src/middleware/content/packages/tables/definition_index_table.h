@@ -94,6 +94,8 @@ inline constexpr std::size_t kRecordTableSlot = 72;
 inline constexpr std::size_t kRecordRowStride = 216;
 /** Unlock slot of the record's completion flag, or a non-positive value when it has none. */
 inline constexpr std::size_t kRecordCompletionFlagOffset = 100;
+/** Points the record is worth. Zero for lore and for the interval records that score per step. */
+inline constexpr std::size_t kRecordScoreOffset = 92;
 
 /** Investment root slot of the five unlock flag mapping tables. */
 inline constexpr std::size_t kUnlockFlagMapTableSlot = 111;
