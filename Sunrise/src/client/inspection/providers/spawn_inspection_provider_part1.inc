@@ -23,6 +23,7 @@ namespace layouts = state::build_data::scenarios;
 namespace spawn_sets = state::build_data::spawn_sets;
 namespace live = live_player;
 namespace placed = placed_objects;
+namespace observed = runtime_observations;
 namespace tables = middleware::content::packages::tables;
 
 [[nodiscard]] std::string
@@ -94,8 +95,16 @@ void add_capability_diagnostics(std::vector<Diagnostic>& diagnostics) {
          "position when the player observer is ready."});
     diagnostics.push_back(
         {Diagnostic::Severity::information,
-         "General live entity enumeration, geometry, terrain, triggers, audio emitters, lights, and "
-         "additional physics bodies are not enumerated by the current providers."});
+         "The primary Wwise listener and bounded Havok body slots are copied from their existing "
+         "runtime hooks. Physics slots are observations, not durable object identities."});
+    diagnostics.push_back(
+        {Diagnostic::Severity::information,
+         "The engine's occupied object-datum iterator now provides general live object identities "
+         "and object-system types. StaticMesh and Speedtree objects populate Geometry."});
+    diagnostics.push_back(
+        {Diagnostic::Severity::information,
+         "Terrain surfaces, trigger volume bounds, audio emitters, lights, physics controllers, and "
+         "stable physics-body identities still need separate native producers."});
     diagnostics.push_back(
         {Diagnostic::Severity::information,
          "Object transforms, bounds, and depth-assisted surface picking are unavailable for "
@@ -121,7 +130,9 @@ void add_world_context_diagnostics(WorldSnapshot& snapshot) {
         text.size(),
         "World context: package='%s' map='%s' session=0x%016llX revision=%llu activity=%d "
         "region=%d bubble=%d mapBubble=%d scenario=0x%08X spawnSet=0x%08X "
-        "localPlayer=0x%08X localPlayerPresent=%s placedObjects=%zu state=%s.",
+        "localPlayer=0x%08X localPlayerPresent=%s placedObjects=%zu runtimeObjects=%u/%u "
+        "audioListener=%s "
+        "physicsBodies=%u/%u state=%s.",
         snapshot.packageName.c_str(),
         snapshot.mapStem.c_str(),
         static_cast<unsigned long long>(snapshot.activitySession),
@@ -135,6 +146,11 @@ void add_world_context_diagnostics(WorldSnapshot& snapshot) {
         snapshot.localPlayerHandle,
         snapshot.localPlayerPresent ? "yes" : "no",
         snapshot.placedObjectCount,
+        static_cast<unsigned>(snapshot.runtimeObjectCount),
+        snapshot.runtimeObjectDeclaredCount,
+        snapshot.audioListenerPresent ? "yes" : "no",
+        static_cast<unsigned>(snapshot.physicsBodyCount),
+        snapshot.physicsDeclaredSlots,
         state);
     if (written > 0 && static_cast<std::size_t>(written) < text.size()) {
         snapshot.diagnostics.push_back(

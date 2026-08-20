@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <limits>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -14,8 +15,10 @@
 
 #include <imgui.h>
 
+#include "../../../core/ui/components/section/ui_section_component.h"
 #include "../../../core/ui/modules/logs/logs.h"
 #include "../../../core/ui/scaling/dpi/ui_dpi_scaling.h"
+#include "../../../core/ui/textures/ui_texture_slots.h"
 #include "../../hooks/graphics/renderer/renderer.h"
 #include "../../hooks/viewer_camera/viewer_camera.h"
 #include "../../inspection/providers/spawn_inspection_provider.h"
@@ -33,20 +36,23 @@ namespace dpi = core::ui::scaling::dpi;
 namespace model = client::inspection;
 namespace provider = client::inspection::providers;
 namespace renderer = client::hooks::graphics::renderer;
+namespace section = core::ui::components::section;
+namespace textures = core::ui::textures;
 namespace viewer_input = client::viewer::input;
 
 constexpr float kToolbarHeight = 30.0F;
-constexpr float kStatusHeight = 22.0F;
-constexpr float kSplitterThickness = 4.0F;
+constexpr float kStatusHeight = 30.0F;
+constexpr float kSplitterThickness = 5.0F;
 constexpr float kMinimumViewportWidth = 360.0F;
 constexpr float kMinimumMainHeight = 140.0F;
-constexpr float kMinimumBottomUsableHeight = 38.0F;
+constexpr float kMinimumBottomUsableHeight = 40.0F;
 constexpr float kTreeRowHeight = 24.0F;
 constexpr float kTreeIndent = 14.0F;
+constexpr float kControlHeight = 24.0F;
 constexpr std::size_t kSearchCapacity = 256;
-constexpr ImU32 kGuideColor = IM_COL32(49, 57, 67, 210);
-constexpr ImVec4 kSelection{0.259F, 0.722F, 0.906F, 1.0F};
-constexpr ImVec4 kSpawn{0.902F, 0.722F, 0.290F, 1.0F};
+constexpr ImU32 kGuideColor = IM_COL32(63, 55, 42, 210);
+constexpr ImVec4 kSelection{0.796F, 0.608F, 0.318F, 1.0F};
+constexpr ImVec4 kSpawn{0.965F, 0.886F, 0.478F, 1.0F};
 constexpr ImVec4 kWarning{0.949F, 0.549F, 0.216F, 1.0F};
 constexpr ImVec4 kFailure{0.941F, 0.349F, 0.349F, 1.0F};
 constexpr ImVec4 kMuted{0.50F, 0.55F, 0.61F, 1.0F};
@@ -112,23 +118,23 @@ struct VerticalLayout final {
 }
 
 constexpr VerticalLayout kNormalLayout =
-    compute_vertical_layout(600.0F, 22.0F, 4.0F, 140.0F, 180.0F, 38.0F, 120.0F, false);
+    compute_vertical_layout(600.0F, 30.0F, 5.0F, 140.0F, 180.0F, 40.0F, 120.0F, false);
 static_assert(kNormalLayout.bottomVisible);
-static_assert(kNormalLayout.statusY == 578.0F);
+static_assert(kNormalLayout.statusY == 570.0F);
 static_assert(kNormalLayout.bottomHeight == 180.0F);
-static_assert(kNormalLayout.bottomY == 398.0F);
-static_assert(kNormalLayout.splitterY == 394.0F);
-static_assert(kNormalLayout.mainHeight == 394.0F);
+static_assert(kNormalLayout.bottomY == 390.0F);
+static_assert(kNormalLayout.splitterY == 385.0F);
+static_assert(kNormalLayout.mainHeight == 385.0F);
 
 constexpr VerticalLayout kCollapsedLayout =
-    compute_vertical_layout(600.0F, 22.0F, 4.0F, 140.0F, 180.0F, 38.0F, 120.0F, true);
+    compute_vertical_layout(600.0F, 30.0F, 5.0F, 140.0F, 180.0F, 40.0F, 120.0F, true);
 static_assert(!kCollapsedLayout.bottomVisible);
-static_assert(kCollapsedLayout.mainHeight == 578.0F);
+static_assert(kCollapsedLayout.mainHeight == 570.0F);
 
 constexpr VerticalLayout kTightLayout =
-    compute_vertical_layout(180.0F, 22.0F, 4.0F, 140.0F, 120.0F, 38.0F, 120.0F, false);
+    compute_vertical_layout(180.0F, 30.0F, 5.0F, 140.0F, 120.0F, 40.0F, 120.0F, false);
 static_assert(!kTightLayout.bottomVisible);
-static_assert(kTightLayout.mainHeight == 158.0F);
+static_assert(kTightLayout.mainHeight == 150.0F);
 
 enum class HierarchyMode : std::uint8_t {
     world,
@@ -155,6 +161,19 @@ struct TreeRow final {
     std::string label;
     std::uint8_t depth{};
     bool hasChildren{};
+};
+
+struct NodeIdentity final {
+    model::NodeKind kind{model::NodeKind::unresolved};
+    std::optional<std::uint64_t> runtimeEntity;
+    std::optional<std::uint64_t> observationId;
+    std::optional<std::uint8_t> objectSystemType;
+    std::optional<std::uint64_t> activitySession;
+    std::optional<std::uint32_t> scenarioTag;
+    std::string name;
+    std::string searchText;
+    bool group{};
+    bool valid{};
 };
 
 struct SplitterResult final {
@@ -197,6 +216,9 @@ struct WorkspaceState final {
     bool contextRequested{};
     bool focusSearch{};
     bool revealSelection{};
+    NodeIdentity treeAnchor;
+    float treeAnchorOffset{};
+    bool restoreTreeScroll{};
 };
 
 std::atomic_bool g_open{};
@@ -210,8 +232,66 @@ WorkspaceState g_state{};
     return g_state.provider.snapshot();
 }
 
+[[nodiscard]] model::NodeId first_observation_node(
+    const provider::WorldSnapshot& snapshot) noexcept {
+    if (snapshot.runtimeObjectGroupNode) {
+        return snapshot.runtimeObjectGroupNode;
+    }
+    if (snapshot.audioListenerNode) {
+        return snapshot.audioListenerNode;
+    }
+    if (snapshot.physicsGroupNode) {
+        return snapshot.physicsGroupNode;
+    }
+    return snapshot.physicsBodyNodes.empty() ? model::NodeId{} : snapshot.physicsBodyNodes.front();
+}
+
 [[nodiscard]] const model::Node* selected_node() noexcept {
     return world().graph.node(g_state.selection.selected());
+}
+
+[[nodiscard]] NodeIdentity node_identity(const model::Node* node) {
+    if (node == nullptr) {
+        return {};
+    }
+    return NodeIdentity{node->kind,
+                        node->runtimeEntity,
+                        node->observationId,
+                        node->objectSystemType,
+                        node->source.activitySession,
+                        node->source.scenarioTag,
+                        node->name,
+                        node->searchText,
+                        !node->children.empty(),
+                        true};
+}
+
+[[nodiscard]] bool identity_matches(const NodeIdentity& identity,
+                                    const model::Node& node) noexcept {
+    if (!identity.valid || identity.kind != node.kind
+        || identity.activitySession != node.source.activitySession
+        || identity.scenarioTag != node.source.scenarioTag) {
+        return false;
+    }
+    if (identity.runtimeEntity.has_value()) {
+        return identity.runtimeEntity == node.runtimeEntity
+               && identity.objectSystemType == node.objectSystemType;
+    }
+    if (identity.observationId.has_value() && node.kind != model::NodeKind::physics) {
+        return identity.observationId == node.observationId;
+    }
+    if (identity.group) {
+        return !node.children.empty() && identity.searchText == node.searchText;
+    }
+    return identity.name == node.name;
+}
+
+[[nodiscard]] model::NodeId find_node(const NodeIdentity& identity) noexcept {
+    const auto iterator =
+        std::ranges::find_if(world().graph.nodes(), [&identity](const model::Node& node) {
+            return identity_matches(identity, node);
+        });
+    return iterator == world().graph.nodes().end() ? model::NodeId{} : iterator->id;
 }
 
 void copy_text(std::string_view text) noexcept {
@@ -603,71 +683,70 @@ void rebuild_rows() {
     g_state.rowsValid = true;
 }
 
-[[nodiscard]] bool chip(const char* label,
-                        bool active,
-                        bool enabled,
-                        const char* unavailableTooltip) noexcept {
+[[nodiscard]] bool control_button(const char* label,
+                                  const ImVec2& size,
+                                  bool active,
+                                  bool enabled,
+                                  const char* unavailableTooltip = "") noexcept {
     if (!enabled) {
         ImGui::BeginDisabled();
     }
     if (active && enabled) {
         ImGui::PushStyleColor(ImGuiCol_Button,
-                              ImVec4(kSelection.x, kSelection.y, kSelection.z, 0.28F));
+                              ImVec4(kSelection.x, kSelection.y, kSelection.z, 0.22F));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+                              ImVec4(kSelection.x, kSelection.y, kSelection.z, 0.32F));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive,
                               ImVec4(kSelection.x, kSelection.y, kSelection.z, 0.42F));
     }
-    const bool pressed = ImGui::SmallButton(label);
+    const bool pressed = ImGui::Button(label, size);
     if (active && enabled) {
-        ImGui::PopStyleColor(2);
+        ImGui::PopStyleColor(3);
     }
     if (!enabled) {
         ImGui::EndDisabled();
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        if (unavailableTooltip[0] != '\0'
+            && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
             ImGui::SetTooltip("%s", unavailableTooltip);
         }
     }
     return enabled && pressed;
 }
 
+[[nodiscard]] bool chip(const char* label,
+                        bool active,
+                        bool enabled,
+                        const char* unavailableTooltip) noexcept {
+    return control_button(label,
+                          {0.0F, scaled(kControlHeight)},
+                          active,
+                          enabled,
+                          unavailableTooltip);
+}
+
+[[nodiscard]] bool tab_button(const char* label, bool active, float width) noexcept {
+    return control_button(label,
+                          {width, scaled(kControlHeight)},
+                          active,
+                          true);
+}
+
 void hierarchy_tabs() noexcept {
-    const auto tab = [](const char* label, HierarchyMode mode) noexcept {
-        const bool active = g_state.hierarchyMode == mode;
-        if (active) {
-            ImGui::PushStyleColor(ImGuiCol_Text, kSelection);
-        }
-        const bool pressed = ImGui::Selectable(label, active, 0, {0.0F, scaled(22.0F)});
-        if (active) {
-            ImGui::PopStyleColor();
-        }
-        if (pressed) {
+    const float spacing = ImGui::GetStyle().ItemSpacing.x;
+    const float available = (std::max)(1.0F, ImGui::GetContentRegionAvail().x - spacing * 2.0F);
+    const float width = available / 3.0F;
+    const auto tab = [width](const char* label, HierarchyMode mode) noexcept {
+        if (tab_button(label, g_state.hierarchyMode == mode, width)) {
             g_state.hierarchyMode = mode;
             g_state.rowsValid = false;
         }
     };
 
-    const float width = ImGui::GetContentRegionAvail().x / 3.0F;
-    ImGui::BeginGroup();
-    ImGui::BeginChild("##hierarchy_world",
-                      {width, scaled(22.0F)},
-                      false,
-                      ImGuiWindowFlags_NoScrollbar);
     tab("World", HierarchyMode::world);
-    ImGui::EndChild();
-    ImGui::SameLine(0.0F, 0.0F);
-    ImGui::BeginChild("##hierarchy_source",
-                      {width, scaled(22.0F)},
-                      false,
-                      ImGuiWindowFlags_NoScrollbar);
+    ImGui::SameLine();
     tab("Source", HierarchyMode::source);
-    ImGui::EndChild();
-    ImGui::SameLine(0.0F, 0.0F);
-    ImGui::BeginChild("##hierarchy_activity",
-                      {0.0F, scaled(22.0F)},
-                      false,
-                      ImGuiWindowFlags_NoScrollbar);
+    ImGui::SameLine();
     tab("Activity", HierarchyMode::activity);
-    ImGui::EndChild();
-    ImGui::EndGroup();
 }
 
 void quick_filters() noexcept {
@@ -768,6 +847,7 @@ model::NodeId draw_tree() noexcept {
     }
 
     const float rowHeight = scaled(kTreeRowHeight);
+    bool scrollAdjusted = false;
     if (g_state.revealSelection && g_state.selection.selected()) {
         const auto iterator = std::find_if(g_state.rows.begin(),
                                            g_state.rows.end(),
@@ -778,8 +858,22 @@ model::NodeId draw_tree() noexcept {
             const float index = static_cast<float>(iterator - g_state.rows.begin());
             const float target = index * rowHeight - ImGui::GetWindowHeight() * 0.45F;
             ImGui::SetScrollY((std::max)(0.0F, target));
+            scrollAdjusted = true;
         }
         g_state.revealSelection = false;
+        g_state.restoreTreeScroll = false;
+    } else if (g_state.restoreTreeScroll && g_state.treeAnchor.valid) {
+        const auto iterator =
+            std::ranges::find_if(g_state.rows, [](const TreeRow& row) {
+                const model::Node* node = world().graph.node(row.id);
+                return node != nullptr && identity_matches(g_state.treeAnchor, *node);
+            });
+        if (iterator != g_state.rows.end()) {
+            const float index = static_cast<float>(iterator - g_state.rows.begin());
+            ImGui::SetScrollY((std::max)(0.0F, index * rowHeight + g_state.treeAnchorOffset));
+            scrollAdjusted = true;
+        }
+        g_state.restoreTreeScroll = false;
     }
 
     ImGuiListClipper clipper;
@@ -809,10 +903,14 @@ model::NodeId draw_tree() noexcept {
             if (helper) {
                 ImGui::PushStyleColor(ImGuiCol_Text, hidden(row.id) ? kMuted : kSpawn);
             }
+            const float textWidth = ImGui::CalcTextSize(row.label.c_str()).x;
+            const float availableWidth = ImGui::GetContentRegionAvail().x;
+            const float itemWidth =
+                (std::max)(availableWidth, textWidth + ImGui::GetStyle().FramePadding.x * 2.0F);
             if (ImGui::Selectable(row.label.c_str(),
                                   selected,
                                   ImGuiSelectableFlags_AllowDoubleClick,
-                                  {0.0F, rowHeight})) {
+                                  {itemWidth, rowHeight})) {
                 g_state.selection.select(row.id);
                 if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
                     focus(row.id);
@@ -823,6 +921,9 @@ model::NodeId draw_tree() noexcept {
             }
             if (ImGui::IsItemHovered()) {
                 hovered = row.id;
+                if (textWidth > availableWidth) {
+                    ImGui::SetTooltip("%s", row.label.c_str());
+                }
                 if (ImGui::IsMouseReleased(ImGuiMouseButton_Right)) {
                     g_state.selection.select(row.id);
                     g_state.contextTarget = row.id;
@@ -832,11 +933,20 @@ model::NodeId draw_tree() noexcept {
             ImGui::PopID();
         }
     }
+    if (!scrollAdjusted) {
+        const float scrollY = ImGui::GetScrollY();
+        const std::size_t anchorIndex = (std::min)(
+            static_cast<std::size_t>((std::max)(0.0F, scrollY) / rowHeight),
+            g_state.rows.size() - 1U);
+        const model::Node* anchorNode = world().graph.node(g_state.rows[anchorIndex].id);
+        g_state.treeAnchor = node_identity(anchorNode);
+        g_state.treeAnchorOffset = scrollY - static_cast<float>(anchorIndex) * rowHeight;
+    }
     return hovered;
 }
 
 void draw_outliner() noexcept {
-    ImGui::TextDisabled("SCENE TREE");
+    section::header("Scene tree");
     hierarchy_tabs();
     if (g_state.focusSearch) {
         ImGui::SetKeyboardFocusHere();
@@ -852,12 +962,12 @@ void draw_outliner() noexcept {
     quick_filters();
     ImGui::Separator();
 
-    if (ImGui::SmallButton("Expand all")) {
+    if (control_button("Expand all", {0.0F, scaled(kControlHeight)}, false, true)) {
         g_state.collapsed.clear();
         g_state.rowsValid = false;
     }
     ImGui::SameLine();
-    if (ImGui::SmallButton("Collapse all")) {
+    if (control_button("Collapse all", {0.0F, scaled(kControlHeight)}, false, true)) {
         g_state.collapsed.clear();
         for (const model::Node& node : world().graph.nodes()) {
             if (!node.children.empty()) {
@@ -868,7 +978,10 @@ void draw_outliner() noexcept {
     }
     ImGui::Separator();
 
-    ImGui::BeginChild("##scene_tree_scroll", {0.0F, 0.0F}, false);
+    ImGui::BeginChild("##scene_tree_scroll",
+                      {0.0F, 0.0F},
+                      false,
+                      ImGuiWindowFlags_HorizontalScrollbar);
     const model::NodeId hovered = draw_tree();
     if (hovered) {
         g_state.selection.hover(hovered);
@@ -926,6 +1039,27 @@ void draw_identity(const model::Node& node) noexcept {
     if (node.runtimeEntity.has_value()) {
         property_u64("Runtime entity", *node.runtimeEntity);
     }
+    if (node.objectSystemType.has_value()) {
+        property_u64("Object-system type", *node.objectSystemType, 2);
+    }
+    if (node.observationId.has_value()) {
+        property_u64("Observation slot", *node.observationId);
+    }
+    if (node.triggerSourceHash.has_value()) {
+        property_u64("Trigger source", *node.triggerSourceHash, 8);
+    }
+    if (node.triggerOverlapCount.has_value()) {
+        property_i32("Overlapping bodies", static_cast<std::int32_t>(*node.triggerOverlapCount));
+    }
+    if (node.triggerSelector.has_value()) {
+        property_i32("Event selector", *node.triggerSelector);
+    }
+    if (node.triggerEnabled.has_value()) {
+        property_row("Enabled", *node.triggerEnabled ? "Yes" : "No");
+    }
+    if (node.triggerActive.has_value()) {
+        property_row("Active", *node.triggerActive ? "Yes" : "No");
+    }
     if (node.worldId.has_value()) {
         property_u64("WorldID", *node.worldId);
     }
@@ -969,6 +1103,10 @@ void draw_transform(const model::Node& node) noexcept {
     if (node.transform->hasScale) {
         formatVector(node.transform->scale, text);
         property_row("Scale", text.data());
+    }
+    if (node.linearVelocity.has_value()) {
+        formatVector(*node.linearVelocity, text);
+        property_row("Linear velocity", text.data());
     }
     ImGui::EndTable();
 }
@@ -1074,7 +1212,7 @@ void draw_inspector_actions(const model::Node& node) noexcept {
             }
         }
         sameLine = true;
-        return ImGui::SmallButton(label);
+        return ImGui::Button(label, {0.0F, scaled(kControlHeight)});
     };
 
     if (model::supports(node.actions, model::Action::focus)) {
@@ -1104,7 +1242,7 @@ void draw_inspector_actions(const model::Node& node) noexcept {
 }
 
 void draw_inspector() noexcept {
-    ImGui::TextDisabled("INSPECTOR");
+    section::header("Inspector");
     const model::Node* node = selected_node();
     if (node == nullptr) {
         ImGui::Separator();
@@ -1298,6 +1436,30 @@ void draw_data() noexcept {
     if (node->runtimeEntity.has_value()) {
         data_u64("runtime_entity", "u64", *node->runtimeEntity, 16, "runtime");
     }
+    if (node->objectSystemType.has_value()) {
+        data_u64("object_system_type", "u8", *node->objectSystemType, 2, "runtime");
+    }
+    if (node->observationId.has_value()) {
+        data_u64("observation_slot", "u64", *node->observationId, 16, "runtime");
+    }
+    if (node->triggerSourceHash.has_value()) {
+        data_u64("trigger_source", "hash32", *node->triggerSourceHash, 8, "runtime");
+    }
+    if (node->triggerOverlapCount.has_value()) {
+        data_i32("trigger_overlap_count",
+                 "u32",
+                 static_cast<std::int32_t>(*node->triggerOverlapCount),
+                 "runtime");
+    }
+    if (node->triggerSelector.has_value()) {
+        data_i32("trigger_selector", "i32", *node->triggerSelector, "runtime");
+    }
+    if (node->triggerEnabled.has_value()) {
+        data_row("trigger_enabled", "bool", *node->triggerEnabled ? "true" : "false", "runtime");
+    }
+    if (node->triggerActive.has_value()) {
+        data_row("trigger_active", "bool", *node->triggerActive ? "true" : "false", "runtime");
+    }
     if (node->worldId.has_value()) {
         data_u64("world_id", "u64", *node->worldId, 16, "runtime");
     }
@@ -1312,13 +1474,17 @@ void draw_data() noexcept {
     }
 
     if (node->transform.has_value()) {
-        data_vec3("position", node->transform->position, "catalog");
+        const char* const transformOrigin = node->transformRuntime ? "runtime" : "catalog";
+        data_vec3("position", node->transform->position, transformOrigin);
         if (node->transform->hasRotation) {
-            data_vec3("rotation", node->transform->rotation, "catalog");
+            data_vec3("rotation", node->transform->rotation, transformOrigin);
         }
         if (node->transform->hasScale) {
-            data_vec3("scale", node->transform->scale, "catalog");
+            data_vec3("scale", node->transform->scale, transformOrigin);
         }
+    }
+    if (node->linearVelocity.has_value()) {
+        data_vec3("linear_velocity", *node->linearVelocity, "runtime");
     }
     if (node->bounds.has_value()) {
         data_vec3("bounds_min", node->bounds->minimum, "runtime");
@@ -1362,7 +1528,10 @@ void draw_diagnostics() noexcept {
 
     ImGui::TextDisabled("%zu diagnostics", diagnostics.size());
     ImGui::SameLine();
-    if (ImGui::SmallButton("Copy diagnostics")) {
+    if (control_button("Copy diagnostics",
+                       {0.0F, scaled(kControlHeight)},
+                       false,
+                       true)) {
         std::string report;
         for (const model::Diagnostic& diagnostic : diagnostics) {
             const char* prefix = diagnostic.severity == model::Diagnostic::Severity::error
@@ -1397,45 +1566,45 @@ void draw_diagnostics() noexcept {
 
 void draw_bottom_dock() noexcept {
     const float contentWidth = (std::max)(1.0F, ImGui::GetContentRegionAvail().x);
+    const float spacing = ImGui::GetStyle().ItemSpacing.x;
     const char* hide = "Hide";
     const float hideWidth =
         ImGui::CalcTextSize(hide).x + ImGui::GetStyle().FramePadding.x * 2.0F;
     const float headerGap = scaled(8.0F);
-    const float minimumTabWidth = scaled(68.0F);
+    const float minimumTabWidth = scaled(76.0F);
     const bool compactHeader =
-        contentWidth < hideWidth + headerGap + minimumTabWidth * 3.0F;
+        contentWidth < hideWidth + headerGap + minimumTabWidth * 3.0F + spacing * 2.0F;
     const float tabArea = compactHeader ? contentWidth
                                         : (std::max)(1.0F, contentWidth - hideWidth - headerGap);
-    const float tabWidth = (std::max)(1.0F, tabArea / 3.0F);
+    const float tabWidth = (std::max)(1.0F, (tabArea - spacing * 2.0F) / 3.0F);
 
     const auto tab = [tabWidth](const char* label, BottomTab tabValue) noexcept {
-        const bool active = g_state.bottomTab == tabValue;
-        if (active) {
-            ImGui::PushStyleColor(ImGuiCol_Text, kSelection);
-        }
-        if (ImGui::Selectable(label, active, 0, {tabWidth, scaled(22.0F)})) {
+        if (tab_button(label, g_state.bottomTab == tabValue, tabWidth)) {
             g_state.bottomTab = tabValue;
-        }
-        if (active) {
-            ImGui::PopStyleColor();
         }
     };
 
     tab("References", BottomTab::references);
-    ImGui::SameLine(0.0F, 0.0F);
+    ImGui::SameLine();
     tab("Data", BottomTab::data);
-    ImGui::SameLine(0.0F, 0.0F);
+    ImGui::SameLine();
     tab("Diagnostics", BottomTab::diagnostics);
 
     if (compactHeader) {
-        if (ImGui::SmallButton("Hide bottom panel")) {
+        if (control_button("Hide bottom panel",
+                           {ImGui::GetContentRegionAvail().x, scaled(kControlHeight)},
+                           false,
+                           true)) {
             g_state.bottomCollapsed = true;
             persist_layout();
         }
     } else {
-        ImGui::SameLine((std::max)(ImGui::GetCursorPosX(),
-                                  ImGui::GetWindowWidth() - hideWidth - scaled(8.0F)));
-        if (ImGui::SmallButton(hide)) {
+        ImGui::SameLine();
+        ImGui::SetCursorPosX(ImGui::GetWindowContentRegionMax().x - hideWidth);
+        if (control_button(hide,
+                           {hideWidth, scaled(kControlHeight)},
+                           false,
+                           true)) {
             g_state.bottomCollapsed = true;
             persist_layout();
         }
@@ -1561,12 +1730,12 @@ void draw_toolbar(const camera::Status& status) noexcept {
                       ImGuiChildFlags_Borders,
                       ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoScrollbar);
     if (ImGui::BeginMenuBar()) {
-        ImDrawList* drawList = ImGui::GetWindowDrawList();
-        const ImVec2 cursor = ImGui::GetCursorScreenPos();
-        drawList->AddCircleFilled({cursor.x + scaled(5.0F), cursor.y + scaled(8.0F)},
-                                  scaled(3.0F),
-                                  ImGui::GetColorU32(world().stale ? kWarning : kSpawn));
-        ImGui::Dummy({scaled(12.0F), 0.0F});
+        const ImTextureID icon = textures::get(textures::Slot::inspectorIcon);
+        if (icon != ImTextureID_Invalid) {
+            ImGui::Image(icon, {scaled(18.0F), scaled(18.0F)});
+        } else {
+            ImGui::Dummy({scaled(18.0F), scaled(18.0F)});
+        }
         ImGui::SameLine();
 
         const char* package =
@@ -1632,13 +1801,19 @@ SplitterResult splitter(const char* id,
     const ImVec2 size = vertical ? ImVec2{scaled(kSplitterThickness), length}
                                  : ImVec2{length, scaled(kSplitterThickness)};
     ImGui::InvisibleButton(id, size);
+    const bool hovered = ImGui::IsItemHovered();
+    const bool active = ImGui::IsItemActive();
+    const ImGuiCol color = active ? ImGuiCol_SeparatorActive
+                                  : (hovered ? ImGuiCol_SeparatorHovered
+                                             : ImGuiCol_Separator);
     ImGui::GetWindowDrawList()->AddRectFilled(ImGui::GetItemRectMin(),
                                               ImGui::GetItemRectMax(),
-                                              ImGui::GetColorU32(ImGuiCol_Separator));
-    if (ImGui::IsItemHovered() || ImGui::IsItemActive()) {
+                                              ImGui::GetColorU32(color),
+                                              scaled(2.0F));
+    if (hovered || active) {
         ImGui::SetMouseCursor(vertical ? ImGuiMouseCursor_ResizeEW : ImGuiMouseCursor_ResizeNS);
     }
-    if (ImGui::IsItemActive() && maximum >= minimum) {
+    if (active && maximum >= minimum) {
         const float delta =
             vertical ? ImGui::GetIO().MouseDelta.x : ImGui::GetIO().MouseDelta.y;
         if (delta != 0.0F) {
@@ -1659,10 +1834,12 @@ void finish_splitter(const SplitterResult& result) noexcept {
 }
 
 void draw_status(const camera::Status& status) noexcept {
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {scaled(10.0F), scaled(3.0F)});
     ImGui::BeginChild("##world_status",
                       {0.0F, scaled(kStatusHeight)},
-                      ImGuiChildFlags_Borders,
+                      ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding,
                       ImGuiWindowFlags_NoScrollbar);
+    ImGui::PopStyleVar();
     std::array<char, 96> coordinates{};
     (void)std::snprintf(coordinates.data(),
                         coordinates.size(),
@@ -1683,7 +1860,7 @@ void draw_status(const camera::Status& status) noexcept {
     ImGui::TextDisabled("| %zu objects", world().graph.nodes().size());
     if (g_state.bottomCollapsed) {
         ImGui::SameLine();
-        if (ImGui::SmallButton("Show bottom")) {
+        if (control_button("Show bottom", {0.0F, scaled(kControlHeight)}, false, true)) {
             g_state.bottomCollapsed = false;
             persist_layout();
         }
@@ -1706,41 +1883,52 @@ void draw_status(const camera::Status& status) noexcept {
     ImGui::EndChild();
 }
 
-void push_editor_style() noexcept {
-    ImGui::PushFont(nullptr, 13.5F);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {0.0F, 0.0F});
-    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 1.0F);
-    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 2.0F);
-    ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding, 2.0F);
+void push_workspace_style() noexcept {
+    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, scaled(1.0F));
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, scaled(1.0F));
+    ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding, scaled(2.0F));
+    ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarRounding, scaled(1.0F));
+    ImGui::PushStyleVar(ImGuiStyleVar_GrabRounding, scaled(1.0F));
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {scaled(6.0F), scaled(4.0F)});
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, {scaled(6.0F), scaled(3.0F)});
-    ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarRounding, 0.0F);
-    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.025F, 0.029F, 0.035F, 1.0F));
-    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.84F, 0.87F, 0.91F, 1.0F));
-    ImGui::PushStyleColor(ImGuiCol_TextDisabled, kMuted);
-    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.075F, 0.086F, 0.102F, 0.975F));
-    ImGui::PushStyleColor(ImGuiCol_PopupBg, ImVec4(0.075F, 0.086F, 0.102F, 1.0F));
-    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.165F, 0.192F, 0.227F, 1.0F));
-    ImGui::PushStyleColor(ImGuiCol_Separator, ImVec4(0.165F, 0.192F, 0.227F, 1.0F));
-    ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.102F, 0.118F, 0.141F, 1.0F));
-    ImGui::PushStyleColor(ImGuiCol_FrameBgHovered,
-                          ImVec4(0.145F, 0.169F, 0.200F, 1.0F));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {scaled(8.0F), scaled(6.0F)});
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, scaled(1.0F));
+
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.010F, 0.009F, 0.015F, 1.0F));
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.91F, 0.91F, 0.88F, 1.0F));
+    ImGui::PushStyleColor(ImGuiCol_TextDisabled, ImVec4(0.48F, 0.48F, 0.46F, 1.0F));
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.024F, 0.024F, 0.033F, 0.985F));
+    ImGui::PushStyleColor(ImGuiCol_PopupBg, ImVec4(0.024F, 0.024F, 0.033F, 1.0F));
+    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.25F, 0.21F, 0.14F, 1.0F));
+    ImGui::PushStyleColor(ImGuiCol_Separator, ImVec4(0.25F, 0.21F, 0.14F, 1.0F));
+    ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.055F, 0.052F, 0.064F, 1.0F));
+    ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(0.105F, 0.090F, 0.072F, 1.0F));
+    ImGui::PushStyleColor(ImGuiCol_FrameBgActive,
+                          ImVec4(kSelection.x, kSelection.y, kSelection.z, 0.30F));
     ImGui::PushStyleColor(ImGuiCol_Header,
-                          ImVec4(kSelection.x, kSelection.y, kSelection.z, 0.22F));
+                          ImVec4(kSelection.x, kSelection.y, kSelection.z, 0.18F));
     ImGui::PushStyleColor(ImGuiCol_HeaderHovered,
-                          ImVec4(kSelection.x, kSelection.y, kSelection.z, 0.31F));
+                          ImVec4(kSelection.x, kSelection.y, kSelection.z, 0.28F));
     ImGui::PushStyleColor(ImGuiCol_HeaderActive,
                           ImVec4(kSelection.x, kSelection.y, kSelection.z, 0.38F));
-    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.102F, 0.118F, 0.141F, 1.0F));
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
-                          ImVec4(0.145F, 0.169F, 0.200F, 1.0F));
-    ImGui::PushStyleColor(ImGuiCol_CheckMark, kSelection);
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.055F, 0.052F, 0.064F, 1.0F));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.105F, 0.090F, 0.072F, 1.0F));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive,
+                          ImVec4(kSelection.x, kSelection.y, kSelection.z, 0.32F));
+    ImGui::PushStyleColor(ImGuiCol_CheckMark, kSpawn);
+    ImGui::PushStyleColor(ImGuiCol_TextSelectedBg,
+                          ImVec4(kSelection.x, kSelection.y, kSelection.z, 0.36F));
+    ImGui::PushStyleColor(ImGuiCol_NavCursor, kSpawn);
+    ImGui::PushStyleColor(ImGuiCol_ScrollbarBg, ImVec4(0.018F, 0.017F, 0.024F, 1.0F));
+    ImGui::PushStyleColor(ImGuiCol_ScrollbarGrab, ImVec4(0.15F, 0.13F, 0.095F, 1.0F));
+    ImGui::PushStyleColor(ImGuiCol_ScrollbarGrabHovered,
+                          ImVec4(kSelection.x, kSelection.y, kSelection.z, 0.56F));
+    ImGui::PushStyleColor(ImGuiCol_ScrollbarGrabActive, kSelection);
 }
 
-void pop_editor_style() noexcept {
-    ImGui::PopStyleColor(15);
-    ImGui::PopStyleVar(7);
-    ImGui::PopFont();
+void pop_workspace_style() noexcept {
+    ImGui::PopStyleColor(23);
+    ImGui::PopStyleVar(9);
 }
 
 } // namespace
@@ -1790,29 +1978,55 @@ bool render(bool uiVisible) noexcept {
 
     initialize_layout();
     refresh_layout_scale();
+    const std::uint32_t previousGeneration = world().graph.generation();
+    const model::NodeId previousObservationStart = first_observation_node(world());
+    const model::NodeId previousSelection = g_state.selection.selected();
+    const NodeIdentity previousSelectionIdentity =
+        node_identity(world().graph.node(previousSelection));
     const bool rebuilt = g_state.provider.refresh();
     if (rebuilt) {
+        if (world().graph.generation() != previousGeneration) {
+            g_state.hidden.clear();
+            g_state.collapsed.clear();
+            g_state.hiddenRevision = 0;
+        } else if (previousObservationStart) {
+            const auto observationState = [previousObservationStart](std::uint64_t id) noexcept {
+                return id >= previousObservationStart.value;
+            };
+            if (observationState(previousSelection.value)) {
+                g_state.selection.clear();
+                const model::NodeId replacement = find_node(previousSelectionIdentity);
+                if (replacement) {
+                    g_state.selection.select(replacement);
+                }
+            }
+            if (std::erase_if(g_state.hidden, observationState) != 0) {
+                ++g_state.hiddenRevision;
+            }
+            std::erase_if(g_state.collapsed, observationState);
+            g_state.restoreTreeScroll = true;
+        }
         g_state.selection.reconcile(world().graph);
-        g_state.hidden.clear();
-        g_state.collapsed.clear();
-        g_state.hiddenRevision = 0;
         g_state.rowsValid = false;
     }
     g_state.selection.clear_hover();
 
     const camera::Status cameraStatus = camera::status();
     const renderer::frame_capture::View capturedFrame = renderer::captured_frame_locked();
-    push_editor_style();
-
-    const ImVec2 displaySize = ImGui::GetIO().DisplaySize;
-    if (displaySize.x <= 0.0F || displaySize.y <= 0.0F) {
-        pop_editor_style();
+    const ImGuiViewport* mainViewport = ImGui::GetMainViewport();
+    if (mainViewport == nullptr || mainViewport->Size.x <= 0.0F
+        || mainViewport->Size.y <= 0.0F) {
         return false;
     }
 
-    ImGui::SetNextWindowPos({0.0F, 0.0F}, ImGuiCond_Always);
-    ImGui::SetNextWindowSize(displaySize, ImGuiCond_Always);
+    push_workspace_style();
+    ImGui::SetNextWindowPos(mainViewport->Pos, ImGuiCond_Always);
+    ImGui::SetNextWindowSize(mainViewport->Size, ImGuiCond_Always);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {0.0F, 0.0F});
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0F);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0F);
     const bool submit = ImGui::Begin("World Inspector", nullptr, kWorkspaceFlags);
+    ImGui::PopStyleVar(3);
     if (submit) {
         draw_toolbar(cameraStatus);
 
@@ -1870,7 +2084,7 @@ bool render(bool uiVisible) noexcept {
         ImGui::SetCursorScreenPos(contentOrigin);
         ImGui::BeginChild("##world_outliner",
                           {leftWidth, mainHeight},
-                          ImGuiChildFlags_Borders);
+                          ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding);
         draw_outliner();
         ImGui::EndChild();
 
@@ -1895,14 +2109,21 @@ bool render(bool uiVisible) noexcept {
         const float viewportX = contentOrigin.x + leftWidth + splitterSize;
         ImGui::SetCursorScreenPos({viewportX, contentOrigin.y});
         const ImVec4 viewportBackground = capturedFrame
-                                              ? ImVec4(0.025F, 0.029F, 0.035F, 1.0F)
+                                              ? ImVec4(0.010F, 0.009F, 0.015F, 1.0F)
                                               : ImVec4(0.0F, 0.0F, 0.0F, 0.0F);
         ImGui::PushStyleColor(ImGuiCol_ChildBg, viewportBackground);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {0.0F, 0.0F});
         ImGui::BeginChild("##world_viewport",
                           {centerWidth, mainHeight},
                           ImGuiChildFlags_Borders,
                           capturedFrame ? ImGuiWindowFlags_None : ImGuiWindowFlags_NoBackground);
-        const viewport::Options overlayOptions{g_state.showSpawns, g_state.showLabels};
+        ImGui::PopStyleVar();
+        const viewport::Options overlayOptions{g_state.showGeometry,
+                                               g_state.showEntities,
+                                               g_state.showSpawns,
+                                               g_state.showTriggers,
+                                               g_state.showAudio,
+                                               g_state.showLabels};
         const viewport::Result interaction =
             viewport::draw(world().graph,
                            g_state.selection.selected(),
@@ -1956,7 +2177,7 @@ bool render(bool uiVisible) noexcept {
         ImGui::SetCursorScreenPos({rightSplitterX + splitterSize, contentOrigin.y});
         ImGui::BeginChild("##world_properties",
                           {rightWidth, mainHeight},
-                          ImGuiChildFlags_Borders);
+                          ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding);
         draw_inspector();
         ImGui::EndChild();
 
@@ -1982,7 +2203,8 @@ bool render(bool uiVisible) noexcept {
             ImGui::SetCursorScreenPos({contentOrigin.x, contentOrigin.y + vertical.bottomY});
             ImGui::BeginChild("##world_bottom",
                               {availableWidth, bottomHeight},
-                              ImGuiChildFlags_Borders);
+                              ImGuiChildFlags_Borders
+                                  | ImGuiChildFlags_AlwaysUseWindowPadding);
             draw_bottom_dock();
             ImGui::EndChild();
         }
@@ -1998,7 +2220,7 @@ bool render(bool uiVisible) noexcept {
         handle_shortcuts();
     }
     ImGui::End();
-    pop_editor_style();
+    pop_workspace_style();
     return true;
 }
 

@@ -28,11 +28,12 @@ precision movement, persistent Viewer settings, focus-to-selection support, came
 copy-position support. HUD and weapon presentation controls remain independent.
 
 World Inspector provides World, Source, and Activity hierarchy modes, structured search, quick
-filters, a captured live game viewport with projected spawn markers, selection/focus/hide/isolate
+filters, a captured live game viewport with projected runtime and spawn markers, selection/focus/hide/isolate
 operations, a property inspector, and References/Data/Diagnostics bottom-dock views. The Entities
-filter includes the live local controlled object when Sunrise has published its handle and physics
-position, plus package-backed placed roster objects and their component-slot descriptors. Hide and
-isolate affect inspector helpers only; inspection does not mutate Destiny world objects.
+filter includes every occupied live object datum, the local controlled object, package-backed
+placed roster objects, and their component-slot descriptors. StaticMesh and Speedtree object types
+also populate Geometry. Hide and isolate affect inspector helpers only; inspection does not mutate
+Destiny world objects.
 
 Current inspection coverage is evidence-backed and intentionally explicit:
 
@@ -41,26 +42,35 @@ Current inspection coverage is evidence-backed and intentionally explicit:
 | Activity / destination / scenario / bubble context | Supported |
 | Spawn set and spawn-point inspection | Supported |
 | Live local controlled-object handle and physics position | Supported when the player observer is ready |
+| Primary Wwise listener position | Supported as a copied runtime observation |
+| Havok rigid-body positions and velocities | Supported as a bounded copied slot snapshot; slots are not durable body or entity identities |
 | Package-backed roster placement inspection | Supported for destination-wide and current-bubble groups |
 | Roster component-slot metadata | Supported; bounded child preview with full declared counts |
-| General live object-system / simulation-entity enumeration | Not currently enumerated |
-| Volumes / trigger semantics | Not currently enumerated |
-| Additional physics object enumeration | Not currently enumerated |
-| Geometry / terrain enumeration | Not currently enumerated |
+| General live object-system enumeration | Supported as a bounded copy from the engine's occupied-datum iterator |
+| Live object-system type classification | Supported; unknown byte values remain explicit |
+| Simulation-entity enumeration | Not currently enumerated separately from object-system handles |
+| Havok trigger volumes | Supported as copied positions and overlap counts; shape bounds and authored semantics remain unavailable |
+| Stable physics body/controller identity and shapes | Not currently enumerated |
+| StaticMesh / Speedtree object geometry | Supported as live object classifications; mesh resources and bounds are not enumerated |
+| Terrain enumeration | Not currently enumerated |
 | Light enumeration | Not currently enumerated |
-| Audio emitter enumeration | Not currently enumerated |
+| Audio emitter/voice/graph enumeration | Not currently enumerated |
 
 Package-backed placement nodes use the dedicated `Placed Object` kind and `Unknown semantic` status.
 They represent authored catalog records and do not claim that a live object-system handle or
 simulation entity exists. They intentionally have no transform, bounds, runtime identity, or
 world-render mutation actions. The live local-player row is separate: it carries only the scalar
 controlled-object handle and copied physics position that Sunrise already publishes without
-retaining a gameplay pointer.
+retaining a gameplay pointer. General live-object rows are rebuilt from the engine's official
+occupied-datum iterator and receive copied positions only when the existing physics-sync hook sees
+that object. Audio and Havok observation rows likewise copy only scalar data while their existing
+runtime hooks own the native objects; they never retain Wwise, Havok, object, or component pointers.
 
 The Diagnostics view reports provider coverage and the exact world snapshot identity used to build
 the graph, including package/map, activity session and revision, activity index, region, bubble,
 map-bubble, scenario tag, spawn-set hash, local-player availability, placed-object and slot counts,
-stale/deferred state, and catalog readiness. Unknown or unsupported runtime semantics are left
+primary-listener availability, bounded Havok observation counts, stale/deferred state, and catalog
+readiness. Unknown or unsupported runtime semantics are left
 unknown rather than assigned speculative names.
 
 ## WIP

@@ -1,4 +1,9 @@
-void SpawnInspectionProvider::rebuild(const Key& key, const live::Snapshot& livePlayer) {
+void SpawnInspectionProvider::rebuild(const Key& key,
+                                      const live::Snapshot& livePlayer,
+                                      const observed::ObjectSnapshot& objects,
+                                      const observed::TriggerSnapshot& triggers,
+                                      const observed::AudioSnapshot& audio,
+                                      const observed::PhysicsSnapshot& physics) {
     snapshot_ = {};
     snapshot_.graph.reset(generation_);
     snapshot_.packageName = key.packageName;
@@ -16,6 +21,18 @@ void SpawnInspectionProvider::rebuild(const Key& key, const live::Snapshot& live
     snapshot_.scenarioTruncated = key.scenarioTruncated;
     snapshot_.localPlayerPresent = key.localPlayerPresent;
     snapshot_.localPlayerPositionPresent = key.localPlayerPositionPresent;
+    snapshot_.runtimeObjectsPresent = key.runtimeObjectsPresent;
+    snapshot_.runtimeObjectsTruncated = key.runtimeObjectsTruncated;
+    snapshot_.runtimeObjectDeclaredCount = key.runtimeObjectDeclaredCount;
+    snapshot_.runtimeObjectCount = key.runtimeObjectCount;
+    snapshot_.triggersPresent = key.triggersPresent;
+    snapshot_.triggersTruncated = key.triggersTruncated;
+    snapshot_.triggerCount = key.triggerCount;
+    snapshot_.audioListenerPresent = key.audioListenerPresent;
+    snapshot_.physicsPresent = key.physicsPresent;
+    snapshot_.physicsDeclaredSlots = key.physicsDeclaredSlots;
+    snapshot_.physicsBodyCount = key.physicsBodyCount;
+    snapshot_.physicsTruncated = key.physicsTruncated;
     snapshot_.spawnCatalogReady = key.spawnCatalogReady;
     snapshot_.stale = key.stale;
     if (key.bubble >= 0) {
@@ -48,7 +65,7 @@ void SpawnInspectionProvider::rebuild(const Key& key, const live::Snapshot& live
     root.name = key.packageName.empty() ? "World" : key.packageName;
     root.kind = NodeKind::world;
     root.status = key.stale ? Status::deferred
-                           : (key.sessionPresent ? Status::known : Status::unknownSemantic);
+                            : (key.sessionPresent ? Status::known : Status::unknownSemantic);
     root.source = source;
     root.actions = Action::copyId;
     const NodeId rootId = snapshot_.graph.add(std::move(root));
@@ -91,8 +108,7 @@ void SpawnInspectionProvider::rebuild(const Key& key, const live::Snapshot& live
         scenarioNode.kind = NodeKind::source;
         scenarioNode.status = !key.scenarioReady
                                   ? Status::deferred
-                                  : (key.scenarioPresent ? Status::known
-                                                         : Status::unknownSemantic);
+                                  : (key.scenarioPresent ? Status::known : Status::unknownSemantic);
         scenarioNode.source = source;
         if (key.scenarioTag != 0) {
             scenarioNode.tag = key.scenarioTag;
@@ -110,8 +126,8 @@ void SpawnInspectionProvider::rebuild(const Key& key, const live::Snapshot& live
         live::append(snapshot_.graph, snapshot_.diagnostics, livePlayer, source, graphParent);
     snapshot_.localPlayerNode = liveResult.node;
 
-    const placed::AppendResult placedResult =
-        placed::append(snapshot_.graph, snapshot_.diagnostics, key.placedObjects, source, graphParent);
+    const placed::AppendResult placedResult = placed::append(
+        snapshot_.graph, snapshot_.diagnostics, key.placedObjects, source, graphParent);
     snapshot_.placedObjectGroupNode = placedResult.groupNode;
     snapshot_.placedObjectCount = placedResult.objectCount;
     snapshot_.placedObjectSlotCount = placedResult.slotCount;

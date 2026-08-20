@@ -19,6 +19,8 @@
 #include "../hooks/teleport/runtime.h"
 #include "../hooks/viewer_audio/viewer_audio.h"
 #include "../hooks/viewer_camera/viewer_camera.h"
+#include "../hooks/viewer_objects/viewer_objects.h"
+#include "../hooks/viewer_triggers/viewer_triggers.h"
 #include "../inactivity/inactivity_settings_store.h"
 #include "../movement/movement_settings_store.h"
 #include "../player/player_settings_store.h"
@@ -136,8 +138,22 @@ bool shutdown() noexcept {
     hooks::bootflow::uninstall();
     hooks::infinite_ammo::uninstall();
     hooks::inactivity::uninstall();
-    hooks::noclip::uninstall();
+    if (!hooks::noclip::uninstall()) {
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::error,
+                         "ev=shutdown stage=noclip result=fail");
+        ReleaseSRWLockExclusive(&runtime::g_lock);
+        return false;
+    }
     hooks::teleport::uninstall();
+    if (!viewer::triggers::uninstall()) {
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::error,
+                         "ev=shutdown stage=viewer_triggers result=fail");
+        ReleaseSRWLockExclusive(&runtime::g_lock);
+        return false;
+    }
+    viewer::objects::uninstall();
     hooks::queuez::uninstall();
     core::log::write(core::log::Channel::client,
                      core::log::Level::debug,

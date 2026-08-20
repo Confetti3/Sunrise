@@ -1,3 +1,4 @@
+    [&]() {
     if (!key.sessionPresent) {
         snapshot_.diagnostics.push_back(
             {Diagnostic::Severity::warning, "No committed activity session is available."});
@@ -101,6 +102,24 @@
         snapshot_.diagnostics.push_back(
             {Diagnostic::Severity::warning, "The selected spawn set contains no copied points."});
     }
+    }();
+
+    const observed::AppendResult observedResult = observed::append(
+        snapshot_.graph,
+        snapshot_.diagnostics,
+        objects,
+        triggers,
+        audio,
+        physics,
+        source,
+        graphParent);
+    snapshot_.runtimeObjectGroupNode = observedResult.objectGroup;
+    snapshot_.runtimeObjectNodes = observedResult.objects;
+    snapshot_.triggerGroupNode = observedResult.triggerGroup;
+    snapshot_.triggerNodes = observedResult.triggers;
+    snapshot_.audioListenerNode = observedResult.audioListener;
+    snapshot_.physicsGroupNode = observedResult.physicsGroup;
+    snapshot_.physicsBodyNodes = observedResult.physicsBodies;
 }
 
 const WorldSnapshot& SpawnInspectionProvider::snapshot() const noexcept {

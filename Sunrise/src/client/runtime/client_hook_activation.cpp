@@ -31,6 +31,8 @@
 #include "../hooks/teleport/runtime.h"
 #include "../hooks/viewer_audio/viewer_audio.h"
 #include "../hooks/viewer_camera/viewer_camera.h"
+#include "../hooks/viewer_objects/viewer_objects.h"
+#include "../hooks/viewer_triggers/viewer_triggers.h"
 #include "../patterns/registry.h"
 #include "../targets/game.h"
 #include "internal.h"
@@ -171,6 +173,10 @@ void clear_game_targets() noexcept {
     (void)hooks::config_getter::install();
     // Boot-step fixes scan for their own single-site targets; each reports its own outcome.
     (void)hooks::bootflow::install();
+    // Resolve the read-only object iterator before the camera callback begins polling it.
+    (void)viewer::objects::install();
+    // Native trigger-event ticks publish copied component state for the read-only inspector.
+    (void)viewer::triggers::install();
     // The teleport hooks attach whether or not the feature is on, so the interface can enable it
     // without a restart. Both replacements return immediately while nothing is requested.
     (void)hooks::teleport::install();

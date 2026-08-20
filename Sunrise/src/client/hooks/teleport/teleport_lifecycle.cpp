@@ -22,6 +22,7 @@
 #include "../sword_skate/sword_skate.h"
 #include "../viewer_audio/viewer_audio.h"
 #include "../viewer_camera/viewer_camera.h"
+#include "../viewer_objects/viewer_objects.h"
 #include "internal.h"
 #include "runtime.h"
 
@@ -91,6 +92,7 @@ std::int64_t __fastcall camera_transform(std::uint32_t playerIndex) noexcept {
     // Read here, not on the physics tick: that tick stops for a player who is standing still.
     hooks::fly::poll_toggle();
     client::player::position::poll();
+    client::viewer::objects::poll();
     hooks::bootflow::poll_world_step();
     return result;
 }
@@ -113,7 +115,9 @@ std::int64_t __fastcall physics_sync(std::byte* component, std::byte* outFlags) 
     // This tick is the only one that sees every component, so it is where the player's is found.
     client::player::position::observe(component);
     const PhysicsSync next = original<PhysicsSync>(kPhysicsSlot);
-    return next != nullptr ? next(component, outFlags) : 0;
+    const std::int64_t result = next != nullptr ? next(component, outFlags) : 0;
+    client::viewer::objects::observe_physics_component(component);
+    return result;
 }
 
 /**

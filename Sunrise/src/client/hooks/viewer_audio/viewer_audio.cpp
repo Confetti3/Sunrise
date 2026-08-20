@@ -2,6 +2,7 @@
 
 #include <Windows.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cmath>
@@ -261,6 +262,31 @@ bool installed() noexcept {
 
 bool applied() noexcept {
     return g_applied.load(std::memory_order_acquire);
+}
+
+bool listener_snapshot(ListenerSnapshot& output) noexcept {
+    output = {};
+    if (!g_installed.load(std::memory_order_acquire)
+        || g_stopping.load(std::memory_order_acquire)) {
+        return false;
+    }
+
+    camera::Pose pose{};
+    if (g_applied.load(std::memory_order_acquire) && camera::pose_snapshot(pose)
+        && finite(pose.position)) {
+        output.position = pose.position;
+        output.viewerOverride = true;
+        return true;
+    }
+
+    ListenerPosition native{};
+    if (!native_snapshot(native)) {
+        return false;
+    }
+    // Inverse of Destiny {x,y,z} -> Wwise {-y,z,x}.
+    output.position = {native.position.z, -native.position.x, native.position.y};
+    return std::ranges::all_of(output.position,
+                               [](float value) noexcept { return std::isfinite(value); });
 }
 
 } // namespace sunrise::client::viewer::audio

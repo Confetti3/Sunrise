@@ -12,7 +12,11 @@
 namespace sunrise::client::ui::world_inspector::viewport {
 
 struct Options final {
+    bool showGeometry{true};
+    bool showEntities{true};
     bool showSpawns{true};
+    bool showTriggers{true};
+    bool showAudio{true};
     bool showLabels{};
 };
 

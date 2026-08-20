@@ -19,6 +19,13 @@ constexpr float kMarkerRadius = 4.5F;
 constexpr float kHoverRadius = 7.0F;
 constexpr float kSelectedRadius = 10.0F;
 constexpr ImU32 kSpawnColor = IM_COL32(230, 184, 74, 235);
+constexpr ImU32 kGeometryColor = IM_COL32(72, 201, 176, 240);
+constexpr ImU32 kTerrainColor = IM_COL32(112, 190, 92, 240);
+constexpr ImU32 kEntityColor = IM_COL32(239, 142, 70, 240);
+constexpr ImU32 kLightColor = IM_COL32(255, 226, 117, 245);
+constexpr ImU32 kTriggerColor = IM_COL32(225, 98, 181, 245);
+constexpr ImU32 kAudioColor = IM_COL32(174, 124, 239, 245);
+constexpr ImU32 kPhysicsColor = IM_COL32(86, 150, 238, 240);
 constexpr ImU32 kSelectionColor = IM_COL32(66, 184, 231, 255);
 constexpr ImU32 kHoverColor = IM_COL32(151, 220, 246, 255);
 constexpr ImU32 kHiddenColor = IM_COL32(116, 124, 135, 230);
@@ -26,10 +33,32 @@ constexpr ImU32 kLabelBackground = IM_COL32(15, 18, 22, 225);
 
 struct Projected final {
     inspection::NodeId id{};
+    inspection::NodeKind kind{inspection::NodeKind::unresolved};
     ImVec2 screen{};
     float depth{};
     bool hidden{};
 };
+
+[[nodiscard]] ImU32 helper_color(inspection::NodeKind kind) noexcept {
+    switch (kind) {
+    case inspection::NodeKind::geometry:
+        return kGeometryColor;
+    case inspection::NodeKind::terrain:
+        return kTerrainColor;
+    case inspection::NodeKind::runtimeEntity:
+        return kEntityColor;
+    case inspection::NodeKind::light:
+        return kLightColor;
+    case inspection::NodeKind::trigger:
+        return kTriggerColor;
+    case inspection::NodeKind::audio:
+        return kAudioColor;
+    case inspection::NodeKind::physics:
+        return kPhysicsColor;
+    default:
+        return kSpawnColor;
+    }
+}
 
 [[nodiscard]] float scaled(float value) noexcept {
     return dpi::pixels(value);
@@ -136,7 +165,7 @@ void draw_marker(ImDrawList& drawList,
     const ImU32 color = projected.hidden ? kHiddenColor
                          : selected       ? kSelectionColor
                          : hovered        ? kHoverColor
-                                          : kSpawnColor;
+                                          : helper_color(projected.kind);
     const float radius = selected ? scaled(kSelectedRadius)
                                    : (hovered ? scaled(kHoverRadius) : scaled(kMarkerRadius));
     if (selected) {
@@ -187,6 +216,28 @@ void draw_bounds_tooltip(const inspection::Bounds& bounds) noexcept {
                 static_cast<double>(bounds.maximum[2]));
 }
 
+[[nodiscard]] bool visible(inspection::NodeKind kind, const Options& options) noexcept {
+    switch (kind) {
+    case inspection::NodeKind::geometry:
+    case inspection::NodeKind::terrain:
+        return options.showGeometry;
+    case inspection::NodeKind::runtimeEntity:
+    case inspection::NodeKind::light:
+    case inspection::NodeKind::physics:
+        return options.showEntities;
+    case inspection::NodeKind::spawnGroup:
+    case inspection::NodeKind::spawnSet:
+    case inspection::NodeKind::spawnPoint:
+        return options.showSpawns;
+    case inspection::NodeKind::trigger:
+        return options.showTriggers;
+    case inspection::NodeKind::audio:
+        return options.showAudio;
+    default:
+        return false;
+    }
+}
+
 } // namespace
 
 Result draw(const inspection::Graph& graph,
@@ -233,15 +284,16 @@ Result draw(const inspection::Graph& graph,
     projected.clear();
     if (camera.active) {
         for (const inspection::Node& node : graph.nodes()) {
-            if (node.kind != inspection::NodeKind::spawnPoint || !node.transform.has_value()) {
+            if (!node.transform.has_value()
+                || !inspection::supports(node.actions, inspection::Action::hide)) {
                 continue;
             }
             const bool selectedNode = node.id == selected;
             const bool hiddenNode = hidden.contains(node.id.value);
-            if ((!options.showSpawns || hiddenNode) && !selectedNode) {
+            if ((!visible(node.kind, options) || hiddenNode) && !selectedNode) {
                 continue;
             }
-            Projected marker{node.id, {}, 0.0F, hiddenNode};
+            Projected marker{node.id, node.kind, {}, 0.0F, hiddenNode};
             if (project(*node.transform,
                         camera.pose,
                         projectionPosition,
@@ -326,7 +378,7 @@ Result draw(const inspection::Graph& graph,
                 const ImU32 color = marker.hidden ? kHiddenColor
                                     : selectedNode ? kSelectionColor
                                     : hoveredNode  ? kHoverColor
-                                                   : kSpawnColor;
+                                                   : helper_color(marker.kind);
                 draw_label(*drawList, *node, marker, color);
             }
         }

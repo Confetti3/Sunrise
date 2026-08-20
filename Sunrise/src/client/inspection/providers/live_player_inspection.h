@@ -71,6 +71,7 @@ struct AppendResult final {
     node.runtimeEntity = snapshot.controlledHandle;
     if (snapshot.positionPresent) {
         node.transform = Transform{snapshot.position};
+        node.transformRuntime = true;
     }
     node.actions = Action::focus | Action::hide | Action::isolate | Action::copyId
                    | Action::copyPosition;
@@ -107,8 +108,10 @@ inline void update(Graph& graph, NodeId nodeId, const Snapshot& snapshot) noexce
     node->status = snapshot.positionPresent ? Status::known : Status::deferred;
     if (snapshot.positionPresent) {
         node->transform = Transform{snapshot.position};
+        node->transformRuntime = true;
     } else {
         node->transform.reset();
+        node->transformRuntime = false;
     }
 }
 

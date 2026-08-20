@@ -14,6 +14,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <limits>
 #include <string_view>
 
 #include "../../../core/logging/log.h"
@@ -73,6 +74,10 @@ constexpr std::uint32_t kArrayCapacityMask = 0x3FFFFFFF;
 /** Defensive limits for game-owned island and entity arrays. */
 constexpr std::int32_t kMaximumIslandCount = 4096;
 constexpr std::int32_t kMaximumEntityCount = 65536;
+/** Total body pointers inspected per step before the observation is marked truncated. */
+constexpr std::uint32_t kPhysicsObservationScanBudget = 1024;
+/** A snapshot older than this no longer proves that a Havok world is being stepped. */
+constexpr ULONGLONG kPhysicsObservationLifetimeMilliseconds = 500;
 /** Maximum accepted physics step; a resumed or stalled frame must not produce a large jump. */
 constexpr float kMaximumStepSeconds = 0.05F;
 /** Native velocity below this magnitude is treated as stationary. */
@@ -91,10 +96,31 @@ constexpr std::size_t kHavokArrayBytes = 16;
 static_assert(sizeof(HavokArray) == kHavokArrayBytes);
 
 std::atomic_bool g_installed{false};
+std::atomic_bool g_stopping{false};
+std::atomic_uint g_replacementInFlight{};
 std::atomic_bool g_toggleDown{false};
 /** Module-owned vtable target; unlike Havok objects, its address is stable until DLL teardown. */
 std::uintptr_t g_characterMotionVtable{};
 hooking::detour::Handle g_stepHandle{};
+SRWLOCK g_physicsObservationLock{SRWLOCK_INIT};
+PhysicsObservationSnapshot g_physicsObservation{};
+ULONGLONG g_physicsObservationTick{};
+std::uint64_t g_physicsObservationSequence{};
+
+struct ReplacementScope final {
+    ReplacementScope() noexcept {
+        g_replacementInFlight.fetch_add(1, std::memory_order_acq_rel);
+    }
+    ~ReplacementScope() {
+        g_replacementInFlight.fetch_sub(1, std::memory_order_acq_rel);
+    }
+    ReplacementScope(const ReplacementScope&) = delete;
+    ReplacementScope& operator=(const ReplacementScope&) = delete;
+};
+
+[[nodiscard]] bool replacement_idle() noexcept {
+    return g_replacementInFlight.load(std::memory_order_acquire) == 0;
+}
 
 /** Views one field while its owning Havok object is live inside the simulation hook. */
 template <typename T> [[nodiscard]] T& field(std::byte* object, std::size_t offset) noexcept {
@@ -139,6 +165,99 @@ capped_speed(const std::array<float, kVectorLanes>& velocity, float limit) noexc
     return array.size >= 0 && array.size <= maximum
            && static_cast<std::uint32_t>(array.size) <= capacity
            && (array.size == 0 || array.entries != nullptr);
+}
+
+[[nodiscard]] bool finite_vector(const std::array<float, kVectorLanes>& value) noexcept {
+    return std::isfinite(value[0]) && std::isfinite(value[1]) && std::isfinite(value[2]);
+}
+
+/** Encodes a snapshot-local active/inactive island and entity-array location. */
+[[nodiscard]] std::uint64_t
+physics_slot(std::size_t arrayIndex, std::int32_t islandIndex, std::int32_t entityIndex) noexcept {
+    return (static_cast<std::uint64_t>(arrayIndex) << 63U)
+           | (static_cast<std::uint64_t>(static_cast<std::uint32_t>(islandIndex)) << 32U)
+           | static_cast<std::uint32_t>(entityIndex);
+}
+
+void clear_physics_observation() noexcept {
+    AcquireSRWLockExclusive(&g_physicsObservationLock);
+    g_physicsObservation = {};
+    g_physicsObservationTick = 0;
+    ReleaseSRWLockExclusive(&g_physicsObservationLock);
+}
+
+/** Copies bounded scalar body state while the simulation hook proves every pointer is live. */
+void publish_physics_observation(std::byte* simulation) noexcept {
+    PhysicsObservationSnapshot next{};
+    if (simulation == nullptr) {
+        clear_physics_observation();
+        return;
+    }
+    std::byte* const world = field<std::byte*>(simulation, kSimulationWorld);
+    if (world == nullptr) {
+        clear_physics_observation();
+        return;
+    }
+
+    std::uint32_t scanned = 0;
+    for (std::size_t arrayIndex = 0; arrayIndex < kWorldIslandArrays.size(); ++arrayIndex) {
+        const HavokArray& islands = field<HavokArray>(world, kWorldIslandArrays[arrayIndex]);
+        if (!valid_array(islands, kMaximumIslandCount)) {
+            next.truncated = true;
+            continue;
+        }
+        for (std::int32_t islandIndex = 0; islandIndex < islands.size; ++islandIndex) {
+            std::byte* const island = islands.entries[islandIndex];
+            if (island == nullptr) {
+                continue;
+            }
+            const HavokArray& entities = field<HavokArray>(island, kIslandEntities);
+            if (!valid_array(entities, kMaximumEntityCount)) {
+                next.truncated = true;
+                continue;
+            }
+            const std::uint64_t declared = static_cast<std::uint64_t>(next.declaredSlots)
+                                           + static_cast<std::uint32_t>(entities.size);
+            next.declaredSlots = declared > (std::numeric_limits<std::uint32_t>::max)()
+                                     ? (std::numeric_limits<std::uint32_t>::max)()
+                                     : static_cast<std::uint32_t>(declared);
+            for (std::int32_t entityIndex = 0; entityIndex < entities.size; ++entityIndex) {
+                if (scanned++ >= kPhysicsObservationScanBudget) {
+                    next.truncated = true;
+                    break;
+                }
+                std::byte* const body = entities.entries[entityIndex];
+                if (body == nullptr) {
+                    continue;
+                }
+                const auto position = field<std::array<float, kVectorLanes>>(body, kBodyPosition);
+                const auto velocity = field<std::array<float, kVectorLanes>>(body, kBodyVelocity);
+                if (!finite_vector(position) || !finite_vector(velocity)) {
+                    continue;
+                }
+                if (next.bodyCount >= next.bodies.size()) {
+                    next.truncated = true;
+                    continue;
+                }
+                PhysicsBodyObservation& output = next.bodies[next.bodyCount++];
+                output.slot = physics_slot(arrayIndex, islandIndex, entityIndex);
+                copy_lanes(position, output.position);
+                copy_lanes(velocity, output.velocity);
+            }
+            if (scanned >= kPhysicsObservationScanBudget) {
+                break;
+            }
+        }
+        if (scanned >= kPhysicsObservationScanBudget) {
+            break;
+        }
+    }
+
+    next.sequence = ++g_physicsObservationSequence;
+    AcquireSRWLockExclusive(&g_physicsObservationLock);
+    g_physicsObservation = next;
+    g_physicsObservationTick = GetTickCount64();
+    ReleaseSRWLockExclusive(&g_physicsObservationLock);
 }
 
 /** @return The character rigid body in one island, or null when the island has none. */
@@ -229,6 +348,11 @@ capped_speed(const std::array<float, kVectorLanes>& velocity, float limit) noexc
 
 /** Runs Havok normally, then applies movement policies and Player Hold in ownership order. */
 std::int32_t __fastcall havok_step(std::byte* simulation, float deltaTime) noexcept {
+    ReplacementScope scope{};
+    const HavokStep next = reinterpret_cast<HavokStep>(g_stepHandle.original);
+    if (g_stopping.load(std::memory_order_acquire)) {
+        return next != nullptr ? next(simulation, deltaTime) : 0;
+    }
     std::array<float, kVectorLanes> nativeVelocity{};
     std::array<float, kVectorLanes> nativePosition{};
     const bool enabledBeforeStep = poll_toggle();
@@ -253,7 +377,6 @@ std::int32_t __fastcall havok_step(std::byte* simulation, float deltaTime) noexc
     }
     const player_hold::StepContext hold = player_hold::before_havok_step();
 
-    const HavokStep next = reinterpret_cast<HavokStep>(g_stepHandle.original);
     const std::int32_t result = next != nullptr ? next(simulation, deltaTime) : 0;
 
     // The movement body is resolved once here for Fly and Noclip. Player Hold independently proves
@@ -303,6 +426,7 @@ std::int32_t __fastcall havok_step(std::byte* simulation, float deltaTime) noexc
 
     // Final writer: no Fly, Noclip, collision, gravity, or contact result escapes while held.
     player_hold::after_havok_step(hold);
+    publish_physics_observation(simulation);
     return result;
 }
 
@@ -325,6 +449,8 @@ bool install() noexcept {
     if (g_installed.load(std::memory_order_acquire)) {
         return true;
     }
+    clear_physics_observation();
+    g_stopping.store(false, std::memory_order_release);
     std::byte* const step = patterns::scan_main_image_unique(kHavokStep, "noclip_havok_step");
     if (step == nullptr) {
         report_install_failure("havok_step");
@@ -351,15 +477,54 @@ bool install() noexcept {
 }
 
 /** Detaches the simulation-step detour, then clears the key state. */
-void uninstall() noexcept {
-    if (!g_installed.exchange(false, std::memory_order_acq_rel)) {
-        return;
+bool uninstall() noexcept {
+    if (!g_installed.load(std::memory_order_acquire)) {
+        return true;
     }
-    (void)hooking::detour::uninstall(g_stepHandle);
+    g_stopping.store(true, std::memory_order_release);
+    if (!replacement_idle()) {
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::warn,
+                         "ev=noclip stage=uninstall result=wait reason=replacement_active");
+        return false;
+    }
+    const std::array protectedEntries{
+        hooking::detour::ProtectedCodeEntry{reinterpret_cast<void*>(&havok_step)},
+    };
+    const hooking::detour::UninstallResult removal =
+        hooking::detour::uninstall(g_stepHandle, protectedEntries, &replacement_idle);
+    if (removal != hooking::detour::UninstallResult::removed) {
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::warn,
+                         removal == hooking::detour::UninstallResult::protectedCodeActive
+                             ? "ev=noclip stage=uninstall result=wait reason=replacement_active"
+                             : "ev=noclip stage=uninstall result=fail reason=detour_detach");
+        return false;
+    }
     g_stepHandle = {};
     g_characterMotionVtable = 0;
+    clear_physics_observation();
     // The switch is a stored setting, so detaching clears only the key state.
     g_toggleDown.store(false, std::memory_order_release);
+    g_installed.store(false, std::memory_order_release);
+    core::log::write(
+        core::log::Channel::client, core::log::Level::info, "ev=noclip stage=uninstall result=ok");
+    return true;
+}
+
+bool physics_observation_snapshot(PhysicsObservationSnapshot& output) noexcept {
+    AcquireSRWLockShared(&g_physicsObservationLock);
+    const ULONGLONG published = g_physicsObservationTick;
+    const bool recent =
+        published != 0 && GetTickCount64() - published <= kPhysicsObservationLifetimeMilliseconds;
+    if (recent) {
+        output = g_physicsObservation;
+    }
+    ReleaseSRWLockShared(&g_physicsObservationLock);
+    if (!recent) {
+        output = {};
+    }
+    return recent;
 }
 
 /** Reads a live rigid body's world position. */

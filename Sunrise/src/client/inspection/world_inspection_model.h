@@ -99,11 +99,22 @@ struct Node final {
     Status status{Status::unknownSemantic};
     Source source{};
     std::optional<std::uint64_t> runtimeEntity;
+    std::optional<std::uint8_t> objectSystemType;
+    /** Runtime producer-local observation slot; not necessarily a durable engine identity. */
+    std::optional<std::uint64_t> observationId;
+    std::optional<std::int32_t> triggerSelector;
+    std::optional<std::uint32_t> triggerSourceHash;
+    std::optional<std::uint32_t> triggerOverlapCount;
+    std::optional<bool> triggerEnabled;
+    std::optional<bool> triggerActive;
     std::optional<std::uint64_t> worldId;
     std::optional<std::uint32_t> tag;
     std::optional<std::uint32_t> classHash;
     std::optional<std::uint32_t> nameHash;
     std::optional<Transform> transform;
+    /** True when transform came from a copied live observation instead of package data. */
+    bool transformRuntime{};
+    std::optional<std::array<float, 3>> linearVelocity;
     std::optional<Bounds> bounds;
     Action actions{Action::none};
 };

@@ -240,6 +240,8 @@
     <ClCompile Include="src\client\hooks\presentation\presentation.cpp" />
     <ClCompile Include="src\client\hooks\viewer_camera\viewer_camera.cpp" />
     <ClCompile Include="src\client\hooks\viewer_audio\viewer_audio.cpp" />
+    <ClCompile Include="src\client\hooks\viewer_objects\viewer_objects.cpp" />
+    <ClCompile Include="src\client\hooks\viewer_triggers\viewer_triggers.cpp" />
     <ClCompile Include="src\client\hooks\infinite_ammo\infinite_ammo.cpp" />
     <ClCompile Include="src\client\input\window_focus.cpp" />
     <ClCompile Include="src\client\hooks\teleport\teleport_lifecycle.cpp" />
@@ -921,6 +923,7 @@
     <ClInclude Include="src\client\viewer\viewer_input_ownership.h" />
     <ClInclude Include="src\client\inspection\world_inspection_model.h" />
     <ClInclude Include="src\client\inspection\providers\spawn_inspection_provider.h" />
+    <ClInclude Include="src\client\inspection\providers\runtime_observation_inspection.h" />
     <ClInclude Include="src\client\ui\world_inspector\world_inspector.h" />
     <ClInclude Include="src\client\ui\world_inspector\world_inspector_viewport.h" />
     <ClInclude Include="src\client\inactivity\inactivity_settings_store.h" />
@@ -939,6 +942,8 @@
     <ClInclude Include="src\client\hooks\presentation\presentation.h" />
     <ClInclude Include="src\client\hooks\viewer_camera\viewer_camera.h" />
     <ClInclude Include="src\client\hooks\viewer_audio\viewer_audio.h" />
+    <ClInclude Include="src\client\hooks\viewer_objects\viewer_objects.h" />
+    <ClInclude Include="src\client\hooks\viewer_triggers\viewer_triggers.h" />
     <ClInclude Include="src\client\ui\components\key_picker\client_key_picker.h" />
     <ClInclude Include="src\client\ui\hud\hud_panel.h" />
     <ClInclude Include="src\client\ui\movement\movement_panel.h" />

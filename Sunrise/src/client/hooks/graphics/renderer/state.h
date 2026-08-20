@@ -19,6 +19,8 @@ struct Resources {
     ID3D11RenderTargetView* renderTarget{};
     /** Bundled logo sheet, uploaded on this device for the interface to draw. */
     textures::Uploaded logoSheet{};
+    /** Compact project icon used by the inspector workspace toolbar. */
+    textures::Uploaded inspectorIcon{};
     /** Reusable game-frame copy shown inside the inspector viewport. */
     frame_capture::Storage frameCapture{};
     HWND window{};
