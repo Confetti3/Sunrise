@@ -296,6 +296,14 @@ std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcep
     build_data::nodes::for_each_driving(
         &progress, [](void* context, const build_data::nodes::Definition& node) noexcept {
             auto* state = static_cast<NodeProgress*>(context);
+            // Only the lore books are counted here. Every other category that drives a bar keeps
+            // whatever the authored policy gave it: node 896 carries an authored -1 at its value
+            // index, and writing a count over it replaced a deliberate sentinel with a zero. This
+            // build has no business flattening authored values for categories it does not manage.
+            if (node.definitionIndex < build_data::nodes::kLoreNodeFirst
+                || node.definitionIndex > build_data::nodes::kLoreNodeLast) {
+                return;
+            }
             // Two counts, because a category and its parent record keep separate bars. The
             // category counts every child it owns, the parent record among them; the parent's own
             // bar counts only the chapters, which is why its denominator is one lower. The parent
@@ -363,7 +371,9 @@ std::size_t apply_character_node_progress(std::span<std::int32_t> characterValue
     std::size_t written = 0;
     for (std::size_t row = 0; row < count; ++row) {
         const nodes::Definition& node = rows[row];
-        if (node.characterValueIndex == nodes::kUnavailableValueIndex
+        if (node.definitionIndex < nodes::kLoreNodeFirst
+            || node.definitionIndex > nodes::kLoreNodeLast
+            || node.characterValueIndex == nodes::kUnavailableValueIndex
             || static_cast<std::size_t>(node.characterValueIndex) >= characterValues.size()) {
             continue;
         }
