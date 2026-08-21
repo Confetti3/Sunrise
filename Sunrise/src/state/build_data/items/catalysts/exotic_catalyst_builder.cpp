@@ -17,10 +17,6 @@ struct LaneResult {
     Error error{Error::none};
     std::uint16_t completedPlugDefinitionIndex{details::kUnavailableItemIndex};
     std::uint16_t effectDefinitionIndex{details::kUnavailableItemIndex};
-    std::uint16_t acquisitionDefinitionIndex{kUnavailableAcquisitionIndex};
-    std::uint16_t completionFlagDefinitionIndex{kUnavailableCompletionFlagIndex};
-    std::uint16_t completionValueIndex{kUnavailableCompletionValueIndex};
-    std::int32_t completionValue{};
 };
 
 /**
@@ -28,84 +24,68 @@ struct LaneResult {
  * @return True when the table is strict and contains no zero hash.
  */
 [[nodiscard]] bool valid_hashes(std::span<const std::uint32_t> hashes) noexcept {
-    return std::none_of(
-               hashes.begin(), hashes.end(), [](std::uint32_t hash) { return hash == 0; })
+    return std::none_of(hashes.begin(), hashes.end(), [](std::uint32_t hash) { return hash == 0; })
            && std::adjacent_find(hashes.begin(), hashes.end(), std::greater_equal{})
                   == hashes.end();
 }
 
 /**
- * Finds a source item without requiring a dense test fixture.
- * @param definitions Source item definitions in native index order.
- * @param index Native item index to find.
- * @return The matching item, or null when no item has the index.
+ * Finds one row in a dense or sorted native-index table.
+ * @tparam Value Row type.
+ * @tparam Index Returns the row's native index.
+ * @param definitions Source rows in native index order.
+ * @param index Native index to find.
+ * @param indexOf Row-index reader.
+ * @return The matching row, or null when no row has the index.
  */
-[[nodiscard]] const items::Definition*
-find_item(std::span<const items::Definition> definitions, std::uint16_t index) noexcept {
+template <typename Value, typename Index>
+[[nodiscard]] const Value*
+find_indexed(std::span<const Value> definitions, std::uint16_t index, Index indexOf) noexcept {
     if (static_cast<std::size_t>(index) < definitions.size()
-        && definitions[index].definitionIndex == index) {
+        && indexOf(definitions[index]) == index) {
         return &definitions[index];
     }
     const auto found = std::lower_bound(
-        definitions.begin(),
-        definitions.end(),
-        index,
-        [](const items::Definition& value, auto key) { return value.definitionIndex < key; });
-    return found != definitions.end() && found->definitionIndex == index ? &*found : nullptr;
+        definitions.begin(), definitions.end(), index, [&indexOf](const Value& value, auto key) {
+            return indexOf(value) < key;
+        });
+    return found != definitions.end() && indexOf(*found) == index ? &*found : nullptr;
 }
 
 /**
- * Finds a source detail without requiring a dense test fixture.
- * @param definitions Source item details in native index order.
+ * @param value Installed item row.
+ * @return The row's native item index.
+ */
+[[nodiscard]] constexpr std::uint16_t item_index(const items::Definition& value) noexcept {
+    return value.definitionIndex;
+}
+
+/**
+ * @param value Installed item detail row.
+ * @return The detail row's native item index.
+ */
+[[nodiscard]] constexpr std::uint16_t detail_index(const details::Definition& value) noexcept {
+    return value.definitionIndex;
+}
+
+/**
+ * @param definitions Installed item rows in native index order.
  * @param index Native item index to find.
- * @return The matching detail, or null when no detail has the index.
+ * @return The matching source item, or null.
+ */
+[[nodiscard]] const items::Definition* find_item(std::span<const items::Definition> definitions,
+                                                 std::uint16_t index) noexcept {
+    return find_indexed(definitions, index, item_index);
+}
+
+/**
+ * @param definitions Installed item details in native index order.
+ * @param index Native item index to find.
+ * @return The matching source detail, or null.
  */
 [[nodiscard]] const details::Definition*
 find_detail(std::span<const details::Definition> definitions, std::uint16_t index) noexcept {
-    if (static_cast<std::size_t>(index) < definitions.size()
-        && definitions[index].definitionIndex == index) {
-        return &definitions[index];
-    }
-    const auto found = std::lower_bound(
-        definitions.begin(),
-        definitions.end(),
-        index,
-        [](const details::Definition& value, auto key) { return value.definitionIndex < key; });
-    return found != definitions.end() && found->definitionIndex == index ? &*found : nullptr;
-}
-
-/** Finds one dense or sorted completion-condition row. */
-[[nodiscard]] const CompletionCondition*
-find_completion_condition(std::span<const CompletionCondition> definitions,
-                          std::uint16_t index) noexcept {
-    if (static_cast<std::size_t>(index) < definitions.size()
-        && definitions[index].itemDefinitionIndex == index) {
-        return &definitions[index];
-    }
-    const auto found = std::lower_bound(
-        definitions.begin(),
-        definitions.end(),
-        index,
-        [](const CompletionCondition& value, auto key) {
-            return value.itemDefinitionIndex < key;
-        });
-    return found != definitions.end() && found->itemDefinitionIndex == index ? &*found : nullptr;
-}
-
-/** Finds one dense or sorted socket-type acquisition row. */
-[[nodiscard]] const AcquisitionGate*
-find_acquisition_gate(std::span<const AcquisitionGate> definitions,
-                      std::uint16_t socketType) noexcept {
-    if (static_cast<std::size_t>(socketType) < definitions.size()
-        && definitions[socketType].socketType == socketType) {
-        return &definitions[socketType];
-    }
-    const auto found = std::lower_bound(
-        definitions.begin(),
-        definitions.end(),
-        socketType,
-        [](const AcquisitionGate& value, auto key) { return value.socketType < key; });
-    return found != definitions.end() && found->socketType == socketType ? &*found : nullptr;
+    return find_indexed(definitions, index, detail_index);
 }
 
 /**
@@ -114,26 +94,13 @@ find_acquisition_gate(std::span<const AcquisitionGate> definitions,
  * the same category, so the unique exotic stackable item in that category supplies the effect.
  * @param source Parsed target-build tables.
  * @param completedPlugDefinitionIndex Completed display or active plug from the socket pool.
- * @param socketType Native socket type that owns the acquired-state gate.
  * @return Completed lane relation, or an effect mapping error.
  */
 [[nodiscard]] LaneResult complete_lane(const Source& source,
-                                       std::uint16_t completedPlugDefinitionIndex,
-                                       std::uint16_t socketType) noexcept {
+                                       std::uint16_t completedPlugDefinitionIndex) noexcept {
     const items::Definition* completed = find_item(source.items, completedPlugDefinitionIndex);
     if (completed == nullptr || completed->plugCategoryHash == 0) {
-        return {.catalyst = true,
-                .error = Error::invalidEffect,
-                .completedPlugDefinitionIndex = completedPlugDefinitionIndex};
-    }
-
-    const AcquisitionGate* acquisition =
-        find_acquisition_gate(source.acquisitionGates, socketType);
-    if (acquisition == nullptr || acquisition->state != AcquisitionState::present
-        || acquisition->definitionIndex == kUnavailableAcquisitionIndex) {
-        return {.catalyst = true,
-                .error = Error::invalidAcquisition,
-                .completedPlugDefinitionIndex = completedPlugDefinitionIndex};
+        return {};
     }
 
     std::optional<std::uint16_t> effect;
@@ -144,49 +111,23 @@ find_acquisition_gate(std::span<const AcquisitionGate> definitions,
         }
         const details::Definition* detail = find_detail(source.details, candidate.definitionIndex);
         if (detail == nullptr || detail->definitionHash != candidate.definitionHash
-            || detail->instancedDefinitionState
-                   != details::InstancedDefinitionState::stackable
+            || detail->instancedDefinitionState != details::InstancedDefinitionState::stackable
             || (detail->sandboxPerkCount == 0 && detail->statCount == 0)) {
             continue;
         }
         if (effect.has_value()) {
-            return {.catalyst = true,
-                    .error = Error::invalidEffect,
-                    .completedPlugDefinitionIndex = completedPlugDefinitionIndex};
+            return {};
         }
         effect = candidate.definitionIndex;
     }
     if (!effect.has_value()) {
-        return {.catalyst = true,
-                .error = Error::invalidEffect,
-                .completedPlugDefinitionIndex = completedPlugDefinitionIndex};
+        return {};
     }
 
-    const CompletionCondition* condition =
-        find_completion_condition(source.completionConditions, *effect);
-    const bool hasFlag = condition != nullptr
-                         && condition->flagDefinitionIndex
-                                != kUnavailableCompletionFlagIndex;
-    const bool hasValue = condition != nullptr
-                          && condition->valueIndex != kUnavailableCompletionValueIndex
-                          && condition->value > 0;
-    const bool directEffect = *effect == completedPlugDefinitionIndex;
-    if (condition == nullptr || condition->state != CompletionConditionState::present
-        || (directEffect && !hasFlag) || (!directEffect && !hasValue)) {
-        return {.catalyst = true,
-                .error = Error::invalidCompletion,
-                .completedPlugDefinitionIndex = completedPlugDefinitionIndex,
-                .effectDefinitionIndex = *effect,
-                .acquisitionDefinitionIndex = acquisition->definitionIndex};
-    }
     return {.catalyst = true,
             .error = Error::none,
             .completedPlugDefinitionIndex = completedPlugDefinitionIndex,
-            .effectDefinitionIndex = *effect,
-            .acquisitionDefinitionIndex = acquisition->definitionIndex,
-            .completionFlagDefinitionIndex = condition->flagDefinitionIndex,
-            .completionValueIndex = condition->valueIndex,
-            .completionValue = condition->value};
+            .effectDefinitionIndex = *effect};
 }
 
 /**
@@ -196,18 +137,17 @@ find_acquisition_gate(std::span<const AcquisitionGate> definitions,
  * @param lane Native socket lane to find.
  * @return The matching rule, or null when no rule matches.
  */
-[[nodiscard]] const socket_plugs::Rule*
-find_rule(std::span<const socket_plugs::Rule> rules,
-          std::uint16_t itemDefinitionIndex,
-          std::uint8_t lane) noexcept {
-    const auto found = std::lower_bound(
-        rules.begin(),
-        rules.end(),
-        std::pair{itemDefinitionIndex, lane},
-        [](const socket_plugs::Rule& value, const auto& key) {
-            return value.itemDefinitionIndex < key.first
-                   || (value.itemDefinitionIndex == key.first && value.lane < key.second);
-        });
+[[nodiscard]] const socket_plugs::Rule* find_rule(std::span<const socket_plugs::Rule> rules,
+                                                  std::uint16_t itemDefinitionIndex,
+                                                  std::uint8_t lane) noexcept {
+    const auto found = std::lower_bound(rules.begin(),
+                                        rules.end(),
+                                        std::pair{itemDefinitionIndex, lane},
+                                        [](const socket_plugs::Rule& value, const auto& key) {
+                                            return value.itemDefinitionIndex < key.first
+                                                   || (value.itemDefinitionIndex == key.first
+                                                       && value.lane < key.second);
+                                        });
     return found != rules.end() && found->itemDefinitionIndex == itemDefinitionIndex
                    && found->lane == lane
                ? &*found
@@ -219,8 +159,8 @@ find_rule(std::span<const socket_plugs::Rule> rules,
  * @param hash Weapon hash to find.
  * @return Index of a released hash, or no value for a placeholder.
  */
-[[nodiscard]] std::optional<std::size_t>
-released_index(std::span<const std::uint32_t> released, std::uint32_t hash) noexcept {
+[[nodiscard]] std::optional<std::size_t> released_index(std::span<const std::uint32_t> released,
+                                                        std::uint32_t hash) noexcept {
     const auto found = std::lower_bound(released.begin(), released.end(), hash);
     if (found == released.end() || *found != hash) {
         return std::nullopt;
@@ -229,17 +169,14 @@ released_index(std::span<const std::uint32_t> released, std::uint32_t hash) noex
 }
 
 /**
- * Classifies one lane when its pool has a target-build catalyst marker.
+ * Classifies one lane from its installed two-state or legacy three-state lifecycle.
  * @param source Parsed target-build tables.
- * @param facts Pinned facts for the target build.
  * @param detail Item detail row that owns the lane.
  * @param lane Native socket lane to classify.
  * @return The catalyst state and any safe-failure reason.
  */
-[[nodiscard]] LaneResult classify_lane(const Source& source,
-                                       const Facts& facts,
-                                       const details::Definition& detail,
-                                       std::uint8_t lane) noexcept {
+[[nodiscard]] LaneResult
+classify_lane(const Source& source, const details::Definition& detail, std::uint8_t lane) noexcept {
     const socket_plugs::Rule* rule =
         find_rule(source.socketPlugRules, detail.definitionIndex, lane);
     if (rule == nullptr) {
@@ -255,55 +192,59 @@ released_index(std::span<const std::uint32_t> released, std::uint32_t hash) noex
     }
 
     const auto members = source.socketPlugMembers.subspan(pool.memberOffset, pool.memberCount);
-    bool hasEmpty = false;
-    std::size_t legacyCount = 0;
-    std::uint16_t legacyCompletionIndex = 0;
-    bool invalidMember = false;
-    for (const std::uint16_t member : members) {
-        const items::Definition* plug = find_item(source.items, member);
-        if (plug == nullptr) {
-            invalidMember = true;
-            continue;
-        }
-        if (plug->definitionHash == facts.emptyCatalystPlugHash) {
-            hasEmpty = true;
-        }
-        if (std::binary_search(facts.legacyCompletionPlugHashes.begin(),
-                               facts.legacyCompletionPlugHashes.end(),
-                               plug->definitionHash)) {
-            ++legacyCount;
-            legacyCompletionIndex = member;
-        }
-    }
-    if (!hasEmpty && legacyCount == 0) {
+    if (members.size() != 2 && members.size() != 3) {
         return {};
-    }
-    if (invalidMember) {
-        return {.catalyst = true, .error = Error::invalidPlug};
     }
 
     const std::uint16_t defaultIndex = detail.initialPlugIndices[lane];
     const items::Definition* defaultPlug = find_item(source.items, defaultIndex);
     if (defaultIndex == details::kUnavailableItemIndex || defaultPlug == nullptr
         || std::find(members.begin(), members.end(), defaultIndex) == members.end()) {
-        return {.catalyst = true, .error = Error::invalidPlug};
+        return {};
     }
 
-    if (members.size() == 2 && hasEmpty && legacyCount == 0
-        && defaultPlug->definitionHash == facts.emptyCatalystPlugHash) {
+    if (members.size() == 2) {
         const auto active =
             std::find_if(members.begin(), members.end(), [defaultIndex](auto member) {
                 return member != defaultIndex;
             });
-        return active != members.end()
-                   ? complete_lane(source, *active, detail.socketTypes[lane])
-                   : LaneResult{.catalyst = true, .error = Error::ambiguousLifecycle};
+        if (active == members.end()) {
+            return {};
+        }
+        const LaneResult completed = complete_lane(source, *active);
+        return completed.catalyst && completed.effectDefinitionIndex == *active ? completed
+                                                                                : LaneResult{};
     }
-    if (members.size() == 3 && !hasEmpty && legacyCount == 1
-        && legacyCompletionIndex != defaultIndex) {
-        return complete_lane(source, legacyCompletionIndex, detail.socketTypes[lane]);
+
+    std::size_t progressCount = 0;
+    std::size_t completedCount = 0;
+    std::uint16_t completedIndex = details::kUnavailableItemIndex;
+    for (const std::uint16_t member : members) {
+        if (member == defaultIndex) {
+            continue;
+        }
+        const items::Definition* plug = find_item(source.items, member);
+        const details::Definition* plugDetail = find_detail(source.details, member);
+        if (plug == nullptr || plugDetail == nullptr
+            || plugDetail->definitionHash != plug->definitionHash
+            || plugDetail->instancedDefinitionState
+                   != details::InstancedDefinitionState::stackable) {
+            return {};
+        }
+        if (plugDetail->maxStackSize == 1) {
+            ++progressCount;
+        } else if (plugDetail->maxStackSize > 1) {
+            ++completedCount;
+            completedIndex = member;
+        }
     }
-    return {.catalyst = true, .error = Error::ambiguousLifecycle};
+    if (progressCount == 1 && completedCount == 1) {
+        const LaneResult completed = complete_lane(source, completedIndex);
+        return completed.catalyst && completed.effectDefinitionIndex != completedIndex
+                   ? completed
+                   : LaneResult{};
+    }
+    return {};
 }
 
 /**
@@ -337,7 +278,7 @@ released_index(std::span<const std::uint32_t> released, std::uint32_t hash) noex
  * @return True for an exotic in one of the three weapon equipment slots.
  */
 [[nodiscard]] bool exotic_weapon(const items::Definition& item,
-                                  const details::Definition& detail) noexcept {
+                                 const details::Definition& detail) noexcept {
     return item.tier == static_cast<std::uint8_t>(items::Tier::exotic)
            && detail.instancedDefinitionState == details::InstancedDefinitionState::instanced
            && detail.equipmentSlot.has_value() && *detail.equipmentSlot >= kFirstWeaponSlot
@@ -356,10 +297,8 @@ bool derive(const Source& source,
     count = 0;
     report = {};
     std::fill(output.begin(), output.end(), Definition{});
-    if (facts.imageTimestamp == 0 || facts.imageSize == 0 || facts.emptyCatalystPlugHash == 0
-        || facts.legacyCompletionPlugHashes.size() > kDefinitionCapacity
+    if (facts.imageTimestamp == 0 || facts.imageSize == 0
         || facts.releasedWeaponHashes.size() > kDefinitionCapacity
-        || !valid_hashes(facts.legacyCompletionPlugHashes)
         || !valid_hashes(facts.releasedWeaponHashes)) {
         return fail(output, count, report, Error::unsupportedBuild);
     }
@@ -383,7 +322,7 @@ bool derive(const Source& source,
         std::uint8_t detectedLane = 0;
         for (std::size_t laneIndex = 0; laneIndex < detail.ordinarySocketCount; ++laneIndex) {
             const auto lane = static_cast<std::uint8_t>(laneIndex);
-            const LaneResult result = classify_lane(source, facts, detail, lane);
+            const LaneResult result = classify_lane(source, detail, lane);
             if (!result.catalyst) {
                 continue;
             }
@@ -396,25 +335,15 @@ bool derive(const Source& source,
                 unclear = Error::ambiguousLifecycle;
                 continue;
             }
-            completed = CompletedCatalyst{lane,
-                                          result.completedPlugDefinitionIndex,
-                                          result.effectDefinitionIndex,
-                                          result.acquisitionDefinitionIndex,
-                                          result.completionFlagDefinitionIndex,
-                                          result.completionValueIndex,
-                                          result.completionValue};
+            completed = CompletedCatalyst{
+                lane, result.completedPlugDefinitionIndex, result.effectDefinitionIndex};
         }
         if (!completed.has_value() && !unclear.has_value()) {
             continue;
         }
         if (unclear.has_value()) {
             if (release.has_value()) {
-                return fail(output,
-                            count,
-                            report,
-                            *unclear,
-                            item->definitionHash,
-                            detectedLane);
+                return fail(output, count, report, *unclear, item->definitionHash, detectedLane);
             }
             if (count >= output.size() || count >= kDefinitionCapacity) {
                 return fail(output,
@@ -428,12 +357,8 @@ bool derive(const Source& source,
                                          item->definitionIndex,
                                          details::kUnavailableItemIndex,
                                          details::kUnavailableItemIndex,
-                                         kUnavailableAcquisitionIndex,
-                                         kUnavailableCompletionFlagIndex,
-                                         kUnavailableCompletionValueIndex,
                                          detectedLane,
-                                         Availability::unsupported,
-                                         0};
+                                         Availability::unsupported};
             ++report.unsupported;
             continue;
         }
@@ -459,32 +384,26 @@ bool derive(const Source& source,
         } else {
             ++report.placeholder;
         }
-        output[count++] = Definition{item->definitionHash,
-                                     item->definitionIndex,
-                                     completed->completedPlugDefinitionIndex,
-                                     completed->effectDefinitionIndex,
-                                     completed->acquisitionDefinitionIndex,
-                                     completed->completionFlagDefinitionIndex,
-                                     completed->completionValueIndex,
-                                     completed->socketLane,
-                                     release.has_value() ? Availability::released
-                                                         : Availability::placeholder,
-                                     completed->completionValue};
+        output[count++] =
+            Definition{item->definitionHash,
+                       item->definitionIndex,
+                       completed->completedPlugDefinitionIndex,
+                       completed->effectDefinitionIndex,
+                       completed->socketLane,
+                       release.has_value() ? Availability::released : Availability::placeholder};
     }
 
     for (std::size_t index = 0; index < facts.releasedWeaponHashes.size(); ++index) {
         if (!releasedFound[index]) {
-            return fail(output,
-                        count,
-                        report,
-                        Error::missingReleased,
-                        facts.releasedWeaponHashes[index]);
+            return fail(
+                output, count, report, Error::missingReleased, facts.releasedWeaponHashes[index]);
         }
     }
-    std::sort(output.begin(), output.begin() + count, [](const Definition& left,
-                                                         const Definition& right) {
-        return left.itemDefinitionIndex < right.itemDefinitionIndex;
-    });
+    std::sort(output.begin(),
+              output.begin() + count,
+              [](const Definition& left, const Definition& right) {
+                  return left.itemDefinitionIndex < right.itemDefinitionIndex;
+              });
     return true;
 }
 
@@ -498,105 +417,18 @@ bool matches_derived(const Source& source,
         || expectedCount != definitions.size()) {
         return false;
     }
-    return std::equal(
-        expected.begin(),
-        expected.begin() + expectedCount,
-        definitions.begin(),
-        [](const Definition& left, const Definition& right) {
-            return left.itemDefinitionHash == right.itemDefinitionHash
-                   && left.itemDefinitionIndex == right.itemDefinitionIndex
-                   && left.completedPlugDefinitionIndex == right.completedPlugDefinitionIndex
-                   && left.effectDefinitionIndex == right.effectDefinitionIndex
-                   && left.acquisitionDefinitionIndex == right.acquisitionDefinitionIndex
-                   && left.completionFlagDefinitionIndex
-                          == right.completionFlagDefinitionIndex
-                   && left.completionValueIndex == right.completionValueIndex
-                   && left.socketLane == right.socketLane
-                   && left.availability == right.availability
-                   && left.completionValue == right.completionValue;
-        });
-}
-
-bool matches_cached(const Source& source,
-                    const Facts& facts,
-                    std::span<const Definition> definitions) noexcept {
-    std::array<CompletionCondition, kDefinitionCapacity> completionConditions{};
-    std::array<AcquisitionGate, kDefinitionCapacity> acquisitionGates{};
-    std::size_t completionCount = 0;
-    std::size_t acquisitionCount = 0;
-    for (const Definition& definition : definitions) {
-        if (definition.availability == Availability::unsupported) {
-            continue;
-        }
-        const details::Definition* detail = find_detail(source.details,
-                                                        definition.itemDefinitionIndex);
-        if (detail == nullptr || definition.socketLane >= detail->ordinarySocketCount
-            || find_item(source.items, definition.acquisitionDefinitionIndex) == nullptr
-            || (definition.completionFlagDefinitionIndex
-                        != kUnavailableCompletionFlagIndex
-                && find_item(source.items, definition.completionFlagDefinitionIndex)
-                       == nullptr)) {
-            return false;
-        }
-
-        const std::uint16_t socketType = detail->socketTypes[definition.socketLane];
-        const auto priorGate = std::find_if(
-            acquisitionGates.begin(),
-            acquisitionGates.begin() + acquisitionCount,
-            [socketType](const AcquisitionGate& gate) { return gate.socketType == socketType; });
-        if (priorGate != acquisitionGates.begin() + acquisitionCount) {
-            if (priorGate->definitionIndex != definition.acquisitionDefinitionIndex) {
-                return false;
-            }
-        } else if (acquisitionCount >= acquisitionGates.size()) {
-            return false;
-        } else {
-            acquisitionGates[acquisitionCount++] = {
-                socketType, definition.acquisitionDefinitionIndex, AcquisitionState::present};
-        }
-
-        if (definition.completionFlagDefinitionIndex == kUnavailableCompletionFlagIndex
-            && definition.completionValueIndex == kUnavailableCompletionValueIndex) {
-            continue;
-        }
-        const auto priorCondition = std::find_if(
-            completionConditions.begin(),
-            completionConditions.begin() + completionCount,
-            [&definition](const CompletionCondition& condition) {
-                return condition.itemDefinitionIndex == definition.effectDefinitionIndex;
-            });
-        if (priorCondition != completionConditions.begin() + completionCount) {
-            if (priorCondition->flagDefinitionIndex
-                    != definition.completionFlagDefinitionIndex
-                || priorCondition->valueIndex != definition.completionValueIndex
-                || priorCondition->value != definition.completionValue) {
-                return false;
-            }
-        } else if (completionCount >= completionConditions.size()) {
-            return false;
-        } else {
-            completionConditions[completionCount++] = {
-                definition.effectDefinitionIndex,
-                definition.completionFlagDefinitionIndex,
-                definition.completionValueIndex,
-                definition.completionValue,
-                CompletionConditionState::present};
-        }
-    }
-    std::sort(completionConditions.begin(),
-              completionConditions.begin() + completionCount,
-              [](const CompletionCondition& left, const CompletionCondition& right) {
-                  return left.itemDefinitionIndex < right.itemDefinitionIndex;
-              });
-    std::sort(acquisitionGates.begin(),
-              acquisitionGates.begin() + acquisitionCount,
-              [](const AcquisitionGate& left, const AcquisitionGate& right) {
-                  return left.socketType < right.socketType;
-              });
-    Source rebuilt = source;
-    rebuilt.completionConditions = std::span(completionConditions).first(completionCount);
-    rebuilt.acquisitionGates = std::span(acquisitionGates).first(acquisitionCount);
-    return matches_derived(rebuilt, facts, definitions);
+    return std::equal(expected.begin(),
+                      expected.begin() + expectedCount,
+                      definitions.begin(),
+                      [](const Definition& left, const Definition& right) {
+                          return left.itemDefinitionHash == right.itemDefinitionHash
+                                 && left.itemDefinitionIndex == right.itemDefinitionIndex
+                                 && left.completedPlugDefinitionIndex
+                                        == right.completedPlugDefinitionIndex
+                                 && left.effectDefinitionIndex == right.effectDefinitionIndex
+                                 && left.socketLane == right.socketLane
+                                 && left.availability == right.availability;
+                      });
 }
 
 } // namespace sunrise::state::build_data::items::catalysts

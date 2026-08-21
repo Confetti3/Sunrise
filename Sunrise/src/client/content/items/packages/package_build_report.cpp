@@ -145,12 +145,11 @@ void report_catalyst_catalog(const state::build_data::items::catalysts::Report& 
         report.itemDefinitionHash,
         static_cast<unsigned>(report.socketLane));
     if (written > 0) {
-        const core::log::Level level = !built                  ? core::log::Level::error
+        const core::log::Level level = !built                    ? core::log::Level::error
                                        : report.unsupported != 0 ? core::log::Level::warn
                                                                  : core::log::Level::info;
-        core::log::write(core::log::Channel::client,
-                         level,
-                         {line.data(), static_cast<std::size_t>(written)});
+        core::log::write(
+            core::log::Channel::client, level, {line.data(), static_cast<std::size_t>(written)});
     }
 }
 

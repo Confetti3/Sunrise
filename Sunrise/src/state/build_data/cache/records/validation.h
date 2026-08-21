@@ -28,7 +28,11 @@ valid_item_detail_links(std::span<const items::details::Definition> details,
 
 /**
  * Checks exact socket rules and members against the complete item and detail domains.
- *
+ * @param rules Exact item and lane rules.
+ * @param pools Deduplicated plug pools.
+ * @param members Flat plug indices owned by the pools.
+ * @param itemDefinitions Complete dense item rows.
+ * @param details Configured item details.
  * @return True when every target lane exists and every plug index names an installed item row.
  */
 [[nodiscard]] bool
@@ -36,25 +40,14 @@ valid_socket_plug_links(std::span<const items::socket_plugs::Rule> rules,
                         std::span<const items::socket_plugs::Pool> pools,
                         std::span<const items::socket_plugs::Member> members,
                         std::span<const items::Definition> itemDefinitions,
-                         std::span<const items::details::Definition> details) noexcept;
+                        std::span<const items::details::Definition> details) noexcept;
 
 /**
  * Checks catalyst item, socket, plug, lifecycle, and pinned release links.
- * @param catalysts Complete candidate catalyst catalog.
- * @param itemDefinitions Complete installed item table.
- * @param details Complete configured item-detail table.
- * @param rules Complete item-and-lane socket rule table.
- * @param pools Complete interned socket plug pools.
- * @param members Complete socket plug pool members.
+ * @param domains Complete cache domains.
  * @return True when a fresh derivation exactly matches the candidate catalog.
  */
-[[nodiscard]] bool valid_exotic_catalyst_links(
-    std::span<const items::catalysts::Definition> catalysts,
-    std::span<const items::Definition> itemDefinitions,
-    std::span<const items::details::Definition> details,
-    std::span<const items::socket_plugs::Rule> rules,
-    std::span<const items::socket_plugs::Pool> pools,
-    std::span<const items::socket_plugs::Member> members) noexcept;
+[[nodiscard]] bool valid_exotic_catalyst_links(Domains domains) noexcept;
 
 /**
  * Checks every collectible item index against the complete dense item table.

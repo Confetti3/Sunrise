@@ -26,6 +26,10 @@
 #include "spawn_sets/definition.h"
 #include "vendors/definition.h"
 
+namespace sunrise::state::build_data::items::catalysts {
+struct Source;
+}
+
 namespace sunrise::state::build_data {
 
 /**
@@ -198,36 +202,25 @@ publish_socket_plug_rules(std::span<const items::socket_plugs::Rule> rules,
 /**
  * Derives released and placeholder catalysts from one complete package pass.
  * The active PE identity supplies the build fingerprint.
- * @param itemDefinitions Complete installed item table.
- * @param itemDetails Complete configured item-detail table.
- * @param socketPlugRules Complete item-and-lane rule table.
- * @param socketPlugPools Complete interned plug-pool table.
- * @param socketPlugMembers Complete plug-pool member table.
- * @param completionConditions Dense item-indexed catalyst completion expressions.
- * @param acquisitionGates Dense socket-type-indexed acquired-state gates.
+ * @param source Complete installed item, detail, and socket-pool domains.
  * @param output Fixed storage that receives the catalyst catalog.
  * @param count Receives the used output row count.
  * @param report Receives catalog counts and the first unsafe released relation.
  * @return True when the complete catalog is safe for publication.
  */
-[[nodiscard]] bool derive_exotic_catalysts(
-    std::span<const items::Definition> itemDefinitions,
-    std::span<const items::details::Definition> itemDetails,
-    std::span<const items::socket_plugs::Rule> socketPlugRules,
-    std::span<const items::socket_plugs::Pool> socketPlugPools,
-    std::span<const items::socket_plugs::Member> socketPlugMembers,
-    std::span<const items::catalysts::CompletionCondition> completionConditions,
-    std::span<const items::catalysts::AcquisitionGate> acquisitionGates,
-    std::span<items::catalysts::Definition> output,
-    std::size_t& count,
-    items::catalysts::Report& report) noexcept;
+[[nodiscard]] bool derive_exotic_catalysts(const items::catalysts::Source& source,
+                                           std::span<items::catalysts::Definition> output,
+                                           std::size_t& count,
+                                           items::catalysts::Report& report) noexcept;
 
 /**
+ * @param source Complete installed item, detail, and socket-pool domains.
  * @param definitions Complete build-derived catalyst catalog.
  * @return True when validation, publication, and any due cache write succeed.
  */
-[[nodiscard]] bool publish_exotic_catalysts(
-    std::span<const items::catalysts::Definition> definitions) noexcept;
+[[nodiscard]] bool
+publish_exotic_catalysts(const items::catalysts::Source& source,
+                         std::span<const items::catalysts::Definition> definitions) noexcept;
 
 /**
  * @param itemDefinitionIndex Native item definition index.
@@ -235,13 +228,10 @@ publish_socket_plug_rules(std::span<const items::socket_plugs::Rule> rules,
  * @param plugs Candidate ordinary socket plugs.
  * @return Completed, unchanged, or failed without a partial change.
  */
-[[nodiscard]] items::catalysts::ApplyResult complete_exotic_catalyst(
-    std::uint16_t itemDefinitionIndex,
-    std::uint32_t& flags,
-    std::span<std::optional<std::uint16_t>> plugs) noexcept;
-
-/** Adds all released catalyst acquisition and completion overrides to one Family-5 snapshot. */
-[[nodiscard]] bool complete_exotic_catalyst_investment(Family5State& family) noexcept;
+[[nodiscard]] items::catalysts::ApplyResult
+complete_exotic_catalyst(std::uint16_t itemDefinitionIndex,
+                         std::uint32_t& flags,
+                         std::span<std::optional<std::uint16_t>> plugs) noexcept;
 
 /**
  * Resolves the item row that supplies one socketed catalyst's native perks and stat changes.
@@ -250,10 +240,10 @@ publish_socket_plug_rules(std::span<const items::socket_plugs::Rule> rules,
  * @param plugDefinitionIndex Socketed plug definition index.
  * @return Effective definition index, or the input plug when no released completion matches.
  */
-[[nodiscard]] std::uint16_t resolve_exotic_catalyst_effect(
-    std::uint16_t itemDefinitionIndex,
-    std::uint8_t socketLane,
-    std::uint16_t plugDefinitionIndex) noexcept;
+[[nodiscard]] std::uint16_t
+resolve_exotic_catalyst_effect(std::uint16_t itemDefinitionIndex,
+                               std::uint8_t socketLane,
+                               std::uint16_t plugDefinitionIndex) noexcept;
 
 /**
  * @param itemDefinitionIndex Native item definition index.
@@ -261,10 +251,7 @@ publish_socket_plug_rules(std::span<const items::socket_plugs::Rule> rules,
  * @return True when the catalog owns this catalyst socket lane.
  */
 [[nodiscard]] bool is_exotic_catalyst_lane(std::uint16_t itemDefinitionIndex,
-                                            std::uint8_t socketLane) noexcept;
-
-/** @return Counts and status for the published catalyst catalog. */
-[[nodiscard]] items::catalysts::Report exotic_catalyst_report() noexcept;
+                                           std::uint8_t socketLane) noexcept;
 
 /** @param enabled True to complete released catalysts during item resolution. */
 void set_exotic_catalyst_completion_enabled(bool enabled) noexcept;

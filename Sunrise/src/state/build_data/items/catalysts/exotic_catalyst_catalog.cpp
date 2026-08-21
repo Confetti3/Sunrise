@@ -4,7 +4,6 @@
 #include <atomic>
 
 #include "../../../account/inventory/item_state.h"
-#include "../../../unlocks/definition.h"
 #include "../../table.h"
 #include "../details/definition.h"
 
@@ -13,7 +12,6 @@ namespace {
 
 Lock g_lock;
 Table<Definition, kDefinitionCapacity> g_definitions;
-Report g_report;
 std::atomic<bool> g_completionEnabled{true};
 
 /**
@@ -31,8 +29,8 @@ std::atomic<bool> g_completionEnabled{true};
  * @param itemDefinitionIndex Native item index to find.
  * @return The matching definition, or null when no definition matches.
  */
-[[nodiscard]] const Definition*
-find(std::span<const Definition> definitions, std::uint16_t itemDefinitionIndex) noexcept {
+[[nodiscard]] const Definition* find(std::span<const Definition> definitions,
+                                     std::uint16_t itemDefinitionIndex) noexcept {
     const auto found = std::lower_bound(
         definitions.begin(),
         definitions.end(),
@@ -43,75 +41,11 @@ find(std::span<const Definition> definitions, std::uint16_t itemDefinitionIndex)
                : nullptr;
 }
 
-/** Sets one flag slot and removes duplicate authored rows for that slot. */
-[[nodiscard]] bool upsert_flag(state::Family5State& family, std::uint16_t slot) noexcept {
-    const std::size_t oldCount = family.flagCount;
-    std::size_t write = 0;
-    bool found = false;
-    for (std::size_t read = 0; read < oldCount; ++read) {
-        const state::UnlockFlagOverride row = family.flags[read];
-        if (row.slot == slot) {
-            if (!found) {
-                family.flags[write++] = {slot, state::unlocks::kFlagSet};
-                found = true;
-            }
-            continue;
-        }
-        family.flags[write++] = row;
-    }
-    if (!found) {
-        if (write >= family.flags.size()) {
-            return false;
-        }
-        family.flags[write++] = {slot, state::unlocks::kFlagSet};
-    }
-    for (std::size_t index = write; index < oldCount; ++index) {
-        family.flags[index] = {};
-    }
-    family.flagCount = write;
-    return true;
-}
-
-/** Raises one signed value slot and removes duplicate authored rows for that slot. */
-[[nodiscard]] bool upsert_completion_value(state::Family5State& family,
-                                           std::uint16_t slot,
-                                           std::int32_t minimum) noexcept {
-    const std::size_t oldCount = family.valueCount;
-    std::size_t write = 0;
-    std::optional<std::size_t> mergedIndex;
-    for (std::size_t read = 0; read < oldCount; ++read) {
-        const state::UnlockValueOverride row = family.values[read];
-        if (row.slot == slot) {
-            if (!mergedIndex.has_value()) {
-                mergedIndex = write;
-                family.values[write++] = {slot, (std::max)(row.value, minimum)};
-            } else {
-                state::UnlockValueOverride& merged = family.values[*mergedIndex];
-                merged.value = (std::max)(merged.value, row.value);
-            }
-            continue;
-        }
-        family.values[write++] = row;
-    }
-    if (!mergedIndex.has_value()) {
-        if (write >= family.values.size()) {
-            return false;
-        }
-        family.values[write++] = {slot, minimum};
-    }
-    for (std::size_t index = write; index < oldCount; ++index) {
-        family.values[index] = {};
-    }
-    family.valueCount = write;
-    return true;
-}
-
 } // namespace
 
 void clear() noexcept {
     const Lock::Exclusive guard(g_lock);
     g_definitions.clear();
-    g_report = {};
     g_completionEnabled.store(true, std::memory_order_release);
 }
 
@@ -131,30 +65,14 @@ bool valid(std::span<const Definition> definitions) noexcept {
         const Definition& definition = definitions[index];
         const bool hasCompletedPlug =
             definition.completedPlugDefinitionIndex != details::kUnavailableItemIndex;
-        const bool hasEffect =
-            definition.effectDefinitionIndex != details::kUnavailableItemIndex;
-        const bool hasAcquisition =
-            definition.acquisitionDefinitionIndex != kUnavailableAcquisitionIndex;
-        const bool hasCompletionFlag = definition.completionFlagDefinitionIndex
-                                       != kUnavailableCompletionFlagIndex;
-        const bool hasCompletionValue =
-            definition.completionValueIndex != kUnavailableCompletionValueIndex;
-        const bool directEffect = definition.completedPlugDefinitionIndex
-                                  == definition.effectDefinitionIndex;
+        const bool hasEffect = definition.effectDefinitionIndex != details::kUnavailableItemIndex;
         if (definition.itemDefinitionHash == 0
             || definition.socketLane >= details::kInitialPlugCapacity
-            || (definition.availability != Availability::released
-                && definition.availability != Availability::placeholder
-                && definition.availability != Availability::unsupported)
+            || !valid_availability(definition.availability)
             || (definition.availability == Availability::unsupported
-                && (hasCompletedPlug || hasEffect || hasAcquisition || hasCompletionFlag
-                    || hasCompletionValue || definition.completionValue != 0))
+                && (hasCompletedPlug || hasEffect))
             || (definition.availability != Availability::unsupported
-                && (!hasCompletedPlug || !hasEffect || !hasAcquisition))
-            || (hasCompletionValue != (definition.completionValue > 0))
-            || (definition.availability != Availability::unsupported
-                && ((directEffect && !hasCompletionFlag)
-                    || (!directEffect && !hasCompletionValue)))
+                && (!hasCompletedPlug || !hasEffect))
             || (index != 0 && !less(definitions[index - 1], definition))) {
             return false;
         }
@@ -166,22 +84,8 @@ bool replace(std::span<const Definition> definitions) noexcept {
     if (!valid(definitions)) {
         return false;
     }
-    Report nextReport{};
-    for (const Definition& definition : definitions) {
-        if (definition.availability == Availability::released) {
-            ++nextReport.released;
-        } else if (definition.availability == Availability::placeholder) {
-            ++nextReport.placeholder;
-        } else {
-            ++nextReport.unsupported;
-        }
-    }
     const Lock::Exclusive guard(g_lock);
-    if (!g_definitions.replace(definitions)) {
-        return false;
-    }
-    g_report = nextReport;
-    return true;
+    return g_definitions.replace(definitions);
 }
 
 Result resolve(std::uint16_t itemDefinitionIndex) noexcept {
@@ -200,11 +104,7 @@ Result resolve(std::uint16_t itemDefinitionIndex) noexcept {
             Availability::released,
             {definition->socketLane,
              definition->completedPlugDefinitionIndex,
-             definition->effectDefinitionIndex,
-             definition->acquisitionDefinitionIndex,
-             definition->completionFlagDefinitionIndex,
-             definition->completionValueIndex,
-             definition->completionValue}};
+             definition->effectDefinitionIndex}};
 }
 
 std::uint16_t resolve_effect(std::uint16_t itemDefinitionIndex,
@@ -214,8 +114,7 @@ std::uint16_t resolve_effect(std::uint16_t itemDefinitionIndex,
     const Definition* definition = find(g_definitions.rows(), itemDefinitionIndex);
     if (definition == nullptr || definition->availability != Availability::released
         || definition->socketLane != socketLane
-        || (definition->completedPlugDefinitionIndex != plugDefinitionIndex
-            && definition->effectDefinitionIndex != plugDefinitionIndex)
+        || definition->completedPlugDefinitionIndex != plugDefinitionIndex
         || definition->effectDefinitionIndex == details::kUnavailableItemIndex) {
         return plugDefinitionIndex;
     }
@@ -238,78 +137,29 @@ ApplyResult apply_completed(std::uint16_t itemDefinitionIndex,
     if (result.error == Error::noCatalyst || result.availability != Availability::released) {
         return ApplyResult::unchanged;
     }
-    if (result.error != Error::none
-        || !account::inventory::valid_item_state(flags)
+    if (result.error != Error::none || !account::inventory::valid_item_state(flags)
         || result.completed.socketLane >= plugs.size()
-        || result.completed.effectDefinitionIndex == details::kUnavailableItemIndex) {
+        || result.completed.completedPlugDefinitionIndex == details::kUnavailableItemIndex) {
         return ApplyResult::failed;
     }
 
     const std::uint32_t completedFlags = flags | account::inventory::kMasterworkItemFlag;
-    const std::optional<std::uint16_t> completedPlug = result.completed.effectDefinitionIndex;
+    const std::optional<std::uint16_t> completedPlug =
+        result.completed.completedPlugDefinitionIndex;
     plugs[result.completed.socketLane] = completedPlug;
     flags = completedFlags;
     return ApplyResult::completed;
 }
 
-bool append_investment_overrides(state::Family5State& family) noexcept {
-    if (!completion_enabled()) {
-        return true;
-    }
-    if (family.flagCount > family.flags.size() || family.valueCount > family.values.size()) {
-        return false;
-    }
-
-    state::Family5State candidate = family;
-    const Lock::Shared guard(g_lock);
-    for (const Definition& definition : g_definitions.rows()) {
-        if (definition.availability != Availability::released) {
-            continue;
-        }
-
-        if (!upsert_flag(candidate, definition.acquisitionDefinitionIndex)) {
-            return false;
-        }
-
-        if (definition.completionFlagDefinitionIndex != kUnavailableCompletionFlagIndex
-            && !upsert_flag(candidate, definition.completionFlagDefinitionIndex)) {
-            return false;
-        }
-
-        if (definition.completionValueIndex == kUnavailableCompletionValueIndex) {
-            continue;
-        }
-        if (!upsert_completion_value(candidate,
-                                     definition.completionValueIndex,
-                                     definition.completionValue)) {
-            return false;
-        }
-    }
-    family = candidate;
-    return true;
-}
-
-bool snapshot(std::span<Definition> output,
-              std::size_t& outputCount,
-              Report& outputReport) noexcept {
+bool snapshot(std::span<Definition> output, std::size_t& outputCount) noexcept {
     outputCount = 0;
-    outputReport = {};
     const Lock::Shared guard(g_lock);
-    if (!g_definitions.snapshot(output, outputCount)) {
-        return false;
-    }
-    outputReport = g_report;
-    return true;
+    return g_definitions.snapshot(output, outputCount);
 }
 
 std::size_t count() noexcept {
     const Lock::Shared guard(g_lock);
     return g_definitions.count();
-}
-
-Report report() noexcept {
-    const Lock::Shared guard(g_lock);
-    return g_report;
 }
 
 } // namespace sunrise::state::build_data::items::catalysts

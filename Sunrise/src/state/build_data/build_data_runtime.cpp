@@ -12,7 +12,6 @@
 #include "constants/investment_constant_catalog.h"
 #include "hash_names/hash_name_catalog.h"
 #include "inventory/buckets/inventory_bucket_catalog.h"
-#include "items/catalysts/exotic_catalyst_builder.h"
 #include "items/catalysts/exotic_catalyst_catalog.h"
 #include "items/details/item_detail_catalog.h"
 #include "items/socket_plugs/socket_plug_catalog.h"
@@ -58,8 +57,7 @@ bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
     if (!core::path::append(persistenceState.cacheDirectory, kCacheDirectorySuffix)
         || !core::path::append(persistenceState.cachePath, kCacheFileSuffix)
         || !cache::current_build_identity(configuredEquipmentHash,
-                                           persistenceState.buildIdentity)
-        || !items::catalysts::matches_target_build(persistenceState.buildIdentity)) {
+                                          persistenceState.buildIdentity)) {
         runtime::persistence::clear_locked(persistenceState);
         ReleaseSRWLockExclusive(&persistenceState.lock);
         return false;
@@ -109,7 +107,7 @@ bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
         // makes the lists ready, the package build skips itself, and no ability is picked.
         || !socket_entry_lists::replace_entry_tables(domains.socketEntryTables) || !detailsReplaced
         || !items::socket_plugs::replace(
-             domains.socketPlugRules, domains.socketPlugPools, domains.socketPlugMembers)
+            domains.socketPlugRules, domains.socketPlugPools, domains.socketPlugMembers)
         || !items::catalysts::replace(domains.exoticCatalysts)
         || !abilities::replace(domains.abilityBuckets)
         || !progressions::replace(domains.progressions)

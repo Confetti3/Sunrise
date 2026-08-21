@@ -1020,7 +1020,6 @@
     <ClCompile Include="src\client\content\items\packages\package_collectible_build.cpp" />
     <ClCompile Include="src\client\content\items\packages\package_material_requirement_build.cpp" />
     <ClCompile Include="src\client\content\items\packages\package_detail_build.cpp" />
-    <ClCompile Include="src\client\content\items\packages\package_catalyst_condition_reader.cpp" />
     <ClCompile Include="src\client\content\items\packages\package_socket_plug_build.cpp" />
     <ClCompile Include="src\client\content\items\packages\package_ability_build.cpp" />
     <ClCompile Include="src\client\content\items\packages\package_subclass_build.cpp" />

@@ -16,8 +16,7 @@ namespace sunrise::state::build_data::items::catalysts {
 struct Facts {
     std::uint32_t imageTimestamp{};
     std::uint32_t imageSize{};
-    std::uint32_t emptyCatalystPlugHash{};
-    std::span<const std::uint32_t> legacyCompletionPlugHashes;
+    /** Historical release state is not present in the installed Season 11 item relations. */
     std::span<const std::uint32_t> releasedWeaponHashes;
 };
 
@@ -29,20 +28,10 @@ struct Source {
     std::span<const socket_plugs::Rule> socketPlugRules;
     std::span<const socket_plugs::Pool> socketPlugPools;
     std::span<const socket_plugs::Member> socketPlugMembers;
-    /** Dense item-indexed completion conditions read from item definition expressions. */
-    std::span<const CompletionCondition> completionConditions;
-    /** Dense socket-type-indexed acquired-state gates read from socket type definitions. */
-    std::span<const AcquisitionGate> acquisitionGates;
 };
 
 /** @return The generated facts pinned to Destiny 2 build 86657.20.08.23. */
 [[nodiscard]] Facts generated_facts() noexcept;
-
-/**
- * @param build Executable identity to compare with the generated content build.
- * @return True when the executable identity matches the generated content build.
- */
-[[nodiscard]] bool matches_target_build(const BuildIdentity& build) noexcept;
 
 /**
  * Derives all released and placeholder catalyst records without display text.
@@ -70,17 +59,5 @@ struct Source {
 [[nodiscard]] bool matches_derived(const Source& source,
                                    const Facts& facts,
                                    std::span<const Definition> definitions) noexcept;
-
-/**
- * Rebuilds package-only transient relations from a stored catalog, then re-derives it.
- * The stored acquisition row must still name an installed item. Conflicting rows fail closed.
- * @param source Installed cache domains. Its transient spans are ignored.
- * @param facts Build-scoped role and release facts.
- * @param definitions Stored candidate catalog.
- * @return True when one fresh derivation exactly matches the stored catalog.
- */
-[[nodiscard]] bool matches_cached(const Source& source,
-                                  const Facts& facts,
-                                  std::span<const Definition> definitions) noexcept;
 
 } // namespace sunrise::state::build_data::items::catalysts

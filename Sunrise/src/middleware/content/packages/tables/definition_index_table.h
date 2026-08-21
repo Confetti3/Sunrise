@@ -183,15 +183,6 @@ slot_tag(std::span<const std::byte> blob, std::size_t index, std::uint32_t& tag)
 inline constexpr std::size_t kItemTableSlot = 48;
 /** The investment root holds the shared reusable/randomized plug-set table at this slot. */
 inline constexpr std::size_t kPlugSetTableSlot = 51;
-/** The investment root holds the dense ordinary socket-type table at this slot. */
-inline constexpr std::size_t kSocketTypeTableSlot = 94;
-/** Element class and row size of the installed ordinary socket-type table. */
-inline constexpr std::uint32_t kSocketTypeTableClass = 0x80807ABBU;
-inline constexpr std::size_t kSocketTypeRowStride = 96;
-/** One socket type points to its acquired-state rule array from this row offset. */
-inline constexpr std::size_t kSocketTypeAcquisitionDescriptor = 16;
-/** Acquired-state and item-completion arrays carry this postfix expression-row class. */
-inline constexpr std::uint32_t kInvestmentExpressionRowClass = 0x80807D31U;
 /** The investment root holds the socket entry list table at this slot. */
 inline constexpr std::size_t kSocketEntryListTableSlot = 97;
 /** The globals container names the investment root as its first child. */

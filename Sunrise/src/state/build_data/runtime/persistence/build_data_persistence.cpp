@@ -65,7 +65,6 @@ to_record(const constants::InvestmentConstants& value) noexcept {
     counts = {};
     const cache::records::MutableDomains scratch = scratch_domains(state);
     *scratch.constants = to_record(constants::snapshot());
-    items::catalysts::Report catalystReport{};
     return content::snapshot(scratch.named, counts.named)
            && items::snapshot(scratch.items, counts.items)
            && collectibles::snapshot(scratch.collectibles, counts.collectibles)
@@ -78,8 +77,7 @@ to_record(const constants::InvestmentConstants& value) noexcept {
                                             counts.socketPlugPools,
                                             scratch.socketPlugMembers,
                                             counts.socketPlugMembers)
-           && items::catalysts::snapshot(
-               scratch.exoticCatalysts, counts.exoticCatalysts, catalystReport)
+           && items::catalysts::snapshot(scratch.exoticCatalysts, counts.exoticCatalysts)
            && inventory::buckets::snapshot(scratch.inventoryBuckets, counts.inventoryBuckets)
            && socket_entry_lists::snapshot(scratch.socketEntryLists, counts.socketEntryLists)
            && socket_entry_lists::snapshot_entry_tables(scratch.socketEntryTables,
@@ -112,11 +110,10 @@ bool all_domains_ready() noexcept {
     constants::InvestmentConstants published{};
     return runtime::named::ready() && item_definitions_ready() && configured_item_details_ready()
            && collectible_definitions_ready() && socket_plug_rules_ready()
-           && exotic_catalysts_ready()
-           && material_requirement_sets_ready() && inventory_bucket_descriptors_ready()
-           && socket_entry_lists_ready() && ability_buckets_ready()
-           && progression_definitions_ready() && scenario_layouts_ready() && spawn_sets_ready()
-           && hash_names_ready() && constants::find(published);
+           && exotic_catalysts_ready() && material_requirement_sets_ready()
+           && inventory_bucket_descriptors_ready() && socket_entry_lists_ready()
+           && ability_buckets_ready() && progression_definitions_ready() && scenario_layouts_ready()
+           && spawn_sets_ready() && hash_names_ready() && constants::find(published);
 }
 
 /** Gives mutable views over every fixed snapshot buffer. */
@@ -144,10 +141,9 @@ cache::records::MutableDomains scratch_domains(Context& state) noexcept {
     const auto socketPlugMembers = ensure_scratch<build_data::items::socket_plugs::Member,
                                                   build_data::items::socket_plugs::kMemberCapacity>(
         state.socketPlugMemberScratch);
-    const auto exoticCatalysts =
-        ensure_scratch<build_data::items::catalysts::Definition,
-                       build_data::items::catalysts::kDefinitionCapacity>(
-            state.exoticCatalystScratch);
+    const auto exoticCatalysts = ensure_scratch<build_data::items::catalysts::Definition,
+                                                build_data::items::catalysts::kDefinitionCapacity>(
+        state.exoticCatalystScratch);
     const auto inventoryBuckets =
         ensure_scratch<inventory::buckets::Descriptor, inventory::buckets::kDescriptorCapacity>(
             state.inventoryBucketScratch);

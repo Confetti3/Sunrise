@@ -5,7 +5,6 @@
 #include <optional>
 #include <span>
 
-#include "../../../investment/investment.h"
 #include "definition.h"
 
 namespace sunrise::state::build_data::items::catalysts {
@@ -65,34 +64,19 @@ void set_completion_enabled(bool enabled) noexcept;
  * @param plugs Candidate ordinary socket plugs.
  * @return Completed, unchanged, or failed without a partial change.
  */
-[[nodiscard]] ApplyResult
-apply_completed(std::uint16_t itemDefinitionIndex,
-                std::uint32_t& flags,
-                std::span<std::optional<std::uint16_t>> plugs) noexcept;
-
-/**
- * Adds acquired-state gates, completion flags, and completion values for released catalysts.
- * Existing authored rows with the same slot are raised to the required value. The input stays
- * unchanged when either fixed override bank cannot hold the complete deduplicated result.
- * @param family Candidate Family-5 state.
- * @return True when completion is disabled or every released override fits atomically.
- */
-[[nodiscard]] bool append_investment_overrides(state::Family5State& family) noexcept;
+[[nodiscard]] ApplyResult apply_completed(std::uint16_t itemDefinitionIndex,
+                                          std::uint32_t& flags,
+                                          std::span<std::optional<std::uint16_t>> plugs) noexcept;
 
 /**
  * Copies the complete catalog under its shared lock.
  * @param output Caller-owned fixed catalog storage.
  * @param count Receives the number of copied rows.
- * @param report Receives the published catalog counts.
  * @return False only when output cannot hold the complete catalog.
  */
-[[nodiscard]] bool
-snapshot(std::span<Definition> output, std::size_t& count, Report& report) noexcept;
+[[nodiscard]] bool snapshot(std::span<Definition> output, std::size_t& count) noexcept;
 
 /** @return Published catalyst record count. */
 [[nodiscard]] std::size_t count() noexcept;
-
-/** @return Counts for the current complete catalog. */
-[[nodiscard]] Report report() noexcept;
 
 } // namespace sunrise::state::build_data::items::catalysts

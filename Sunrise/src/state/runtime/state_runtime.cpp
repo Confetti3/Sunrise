@@ -364,17 +364,12 @@ bool new_bap_session(BapState& output) noexcept {
     return true;
 }
 
-/** Copies one complete evaluated content state with build-derived catalyst overrides. */
-bool investment_snapshot(InvestmentState& output) noexcept {
-    output = {};
+/** @return A copy of the evaluated content state, read under the lock. */
+InvestmentState investment_snapshot() noexcept {
     AcquireSRWLockShared(&runtime::storage::g_stateLock);
-    InvestmentState snapshot = runtime::storage::g_state.investment;
+    const InvestmentState snapshot = runtime::storage::g_state.investment;
     ReleaseSRWLockShared(&runtime::storage::g_stateLock);
-    if (!build_data::complete_exotic_catalyst_investment(snapshot.family5)) {
-        return false;
-    }
-    output = snapshot;
-    return true;
+    return snapshot;
 }
 
 } // namespace sunrise::state

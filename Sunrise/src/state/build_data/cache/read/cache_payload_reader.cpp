@@ -72,8 +72,8 @@ void clear(records::MutableDomains output) noexcept {
     std::fill(
         output.socketPlugPools.begin(), output.socketPlugPools.end(), items::socket_plugs::Pool{});
     std::fill(output.socketPlugMembers.begin(),
-               output.socketPlugMembers.end(),
-               items::socket_plugs::Member{});
+              output.socketPlugMembers.end(),
+              items::socket_plugs::Member{});
     std::fill(output.exoticCatalysts.begin(),
               output.exoticCatalysts.end(),
               items::catalysts::Definition{});
@@ -162,8 +162,8 @@ bool read_payload(HANDLE file,
             && read_domain<records::SocketPlugPoolRecord>(
                 file, output.socketPlugPools.first(counts.socketPlugPools), checksum);
     valid = valid
-             && read_domain<records::SocketPlugMemberRecord>(
-                 file, output.socketPlugMembers.first(counts.socketPlugMembers), checksum);
+            && read_domain<records::SocketPlugMemberRecord>(
+                file, output.socketPlugMembers.first(counts.socketPlugMembers), checksum);
     valid = valid
             && read_domain<records::ExoticCatalystRecord>(
                 file, output.exoticCatalysts.first(counts.exoticCatalysts), checksum);

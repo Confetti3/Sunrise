@@ -1,7 +1,7 @@
 #include <array>
 #include <span>
-#include <vector>
 
+#include "../../../../state/build_data/items/catalysts/exotic_catalyst_builder.h"
 #include "../../../../state/build_data/items/details/item_detail_catalog.h"
 #include "../../../../state/build_data/runtime.h"
 #include "internal.h"
@@ -54,15 +54,6 @@ bool build_item_rows(const reader::Source& source,
     bool published = !needRows;
     if (retainDetails && storage.details.size() != kDetailCapacity) {
         storage.details.assign(kDetailCapacity, build_details::Definition{});
-    }
-    if (needCatalysts) {
-        storage.catalystCompletionConditions.assign(
-            static_cast<std::size_t>(table.count),
-            state::build_data::items::catalysts::CompletionCondition{});
-        for (std::size_t item = 0; item < storage.catalystCompletionConditions.size(); ++item) {
-            storage.catalystCompletionConditions[item].itemDefinitionIndex =
-                static_cast<std::uint16_t>(item);
-        }
     }
     const bool detailStorageReady = !retainDetails || storage.details.size() == kDetailCapacity;
     const std::span<const std::byte> container{storage.child};
@@ -156,13 +147,6 @@ bool build_item_rows(const reader::Source& source,
             if (retainDetails) {
                 storage.details[builtDetailCount++] = detail;
             }
-            if (needCatalysts
-                && detail.definitionIndex < storage.catalystCompletionConditions.size()) {
-                read_catalyst_completion_condition(
-                    std::span<const std::byte>{storage.definition},
-                    detail.definitionIndex,
-                    storage.catalystCompletionConditions[detail.definitionIndex]);
-            }
             if (needSocketRows) {
                 (void)socketPlugBuild.append(item,
                                              std::span<const std::byte>{storage.definition},
@@ -180,21 +164,20 @@ bool build_item_rows(const reader::Source& source,
             catalystRows{};
         std::size_t catalystCount = 0;
         state::build_data::items::catalysts::Report catalystReport{};
+        const state::build_data::items::catalysts::Source catalystSource{
+            {},
+            std::span(storage.rows).first(rowCount),
+            std::span(storage.details).first(builtDetailCount),
+            socketPlugBuild.rules(),
+            socketPlugBuild.pools(),
+            socketPlugBuild.members(),
+        };
+        bool catalystBuilt = false;
         if (published && needCatalysts) {
             reason = "exotic_catalysts";
-            const bool built = state::build_data::derive_exotic_catalysts(
-                std::span(storage.rows).first(rowCount),
-                std::span(storage.details).first(builtDetailCount),
-                socketPlugBuild.rules(),
-                socketPlugBuild.pools(),
-                socketPlugBuild.members(),
-                storage.catalystCompletionConditions,
-                storage.catalystAcquisitionGates,
-                catalystRows,
-                catalystCount,
-                catalystReport);
-            report_catalyst_catalog(catalystReport, built);
-            published = built;
+            catalystBuilt = state::build_data::derive_exotic_catalysts(
+                catalystSource, catalystRows, catalystCount, catalystReport);
+            report_catalyst_catalog(catalystReport, catalystBuilt);
         }
         if (published && needSocketPlugs) {
             const std::size_t rules = socketPlugBuild.rule_count();
@@ -207,10 +190,10 @@ bool build_item_rows(const reader::Source& source,
                 report_socket_plug_count(rules, pools, members, skipped);
             }
         }
-        if (published && needCatalysts) {
+        if (published && needCatalysts && catalystBuilt) {
             reason = "exotic_catalysts";
             published = state::build_data::publish_exotic_catalysts(
-                std::span(catalystRows).first(catalystCount));
+                catalystSource, std::span(catalystRows).first(catalystCount));
         }
     }
     // Ability buckets read the socket entry list table again and depend on the detail domain, so
@@ -244,7 +227,6 @@ bool build_item_rows(const reader::Source& source,
     return published && state::build_data::item_definitions_ready()
            && state::build_data::configured_item_details_ready()
            && state::build_data::socket_plug_rules_ready()
-           && state::build_data::exotic_catalysts_ready()
            && state::build_data::ability_buckets_ready();
 }
 

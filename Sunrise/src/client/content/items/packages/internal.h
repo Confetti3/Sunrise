@@ -62,12 +62,6 @@ struct Storage {
     std::vector<std::byte> definition{};
     /** Shared reusable/randomized plug-set table read from investment-root slot 51. */
     std::vector<std::byte> plugSetTable{};
-    /** Dense item-indexed legacy catalyst completion expressions for this package pass. */
-    std::vector<state::build_data::items::catalysts::CompletionCondition>
-        catalystCompletionConditions{};
-    /** Dense socket-type-indexed acquired-state gates for this package pass. */
-    std::vector<state::build_data::items::catalysts::AcquisitionGate>
-        catalystAcquisitionGates{};
     /** Compact 0..3 special plug-category code of every dense installed item row. */
     std::array<std::uint8_t, state::build_data::items::kDefinitionCapacity> specialPlugCategories{};
     /** Inventory routing rows held until the paired bucket-definition table is resolved. */
@@ -311,9 +305,9 @@ void report_row_count(std::size_t walked,
 
 /** Reports the exact socket-rule, deduplicated-pool, member, and skipped-lane counts. */
 void report_socket_plug_count(std::size_t rules,
-                               std::size_t pools,
-                               std::size_t members,
-                               std::size_t skipped) noexcept;
+                              std::size_t pools,
+                              std::size_t members,
+                              std::size_t skipped) noexcept;
 
 /**
  * Reports released, placeholder, and unsupported catalyst catalog counts.
