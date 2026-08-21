@@ -6,14 +6,61 @@
 #include <span>
 #include <vector>
 
+#include "../../../../middleware/content/packages/reader/reader.h"
 #include "../../../../middleware/content/packages/tables/items.h"
+#include "../../../../state/build_data/items/catalysts/definition.h"
 #include "../../../../state/build_data/items/item_catalog.h"
 #include "../../../../state/build_data/items/socket_plugs/definition.h"
 
 namespace sunrise::client::content::items::packages {
 
+namespace reader = middleware::content::packages::reader;
 namespace tables = middleware::content::packages::tables;
 namespace socket_plugs = state::build_data::items::socket_plugs;
+namespace catalysts = state::build_data::items::catalysts;
+
+/**
+ * Reads the dense socket-type table and extracts each type's acquired-state gate.
+ * @param source Installed package source.
+ * @param scratch Shared package reader scratch.
+ * @param root Investment root bytes.
+ * @param blob Scratch storage for the socket-type table.
+ * @param output Receives one row per native socket type.
+ * @return True when the fixed table shape and every row extent are valid.
+ */
+[[nodiscard]] bool
+read_catalyst_acquisition_gates(const reader::Source& source,
+                                reader::Scratch& scratch,
+                                std::span<const std::byte> root,
+                                std::vector<std::byte>& blob,
+                                std::vector<catalysts::AcquisitionGate>& output) noexcept;
+
+/**
+ * Reads the dense objective table's build-defined completion values.
+ * @param source Installed package source.
+ * @param scratch Shared package reader scratch.
+ * @param root Investment root bytes.
+ * @param blob Scratch storage for the objective table.
+ * @param output Receives one completion value per native objective index.
+ * @return True when the table class, row class, count, and fixed rows are valid.
+ */
+[[nodiscard]] bool
+read_catalyst_objective_values(const reader::Source& source,
+                               reader::Scratch& scratch,
+                               std::span<const std::byte> root,
+                               std::vector<std::byte>& blob,
+                               std::vector<std::int32_t>& output) noexcept;
+
+/**
+ * Finds every positive flag and `value >= literal` term plus one objective reference.
+ * Duplicate terms are folded. Conflicting objectives or fixed-capacity overflow fail closed.
+ * @param definition Complete installed definition of the catalyst effect item.
+ * @param itemDefinitionIndex Native index of the catalyst effect item.
+ * @param output Receives the unique condition or its absent or ambiguous state.
+ */
+void read_catalyst_completion_condition(std::span<const std::byte> definition,
+                                        std::uint16_t itemDefinitionIndex,
+                                        catalysts::CompletionCondition& output) noexcept;
 
 /** Fixed-size, heap-backed interning state for one installed package pass. */
 class SocketPlugBuild final {

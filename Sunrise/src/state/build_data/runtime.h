@@ -7,6 +7,7 @@
 #include <span>
 #include <string_view>
 
+#include "../investment/investment.h"
 #include "abilities/definition.h"
 #include "collectibles/collectible_catalog.h"
 #include "constants/definition.h"
@@ -231,6 +232,20 @@ publish_exotic_catalysts(const items::catalysts::Source& source,
 complete_exotic_catalyst(std::uint16_t itemDefinitionIndex,
                          std::uint32_t& flags,
                          std::span<std::optional<std::uint16_t>> plugs) noexcept;
+
+/**
+ * Adds all released catalyst acquisition and completion overrides to one Family-5 snapshot.
+ * @param family Candidate Family-5 state.
+ * @return True when all overrides fit and the complete state commits.
+ */
+[[nodiscard]] bool complete_exotic_catalyst_investment(Family5State& family) noexcept;
+
+/**
+ * Raises every account objective required by a released legacy catalyst.
+ * @param values Candidate account objective bank.
+ * @return True when all derived objectives fit and apply.
+ */
+[[nodiscard]] bool complete_exotic_catalyst_objectives(std::span<std::int32_t> values) noexcept;
 
 /**
  * Resolves the item row that supplies one socketed catalyst's native perks and stat changes.

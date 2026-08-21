@@ -11,6 +11,7 @@
 #include "../../constants/definition.h"
 #include "../../definition.h"
 #include "../../hash_names/definition.h"
+#include "../../items/catalysts/definition.h"
 #include "../../items/details/definition.h"
 #include "../../items/item_catalog.h"
 #include "../../items/socket_plugs/definition.h"
@@ -28,9 +29,8 @@ inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', '
  * Current build-data cache format. An older cache is rebuilt rather than read.
  * Bump it when a stored shape changes, and when the extraction filling it changes what it writes.
  * A cached row survives a code change, so a corrected walk keeps publishing the old rows.
- * Development builds wrote formats 46 through 48, so those numbers cannot be reused.
  */
-inline constexpr std::uint32_t kCacheFormatVersion = 49;
+inline constexpr std::uint32_t kCacheFormatVersion = 47;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */
@@ -210,9 +210,20 @@ struct ExoticCatalystRecord {
     std::uint32_t itemDefinitionHash{};
     std::uint16_t itemDefinitionIndex{};
     std::uint16_t completedPlugDefinitionIndex{};
+    std::uint16_t progressPlugDefinitionIndex{};
     std::uint16_t effectDefinitionIndex{};
+    std::uint16_t acquisitionDefinitionIndex{};
+    std::array<std::uint16_t, items::catalysts::kCompletionFlagCapacity>
+        completionFlagDefinitionIndices{};
+    std::array<std::uint16_t, items::catalysts::kCompletionValueCapacity>
+        completionValueIndices{};
+    std::uint16_t objectiveDefinitionIndex{items::catalysts::kUnavailableObjectiveIndex};
     std::uint8_t socketLane{};
     std::uint8_t availability{};
+    std::uint8_t completionFlagCount{};
+    std::uint8_t completionValueCount{};
+    std::array<std::int32_t, items::catalysts::kCompletionValueCapacity> completionValues{};
+    std::int32_t objectiveValue{};
 };
 
 /** Disk form of one inventory-bucket array-routing descriptor. */
@@ -506,7 +517,8 @@ static_assert(sizeof(SocketPlugRuleRecord)
 static_assert(sizeof(SocketPlugPoolRecord) == 2 * sizeof(std::uint32_t));
 static_assert(sizeof(SocketPlugMemberRecord) == sizeof(std::uint16_t));
 static_assert(sizeof(ExoticCatalystRecord)
-              == sizeof(std::uint32_t) + 3 * sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t));
+              == 6 * sizeof(std::uint32_t) + 14 * sizeof(std::uint16_t)
+                     + 4 * sizeof(std::uint8_t));
 static_assert(sizeof(InventoryBucketRecord)
               == 4 * sizeof(std::uint8_t) + 2 * sizeof(std::uint16_t));
 static_assert(sizeof(SocketEntryListRecord)

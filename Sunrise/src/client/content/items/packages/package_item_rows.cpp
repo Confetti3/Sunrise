@@ -55,6 +55,15 @@ bool build_item_rows(const reader::Source& source,
     if (retainDetails && storage.details.size() != kDetailCapacity) {
         storage.details.assign(kDetailCapacity, build_details::Definition{});
     }
+    if (needCatalysts) {
+        storage.catalystCompletionConditions.assign(
+            static_cast<std::size_t>(table.count),
+            state::build_data::items::catalysts::CompletionCondition{});
+        for (std::size_t item = 0; item < storage.catalystCompletionConditions.size(); ++item) {
+            storage.catalystCompletionConditions[item].itemDefinitionIndex =
+                static_cast<std::uint16_t>(item);
+        }
+    }
     const bool detailStorageReady = !retainDetails || storage.details.size() == kDetailCapacity;
     const std::span<const std::byte> container{storage.child};
     reason = "rows";
@@ -147,6 +156,13 @@ bool build_item_rows(const reader::Source& source,
             if (retainDetails) {
                 storage.details[builtDetailCount++] = detail;
             }
+            if (needCatalysts
+                && detail.definitionIndex < storage.catalystCompletionConditions.size()) {
+                read_catalyst_completion_condition(
+                    std::span<const std::byte>{storage.definition},
+                    detail.definitionIndex,
+                    storage.catalystCompletionConditions[detail.definitionIndex]);
+            }
             if (needSocketRows) {
                 (void)socketPlugBuild.append(item,
                                              std::span<const std::byte>{storage.definition},
@@ -171,6 +187,9 @@ bool build_item_rows(const reader::Source& source,
             socketPlugBuild.rules(),
             socketPlugBuild.pools(),
             socketPlugBuild.members(),
+            storage.catalystCompletionConditions,
+            storage.catalystAcquisitionGates,
+            storage.catalystObjectiveValues,
         };
         bool catalystBuilt = false;
         if (published && needCatalysts) {
@@ -178,6 +197,7 @@ bool build_item_rows(const reader::Source& source,
             catalystBuilt = state::build_data::derive_exotic_catalysts(
                 catalystSource, catalystRows, catalystCount, catalystReport);
             report_catalyst_catalog(catalystReport, catalystBuilt);
+            published = catalystBuilt;
         }
         if (published && needSocketPlugs) {
             const std::size_t rules = socketPlugBuild.rule_count();
@@ -227,6 +247,7 @@ bool build_item_rows(const reader::Source& source,
     return published && state::build_data::item_definitions_ready()
            && state::build_data::configured_item_details_ready()
            && state::build_data::socket_plug_rules_ready()
+           && state::build_data::exotic_catalysts_ready()
            && state::build_data::ability_buckets_ready();
 }
 

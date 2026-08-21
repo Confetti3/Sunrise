@@ -102,6 +102,14 @@ complete_exotic_catalyst(std::uint16_t itemDefinitionIndex,
     return items::catalysts::apply_completed(itemDefinitionIndex, flags, plugs);
 }
 
+bool complete_exotic_catalyst_investment(Family5State& family) noexcept {
+    return items::catalysts::append_investment_overrides(family);
+}
+
+bool complete_exotic_catalyst_objectives(std::span<std::int32_t> values) noexcept {
+    return items::catalysts::append_objective_completions(values);
+}
+
 std::uint16_t resolve_exotic_catalyst_effect(std::uint16_t itemDefinitionIndex,
                                              std::uint8_t socketLane,
                                              std::uint16_t plugDefinitionIndex) noexcept {

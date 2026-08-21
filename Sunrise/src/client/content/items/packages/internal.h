@@ -62,6 +62,13 @@ struct Storage {
     std::vector<std::byte> definition{};
     /** Shared reusable/randomized plug-set table read from investment-root slot 51. */
     std::vector<std::byte> plugSetTable{};
+    /** Dense item-indexed catalyst completion expressions for this package pass. */
+    std::vector<state::build_data::items::catalysts::CompletionCondition>
+        catalystCompletionConditions{};
+    /** Dense socket-type-indexed acquired-state gates for this package pass. */
+    std::vector<state::build_data::items::catalysts::AcquisitionGate> catalystAcquisitionGates{};
+    /** Dense native objective completion values used by legacy catalyst progress items. */
+    std::vector<std::int32_t> catalystObjectiveValues{};
     /** Compact 0..3 special plug-category code of every dense installed item row. */
     std::array<std::uint8_t, state::build_data::items::kDefinitionCapacity> specialPlugCategories{};
     /** Inventory routing rows held until the paired bucket-definition table is resolved. */

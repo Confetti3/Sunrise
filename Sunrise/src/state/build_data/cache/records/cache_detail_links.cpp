@@ -128,8 +128,11 @@ bool valid_exotic_catalyst_links(const BuildIdentity& build, Domains domains) no
         domains.socketPlugRules,
         domains.socketPlugPools,
         domains.socketPlugMembers,
+        {},
+        {},
+        {},
     };
-    return items::catalysts::matches_derived(source, facts, domains.exoticCatalysts);
+    return items::catalysts::matches_cached(source, facts, domains.exoticCatalysts);
 }
 
 } // namespace sunrise::state::build_data::cache::records
