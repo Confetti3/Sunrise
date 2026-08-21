@@ -221,6 +221,7 @@ enum class FilterGroup : std::uint8_t {
     geometry,
     entities,
     spawns,
+    logic,
     triggers,
     audio,
     rendering,
@@ -288,6 +289,7 @@ struct WorkspaceState final {
     bool showGeometry{true};
     bool showEntities{true};
     bool showSpawns{true};
+    bool showLogic{true};
     bool showTriggers{true};
     bool showAudio{true};
     bool showKnownBounds{true};
@@ -339,6 +341,8 @@ struct InspectorCapabilities final {
     std::size_t knownBounds{};
     std::size_t triggerCenters{};
     std::size_t triggerShapes{};
+    std::size_t logicDefinitions{};
+    std::size_t logicPlacements{};
     std::size_t warnings{};
     std::size_t errors{};
 };
@@ -347,6 +351,14 @@ struct InspectorCapabilities final {
     InspectorCapabilities result{};
     for (const model::Node& node : world().graph.nodes()) {
         if (node.producer == model::Producer::activityCatalog) {
+            continue;
+        }
+        if (node.producer == model::Producer::activityLogicCatalog) {
+            if (node.kind == model::NodeKind::logicEntity) {
+                ++result.logicDefinitions;
+            } else if (node.kind == model::NodeKind::logicPlacement) {
+                ++result.logicPlacements;
+            }
             continue;
         }
         ++result.liveNodes;
@@ -686,6 +698,11 @@ void refresh_layout_scale() noexcept {
     case model::NodeKind::spawnSet:
     case model::NodeKind::spawnPoint:
         return FilterGroup::spawns;
+    case model::NodeKind::activityLogic:
+    case model::NodeKind::logicGroup:
+    case model::NodeKind::logicEntity:
+    case model::NodeKind::logicPlacement:
+        return FilterGroup::logic;
     case model::NodeKind::trigger:
         return FilterGroup::triggers;
     case model::NodeKind::audio:
@@ -716,6 +733,8 @@ void refresh_layout_scale() noexcept {
         return g_state.showEntities;
     case FilterGroup::spawns:
         return g_state.showSpawns;
+    case FilterGroup::logic:
+        return g_state.showLogic;
     case FilterGroup::triggers:
         return g_state.showTriggers;
     case FilterGroup::audio:
@@ -1007,6 +1026,8 @@ void quick_filters() noexcept {
     filterChip("Entities", FilterGroup::entities, g_state.showEntities);
     ImGui::SameLine();
     filterChip("Spawns", FilterGroup::spawns, g_state.showSpawns);
+    ImGui::SameLine();
+    filterChip("Logic", FilterGroup::logic, g_state.showLogic);
 
     filterChip("Triggers", FilterGroup::triggers, g_state.showTriggers);
     ImGui::SameLine();
@@ -1625,6 +1646,71 @@ void draw_activity_metadata(const model::Node& node) noexcept {
     }
 }
 
+[[nodiscard]] model::NodeId logic_node_for_definition(std::uint32_t definitionTag) noexcept {
+    for (const model::Node& node : world().graph.nodes()) {
+        if (node.kind == model::NodeKind::logicEntity && node.activityLogicMetadata.has_value()
+            && node.activityLogicMetadata->definitionTag == definitionTag) {
+            return node.id;
+        }
+    }
+    return {};
+}
+
+void draw_activity_logic_metadata(const model::Node& node) noexcept {
+    if (!node.activityLogicMetadata.has_value()) {
+        return;
+    }
+    const model::ActivityLogicMetadata& metadata = *node.activityLogicMetadata;
+    if (inspector_header("Activity logic", ImGuiTreeNodeFlags_DefaultOpen)
+        && begin_properties("##activity_logic_properties")) {
+        property_u64("Scenario", metadata.scenarioTag, 8);
+        property_u64("Definition", metadata.definitionTag, 8);
+        property_u64("Class primary", metadata.classPrimary, 8);
+        property_u64("Class secondary", metadata.classSecondary, 8);
+        property_row("Role", metadata.roleName.c_str());
+        property_row("Label", metadata.label.c_str());
+        property_row("Confidence", metadata.confidenceName.c_str());
+        if (!metadata.localizedText.empty()) {
+            property_row("Localized text", metadata.localizedText.c_str());
+        }
+        property_i32("Authored placements", static_cast<std::int32_t>(metadata.placementCount));
+        if (metadata.hasPlacement) {
+            property_u64("WorldID", metadata.worldId);
+            property_u64("Map table", metadata.mapTableTag, 8);
+            property_u64("Placed entity", metadata.placedEntityTag, 8);
+            std::array<char, 128> rotation{};
+            std::snprintf(rotation.data(), rotation.size(), "%.4f, %.4f, %.4f, %.4f",
+                          static_cast<double>(metadata.authoredRotation[0]),
+                          static_cast<double>(metadata.authoredRotation[1]),
+                          static_cast<double>(metadata.authoredRotation[2]),
+                          static_cast<double>(metadata.authoredRotation[3]));
+            property_row("Authored quaternion", rotation.data());
+        }
+        end_properties();
+    }
+    if ((metadata.roleName.find("Trigger") != std::string::npos
+         || metadata.roleName.find("Spatial") != std::string::npos)
+        && !node.transform.has_value()) {
+        inspector_text("Static archive identifies spatial/volume logic, but this definition has no proven shape or world transform.", true);
+    }
+    if (metadata.linkedDefinitionTags.empty()) {
+        return;
+    }
+    ImGui::TextUnformatted("Serialized definition links");
+    for (const std::uint32_t linked : metadata.linkedDefinitionTags) {
+        std::array<char, 64> label{};
+        std::snprintf(label.data(), label.size(), "Open 0x%08X", linked);
+        ImGui::PushID(static_cast<int>(linked));
+        const model::NodeId target = logic_node_for_definition(linked);
+        ImGui::BeginDisabled(!target);
+        if (ImGui::Button(label.data())) {
+            select_node(target);
+        }
+        ImGui::EndDisabled();
+        ImGui::PopID();
+    }
+}
+
 void draw_rendering(const model::Node& node) noexcept {
     if (!model::supports(node.actions, model::Action::hide)
         || !inspector_header("Rendering", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -1718,6 +1804,7 @@ void draw_inspector() noexcept {
     draw_activity(*node);
     draw_source(*node);
     draw_activity_metadata(*node);
+    draw_activity_logic_metadata(*node);
 }
 
 void graph_reference_row(const char* relation, const model::Node& node) noexcept {
@@ -2699,6 +2786,15 @@ void draw_toolbar(const camera::Status& status) noexcept {
             if (ImGui::MenuItem("Spawn helpers", nullptr, &g_state.showSpawns)) {
                 g_state.rowsValid = false;
             }
+            ImGui::BeginDisabled(available.logicPlacements == 0);
+            if (ImGui::MenuItem("Authored activity placements", nullptr, &g_state.showLogic)) {
+                g_state.rowsValid = false;
+            }
+            ImGui::EndDisabled();
+            if (available.logicPlacements == 0
+                && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                ImGui::SetTooltip("No exact WorldID-backed activity-logic placements are present for this scenario.");
+            }
             ImGui::BeginDisabled(available.knownBounds == 0);
             ImGui::MenuItem("Known bounds (x-ray)", nullptr, &g_state.showKnownBounds);
             ImGui::EndDisabled();
@@ -2817,6 +2913,12 @@ void draw_status(const camera::Status& status) noexcept {
                         available.liveNodes,
                         available.spatialNodes,
                         available.knownBounds);
+    if (available.logicDefinitions != 0) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("| Logic %zu / %zu placed",
+                            available.logicDefinitions,
+                            available.logicPlacements);
+    }
     if (available.triggerCenters != 0) {
         ImGui::SameLine();
         ImGui::TextDisabled("| triggers %zu centers / %zu shapes",
@@ -3102,6 +3204,7 @@ bool render(bool uiVisible) noexcept {
             const viewport::Options overlayOptions{g_state.showGeometry,
                                                    g_state.showEntities,
                                                    g_state.showSpawns,
+                                                   g_state.showLogic,
                                                    g_state.showTriggers,
                                                    g_state.showAudio,
                                                    g_state.showRendering,

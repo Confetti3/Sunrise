@@ -15,4 +15,5 @@
 /build/
 /bin/
 **/activity-graph-catalog.bin
+**/activity-logic-catalog.bin
 __pycache__/

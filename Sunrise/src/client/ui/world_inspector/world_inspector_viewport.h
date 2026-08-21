@@ -15,6 +15,7 @@ struct Options final {
     bool showGeometry{true};
     bool showEntities{true};
     bool showSpawns{true};
+    bool showLogic{true};
     bool showTriggers{true};
     bool showAudio{true};
     bool showRendering{true};

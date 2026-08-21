@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|x64">
@@ -230,7 +230,9 @@
     <ClCompile Include="src\client\inspection\providers\spawn_inspection_provider.cpp" />
     <ClCompile Include="src\client\inspection\inspection_capture.cpp" />
     <ClCompile Include="src\client\inspection\activity_graph_catalog.cpp" />
+    <ClCompile Include="src\client\inspection\activity_logic_catalog.cpp" />
     <ClCompile Include="src\client\inspection\providers\activity_graph_inspection.cpp" />
+    <ClCompile Include="src\client\inspection\providers\activity_logic_inspection.cpp" />
     <ClCompile Include="src\client\viewer\viewer_camera_settings_store.cpp" />
     <ClCompile Include="src\client\viewer\viewer_camera_path_store.cpp" />
     <ClCompile Include="src\client\viewer\viewer_input_ownership.cpp" />
@@ -927,7 +929,9 @@
     <ClInclude Include="src\client\runtime\runtime.h" />
     <ClInclude Include="src\client\movement\movement_settings_store.h" />
     <ClInclude Include="src\client\inspection\activity_graph_catalog.h" />
+    <ClInclude Include="src\client\inspection\activity_logic_catalog.h" />
     <ClInclude Include="src\client\inspection\providers\activity_graph_inspection.h" />
+    <ClInclude Include="src\client\inspection\providers\activity_logic_inspection.h" />
     <ClInclude Include="src\client\ui\world_inspector\world_debug_primitives.h" />
     <ClInclude Include="src\client\ui\world_inspector\world_inspector_graph.h" />
     <ClInclude Include="src\client\ui\world_inspector\world_inspector_graph_layout.h" />

@@ -124,6 +124,27 @@ the UI labels them **Shape unavailable; center observation only** and never inve
 engine debug-draw calls, global wireframe mode, depth-aware occlusion, and Havok shape retention are
 not enabled.
 
+### Building an optional activity logic catalog
+
+A separate optional research artifact can expose authored encounter logic for the current scenario:
+
+```powershell
+python tools/build_activity_logic_catalog.py `
+  --input C:\path\to\destiny2-complete-activity-logic-archive.zip `
+  --output bin\x64\Sunrise\activity-logic-catalog.bin
+```
+
+The converter retains scenario membership, semantic role/confidence, developer names, unique localized
+text, strong serialized definition links, and strong WorldID-to-map placements. In the Inspector these
+appear under **Activity logic** with groups for squad spawn rules, squads, triggers/volumes, spatial
+areas/fields, objectives, devices/objects, actions/targets, and condition monitors. Exact authored
+placements can be focused and picked in the World view through **Authored activity placements**.
+
+This is static authored evidence. A squad spawn-rule placement is **not** proof that an enemy is
+currently spawned; a trigger/area definition is **not** given a guessed volume when the archive does
+not prove its shape or transform. Live object/trigger observations remain separately labeled runtime
+data. The source ZIP and generated binary are intentionally not committed.
+
 ### Building an optional activity catalog
 
 The converter reads only the required tables from a supplied `manifest.zip` and uses Python's

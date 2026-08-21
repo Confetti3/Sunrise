@@ -24,6 +24,7 @@ namespace spawn_sets = state::build_data::spawn_sets;
 namespace live = live_player;
 namespace placed = placed_objects;
 namespace observed = runtime_observations;
+namespace activity_logic = ::sunrise::client::inspection::providers::activity_logic;
 namespace tables = middleware::content::packages::tables;
 
 [[nodiscard]] std::string
@@ -89,6 +90,11 @@ void add_capability_diagnostics(std::vector<Diagnostic>& diagnostics) {
         {Diagnostic::Severity::information,
          "Spawn inspection is supported; availability depends on the current scenario and spawn "
          "catalogs."});
+    diagnostics.push_back(
+        {Diagnostic::Severity::information,
+         "An optional Activity Logic catalog can expose authored squad spawn rules, squads, triggers, "
+         "areas/fields, objectives, devices, objects, actions, and conditions. Exact WorldID placement "
+         "links are spatial helpers; they do not prove a live enemy or active encounter state."});
     diagnostics.push_back(
         {Diagnostic::Severity::information,
          "Live runtime coverage proves the local controlled-object handle and its published physics "
