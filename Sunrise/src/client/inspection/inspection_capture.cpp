@@ -204,6 +204,37 @@ void append_vector_json(std::string& output, const std::array<float, 3>& value) 
                : std::string{};
 }
 
+[[nodiscard]] std::string quaternion_text(const std::array<float, 4>& value) {
+    std::array<char, 160> text{};
+    const int written = std::snprintf(text.data(),
+                                      text.size(),
+                                      "%.4f, %.4f, %.4f, %.4f",
+                                      static_cast<double>(value[0]),
+                                      static_cast<double>(value[1]),
+                                      static_cast<double>(value[2]),
+                                      static_cast<double>(value[3]));
+    return written > 0 && static_cast<std::size_t>(written) < text.size()
+               ? std::string(text.data(), static_cast<std::size_t>(written))
+               : std::string{};
+}
+
+[[nodiscard]] std::string relationships_text(const std::vector<ActivityLogicRelationship>& relationships) {
+    std::string output;
+    for (const ActivityLogicRelationship& relationship : relationships) {
+        if (!output.empty()) {
+            output.push_back(';');
+        }
+        output += relationship.outgoing ? "outgoing" : "incoming";
+        output.push_back(':');
+        output += std::to_string(relationship.definitionTag);
+        output.push_back(':');
+        output += std::to_string(relationship.nameHash);
+        output.push_back(':');
+        output += std::to_string(relationship.occurrenceCount);
+    }
+    return output;
+}
+
 [[nodiscard]] bool position_changed(const std::array<float, 3>& left,
                                     const std::array<float, 3>& right,
                                     float epsilon) noexcept {
@@ -564,6 +595,66 @@ void append_node_json(std::string& output,
         output.append(", \"browse_only\": ");
         output.append(metadata.browseOnly ? "true}" : "false}");
     }
+    output.append(", \"activity_logic_metadata\": ");
+    if (!node.activityLogicMetadata.has_value()) {
+        output.append("null");
+    } else {
+        const ActivityLogicMetadata& metadata = *node.activityLogicMetadata;
+        output.append("{\"scenario_tag\": ");
+        append_number(output, metadata.scenarioTag);
+        output.append(", \"definition_tag\": ");
+        append_number(output, metadata.definitionTag);
+        output.append(", \"class_primary\": ");
+        append_number(output, metadata.classPrimary);
+        output.append(", \"class_secondary\": ");
+        append_number(output, metadata.classSecondary);
+        output.append(", \"role\": ");
+        append_number(output, metadata.role);
+        output.append(", \"role_name\": ");
+        append_json_string(output, metadata.roleName);
+        output.append(", \"confidence\": ");
+        append_number(output, metadata.confidence);
+        output.append(", \"confidence_name\": ");
+        append_json_string(output, metadata.confidenceName);
+        output.append(", \"label\": ");
+        append_json_string(output, metadata.label);
+        output.append(", \"localized_text\": ");
+        append_json_string(output, metadata.localizedText);
+        output.append(", \"placement_count\": ");
+        append_number(output, metadata.placementCount);
+        output.append(", \"has_placement\": ");
+        output.append(metadata.hasPlacement ? "true" : "false");
+        output.append(", \"world_id\": ");
+        append_number(output, metadata.worldId);
+        output.append(", \"map_table_tag\": ");
+        append_number(output, metadata.mapTableTag);
+        output.append(", \"placed_entity_tag\": ");
+        append_number(output, metadata.placedEntityTag);
+        output.append(", \"authored_rotation\": [");
+        for (std::size_t index = 0; index < metadata.authoredRotation.size(); ++index) {
+            if (index != 0) {
+                output.append(", ");
+            }
+            append_float(output, metadata.authoredRotation[index]);
+        }
+        output.append("], \"relationships\": [");
+        for (std::size_t index = 0; index < metadata.relationships.size(); ++index) {
+            if (index != 0) {
+                output.append(", ");
+            }
+            const ActivityLogicRelationship& relationship = metadata.relationships[index];
+            output.append("{\"direction\": ");
+            append_json_string(output, relationship.outgoing ? "outgoing" : "incoming");
+            output.append(", \"definition_tag\": ");
+            append_number(output, relationship.definitionTag);
+            output.append(", \"name_hash\": ");
+            append_number(output, relationship.nameHash);
+            output.append(", \"occurrence_count\": ");
+            append_number(output, relationship.occurrenceCount);
+            output.push_back('}');
+        }
+        output.append("]}");
+    }
     output.append(", \"transform_runtime\": ");
     output.append(node.transformRuntime ? "true" : "false");
     output.append(", \"linear_velocity\": ");
@@ -735,7 +826,13 @@ void append_node_json(std::string& output,
         "trigger_enabled,trigger_active,position_x,position_y,position_z,rotation,scale,"
         "transform_runtime,velocity,bounds,bounds_provenance,spatial_helper_state,"
         "activity_graph_hash,activity_node_hash,activity_hash,activity_x,activity_y,"
-        "activity_catalog_build,activity_catalog_version,activity_build_match,actions\r\n";
+        "activity_catalog_build,activity_catalog_version,activity_build_match,"
+        "activity_logic_scenario_tag,activity_logic_definition_tag,activity_logic_role,"
+        "activity_logic_role_name,activity_logic_confidence,activity_logic_confidence_name,"
+        "activity_logic_label,activity_logic_localized_text,activity_logic_placement_count,"
+        "activity_logic_has_placement,activity_logic_world_id,activity_logic_map_table_tag,"
+        "activity_logic_placed_entity_tag,activity_logic_authored_rotation,"
+        "activity_logic_relationships,actions\r\n";
     output.reserve(snapshot.world.graph.nodes().size() * 192U + output.size());
     std::string producerStatus;
     for (const InspectionSnapshot::ProducerState& state : snapshot.producers) {
@@ -860,6 +957,40 @@ void append_node_json(std::string& output,
             output.append(metadata.buildMatch ? "true," : "false,");
         } else {
             output.append(",,,,,,,");
+        }
+        if (node.activityLogicMetadata.has_value()) {
+            const ActivityLogicMetadata& metadata = *node.activityLogicMetadata;
+            append_number(output, metadata.scenarioTag);
+            output.push_back(',');
+            append_number(output, metadata.definitionTag);
+            output.push_back(',');
+            append_number(output, metadata.role);
+            output.push_back(',');
+            append_csv(output, metadata.roleName);
+            output.push_back(',');
+            append_number(output, metadata.confidence);
+            output.push_back(',');
+            append_csv(output, metadata.confidenceName);
+            output.push_back(',');
+            append_csv(output, metadata.label);
+            output.push_back(',');
+            append_csv(output, metadata.localizedText);
+            output.push_back(',');
+            append_number(output, metadata.placementCount);
+            output.push_back(',');
+            output.append(metadata.hasPlacement ? "true," : "false,");
+            append_number(output, metadata.worldId);
+            output.push_back(',');
+            append_number(output, metadata.mapTableTag);
+            output.push_back(',');
+            append_number(output, metadata.placedEntityTag);
+            output.push_back(',');
+            append_csv(output, quaternion_text(metadata.authoredRotation));
+            output.push_back(',');
+            append_csv(output, relationships_text(metadata.relationships));
+            output.push_back(',');
+        } else {
+            output.append(",,,,,,,,,,,,,,,");
         }
         append_number(output, static_cast<std::uint32_t>(node.actions));
         output.append("\r\n");
