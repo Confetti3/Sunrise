@@ -10,6 +10,8 @@ namespace sunrise::state::build_data::items::catalysts {
 inline constexpr std::size_t kDefinitionCapacity = 128;
 /** All bits set mark a catalyst relation with no completion-value requirement. */
 inline constexpr std::uint16_t kUnavailableCompletionValueIndex = 0xFFFFU;
+/** All bits set mark a catalyst relation with no completion-flag requirement. */
+inline constexpr std::uint16_t kUnavailableCompletionFlagIndex = 0xFFFFU;
 /** All bits set mark a catalyst relation with no acquired-state gate. */
 inline constexpr std::uint16_t kUnavailableAcquisitionIndex = 0xFFFFU;
 
@@ -80,6 +82,8 @@ struct Definition {
     std::uint16_t effectDefinitionIndex{};
     /** Family-5 acquired-state slot that makes the catalyst socket visible. */
     std::uint16_t acquisitionDefinitionIndex{kUnavailableAcquisitionIndex};
+    /** Family-5 flag slot used by later catalyst completion expressions. */
+    std::uint16_t completionFlagDefinitionIndex{kUnavailableCompletionFlagIndex};
     /** Family-5 value slot used by legacy catalyst completion expressions. */
     std::uint16_t completionValueIndex{kUnavailableCompletionValueIndex};
     std::uint8_t socketLane{};
@@ -94,6 +98,7 @@ struct CompletedCatalyst {
     std::uint16_t completedPlugDefinitionIndex{};
     std::uint16_t effectDefinitionIndex{};
     std::uint16_t acquisitionDefinitionIndex{kUnavailableAcquisitionIndex};
+    std::uint16_t completionFlagDefinitionIndex{kUnavailableCompletionFlagIndex};
     std::uint16_t completionValueIndex{kUnavailableCompletionValueIndex};
     std::int32_t completionValue{};
 };
@@ -105,9 +110,10 @@ enum class CompletionConditionState : std::uint8_t {
     ambiguous = 2,
 };
 
-/** One item definition's build-derived legacy completion value. */
+/** One item definition's build-derived completion flag and value. */
 struct CompletionCondition {
     std::uint16_t itemDefinitionIndex{};
+    std::uint16_t flagDefinitionIndex{kUnavailableCompletionFlagIndex};
     std::uint16_t valueIndex{kUnavailableCompletionValueIndex};
     std::int32_t value{};
     CompletionConditionState state{CompletionConditionState::absent};

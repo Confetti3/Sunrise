@@ -18,6 +18,7 @@ struct LaneResult {
     std::uint16_t completedPlugDefinitionIndex{details::kUnavailableItemIndex};
     std::uint16_t effectDefinitionIndex{details::kUnavailableItemIndex};
     std::uint16_t acquisitionDefinitionIndex{kUnavailableAcquisitionIndex};
+    std::uint16_t completionFlagDefinitionIndex{kUnavailableCompletionFlagIndex};
     std::uint16_t completionValueIndex{kUnavailableCompletionValueIndex};
     std::int32_t completionValue{};
 };
@@ -161,30 +162,31 @@ find_acquisition_gate(std::span<const AcquisitionGate> definitions,
                 .completedPlugDefinitionIndex = completedPlugDefinitionIndex};
     }
 
-    std::uint16_t completionValueIndex = kUnavailableCompletionValueIndex;
-    std::int32_t completionValue = 0;
-    if (*effect != completedPlugDefinitionIndex) {
-        const CompletionCondition* condition =
-            find_completion_condition(source.completionConditions, *effect);
-        if (condition == nullptr || condition->state != CompletionConditionState::present
-            || condition->valueIndex == kUnavailableCompletionValueIndex
-            || condition->value <= 0) {
-            return {.catalyst = true,
-                    .error = Error::invalidCompletion,
-                    .completedPlugDefinitionIndex = completedPlugDefinitionIndex,
-                    .effectDefinitionIndex = *effect,
-                    .acquisitionDefinitionIndex = acquisition->definitionIndex};
-        }
-        completionValueIndex = condition->valueIndex;
-        completionValue = condition->value;
+    const CompletionCondition* condition =
+        find_completion_condition(source.completionConditions, *effect);
+    const bool hasFlag = condition != nullptr
+                         && condition->flagDefinitionIndex
+                                != kUnavailableCompletionFlagIndex;
+    const bool hasValue = condition != nullptr
+                          && condition->valueIndex != kUnavailableCompletionValueIndex
+                          && condition->value > 0;
+    const bool directEffect = *effect == completedPlugDefinitionIndex;
+    if (condition == nullptr || condition->state != CompletionConditionState::present
+        || (directEffect && !hasFlag) || (!directEffect && !hasValue)) {
+        return {.catalyst = true,
+                .error = Error::invalidCompletion,
+                .completedPlugDefinitionIndex = completedPlugDefinitionIndex,
+                .effectDefinitionIndex = *effect,
+                .acquisitionDefinitionIndex = acquisition->definitionIndex};
     }
     return {.catalyst = true,
             .error = Error::none,
             .completedPlugDefinitionIndex = completedPlugDefinitionIndex,
             .effectDefinitionIndex = *effect,
             .acquisitionDefinitionIndex = acquisition->definitionIndex,
-            .completionValueIndex = completionValueIndex,
-            .completionValue = completionValue};
+            .completionFlagDefinitionIndex = condition->flagDefinitionIndex,
+            .completionValueIndex = condition->valueIndex,
+            .completionValue = condition->value};
 }
 
 /**
@@ -398,6 +400,7 @@ bool derive(const Source& source,
                                           result.completedPlugDefinitionIndex,
                                           result.effectDefinitionIndex,
                                           result.acquisitionDefinitionIndex,
+                                          result.completionFlagDefinitionIndex,
                                           result.completionValueIndex,
                                           result.completionValue};
         }
@@ -426,6 +429,7 @@ bool derive(const Source& source,
                                          details::kUnavailableItemIndex,
                                          details::kUnavailableItemIndex,
                                          kUnavailableAcquisitionIndex,
+                                         kUnavailableCompletionFlagIndex,
                                          kUnavailableCompletionValueIndex,
                                          detectedLane,
                                          Availability::unsupported,
@@ -460,6 +464,7 @@ bool derive(const Source& source,
                                      completed->completedPlugDefinitionIndex,
                                      completed->effectDefinitionIndex,
                                      completed->acquisitionDefinitionIndex,
+                                     completed->completionFlagDefinitionIndex,
                                      completed->completionValueIndex,
                                      completed->socketLane,
                                      release.has_value() ? Availability::released
@@ -503,6 +508,8 @@ bool matches_derived(const Source& source,
                    && left.completedPlugDefinitionIndex == right.completedPlugDefinitionIndex
                    && left.effectDefinitionIndex == right.effectDefinitionIndex
                    && left.acquisitionDefinitionIndex == right.acquisitionDefinitionIndex
+                   && left.completionFlagDefinitionIndex
+                          == right.completionFlagDefinitionIndex
                    && left.completionValueIndex == right.completionValueIndex
                    && left.socketLane == right.socketLane
                    && left.availability == right.availability
@@ -524,7 +531,11 @@ bool matches_cached(const Source& source,
         const details::Definition* detail = find_detail(source.details,
                                                         definition.itemDefinitionIndex);
         if (detail == nullptr || definition.socketLane >= detail->ordinarySocketCount
-            || find_item(source.items, definition.acquisitionDefinitionIndex) == nullptr) {
+            || find_item(source.items, definition.acquisitionDefinitionIndex) == nullptr
+            || (definition.completionFlagDefinitionIndex
+                        != kUnavailableCompletionFlagIndex
+                && find_item(source.items, definition.completionFlagDefinitionIndex)
+                       == nullptr)) {
             return false;
         }
 
@@ -544,7 +555,8 @@ bool matches_cached(const Source& source,
                 socketType, definition.acquisitionDefinitionIndex, AcquisitionState::present};
         }
 
-        if (definition.completionValueIndex == kUnavailableCompletionValueIndex) {
+        if (definition.completionFlagDefinitionIndex == kUnavailableCompletionFlagIndex
+            && definition.completionValueIndex == kUnavailableCompletionValueIndex) {
             continue;
         }
         const auto priorCondition = std::find_if(
@@ -554,7 +566,9 @@ bool matches_cached(const Source& source,
                 return condition.itemDefinitionIndex == definition.effectDefinitionIndex;
             });
         if (priorCondition != completionConditions.begin() + completionCount) {
-            if (priorCondition->valueIndex != definition.completionValueIndex
+            if (priorCondition->flagDefinitionIndex
+                    != definition.completionFlagDefinitionIndex
+                || priorCondition->valueIndex != definition.completionValueIndex
                 || priorCondition->value != definition.completionValue) {
                 return false;
             }
@@ -563,6 +577,7 @@ bool matches_cached(const Source& source,
         } else {
             completionConditions[completionCount++] = {
                 definition.effectDefinitionIndex,
+                definition.completionFlagDefinitionIndex,
                 definition.completionValueIndex,
                 definition.completionValue,
                 CompletionConditionState::present};

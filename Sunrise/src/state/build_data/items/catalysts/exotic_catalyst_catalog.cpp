@@ -4,6 +4,7 @@
 #include <atomic>
 
 #include "../../../account/inventory/item_state.h"
+#include "../../../unlocks/definition.h"
 #include "../../table.h"
 #include "../details/definition.h"
 
@@ -42,9 +43,8 @@ find(std::span<const Definition> definitions, std::uint16_t itemDefinitionIndex)
                : nullptr;
 }
 
-/** Sets one acquired-state slot and removes duplicate authored rows for that slot. */
-[[nodiscard]] bool upsert_acquisition(state::Family5State& family,
-                                      std::uint16_t slot) noexcept {
+/** Sets one flag slot and removes duplicate authored rows for that slot. */
+[[nodiscard]] bool upsert_flag(state::Family5State& family, std::uint16_t slot) noexcept {
     const std::size_t oldCount = family.flagCount;
     std::size_t write = 0;
     bool found = false;
@@ -52,7 +52,7 @@ find(std::span<const Definition> definitions, std::uint16_t itemDefinitionIndex)
         const state::UnlockFlagOverride row = family.flags[read];
         if (row.slot == slot) {
             if (!found) {
-                family.flags[write++] = {slot, 2};
+                family.flags[write++] = {slot, state::unlocks::kFlagSet};
                 found = true;
             }
             continue;
@@ -63,7 +63,7 @@ find(std::span<const Definition> definitions, std::uint16_t itemDefinitionIndex)
         if (write >= family.flags.size()) {
             return false;
         }
-        family.flags[write++] = {slot, 2};
+        family.flags[write++] = {slot, state::unlocks::kFlagSet};
     }
     for (std::size_t index = write; index < oldCount; ++index) {
         family.flags[index] = {};
@@ -135,22 +135,26 @@ bool valid(std::span<const Definition> definitions) noexcept {
             definition.effectDefinitionIndex != details::kUnavailableItemIndex;
         const bool hasAcquisition =
             definition.acquisitionDefinitionIndex != kUnavailableAcquisitionIndex;
+        const bool hasCompletionFlag = definition.completionFlagDefinitionIndex
+                                       != kUnavailableCompletionFlagIndex;
         const bool hasCompletionValue =
             definition.completionValueIndex != kUnavailableCompletionValueIndex;
+        const bool directEffect = definition.completedPlugDefinitionIndex
+                                  == definition.effectDefinitionIndex;
         if (definition.itemDefinitionHash == 0
             || definition.socketLane >= details::kInitialPlugCapacity
             || (definition.availability != Availability::released
                 && definition.availability != Availability::placeholder
                 && definition.availability != Availability::unsupported)
             || (definition.availability == Availability::unsupported
-                && (hasCompletedPlug || hasEffect || hasAcquisition || hasCompletionValue
-                    || definition.completionValue != 0))
+                && (hasCompletedPlug || hasEffect || hasAcquisition || hasCompletionFlag
+                    || hasCompletionValue || definition.completionValue != 0))
             || (definition.availability != Availability::unsupported
                 && (!hasCompletedPlug || !hasEffect || !hasAcquisition))
             || (hasCompletionValue != (definition.completionValue > 0))
-            || ((definition.completedPlugDefinitionIndex
-                 != definition.effectDefinitionIndex)
-                != hasCompletionValue)
+            || (definition.availability != Availability::unsupported
+                && ((directEffect && !hasCompletionFlag)
+                    || (!directEffect && !hasCompletionValue)))
             || (index != 0 && !less(definitions[index - 1], definition))) {
             return false;
         }
@@ -198,6 +202,7 @@ Result resolve(std::uint16_t itemDefinitionIndex) noexcept {
              definition->completedPlugDefinitionIndex,
              definition->effectDefinitionIndex,
              definition->acquisitionDefinitionIndex,
+             definition->completionFlagDefinitionIndex,
              definition->completionValueIndex,
              definition->completionValue}};
 }
@@ -262,7 +267,12 @@ bool append_investment_overrides(state::Family5State& family) noexcept {
             continue;
         }
 
-        if (!upsert_acquisition(candidate, definition.acquisitionDefinitionIndex)) {
+        if (!upsert_flag(candidate, definition.acquisitionDefinitionIndex)) {
+            return false;
+        }
+
+        if (definition.completionFlagDefinitionIndex != kUnavailableCompletionFlagIndex
+            && !upsert_flag(candidate, definition.completionFlagDefinitionIndex)) {
             return false;
         }
 

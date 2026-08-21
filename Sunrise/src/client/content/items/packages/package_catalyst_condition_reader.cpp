@@ -9,18 +9,28 @@
 namespace sunrise::client::content::items::packages {
 namespace {
 
-/** Native postfix opcodes for value, literal, and greater-than-or-equal. */
+/** Native postfix opcodes for flag, value, literal, and greater-than-or-equal. */
+constexpr std::uint32_t kFlagOpcode = 1;
 constexpr std::uint32_t kValueOpcode = 10;
 constexpr std::uint32_t kLiteralOpcode = 11;
 constexpr std::uint32_t kGreaterEqualOpcode = 14;
 /** Each postfix token is an opcode and one 32-bit operand. */
 constexpr std::size_t kExpressionTokenSize = 8;
-constexpr std::size_t kCompletionExpressionTokenCount = 3;
+constexpr std::size_t kFlagExpressionTokenCount = 1;
+constexpr std::size_t kValueExpressionTokenCount = 3;
+
+/** Marks a conflicting native completion rule and clears its partial operands. */
+void mark_ambiguous(catalysts::CompletionCondition& output) noexcept {
+    output.flagDefinitionIndex = catalysts::kUnavailableCompletionFlagIndex;
+    output.valueIndex = catalysts::kUnavailableCompletionValueIndex;
+    output.value = 0;
+    output.state = catalysts::CompletionConditionState::ambiguous;
+}
 
 } // namespace
 
 /**
- * Finds the unique three-token `value >= literal` completion rule in one effect item.
+ * Finds the unique flag and `value >= literal` completion rules in one effect item.
  * @param definition Complete installed definition of the catalyst effect item.
  * @param itemDefinitionIndex Native index of the catalyst effect item.
  * @param output Receives the unique condition or its absent or ambiguous state.
@@ -35,15 +45,42 @@ void read_catalyst_completion_condition(
          descriptor + 2 * sizeof(std::uint64_t) <= definition.size();
          descriptor += sizeof(std::uint64_t)) {
         tables::Array expression{};
-        if (!tables::find_array_at(definition, descriptor, expression)
-            || expression.count != kCompletionExpressionTokenCount
-            || expression.elementClass != tables::kInvestmentExpressionRowClass
-            || expression.dataOffset > definition.size()
-            || definition.size() - expression.dataOffset
-                   < kCompletionExpressionTokenCount * kExpressionTokenSize) {
+        if (!tables::find_array_at(definition, descriptor, expression)) {
             continue;
         }
-        std::array<std::uint32_t, kCompletionExpressionTokenCount * 2> tokens{};
+        if (expression.elementClass != tables::kInvestmentExpressionRowClass
+            || expression.dataOffset > definition.size()) {
+            continue;
+        }
+
+        if (expression.count == kFlagExpressionTokenCount
+            && definition.size() - expression.dataOffset
+                   >= kFlagExpressionTokenCount * kExpressionTokenSize) {
+            std::array<std::uint32_t, kFlagExpressionTokenCount * 2> tokens{};
+            std::memcpy(tokens.data(),
+                        definition.data() + expression.dataOffset,
+                        tokens.size() * sizeof(tokens.front()));
+            if (tokens[0] != kFlagOpcode
+                || tokens[1] >= state::build_data::items::kDefinitionCapacity) {
+                continue;
+            }
+            const auto flagDefinitionIndex = static_cast<std::uint16_t>(tokens[1]);
+            if (output.flagDefinitionIndex == catalysts::kUnavailableCompletionFlagIndex) {
+                output.flagDefinitionIndex = flagDefinitionIndex;
+                output.state = catalysts::CompletionConditionState::present;
+            } else if (output.flagDefinitionIndex != flagDefinitionIndex) {
+                mark_ambiguous(output);
+                return;
+            }
+            continue;
+        }
+
+        if (expression.count != kValueExpressionTokenCount
+            || definition.size() - expression.dataOffset
+                   < kValueExpressionTokenCount * kExpressionTokenSize) {
+            continue;
+        }
+        std::array<std::uint32_t, kValueExpressionTokenCount * 2> tokens{};
         std::memcpy(tokens.data(),
                     definition.data() + expression.dataOffset,
                     tokens.size() * sizeof(tokens.front()));
@@ -57,14 +94,12 @@ void read_catalyst_completion_condition(
         }
         const auto valueIndex = static_cast<std::uint16_t>(tokens[1]);
         const auto value = static_cast<std::int32_t>(tokens[3]);
-        if (output.state == catalysts::CompletionConditionState::absent) {
+        if (output.valueIndex == catalysts::kUnavailableCompletionValueIndex) {
             output.valueIndex = valueIndex;
             output.value = value;
             output.state = catalysts::CompletionConditionState::present;
         } else if (output.valueIndex != valueIndex || output.value != value) {
-            output.valueIndex = catalysts::kUnavailableCompletionValueIndex;
-            output.value = 0;
-            output.state = catalysts::CompletionConditionState::ambiguous;
+            mark_ambiguous(output);
             return;
         }
     }

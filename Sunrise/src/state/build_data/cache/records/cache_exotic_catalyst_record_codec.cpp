@@ -15,6 +15,7 @@ bool encode(const items::catalysts::Definition& value,
     record.completedPlugDefinitionIndex = value.completedPlugDefinitionIndex;
     record.effectDefinitionIndex = value.effectDefinitionIndex;
     record.acquisitionDefinitionIndex = value.acquisitionDefinitionIndex;
+    record.completionFlagDefinitionIndex = value.completionFlagDefinitionIndex;
     record.completionValueIndex = value.completionValueIndex;
     record.socketLane = value.socketLane;
     record.availability = static_cast<std::uint8_t>(value.availability);
@@ -36,6 +37,7 @@ bool decode(const ExoticCatalystRecord& record,
              record.completedPlugDefinitionIndex,
              record.effectDefinitionIndex,
              record.acquisitionDefinitionIndex,
+             record.completionFlagDefinitionIndex,
              record.completionValueIndex,
              record.socketLane,
              availability,

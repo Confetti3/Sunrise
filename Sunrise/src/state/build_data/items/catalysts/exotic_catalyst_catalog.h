@@ -71,7 +71,7 @@ apply_completed(std::uint16_t itemDefinitionIndex,
                 std::span<std::optional<std::uint16_t>> plugs) noexcept;
 
 /**
- * Adds the acquired-state gates and legacy completion values for all released catalysts.
+ * Adds acquired-state gates, completion flags, and completion values for released catalysts.
  * Existing authored rows with the same slot are raised to the required value. The input stays
  * unchanged when either fixed override bank cannot hold the complete deduplicated result.
  * @param family Candidate Family-5 state.
