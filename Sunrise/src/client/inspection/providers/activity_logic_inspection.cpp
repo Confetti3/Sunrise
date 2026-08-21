@@ -188,6 +188,14 @@ void append_activity_nodes(Graph& graph,
     }
 
     std::array<NodeId, 11> groups{};
+    std::array<std::uint32_t, 11> roleCounts{};
+    std::uint32_t strongCount = 0;
+    std::uint32_t probableCount = 0;
+    std::uint32_t unknownCount = 0;
+    std::uint32_t definitionsWithPlacement = 0;
+    std::uint32_t definitionsWithRelationships = 0;
+    std::uint32_t definitionsWithLocalizedText = 0;
+    std::uint32_t emittedDefinitions = 0;
     for (const std::uint32_t entityIndex : activity.entityIndices) {
         if (entityIndex >= g_state.catalog.entities.size()) {
             diagnostics.push_back({Diagnostic::Severity::warning,
@@ -195,6 +203,27 @@ void append_activity_nodes(Graph& graph,
             continue;
         }
         const catalog::Entity& entity = g_state.catalog.entities[entityIndex];
+        const std::uint8_t roleIndex = static_cast<std::uint8_t>(entity.role);
+        if (roleIndex < roleCounts.size()) {
+            ++roleCounts[roleIndex];
+        }
+        if (entity.confidence == catalog::Confidence::strong) {
+            ++strongCount;
+        } else if (entity.confidence == catalog::Confidence::probable) {
+            ++probableCount;
+        } else {
+            ++unknownCount;
+        }
+        if (!entity.placements.empty()) {
+            ++definitionsWithPlacement;
+        }
+        if (!entity.localizedText.empty()) {
+            ++definitionsWithLocalizedText;
+        }
+        if (!catalog::outgoing_edges(g_state.catalog, entityIndex).empty()
+            || !catalog::incoming_edges(g_state.catalog, entityIndex).empty()) {
+            ++definitionsWithRelationships;
+        }
         const NodeId group = ensure_group(graph,
                                           source,
                                           result.root,
@@ -224,6 +253,7 @@ void append_activity_nodes(Graph& graph,
                                    "The inspection graph reached its node-id capacity while adding activity logic."});
             break;
         }
+        ++emittedDefinitions;
 
         std::size_t ordinal = 0;
         for (const catalog::Placement& placement : entity.placements) {
@@ -276,12 +306,51 @@ void append_activity_nodes(Graph& graph,
                       ? "Browse only — not correlated to current runtime scenario."
                       : "Definitions are static authored evidence, not proof of live enemies, active triggers, or current encounter state.");
     diagnostics.push_back({Diagnostic::Severity::information, summary.data()});
+
+    std::string coverage = "Activity Logic coverage: ";
+    coverage += std::to_string(result.definitionCount);
+    coverage += " definitions (strong ";
+    coverage += std::to_string(strongCount);
+    coverage += ", probable ";
+    coverage += std::to_string(probableCount);
+    coverage += ", unknown ";
+    coverage += std::to_string(unknownCount);
+    coverage += "), ";
+    coverage += std::to_string(definitionsWithPlacement);
+    coverage += " definitions with ";
+    coverage += std::to_string(result.placementCount);
+    coverage += " exact placements, ";
+    coverage += std::to_string(definitionsWithRelationships);
+    coverage += " with relationships, ";
+    coverage += std::to_string(definitionsWithLocalizedText);
+    coverage += " with localized text; roles ";
+    bool firstRole = true;
+    for (std::size_t role = 0; role < roleCounts.size(); ++role) {
+        if (roleCounts[role] == 0) {
+            continue;
+        }
+        if (!firstRole) {
+            coverage += ", ";
+        }
+        firstRole = false;
+        coverage += catalog::role_name(static_cast<catalog::Role>(role));
+        coverage += "=";
+        coverage += std::to_string(roleCounts[role]);
+    }
+    coverage += ".";
+    if (emittedDefinitions < result.definitionCount) {
+        coverage += " Graph truncated: omitted ";
+        coverage += std::to_string(result.definitionCount - emittedDefinitions);
+        coverage += " definitions.";
+    }
+    diagnostics.push_back({Diagnostic::Severity::information, std::move(coverage)});
 }
 
 } // namespace
 
 void initialize(void* module) noexcept {
     g_state = {};
+    g_state.module = module;
     g_state.initialized = true;
     core::path::Buffer path{};
     if (!core::path::artifact_directory(module, path)
@@ -295,6 +364,31 @@ void initialize(void* module) noexcept {
 
 void shutdown() noexcept {
     g_state = {};
+}
+
+bool reload() noexcept {
+    if (!g_state.initialized || g_state.module == nullptr) {
+        g_state.reloadDiagnostic = "Activity Logic catalog reload is unavailable before initialization.";
+        return false;
+    }
+    core::path::Buffer path{};
+    if (!core::path::artifact_directory(g_state.module, path)
+        || !core::path::append(path, kCatalogSuffix)) {
+        g_state.reloadDiagnostic = "Activity Logic catalog reload path is unavailable.";
+        return false;
+    }
+    catalog::Catalog candidate;
+    catalog::LoadResult candidateLoad = catalog::load_file(path.chars.data(), candidate);
+    if (candidateLoad.state != catalog::LoadState::ready) {
+        g_state.reloadDiagnostic = candidateLoad.diagnostic.empty()
+                                       ? "Activity Logic catalog reload rejected the candidate."
+                                       : candidateLoad.diagnostic;
+        return false;
+    }
+    g_state.catalog = std::move(candidate);
+    g_state.load = std::move(candidateLoad);
+    g_state.reloadDiagnostic.clear();
+    return true;
 }
 
 const State& state() noexcept {

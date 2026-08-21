@@ -2877,6 +2877,16 @@ void draw_toolbar(const camera::Status& status) noexcept {
             if (ImGui::MenuItem("Live scenario match", nullptr, !browsing)) {
                 g_state.provider.set_activity_logic_browse(0);
             }
+            if (ImGui::MenuItem("Reload catalog")) {
+                if (provider::activity_logic::reload()) {
+                    g_state.provider.reset();
+                    g_state.rowsValid = false;
+                }
+            }
+            if (!provider::activity_logic::state().reloadDiagnostic.empty()) {
+                ImGui::TextDisabled("%s",
+                                    provider::activity_logic::state().reloadDiagnostic.c_str());
+            }
             ImGui::Separator();
             if (browse.empty()) {
                 ImGui::TextDisabled("No activity logic catalog installed.");
