@@ -20,6 +20,7 @@ constexpr float kMarkerRadius = 4.5F;
 constexpr float kHoverRadius = 7.0F;
 constexpr float kSelectedRadius = 10.0F;
 constexpr ImU32 kSpawnColor = IM_COL32(230, 184, 74, 235);
+constexpr ImU32 kLogicColor = IM_COL32(245, 126, 84, 240);
 constexpr ImU32 kGeometryColor = IM_COL32(72, 201, 176, 240);
 constexpr ImU32 kTerrainColor = IM_COL32(112, 190, 92, 240);
 constexpr ImU32 kEntityColor = IM_COL32(239, 142, 70, 240);
@@ -73,6 +74,8 @@ struct LabelPlacement final {
         return kAudioColor;
     case inspection::NodeKind::physics:
         return kPhysicsColor;
+    case inspection::NodeKind::logicPlacement:
+        return kLogicColor;
     default:
         return kSpawnColor;
     }
@@ -295,6 +298,8 @@ void draw_bounds_tooltip(const inspection::Bounds& bounds) noexcept {
     case inspection::NodeKind::spawnSet:
     case inspection::NodeKind::spawnPoint:
         return options.showSpawns;
+    case inspection::NodeKind::logicPlacement:
+        return options.showLogic;
     case inspection::NodeKind::trigger:
         return options.showTriggers;
     case inspection::NodeKind::audio:

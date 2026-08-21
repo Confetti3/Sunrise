@@ -26,6 +26,10 @@ enum class NodeKind : std::uint8_t {
     activityGraph,
     activityGraphNode,
     activityReference,
+    activityLogic,
+    logicGroup,
+    logicEntity,
+    logicPlacement,
     destination,
     spawnGroup,
     spawnSet,
@@ -55,6 +59,7 @@ enum class Producer : std::uint8_t {
     graph,
     catalog,
     activityCatalog,
+    activityLogicCatalog,
     localPlayer,
     objectSystem,
     trigger,
@@ -152,6 +157,26 @@ struct ActivityMetadata final {
     bool browseOnly{true};
 
 };
+struct ActivityLogicMetadata final {
+    std::uint32_t scenarioTag{};
+    std::uint32_t definitionTag{};
+    std::uint32_t classPrimary{};
+    std::uint32_t classSecondary{};
+    std::uint8_t role{};
+    std::uint8_t confidence{};
+    std::uint32_t placementCount{};
+    std::string roleName;
+    std::string label;
+    std::string confidenceName;
+    std::string localizedText;
+    std::vector<std::uint32_t> linkedDefinitionTags;
+    std::uint64_t worldId{};
+    std::uint32_t mapTableTag{};
+    std::uint32_t placedEntityTag{};
+    std::array<float, 4> authoredRotation{};
+    bool hasPlacement{};
+};
+
 struct Node final {
     NodeId id{};
     NodeId parent{};
@@ -166,6 +191,7 @@ struct Node final {
     std::uint64_t nativeKey{};
     Source source{};
     std::optional<ActivityMetadata> activityMetadata;
+    std::optional<ActivityLogicMetadata> activityLogicMetadata;
     std::optional<std::uint64_t> runtimeEntity;
     std::optional<std::uint8_t> objectSystemType;
     /** Runtime producer-local observation slot; not necessarily a durable engine identity. */

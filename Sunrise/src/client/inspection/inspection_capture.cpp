@@ -287,7 +287,10 @@ template <typename Value>
                                                   const Node& node) noexcept {
     // The optional activity catalog is immutable browse metadata loaded once at startup.
     // It must not churn identity merely because the live activity producer epoch changes.
-    return node.producer == Producer::activityCatalog ? 0U : snapshot.producerEpoch;
+    return node.producer == Producer::activityCatalog
+                   || node.producer == Producer::activityLogicCatalog
+               ? 0U
+               : snapshot.producerEpoch;
 }
 
 [[nodiscard]] std::string make_identity(const providers::WorldSnapshot& snapshot,
@@ -967,7 +970,8 @@ History::StateMap History::collect(const providers::WorldSnapshot& snapshot) con
         // Havok array slots are observations, not durable body identities. Export them, but do not
         // claim continuity for change history until a producer can prove a lifetime key.
         // Browse-only activity metadata is immutable and would only waste the bounded event bank.
-        if (node.producer == Producer::physics || node.producer == Producer::activityCatalog) {
+        if (node.producer == Producer::physics || node.producer == Producer::activityCatalog
+            || node.producer == Producer::activityLogicCatalog) {
             continue;
         }
         if (options_.runtimeOnly && node.provenance != Provenance::runtime) {
@@ -1307,6 +1311,14 @@ InspectionSnapshot make_snapshot(const providers::WorldSnapshot& snapshot) {
         snapshot.activityCatalogPresent ? 1 : 0,
         false,
         snapshot.activityCatalogDiagnostic);
+    add("activity-logic-catalog",
+        snapshot.activityLogicPresent,
+        snapshot.activityLogicMatched,
+        0,
+        snapshot.activityLogicDefinitionCount,
+        snapshot.activityLogicDefinitionCount,
+        false,
+        snapshot.activityLogicDiagnostic);
     add("local-player",
         true,
         snapshot.localPlayerPresent,

@@ -12,6 +12,7 @@
 #include "placed_object_inspection.h"
 #include "runtime_observation_inspection.h"
 #include "activity_graph_inspection.h"
+#include "activity_logic_inspection.h"
 
 namespace sunrise::client::inspection::providers {
 
@@ -31,6 +32,14 @@ struct WorldSnapshot final {
     std::uint32_t activityCatalogBuild{};
     std::string activityCatalogVersion;
     std::string activityCatalogDiagnostic;
+    NodeId activityLogicNode{};
+    std::string activityLogicActivityName;
+    std::string activityLogicDestination;
+    std::string activityLogicDiagnostic;
+    std::uint32_t activityLogicDefinitionCount{};
+    std::uint32_t activityLogicPlacementCount{};
+    bool activityLogicPresent{};
+    bool activityLogicMatched{};
     NodeId spawnSetNode{};
     std::string packageName;
     std::string mapStem;

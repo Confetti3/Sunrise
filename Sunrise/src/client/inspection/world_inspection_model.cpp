@@ -230,6 +230,19 @@ NodeId Graph::add(Node node, NodeId parent) {
         append_hex(node.searchText, node.activityMetadata->nodeHash, 8);
         append_search(node.searchText, node.activityMetadata->catalogVersion);
     }
+    if (node.activityLogicMetadata.has_value()) {
+        const ActivityLogicMetadata& logic = *node.activityLogicMetadata;
+        append_hex(node.searchText, logic.scenarioTag, 8);
+        append_hex(node.searchText, logic.definitionTag, 8);
+        append_hex(node.searchText, logic.classPrimary, 8);
+        append_hex(node.searchText, logic.classSecondary, 8);
+        append_search(node.searchText, normalize(logic.roleName));
+        append_search(node.searchText, normalize(logic.label));
+        append_search(node.searchText, normalize(logic.localizedText));
+        for (const std::uint32_t linked : logic.linkedDefinitionTags) {
+            append_hex(node.searchText, linked, 8);
+        }
+    }
 
     nodes_.push_back(std::move(node));
     if (parent) {
@@ -357,6 +370,14 @@ const char* kind_name(NodeKind kind) noexcept {
         return "Activity Graph Node";
     case NodeKind::activityReference:
         return "Activity Reference";
+    case NodeKind::activityLogic:
+        return "Activity Logic";
+    case NodeKind::logicGroup:
+        return "Logic Group";
+    case NodeKind::logicEntity:
+        return "Logic Definition";
+    case NodeKind::logicPlacement:
+        return "Logic Placement";
     case NodeKind::destination:
         return "Destination";
     case NodeKind::spawnGroup:
@@ -410,6 +431,7 @@ const char* producer_name(Producer producer) noexcept {
     case Producer::graph: return "graph";
     case Producer::catalog: return "catalog";
     case Producer::activityCatalog: return "activity-catalog";
+    case Producer::activityLogicCatalog: return "activity-logic-catalog";
     case Producer::localPlayer: return "local-player";
     case Producer::objectSystem: return "object-system";
     case Producer::trigger: return "trigger";

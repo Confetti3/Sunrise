@@ -135,6 +135,17 @@
     snapshot_.activityCatalogBuild = activityResult.contentBuild;
     snapshot_.activityCatalogVersion = activityResult.version;
     snapshot_.activityCatalogDiagnostic = activityResult.diagnostic;
+
+    const activity_logic::AppendResult logicResult =
+        activity_logic::append(snapshot_.graph, snapshot_.diagnostics, source, graphParent);
+    snapshot_.activityLogicNode = logicResult.root;
+    snapshot_.activityLogicPresent = logicResult.present;
+    snapshot_.activityLogicMatched = logicResult.matched;
+    snapshot_.activityLogicActivityName = logicResult.activityName;
+    snapshot_.activityLogicDestination = logicResult.destination;
+    snapshot_.activityLogicDiagnostic = logicResult.diagnostic;
+    snapshot_.activityLogicDefinitionCount = logicResult.definitionCount;
+    snapshot_.activityLogicPlacementCount = logicResult.placementCount;
 }
 
 const WorldSnapshot& SpawnInspectionProvider::snapshot() const noexcept {
