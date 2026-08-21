@@ -294,6 +294,7 @@ struct WorkspaceState final {
     bool showAudio{true};
     bool showKnownBounds{true};
     bool showTriggerCenters{true};
+    bool showAuthoredOrientation{true};
     bool showRendering{true};
     bool showNavigation{true};
     bool showHidden{true};
@@ -2858,6 +2859,12 @@ void draw_toolbar(const camera::Status& status) noexcept {
                 && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
                 ImGui::SetTooltip("No exact WorldID-backed activity-logic placements are present for this scenario.");
             }
+            ImGui::BeginDisabled(available.logicPlacements == 0);
+            if (ImGui::MenuItem("Authored serialized orientation", nullptr,
+                                &g_state.showAuthoredOrientation)) {
+                g_state.rowsValid = false;
+            }
+            ImGui::EndDisabled();
             ImGui::BeginDisabled(available.knownBounds == 0);
             ImGui::MenuItem("Known bounds (x-ray)", nullptr, &g_state.showKnownBounds);
             ImGui::EndDisabled();
@@ -3275,7 +3282,8 @@ bool render(bool uiVisible) noexcept {
                                                    g_state.showNavigation,
                                                    g_state.showLabels,
                                                    g_state.showKnownBounds,
-                                                   g_state.showTriggerCenters};
+                                                   g_state.showTriggerCenters,
+                                                   g_state.showAuthoredOrientation};
             interaction = viewport::draw(world().graph,
                                          g_state.selection.selected(),
                                          g_state.hidden,

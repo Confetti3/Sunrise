@@ -32,6 +32,10 @@ constexpr ImU32 kSelectionColor = IM_COL32(66, 184, 231, 255);
 constexpr ImU32 kHoverColor = IM_COL32(151, 220, 246, 255);
 constexpr ImU32 kHiddenColor = IM_COL32(116, 124, 135, 230);
 constexpr ImU32 kLabelBackground = IM_COL32(15, 18, 22, 225);
+constexpr ImU32 kAuthoredAxisX = IM_COL32(244, 96, 96, 235);
+constexpr ImU32 kAuthoredAxisY = IM_COL32(96, 220, 126, 235);
+constexpr ImU32 kAuthoredAxisZ = IM_COL32(96, 154, 244, 235);
+constexpr float kAuthoredAxisLength = 2.0F;
 struct Projected final {
     inspection::NodeId id{};
     inspection::NodeKind kind{inspection::NodeKind::unresolved};
@@ -46,6 +50,13 @@ struct ProjectedEdge final {
     debug_primitives::ProjectedSegment segment{};
     bool hidden{};
     bool dashed{};
+};
+
+struct ProjectedAxis final {
+    inspection::NodeId id{};
+    debug_primitives::ProjectedSegment segment{};
+    ImU32 color{};
+    bool hidden{};
 };
 
 struct LabelPlacement final {
@@ -164,6 +175,32 @@ void draw_marker(ImDrawList& drawList,
         };
         drawList.AddConvexPolyFilled(diamond.data(), static_cast<int>(diamond.size()), color);
     }
+}
+
+[[nodiscard]] bool authored_axis(const std::array<float, 4>& rotation,
+                                 const std::array<float, 3>& basis,
+                                 std::array<float, 3>& output) noexcept {
+    float x = rotation[0];
+    float y = rotation[1];
+    float z = rotation[2];
+    float w = rotation[3];
+    const float lengthSquared = x * x + y * y + z * z + w * w;
+    if (!std::isfinite(lengthSquared) || lengthSquared < 1.0e-8F) {
+        return false;
+    }
+    const float inverseLength = 1.0F / std::sqrt(lengthSquared);
+    x *= inverseLength;
+    y *= inverseLength;
+    z *= inverseLength;
+    w *= inverseLength;
+    const float ix = w * basis[0] + y * basis[2] - z * basis[1];
+    const float iy = w * basis[1] + z * basis[0] - x * basis[2];
+    const float iz = w * basis[2] + x * basis[1] - y * basis[0];
+    const float iw = -x * basis[0] - y * basis[1] - z * basis[2];
+    output = {ix * w + iw * -x + iy * -z - iz * -y,
+              iy * w + iw * -y + iz * -x - ix * -z,
+              iz * w + iw * -z + ix * -y - iy * -x};
+    return std::ranges::all_of(output, [](float value) { return std::isfinite(value); });
 }
 
 void draw_segment(ImDrawList& drawList,
@@ -358,8 +395,10 @@ Result draw(const inspection::Graph& graph,
 
     static std::vector<Projected> projected;
     static std::vector<ProjectedEdge> edges;
+    static std::vector<ProjectedAxis> authoredAxes;
     projected.clear();
     edges.clear();
+    authoredAxes.clear();
     projected.reserve(graph.nodes().size());
     if (camera.active && debug_primitives::valid_projection(projection)) {
         for (const inspection::Node& node : graph.nodes()) {
@@ -396,6 +435,38 @@ Result draw(const inspection::Graph& graph,
                                   point.depth,
                                   hiddenNode,
                                   unknownShape && !knownBounds});
+                }
+            }
+            if (options.showAuthoredOrientation
+                && node.kind == inspection::NodeKind::logicPlacement
+                && node.activityLogicMetadata.has_value()
+                && node.activityLogicMetadata->hasPlacement
+                && node.transform.has_value()) {
+                constexpr std::array<std::array<float, 3>, 3> bases{{
+                    {1.0F, 0.0F, 0.0F},
+                    {0.0F, 1.0F, 0.0F},
+                    {0.0F, 0.0F, 1.0F}}};
+                constexpr std::array<ImU32, 3> colors{
+                    kAuthoredAxisX, kAuthoredAxisY, kAuthoredAxisZ};
+                for (std::size_t axis = 0; axis < bases.size(); ++axis) {
+                    std::array<float, 3> direction{};
+                    if (!authored_axis(node.activityLogicMetadata->authoredRotation,
+                                       bases[axis],
+                                       direction)) {
+                        continue;
+                    }
+                    const std::array<float, 3> endpoint{
+                        node.transform->position[0] + direction[0] * kAuthoredAxisLength,
+                        node.transform->position[1] + direction[1] * kAuthoredAxisLength,
+                        node.transform->position[2] + direction[2] * kAuthoredAxisLength};
+                    debug_primitives::ProjectedSegment segment{};
+                    if (debug_primitives::project_segment(projection,
+                                                          node.transform->position,
+                                                          endpoint,
+                                                          segment)) {
+                        authoredAxes.push_back(
+                            {node.id, segment, colors[axis], hiddenNode});
+                    }
                 }
             }
             if (drawBounds) {
@@ -497,6 +568,17 @@ Result draw(const inspection::Graph& graph,
         drawList->AddText({imageMinimum.x + scaled(8.0F), imageMinimum.y + scaled(8.0F)},
                           kHiddenColor,
                           disclosure);
+        for (const ProjectedAxis& axis : authoredAxes) {
+            if (axis.hidden) {
+                continue;
+            }
+            const bool selectedAxis = axis.id == selected;
+            draw_segment(*drawList,
+                         axis.segment,
+                         selectedAxis ? kSelectionColor : axis.color,
+                         scaled(selectedAxis ? 2.5F : 1.5F),
+                         false);
+        }
         for (const ProjectedEdge& edge : edges) {
             if (edge.id != selected) {
                 draw_segment(*drawList,

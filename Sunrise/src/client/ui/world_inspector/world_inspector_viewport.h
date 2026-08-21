@@ -23,6 +23,7 @@ struct Options final {
     bool showLabels{};
     bool showKnownBounds{true};
     bool showTriggerCenters{true};
+    bool showAuthoredOrientation{true};
 };
 
 struct Result final {
