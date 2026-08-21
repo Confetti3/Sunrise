@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <unordered_set>
 
@@ -10,6 +11,12 @@
 #include "../../inspection/world_inspection_model.h"
 
 namespace sunrise::client::ui::world_inspector::viewport {
+
+enum class Detail : std::uint8_t {
+    selectedOnly,
+    selectedNearby,
+    all,
+};
 
 struct Options final {
     bool showGeometry{true};
@@ -24,6 +31,7 @@ struct Options final {
     bool showKnownBounds{true};
     bool showTriggerCenters{true};
     bool showAuthoredOrientation{true};
+    Detail detail{Detail::selectedNearby};
 };
 
 struct Result final {
@@ -31,6 +39,10 @@ struct Result final {
     inspection::NodeId selected{};
     inspection::NodeId focused{};
     inspection::NodeId context{};
+    std::size_t detailFilteredNodes{};
+    std::size_t omittedNodes{};
+    std::size_t omittedSegments{};
+    std::size_t omittedLabels{};
     bool clearSelection{};
     bool navigation{};
 };

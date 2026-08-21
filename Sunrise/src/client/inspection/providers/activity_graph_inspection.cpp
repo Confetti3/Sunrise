@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdio>
+#include <unordered_map>
 #include <utility>
 
 #include "../../../core/filesystem/path.h"
@@ -132,14 +133,15 @@ AppendResult append(Graph& graph,
         return result;
     }
     const activity_catalog::Catalog& catalog = g_state.catalog;
-    const auto release_count = [&catalog](std::uint32_t graphHash, std::uint32_t nodeHash) {
-        std::uint32_t count = 0;
-        for (const activity_catalog::LocationRelease& release : catalog.locationReleases) {
-            if (release.graphHash == graphHash && release.nodeHash == nodeHash) {
-                ++count;
-            }
-        }
-        return count;
+    std::unordered_map<std::uint64_t, std::uint32_t> releaseCounts;
+    releaseCounts.reserve(catalog.locationReleases.size());
+    for (const activity_catalog::LocationRelease& release : catalog.locationReleases) {
+        ++releaseCounts[node_key(release.graphHash, release.nodeHash)];
+    }
+    const auto release_count = [&releaseCounts](std::uint32_t graphHash,
+                                                std::uint32_t nodeHash) {
+        const auto iterator = releaseCounts.find(node_key(graphHash, nodeHash));
+        return iterator == releaseCounts.end() ? 0U : iterator->second;
     };
 
     for (const activity_catalog::Graph& sourceGraph : g_state.catalog.graphs) {

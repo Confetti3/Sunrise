@@ -12,10 +12,12 @@
 #include <utility>
 
 #include "client/inspection/providers/runtime_observation_inspection.h"
+#include "client/inspection/providers/activity_logic_browse.h"
 #include "client/inspection/activity_graph_catalog.h"
 #include "client/inspection/world_inspection_model.h"
 #include "client/ui/world_inspector/world_debug_primitives.h"
 #include "client/ui/world_inspector/world_inspector_graph_layout.h"
+#include "client/ui/world_inspector/world_inspector_graph_admission.h"
 namespace observed = sunrise::client::inspection::providers::runtime_observations;
 namespace objects = sunrise::client::viewer::objects;
 namespace triggers = sunrise::client::viewer::triggers;
@@ -23,6 +25,9 @@ namespace triggers = sunrise::client::viewer::triggers;
 namespace inspection = sunrise::client::inspection;
 namespace debug = sunrise::client::ui::world_inspector::debug_primitives;
 namespace graph_layout = sunrise::client::ui::world_inspector::graph_layout;
+namespace graph_admission = sunrise::client::ui::world_inspector::graph_admission;
+namespace logic_browse = sunrise::client::inspection::providers::activity_logic::browse;
+namespace logic_provider = sunrise::client::inspection::providers::activity_logic;
 namespace catalog = sunrise::client::inspection::activity_catalog;
 
 [[nodiscard]] bool require(bool condition, const char* message) {
@@ -245,6 +250,111 @@ int main() {
         return 10;
     }
 
+
+
+    inspection::Graph fanoutGraph;
+    fanoutGraph.reset(11);
+    inspection::Node fanoutRootNode;
+    fanoutRootNode.name = "fanout-root";
+    const inspection::NodeId fanoutRoot =
+        fanoutGraph.add(std::move(fanoutRootNode));
+    std::vector<inspection::NodeId> fanoutChildren;
+    fanoutChildren.reserve(1024);
+    std::unordered_set<std::uint64_t> fanoutEligible{fanoutRoot.value};
+    for (std::size_t index = 0; index < 1024; ++index) {
+        inspection::Node child;
+        child.name = "child-" + std::to_string(index);
+        const inspection::NodeId id =
+            fanoutGraph.add(std::move(child), fanoutRoot);
+        fanoutChildren.push_back(id);
+        fanoutEligible.insert(id.value);
+    }
+    std::unordered_set<std::uint64_t> graphVisible;
+    const graph_admission::Result neighborhood =
+        graph_admission::selected_neighborhood(
+            fanoutGraph,
+            fanoutChildren[512],
+            fanoutEligible,
+            {},
+            graphVisible);
+    if (!require(neighborhood.root == fanoutRoot,
+                 "selected-neighborhood root is selected parent")
+        || !require(graphVisible.contains(fanoutRoot.value)
+                        && graphVisible.contains(fanoutChildren[512].value),
+                    "selected-neighborhood retains root and selection")
+        || !require(graphVisible.size() <= 15,
+                    "selected-neighborhood bounds sibling fan-out")
+        || !require(neighborhood.omitted >= 1000,
+                    "selected-neighborhood reports omitted nodes")) {
+        return 11;
+    }
+    const std::unordered_set<std::uint64_t> collapsedFanout{fanoutRoot.value};
+    const graph_admission::Result collapsedNeighborhood =
+        graph_admission::selected_neighborhood(
+            fanoutGraph,
+            fanoutChildren[512],
+            fanoutEligible,
+            collapsedFanout,
+            graphVisible);
+    if (!require(graphVisible.size() == 2,
+                 "collapsed graph group retains only root and selected context")
+        || !require(collapsedNeighborhood.truncated,
+                    "collapsed graph group reports reduced detail")) {
+        return 12;
+    }
+    graph_admission::Limits hierarchyLimits{};
+    hierarchyLimits.hierarchyLimit = 128;
+    const graph_admission::Result limitedHierarchy =
+        graph_admission::filtered_hierarchy(
+            fanoutGraph,
+            fanoutRoot,
+            fanoutEligible,
+            {},
+            graphVisible,
+            hierarchyLimits);
+    if (!require(graphVisible.size() == 128,
+                 "filtered hierarchy obeys explicit node budget")
+        || !require(limitedHierarchy.truncated,
+                    "filtered hierarchy reports node-budget truncation")) {
+        return 13;
+    }
+
+    const std::vector<logic_provider::BrowseSummary> browseEntries{
+        {0x10000003U, "Strike B", "Moon"},
+        {0x10000001U, "Patrol", "EDZ"},
+        {0x10000002U, "Lost Sector", "EDZ"},
+        {0x10000004U, "Strike A", "Moon"}};
+    const logic_browse::View localBrowse =
+        logic_browse::build(std::span<const logic_provider::BrowseSummary>(browseEntries),
+                            0x10000001U);
+    if (!require(localBrowse.current != nullptr
+                     && localBrowse.current->activityName == "Patrol",
+                 "Activity Logic browser pins exact current scenario")
+        || !require(localBrowse.destination == "EDZ"
+                        && localBrowse.local.size() == 1
+                        && localBrowse.local.front()->activityName == "Lost Sector",
+                    "Activity Logic browser defaults to current destination")
+        || !require(localBrowse.all.front()->scenarioTag == 0x10000001U,
+                    "Activity Logic browser sorts current scenario first")) {
+        return 14;
+    }
+    const logic_browse::View searchedBrowse =
+        logic_browse::build(std::span<const logic_provider::BrowseSummary>(browseEntries),
+                            0x10000001U,
+                            "moon");
+    if (!require(searchedBrowse.all.size() == 2
+                     && searchedBrowse.all[0]->activityName == "Strike A"
+                     && searchedBrowse.all[1]->activityName == "Strike B",
+                 "Activity Logic global search is deterministic and destination-aware")
+        || !require(logic_browse::contains_scenario(
+                            std::span<const logic_provider::BrowseSummary>(browseEntries),
+                            0x10000004U)
+                        && !logic_browse::contains_scenario(
+                            std::span<const logic_provider::BrowseSummary>(browseEntries),
+                            0xDEADBEEFU),
+                    "Activity Logic browse reconciliation finds pinned scenarios")) {
+        return 15;
+    }
 
     debug::ProjectionContext context{};
     context.position = {0.0F, 0.0F, 0.0F};

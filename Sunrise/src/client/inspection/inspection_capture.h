@@ -12,7 +12,7 @@
 
 namespace sunrise::client::inspection::capture {
 
-inline constexpr std::uint32_t kSchemaVersion = 4;
+inline constexpr std::uint32_t kSchemaVersion = 5;
 inline constexpr std::size_t kEventCapacity = 4096;
 
 enum class ChangeKind : std::uint8_t {

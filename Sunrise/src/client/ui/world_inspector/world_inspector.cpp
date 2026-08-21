@@ -23,6 +23,7 @@
 #include "../../hooks/graphics/renderer/renderer.h"
 #include "../../hooks/viewer_camera/viewer_camera.h"
 #include "../../inspection/providers/spawn_inspection_provider.h"
+#include "../../inspection/providers/activity_logic_browse.h"
 #include "../../inspection/inspection_capture.h"
 #include "../../inspection/world_inspection_model.h"
 #include "../../viewer/viewer_camera_settings_store.h"
@@ -30,6 +31,7 @@
 #include "../../viewer/viewer_input_ownership.h"
 #include "world_inspector_viewport.h"
 #include "world_inspector_graph.h"
+#include "world_inspector_graph_admission.h"
 
 namespace sunrise::client::ui::world_inspector {
 namespace {
@@ -41,6 +43,7 @@ namespace model = client::inspection;
 namespace capture = client::inspection::capture;
 namespace provider = client::inspection::providers;
 namespace activity_catalog = client::inspection::activity_catalog;
+namespace logic_browse = client::inspection::providers::activity_logic::browse;
 namespace renderer = client::hooks::graphics::renderer;
 namespace section = core::ui::components::section;
 namespace textures = core::ui::textures;
@@ -201,6 +204,7 @@ enum class HierarchyMode : std::uint8_t {
 enum class CenterMode : std::uint8_t {
     world,
     nodeGraph,
+    logicGraph,
     activityMap,
 };
 
@@ -266,8 +270,11 @@ struct WorkspaceState final {
     std::unordered_set<std::uint64_t> admitted;
     std::unordered_set<std::uint64_t> graphAdmitted;
     std::uint64_t admissionRevision{};
+    std::size_t graphOmitted{};
     graph::State graphState;
+    graph::State relationshipGraphState;
     std::array<char, kSearchCapacity> search{};
+    std::array<char, kSearchCapacity> activityLogicSearch{};
     std::array<char, kSearchCapacity> eventFilter{};
     CenterMode centerMode{CenterMode::world};
     GraphScope graphScope{GraphScope::selectionNeighborhood};
@@ -286,6 +293,7 @@ struct WorkspaceState final {
     float layoutScale{1.0F};
     bool layoutInitialized{};
     bool rowsValid{};
+    bool activityLogicBrowserOpen{};
     bool showGeometry{true};
     bool showEntities{true};
     bool showSpawns{true};
@@ -300,6 +308,7 @@ struct WorkspaceState final {
     bool showHidden{true};
     bool errorsOnly{};
     bool showLabels{};
+    viewport::Detail overlayDetail{viewport::Detail::selectedNearby};
     bool trackRuntimeOnly{true};
     bool trackTransforms{};
     bool bottomCollapsed{};
@@ -833,45 +842,34 @@ void admit_with_ancestors(const model::Graph& graph,
 }
 
 [[nodiscard]] model::NodeId prepare_graph_admission() {
-    g_state.graphAdmitted.clear();
+    const model::NodeId root = hierarchy_root(world());
+    graph_admission::Result result{};
     if (g_state.graphScope == GraphScope::filteredHierarchy) {
-        g_state.graphAdmitted = g_state.admitted;
-        return hierarchy_root(world());
-    }
-
-    const model::NodeId selectedId = g_state.selection.selected();
-    const model::Node* selected = world().graph.node(selectedId);
-    if (selected == nullptr || selected->producer == model::Producer::activityCatalog
-        || !g_state.admitted.contains(selectedId.value)) {
-        g_state.graphAdmitted = g_state.admitted;
-        return hierarchy_root(world());
-    }
-
-    const auto admit = [](model::NodeId id) {
-        if (id && g_state.admitted.contains(id.value)) {
-            g_state.graphAdmitted.insert(id.value);
-        }
-    };
-    model::NodeId root = selectedId;
-    if (selected->parent && g_state.admitted.contains(selected->parent.value)) {
-        root = selected->parent;
-    }
-    admit(root);
-    if (const model::Node* rootNode = world().graph.node(root); rootNode != nullptr) {
-        for (const model::NodeId child : rootNode->children) {
-            admit(child);
+        result = graph_admission::filtered_hierarchy(world().graph,
+                                                     root,
+                                                     g_state.admitted,
+                                                     g_state.collapsed,
+                                                     g_state.graphAdmitted);
+    } else {
+        const model::NodeId selected = g_state.selection.selected();
+        const model::Node* node = world().graph.node(selected);
+        if (node == nullptr || node->producer == model::Producer::activityCatalog
+            || !g_state.admitted.contains(selected.value)) {
+            result = graph_admission::filtered_hierarchy(world().graph,
+                                                         root,
+                                                         g_state.admitted,
+                                                         g_state.collapsed,
+                                                         g_state.graphAdmitted);
+        } else {
+            result = graph_admission::selected_neighborhood(world().graph,
+                                                            selected,
+                                                            g_state.admitted,
+                                                            g_state.collapsed,
+                                                            g_state.graphAdmitted);
         }
     }
-    admit(selectedId);
-    for (const model::NodeId child : selected->children) {
-        admit(child);
-        if (const model::Node* childNode = world().graph.node(child); childNode != nullptr) {
-            for (const model::NodeId grandchild : childNode->children) {
-                admit(grandchild);
-            }
-        }
-    }
-    return root;
+    g_state.graphOmitted = result.omitted;
+    return result.root ? result.root : root;
 }
 
 void append_rows(const model::Graph& graph,
@@ -888,15 +886,18 @@ void append_rows(const model::Graph& graph,
         return;
     }
 
-    bool hasChildren = false;
+    std::size_t admittedChildren = 0;
     for (const model::NodeId child : node->children) {
-        if (admitted.contains(child.value)) {
-            hasChildren = true;
-            break;
-        }
+        admittedChildren += admitted.contains(child.value) ? 1U : 0U;
     }
-    g_state.rows.push_back(
-        TreeRow{id, row_label(*node, g_state.hierarchyMode, snapshot), depth, hasChildren});
+    const bool hasChildren = admittedChildren != 0;
+    std::string label = row_label(*node, g_state.hierarchyMode, snapshot);
+    if (hasChildren) {
+        label += "  [";
+        label += std::to_string(admittedChildren);
+        label += "]";
+    }
+    g_state.rows.push_back(TreeRow{id, std::move(label), depth, hasChildren});
 
     if (!searching && g_state.collapsed.contains(id.value)) {
         return;
@@ -1038,12 +1039,12 @@ void quick_filters() noexcept {
     ImGui::SameLine();
     filterChip("Navigation", FilterGroup::navigation, g_state.showNavigation);
     ImGui::SameLine();
-    if (chip("Hidden", g_state.showHidden, true, "")) {
+    if (chip("Include hidden", g_state.showHidden, true, "")) {
         g_state.showHidden = !g_state.showHidden;
         g_state.rowsValid = false;
     }
     ImGui::SameLine();
-    if (chip("Errors", g_state.errorsOnly, true, "")) {
+    if (chip("Errors only", g_state.errorsOnly, true, "")) {
         g_state.errorsOnly = !g_state.errorsOnly;
         g_state.rowsValid = false;
     }
@@ -1632,7 +1633,7 @@ void draw_activity(const model::Node& node) noexcept {
 }
 
 [[nodiscard]] model::NodeId logic_node_for_scenario(std::uint32_t scenarioTag) noexcept;
-[[nodiscard]] std::uint32_t activity_graph_for_scenario(std::uint32_t scenarioTag) noexcept;
+[[nodiscard]] std::vector<std::uint32_t> activity_graphs_for_scenario(std::uint32_t scenarioTag);
 
 void draw_activity_metadata(const model::Node& node) noexcept {
     if (!node.activityMetadata.has_value()) {
@@ -1714,16 +1715,20 @@ void draw_activity_metadata(const model::Node& node) noexcept {
     return {};
 }
 
-[[nodiscard]] std::uint32_t activity_graph_for_scenario(std::uint32_t scenarioTag) noexcept {
+[[nodiscard]] std::vector<std::uint32_t>
+activity_graphs_for_scenario(std::uint32_t scenarioTag) {
+    std::vector<std::uint32_t> matches;
     for (const model::Node& node : world().graph.nodes()) {
         if (node.producer == model::Producer::activityCatalog
             && node.activityMetadata.has_value()
             && node.activityMetadata->activityHash == scenarioTag
             && node.activityMetadata->graphHash != 0) {
-            return node.activityMetadata->graphHash;
+            matches.push_back(node.activityMetadata->graphHash);
         }
     }
-    return 0;
+    std::ranges::sort(matches);
+    matches.erase(std::unique(matches.begin(), matches.end()), matches.end());
+    return matches;
 }
 
 void draw_activity_logic_metadata(const model::Node& node) noexcept {
@@ -1759,15 +1764,27 @@ void draw_activity_logic_metadata(const model::Node& node) noexcept {
         end_properties();
     }
     if (metadata.scenarioTag != 0) {
-        const std::uint32_t graphHash = activity_graph_for_scenario(metadata.scenarioTag);
-        ImGui::TextUnformatted("Exact Activity Map link");
-        ImGui::BeginDisabled(graphHash == 0);
-        if (ImGui::Button("Open in Activity Map")) {
-            open_activity_graph(graphHash);
-        }
-        ImGui::EndDisabled();
-        if (graphHash == 0) {
-            ImGui::TextDisabled("No exact Activity Map activity hash is present in this snapshot.");
+        const std::vector<std::uint32_t> graphHashes =
+            activity_graphs_for_scenario(metadata.scenarioTag);
+        ImGui::TextUnformatted("Exact Activity Map links");
+        if (graphHashes.empty()) {
+            ImGui::TextDisabled(
+                "No exact Activity Map activity hash is present in this snapshot.");
+        } else if (graphHashes.size() == 1) {
+            if (ImGui::Button("Open in Activity Map")) {
+                open_activity_graph(graphHashes.front());
+            }
+        } else {
+            ImGui::TextDisabled("%zu exact graph matches; choose one:", graphHashes.size());
+            for (const std::uint32_t graphHash : graphHashes) {
+                std::array<char, 64> label{};
+                std::snprintf(label.data(), label.size(), "Open graph 0x%08X", graphHash);
+                ImGui::PushID(static_cast<int>(graphHash));
+                if (ImGui::Button(label.data())) {
+                    open_activity_graph(graphHash);
+                }
+                ImGui::PopID();
+            }
         }
     }
     if ((metadata.roleName.find("Trigger") != std::string::npos
@@ -1778,7 +1795,12 @@ void draw_activity_logic_metadata(const model::Node& node) noexcept {
     if (metadata.relationships.empty()) {
         return;
     }
+    if (ImGui::Button("Open relationship graph")) {
+        g_state.centerMode = CenterMode::logicGraph;
+        g_state.relationshipGraphState.fitRequested = true;
+    }
     ImGui::TextUnformatted("Serialized definition links");
+    std::size_t relationshipIndex = 0;
     for (const model::ActivityLogicRelationship& relationship : metadata.relationships) {
         std::array<char, 96> label{};
         std::snprintf(label.data(),
@@ -1788,7 +1810,9 @@ void draw_activity_logic_metadata(const model::Node& node) noexcept {
                       relationship.definitionTag,
                       relationship.nameHash,
                       relationship.occurrenceCount);
+        ImGui::PushID(static_cast<int>(relationshipIndex++));
         ImGui::PushID(static_cast<int>(relationship.definitionTag));
+        ImGui::PushID(static_cast<int>(relationship.nameHash));
         ImGui::TextDisabled("%s", relationship.outgoing ? "->" : "<-");
         ImGui::SameLine();
         const model::NodeId target = logic_node_for_definition(relationship.definitionTag);
@@ -1797,6 +1821,8 @@ void draw_activity_logic_metadata(const model::Node& node) noexcept {
             select_node(target);
         }
         ImGui::EndDisabled();
+        ImGui::PopID();
+        ImGui::PopID();
         ImGui::PopID();
     }
 }
@@ -1929,10 +1955,9 @@ void draw_references() noexcept {
         return;
     }
 
-    ImGui::TextUnformatted("Graph Relationships");
+    ImGui::TextUnformatted("Ownership relationships");
     ImGui::TextDisabled(
-        "These are inspection-graph relationships. Raw serialized reference edges are not retained "
-        "by the current provider.");
+        "Parent and child rows are the pointer-free inspection ownership hierarchy.");
     ImGui::Spacing();
 
     ImGui::TextUnformatted("Parent");
@@ -1955,6 +1980,53 @@ void draw_references() noexcept {
             if (const model::Node* child = world().graph.node(childId); child != nullptr) {
                 graph_reference_row("child", *child);
             }
+        }
+    }
+
+    if (node->activityLogicMetadata.has_value()) {
+        const model::ActivityLogicMetadata& metadata = *node->activityLogicMetadata;
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Text("Serialized Activity Logic relationships (%zu)",
+                    metadata.relationships.size());
+        ImGui::TextDisabled(
+            "Static catalog evidence; these links do not prove that an encounter is live.");
+        if (!metadata.relationships.empty()
+            && control_button("Open relationship graph",
+                              {0.0F, scaled(kControlHeight)},
+                              false,
+                              true)) {
+            g_state.centerMode = CenterMode::logicGraph;
+            g_state.relationshipGraphState.fitRequested = true;
+        }
+        std::size_t index = 0;
+        for (const model::ActivityLogicRelationship& relationship
+             : metadata.relationships) {
+            std::array<char, 160> label{};
+            std::snprintf(label.data(),
+                          label.size(),
+                          "%s  0x%08X  name 0x%08X  x%u",
+                          relationship.outgoing ? "outgoing ->" : "incoming <-",
+                          relationship.definitionTag,
+                          relationship.nameHash,
+                          relationship.occurrenceCount);
+            ImGui::PushID(static_cast<int>(index++));
+            ImGui::PushID(static_cast<int>(relationship.definitionTag));
+            ImGui::PushID(static_cast<int>(relationship.nameHash));
+            const model::NodeId target =
+                logic_node_for_definition(relationship.definitionTag);
+            ImGui::BeginDisabled(!target);
+            if (ImGui::Selectable(label.data(), false)) {
+                select_node(target);
+            }
+            ImGui::EndDisabled();
+            if (!target && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                ImGui::SetTooltip(
+                    "The target definition is not materialized in the current activity graph.");
+            }
+            ImGui::PopID();
+            ImGui::PopID();
+            ImGui::PopID();
         }
     }
 
@@ -2160,6 +2232,39 @@ void draw_data() noexcept {
     }
     if (source.bubble.has_value()) {
         data_i32("bubble", "u16", *source.bubble, "runtime");
+    }
+
+    if (node->activityLogicMetadata.has_value()) {
+        const model::ActivityLogicMetadata& metadata = *node->activityLogicMetadata;
+        data_u64("activity_logic_scenario", "tag32", metadata.scenarioTag, 8, "catalog");
+        data_u64("activity_logic_definition", "tag32", metadata.definitionTag, 8, "catalog");
+        data_row("activity_logic_role", "string", metadata.roleName.c_str(), "catalog");
+        data_row("activity_logic_confidence",
+                 "string",
+                 metadata.confidenceName.c_str(),
+                 "catalog");
+        data_i32("activity_logic_placement_count",
+                 "u32",
+                 static_cast<std::int32_t>(metadata.placementCount),
+                 "catalog");
+        std::size_t relationshipIndex = 0;
+        for (const model::ActivityLogicRelationship& relationship
+             : metadata.relationships) {
+            std::array<char, 64> field{};
+            std::array<char, 128> value{};
+            std::snprintf(field.data(),
+                          field.size(),
+                          "activity_logic_relationship_%zu",
+                          relationshipIndex++);
+            std::snprintf(value.data(),
+                          value.size(),
+                          "%s definition=0x%08X name=0x%08X count=%u",
+                          relationship.outgoing ? "outgoing" : "incoming",
+                          relationship.definitionTag,
+                          relationship.nameHash,
+                          relationship.occurrenceCount);
+            data_row(field.data(), "relationship", value.data(), "catalog");
+        }
     }
 
     ImGui::EndTable();
@@ -2728,6 +2833,105 @@ viewport::Result draw_activity_map() noexcept {
     }
     return result;
 }
+
+
+void select_activity_logic_scenario(std::uint32_t scenarioTag) noexcept {
+    g_state.provider.set_activity_logic_browse(scenarioTag);
+    g_state.selection.clear();
+    g_state.rowsValid = false;
+}
+
+void draw_activity_logic_browser() noexcept {
+    if (g_state.activityLogicBrowserOpen) {
+        ImGui::OpenPopup("Activity Logic Browser");
+        g_state.activityLogicBrowserOpen = false;
+    }
+    ImGui::SetNextWindowSize({scaled(700.0F), scaled(520.0F)}, ImGuiCond_Appearing);
+    if (!ImGui::BeginPopup("Activity Logic Browser")) {
+        return;
+    }
+
+    const auto catalog = provider::activity_logic::browse_activities();
+    const bool browsing = world().activityLogicBrowseOnly;
+    const std::uint32_t selectedScenario = world().activityLogicBrowseScenarioTag;
+    ImGui::TextUnformatted("Activity Logic catalog");
+    ImGui::SameLine();
+    ImGui::TextDisabled("- static authored evidence");
+    if (browsing) {
+        ImGui::TextColored(kWarning,
+                           "Pinned static browse: %s (%s), scenario 0x%08X - not live",
+                           world().activityLogicActivityName.c_str(),
+                           world().activityLogicDestination.c_str(),
+                           selectedScenario);
+        if (control_button("Return to live scenario",
+                           {0.0F, scaled(kControlHeight)},
+                           true,
+                           true)) {
+            select_activity_logic_scenario(0);
+            ImGui::CloseCurrentPopup();
+        }
+    }
+
+    ImGui::SetNextItemWidth(-1.0F);
+    ImGui::InputTextWithHint("##activity_logic_catalog_search",
+                             "Search activity, destination, or 0x scenario tag",
+                             g_state.activityLogicSearch.data(),
+                             g_state.activityLogicSearch.size());
+    const logic_browse::View view =
+        logic_browse::build(catalog,
+                            world().scenarioTag,
+                            g_state.activityLogicSearch.data());
+    ImGui::TextDisabled("%zu matches / %zu catalog activities; sorted by destination",
+                        view.all.size(),
+                        catalog.size());
+    ImGui::Separator();
+
+    const float tableHeight = (std::max)(scaled(300.0F),
+                                         ImGui::GetContentRegionAvail().y
+                                             - scaled(kControlHeight + 12.0F));
+    if (ImGui::BeginTable("##activity_logic_catalog_table",
+                          3,
+                          ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH
+                              | ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY,
+                          {0.0F, tableHeight})) {
+        ImGui::TableSetupScrollFreeze(0, 1);
+        ImGui::TableSetupColumn("Destination");
+        ImGui::TableSetupColumn("Activity");
+        ImGui::TableSetupColumn("Scenario", ImGuiTableColumnFlags_WidthFixed, scaled(112.0F));
+        ImGui::TableHeadersRow();
+        for (const provider::activity_logic::BrowseSummary* summary : view.all) {
+            ImGui::PushID(static_cast<int>(summary->scenarioTag));
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(summary->destination.empty()
+                                       ? "(unknown destination)"
+                                       : summary->destination.c_str());
+            ImGui::TableNextColumn();
+            const bool selected =
+                browsing && selectedScenario == summary->scenarioTag;
+            if (ImGui::Selectable(summary->activityName.empty()
+                                      ? "(unnamed activity)"
+                                      : summary->activityName.c_str(),
+                                  selected,
+                                  ImGuiSelectableFlags_SpanAllColumns)) {
+                select_activity_logic_scenario(summary->scenarioTag);
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::TableNextColumn();
+            ImGui::Text("0x%08X", summary->scenarioTag);
+            ImGui::PopID();
+        }
+        ImGui::EndTable();
+    }
+    if (control_button("Close",
+                       {ImGui::GetContentRegionAvail().x, scaled(kControlHeight)},
+                       false,
+                       true)) {
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+}
+
 void draw_toolbar(const camera::Status& status) noexcept {
     ImGui::BeginChild("##world_toolbar",
                       {0.0F, scaled(kToolbarHeight)},
@@ -2842,6 +3046,18 @@ void draw_toolbar(const camera::Status& status) noexcept {
                 g_state.centerMode = CenterMode::nodeGraph;
                 g_state.graphState.fitRequested = true;
             }
+            const model::Node* selected = selected_node();
+            const bool relationshipsAvailable =
+                selected != nullptr && selected->activityLogicMetadata.has_value()
+                && !selected->activityLogicMetadata->relationships.empty();
+            ImGui::BeginDisabled(!relationshipsAvailable);
+            if (ImGui::MenuItem("Activity Logic Relationships",
+                                nullptr,
+                                g_state.centerMode == CenterMode::logicGraph)) {
+                g_state.centerMode = CenterMode::logicGraph;
+                g_state.relationshipGraphState.fitRequested = true;
+            }
+            ImGui::EndDisabled();
             if (ImGui::MenuItem("Activity Map",
                                 nullptr,
                                 g_state.centerMode == CenterMode::activityMap)) {
@@ -2872,45 +3088,117 @@ void draw_toolbar(const camera::Status& status) noexcept {
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Activity Logic")) {
-            const auto browse = provider::activity_logic::browse_activities();
-            const bool browsing = g_state.provider.snapshot().activityLogicBrowseOnly;
-            if (ImGui::MenuItem("Live scenario match", nullptr, !browsing)) {
-                g_state.provider.set_activity_logic_browse(0);
+            const auto catalog = provider::activity_logic::browse_activities();
+            const logic_browse::View browse =
+                logic_browse::build(catalog, world().scenarioTag);
+            const bool browsing = world().activityLogicBrowseOnly;
+            if (browsing) {
+                ImGui::TextColored(kWarning, "STATIC BROWSE - NOT LIVE");
+                ImGui::TextDisabled("%s / %s / 0x%08X",
+                                    world().activityLogicActivityName.c_str(),
+                                    world().activityLogicDestination.c_str(),
+                                    world().activityLogicBrowseScenarioTag);
+                if (ImGui::MenuItem("Return to live scenario")) {
+                    select_activity_logic_scenario(0);
+                }
+            } else if (browse.current != nullptr) {
+                ImGui::TextDisabled("Live: %s / %s",
+                                    browse.current->activityName.c_str(),
+                                    browse.current->destination.c_str());
+            } else {
+                ImGui::TextDisabled("No exact catalog match for scenario 0x%08X.",
+                                    world().scenarioTag);
+            }
+
+            if (browse.current != nullptr) {
+                std::array<char, 256> currentLabel{};
+                std::snprintf(currentLabel.data(),
+                              currentLabel.size(),
+                              "Current activity: %s",
+                              browse.current->activityName.c_str());
+                if (ImGui::MenuItem(currentLabel.data(), nullptr, !browsing)) {
+                    select_activity_logic_scenario(0);
+                }
+                if (!browse.destination.empty()
+                    && ImGui::BeginMenu(
+                        (std::string("This destination: ") + browse.destination).c_str())) {
+                    for (const provider::activity_logic::BrowseSummary* summary
+                         : browse.local) {
+                        std::array<char, 256> label{};
+                        std::snprintf(label.data(),
+                                      label.size(),
+                                      "%s  [0x%08X]",
+                                      summary->activityName.c_str(),
+                                      summary->scenarioTag);
+                        if (ImGui::MenuItem(
+                                label.data(),
+                                nullptr,
+                                browsing
+                                    && world().activityLogicBrowseScenarioTag
+                                           == summary->scenarioTag)) {
+                            select_activity_logic_scenario(summary->scenarioTag);
+                        }
+                    }
+                    if (browse.local.empty()) {
+                        ImGui::TextDisabled("No other activities at this destination.");
+                    }
+                    ImGui::EndMenu();
+                }
+            }
+
+            ImGui::Separator();
+            if (ImGui::MenuItem("Browse all catalog...")) {
+                g_state.activityLogicBrowserOpen = true;
             }
             if (ImGui::MenuItem("Reload catalog")) {
+                const std::uint32_t pinned =
+                    browsing ? world().activityLogicBrowseScenarioTag : 0U;
                 if (provider::activity_logic::reload()) {
+                    const bool preserve =
+                        pinned != 0
+                        && logic_browse::contains_scenario(
+                            provider::activity_logic::browse_activities(), pinned);
                     g_state.provider.reset();
+                    if (preserve) {
+                        g_state.provider.set_activity_logic_browse(pinned);
+                    }
                     g_state.rowsValid = false;
                 }
             }
             if (!provider::activity_logic::state().reloadDiagnostic.empty()) {
                 ImGui::TextDisabled("%s",
-                                    provider::activity_logic::state().reloadDiagnostic.c_str());
+                                    provider::activity_logic::state()
+                                        .reloadDiagnostic.c_str());
             }
-            ImGui::Separator();
-            if (browse.empty()) {
-                ImGui::TextDisabled("No activity logic catalog installed.");
-            } else {
-                for (const provider::activity_logic::BrowseSummary& summary : browse) {
-                    std::array<char, 256> label{};
-                    std::snprintf(label.data(),
-                                  label.size(),
-                                  "%s (%s)",
-                                  summary.activityName.c_str(),
-                                  summary.destination.c_str());
-                    if (ImGui::MenuItem(label.data(),
-                                        nullptr,
-                                        browsing
-                                            && g_state.provider.snapshot().activityLogicBrowseScenarioTag
-                                                   == summary.scenarioTag)) {
-                        g_state.provider.set_activity_logic_browse(summary.scenarioTag);
-                    }
-                }
+            if (catalog.empty()) {
+                ImGui::TextDisabled("No Activity Logic catalog installed.");
             }
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Overlays")) {
             const InspectorCapabilities available = capabilities();
+            if (ImGui::BeginMenu("Helper detail")) {
+                if (ImGui::MenuItem(
+                        "Selected only",
+                        nullptr,
+                        g_state.overlayDetail == viewport::Detail::selectedOnly)) {
+                    g_state.overlayDetail = viewport::Detail::selectedOnly;
+                }
+                if (ImGui::MenuItem(
+                        "Selected and nearby",
+                        nullptr,
+                        g_state.overlayDetail == viewport::Detail::selectedNearby)) {
+                    g_state.overlayDetail = viewport::Detail::selectedNearby;
+                }
+                if (ImGui::MenuItem(
+                        "All admitted",
+                        nullptr,
+                        g_state.overlayDetail == viewport::Detail::all)) {
+                    g_state.overlayDetail = viewport::Detail::all;
+                }
+                ImGui::EndMenu();
+            }
+            ImGui::Separator();
             if (ImGui::MenuItem("Spawn helpers", nullptr, &g_state.showSpawns)) {
                 g_state.rowsValid = false;
             }
@@ -2965,6 +3253,7 @@ void draw_toolbar(const camera::Status& status) noexcept {
         }
         ImGui::EndMenuBar();
     }
+    draw_activity_logic_browser();
 
     const ImVec2 minimum = ImGui::GetWindowPos();
     const ImVec2 size = ImGui::GetWindowSize();
@@ -3049,10 +3338,16 @@ void draw_status(const camera::Status& status) noexcept {
                         available.knownBounds);
     if (available.logicDefinitions != 0) {
         ImGui::SameLine();
-        ImGui::TextDisabled("| Logic %zu / %zu placed%s",
-                            available.logicDefinitions,
-                            available.logicPlacements,
-                            world().activityLogicBrowseOnly ? " (browse)" : "");
+        if (world().activityLogicBrowseOnly) {
+            ImGui::TextColored(kWarning,
+                               "| STATIC BROWSE %s / %s - NOT LIVE",
+                               world().activityLogicActivityName.c_str(),
+                               world().activityLogicDestination.c_str());
+        } else {
+            ImGui::TextDisabled("| Logic %zu / %zu placed",
+                                available.logicDefinitions,
+                                available.logicPlacements);
+        }
     }
     if (available.triggerCenters != 0) {
         ImGui::SameLine();
@@ -3202,6 +3497,11 @@ bool render(bool uiVisible) noexcept {
         if (world().graph.generation() != previousGeneration) {
             g_state.hidden.clear();
             g_state.collapsed.clear();
+            for (const model::Node& node : world().graph.nodes()) {
+                if (node.children.size() >= 256U) {
+                    g_state.collapsed.insert(node.id.value);
+                }
+            }
             g_state.hiddenRevision = 0;
         } else if (previousObservationStart) {
             const auto observationState = [previousObservationStart](std::uint64_t id) noexcept {
@@ -3336,18 +3636,20 @@ bool render(bool uiVisible) noexcept {
         ImGui::PopStyleVar();
         viewport::Result interaction{};
         if (worldCenter) {
-            const viewport::Options overlayOptions{g_state.showGeometry,
-                                                   g_state.showEntities,
-                                                   g_state.showSpawns,
-                                                   g_state.showLogic,
-                                                   g_state.showTriggers,
-                                                   g_state.showAudio,
-                                                   g_state.showRendering,
-                                                   g_state.showNavigation,
-                                                   g_state.showLabels,
-                                                   g_state.showKnownBounds,
-                                                   g_state.showTriggerCenters,
-                                                   g_state.showAuthoredOrientation};
+            viewport::Options overlayOptions{};
+            overlayOptions.showGeometry = g_state.showGeometry;
+            overlayOptions.showEntities = g_state.showEntities;
+            overlayOptions.showSpawns = g_state.showSpawns;
+            overlayOptions.showLogic = g_state.showLogic;
+            overlayOptions.showTriggers = g_state.showTriggers;
+            overlayOptions.showAudio = g_state.showAudio;
+            overlayOptions.showRendering = g_state.showRendering;
+            overlayOptions.showNavigation = g_state.showNavigation;
+            overlayOptions.showLabels = g_state.showLabels;
+            overlayOptions.showKnownBounds = g_state.showKnownBounds;
+            overlayOptions.showTriggerCenters = g_state.showTriggerCenters;
+            overlayOptions.showAuthoredOrientation = g_state.showAuthoredOrientation;
+            overlayOptions.detail = g_state.overlayDetail;
             interaction = viewport::draw(world().graph,
                                          g_state.selection.selected(),
                                          g_state.hidden,
@@ -3369,7 +3671,19 @@ bool render(bool uiVisible) noexcept {
                             g_state.selection.selected(),
                             g_state.graphAdmitted,
                             graphRevision,
+                            g_state.graphOmitted,
                             g_state.graphState);
+            interaction.hovered = graphInteraction.hovered;
+            interaction.selected = graphInteraction.selected;
+            interaction.focused = graphInteraction.focused;
+            interaction.context = graphInteraction.context;
+            interaction.clearSelection = graphInteraction.clearSelection;
+        } else if (g_state.centerMode == CenterMode::logicGraph) {
+            const graph::Result graphInteraction =
+                graph::draw_activity_logic_relationships(
+                    world().graph,
+                    g_state.selection.selected(),
+                    g_state.relationshipGraphState);
             interaction.hovered = graphInteraction.hovered;
             interaction.selected = graphInteraction.selected;
             interaction.focused = graphInteraction.focused;

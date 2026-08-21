@@ -15,6 +15,29 @@ namespace catalog = activity_logic_catalog;
 constexpr std::wstring_view kCatalogSuffix = L"\\activity-logic-catalog.bin";
 State g_state{};
 
+void rebuild_browse_cache() {
+    g_state.browseCache.clear();
+    if (g_state.load.state != catalog::LoadState::ready) {
+        return;
+    }
+    g_state.browseCache.reserve(g_state.catalog.activities.size());
+    for (const catalog::Activity& activity : g_state.catalog.activities) {
+        g_state.browseCache.push_back(
+            {activity.scenarioTag, activity.name, activity.destination});
+    }
+    std::ranges::stable_sort(
+        g_state.browseCache,
+        [](const BrowseSummary& left, const BrowseSummary& right) {
+            if (left.destination != right.destination) {
+                return left.destination < right.destination;
+            }
+            if (left.activityName != right.activityName) {
+                return left.activityName < right.activityName;
+            }
+            return left.scenarioTag < right.scenarioTag;
+        });
+}
+
 [[nodiscard]] std::uint64_t group_key(std::uint32_t scenarioTag, catalog::Role role) noexcept {
     return (static_cast<std::uint64_t>(scenarioTag) << 32U)
            | (0x100U + static_cast<std::uint8_t>(role));
@@ -360,6 +383,7 @@ void initialize(void* module) noexcept {
         return;
     }
     g_state.load = catalog::load_file(path.chars.data(), g_state.catalog);
+    rebuild_browse_cache();
 }
 
 void shutdown() noexcept {
@@ -387,6 +411,7 @@ bool reload() noexcept {
     }
     g_state.catalog = std::move(candidate);
     g_state.load = std::move(candidateLoad);
+    rebuild_browse_cache();
     g_state.reloadDiagnostic.clear();
     return true;
 }
@@ -458,16 +483,8 @@ AppendResult append(Graph& graph,
     return result;
 }
 
-std::vector<BrowseSummary> browse_activities() noexcept {
-    std::vector<BrowseSummary> result;
-    if (g_state.load.state != catalog::LoadState::ready) {
-        return result;
-    }
-    result.reserve(g_state.catalog.activities.size());
-    for (const catalog::Activity& activity : g_state.catalog.activities) {
-        result.push_back({activity.scenarioTag, activity.name, activity.destination});
-    }
-    return result;
+std::span<const BrowseSummary> browse_activities() noexcept {
+    return g_state.browseCache;
 }
 
 AppendResult append_browse(Graph& graph,

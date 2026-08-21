@@ -1,9 +1,11 @@
 #pragma once
 
 #include <cstdint>
+#include <span>
 #include <string>
 #include <vector>
 
+#include "activity_logic_browse.h"
 #include "../activity_logic_catalog.h"
 #include "../world_inspection_model.h"
 
@@ -13,6 +15,7 @@ struct State final {
     activity_logic_catalog::Catalog catalog;
     activity_logic_catalog::LoadResult load;
     std::string reloadDiagnostic;
+    std::vector<BrowseSummary> browseCache;
     void* module{};
     bool initialized{};
 };
@@ -30,14 +33,8 @@ struct AppendResult final {
     std::string diagnostic;
 };
 
-/** Catalog-level list of browsable activities; empty when no catalog is loaded. */
-struct BrowseSummary final {
-    std::uint32_t scenarioTag{};
-    std::string activityName;
-    std::string destination;
-};
-
-[[nodiscard]] std::vector<BrowseSummary> browse_activities() noexcept;
+/** Cached catalog-level list of browsable activities; empty when no catalog is loaded. */
+[[nodiscard]] std::span<const BrowseSummary> browse_activities() noexcept;
 
 void initialize(void* module) noexcept;
 void shutdown() noexcept;
