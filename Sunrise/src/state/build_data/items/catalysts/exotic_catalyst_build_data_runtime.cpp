@@ -45,6 +45,19 @@ valid_publication(const items::catalysts::Source& source,
                bound, items::catalysts::generated_facts(), definitions);
 }
 
+/**
+ * Records the last whole-catalog derivation result for cache policy.
+ * @param error None after a safe derivation, or its exact failure reason.
+ */
+void record_derivation_error(items::catalysts::Error error) noexcept {
+    runtime::persistence::Context& state = runtime::persistence::context();
+    AcquireSRWLockExclusive(&state.lock);
+    if (state.enabled) {
+        state.catalystError = error;
+    }
+    ReleaseSRWLockExclusive(&state.lock);
+}
+
 } // namespace
 
 bool exotic_catalysts_ready() noexcept {
@@ -61,10 +74,13 @@ bool derive_exotic_catalysts(const items::catalysts::Source& source,
         report = {};
         report.error = items::catalysts::Error::unsupportedBuild;
         report.unsupported = 1;
+        record_derivation_error(report.error);
         return false;
     }
-    return items::catalysts::derive(
-        bound, items::catalysts::generated_facts(), output, count, report);
+    const bool derived =
+        items::catalysts::derive(bound, items::catalysts::generated_facts(), output, count, report);
+    record_derivation_error(derived ? items::catalysts::Error::none : report.error);
+    return derived;
 }
 
 bool publish_exotic_catalysts(const items::catalysts::Source& source,

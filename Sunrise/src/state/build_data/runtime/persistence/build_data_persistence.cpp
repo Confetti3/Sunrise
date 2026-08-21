@@ -261,6 +261,7 @@ void clear_locked(Context& state) noexcept {
     state.cacheDirectory = {};
     state.cachePath = {};
     state.buildIdentity = {};
+    state.catalystError = items::catalysts::Error::none;
     state.enabled = false;
     state.persisted = false;
     state.replaceStaleCache = false;
@@ -359,7 +360,8 @@ bool persist() noexcept {
     AcquireSRWLockExclusive(&state.lock);
     const bool requiredReady = runtime::persistence::required_domains_ready();
     bool result = false;
-    if (requiredReady && !exotic_catalysts_ready()) {
+    if (requiredReady && !exotic_catalysts_ready()
+        && state.catalystError == items::catalysts::Error::unsupportedBuild) {
         // Catalyst facts are build-pinned. A rejected build must not keep the refresh worker
         // active or put an incomplete catalog on disk. Other extracted domains stay usable.
         runtime::persistence::release_scratch_locked(state);

@@ -587,7 +587,11 @@ publish_vendor_catalog(std::span<const vendors::IndexEntry> index,
 [[nodiscard]] bool find_vendor_definition(std::uint32_t definitionHash,
                                           vendors::Definition& definition) noexcept;
 
-/** @return True only when every domain is ready and any needed cache write succeeds. */
+/**
+ * @return True when required domains are ready and either the full cache write succeeds or the
+
+ * * optional catalyst catalog rejects an unsupported build without writing an incomplete cache.
+ */
 [[nodiscard]] bool persist() noexcept;
 
 } // namespace sunrise::state::build_data

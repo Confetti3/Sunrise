@@ -58,6 +58,8 @@ struct Context {
     core::path::Buffer cacheDirectory;
     core::path::Buffer cachePath;
     BuildIdentity buildIdentity{};
+    /** Last catalyst derivation error for this build. */
+    items::catalysts::Error catalystError{items::catalysts::Error::none};
     bool enabled{};
     bool persisted{};
     bool replaceStaleCache{};
