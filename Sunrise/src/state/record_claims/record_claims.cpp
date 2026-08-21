@@ -261,6 +261,45 @@ struct NodeProgress {
 
 } // namespace
 
+/**
+ * @return How many of a category's children are claimed. The caller owns the claim lock.
+ *
+ * Both passes count the same thing against different banks, so they share the count rather than
+ * each carrying a copy of the loop.
+ */
+[[nodiscard]] std::int32_t claimed_children(const build_data::nodes::Definition& node) noexcept {
+    std::int32_t claimed = 0;
+    for (std::size_t child = 0; child < node.childCount; ++child) {
+        build_data::records::Definition record{};
+        if (build_data::find_record_definition(node.children[child], record)
+            && record.completionFlagIndex != build_data::records::kUnavailableFlagIndex
+            && claimed_locked(record.completionFlagIndex)) {
+            ++claimed;
+        }
+    }
+    return claimed;
+}
+
+/**
+ * @return One when a category's parent record is itself claimed, otherwise zero.
+ *
+ * The parent is the child naming the category's own value slot. It sits in the category's count and
+ * not in its own bar's, so subtracting it is what separates the two totals. The caller owns the
+ * claim lock.
+ */
+[[nodiscard]] std::int32_t claimed_parent(const build_data::nodes::Definition& node) noexcept {
+    for (std::size_t child = 0; child < node.childCount; ++child) {
+        build_data::records::Definition record{};
+        if (build_data::find_record_definition(node.children[child], record)
+            && record.completionFlagIndex != build_data::records::kUnavailableFlagIndex
+            && record.categoryValueIndex == node.valueIndex
+            && claimed_locked(record.completionFlagIndex)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /** Writes each node's claimed-child count into the value slot its bar reads. */
 std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcept {
     // The account image is the latest point anything asks for the node table, and on a warm start it
@@ -274,20 +313,15 @@ std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcep
     // Every category's own index, so the walk can tell a free slot above a category from the next
     // category along. Without it, writing the slot above drives whichever book owns that slot.
     std::vector<char> categoryFlags(objectiveValues.size(), 0);
-    {
-        namespace nodes = build_data::nodes;
-        std::vector<nodes::Definition> all(nodes::kDefinitionCapacity);
-        std::size_t total = 0;
-        if (nodes::snapshot(std::span<nodes::Definition>{all}, total)) {
-            for (std::size_t row = 0; row < total; ++row) {
-                const std::uint16_t index = all[row].valueIndex;
-                if (index != nodes::kUnavailableValueIndex
-                    && static_cast<std::size_t>(index) < categoryFlags.size()) {
-                    categoryFlags[index] = 1;
-                }
+    build_data::nodes::for_each(
+        &categoryFlags, [](void* context, const build_data::nodes::Definition& node) noexcept {
+            auto* flags = static_cast<std::vector<char>*>(context);
+            const std::uint16_t index = node.valueIndex;
+            if (index != build_data::nodes::kUnavailableValueIndex
+                && static_cast<std::size_t>(index) < flags->size()) {
+                (*flags)[index] = 1;
             }
-        }
-    }
+        });
 
     NodeProgress progress{objectiveValues, 0, std::span<const char>{categoryFlags}};
     // The claim lock is taken first and the node lock inside the walk. Nothing takes them the other
@@ -296,35 +330,18 @@ std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcep
     build_data::nodes::for_each_driving(
         &progress, [](void* context, const build_data::nodes::Definition& node) noexcept {
             auto* state = static_cast<NodeProgress*>(context);
-            // Only the lore books are counted here. Every other category that drives a bar keeps
-            // whatever the authored policy gave it: node 896 carries an authored -1 at its value
-            // index, and writing a count over it replaced a deliberate sentinel with a zero. This
-            // build has no business flattening authored values for categories it does not manage.
-            if (node.definitionIndex < build_data::nodes::kLoreNodeFirst
-                || node.definitionIndex > build_data::nodes::kLoreNodeLast) {
+            // Only the lore books are counted. Every other category that drives a bar keeps what
+            // the authored policy gave it: node 896 carries an authored -1 at its value index, and
+            // writing a count over it replaced a deliberate sentinel with a zero.
+            if (!build_data::nodes::lore_category(node.definitionIndex)) {
                 return;
             }
-            // Two counts, because a category and its parent record keep separate bars. The
-            // category counts every child it owns, the parent record among them; the parent's own
-            // bar counts only the chapters, which is why its denominator is one lower. The parent
-            // is the child that names the category's own value slot.
-            std::int32_t claimed = 0;
-            std::int32_t claimedChapters = 0;
-            for (std::size_t child = 0; child < node.childCount; ++child) {
-                build_data::records::Definition record{};
-                if (!build_data::find_record_definition(node.children[child], record)
-                    || record.completionFlagIndex
-                           == build_data::records::kUnavailableFlagIndex) {
-                    continue;
-                }
-                if (!claimed_locked(record.completionFlagIndex)) {
-                    continue;
-                }
-                ++claimed;
-                if (record.categoryValueIndex != node.valueIndex) {
-                    ++claimedChapters;
-                }
-            }
+            // Two counts, because a category and its parent record keep separate bars. The category
+            // counts every child it owns, the parent among them; the parent's own bar counts only
+            // the chapters, which is why its denominator is one lower. The parent is the child
+            // naming the category's own value slot.
+            const std::int32_t claimed = claimed_children(node);
+            const std::int32_t claimedChapters = claimed - claimed_parent(node);
             // The parent's bar sits one slot above its category on the books where that slot is
             // free, confirmed by marker on two of them. Categories are allocated contiguously
             // though, so for many books the slot above is the next book's category, and writing it
@@ -338,21 +355,6 @@ std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcep
             if (static_cast<std::size_t>(node.valueIndex) < state->values.size()) {
                 state->values[node.valueIndex] = claimed;
                 ++state->written;
-                // TEMPORARY: name every node driven, so a bar that does not move can be told from
-                // a node that was never counted.
-                std::array<char, 160> line{};
-                const int written = std::snprintf(
-                    line.data(), line.size(),
-                    "ev=nodeprog node=%u value_index=%u parent_index=%u children=%u claimed=%d "
-                    "chapters=%d",
-                    static_cast<unsigned>(node.definitionIndex),
-                    static_cast<unsigned>(node.valueIndex),
-                    static_cast<unsigned>(node.parentValueIndex),
-                    static_cast<unsigned>(node.childCount), claimed, claimedChapters);
-                if (written > 0) {
-                    core::log::write(core::log::Channel::state, core::log::Level::info,
-                                     {line.data(), static_cast<std::size_t>(written)});
-                }
             }
         });
     return progress.written;
@@ -360,36 +362,21 @@ std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcep
 
 /** Writes each category's claimed-child count into the character value slot its bar reads. */
 std::size_t apply_character_node_progress(std::span<std::int32_t> characterValues) noexcept {
-    namespace nodes = build_data::nodes;
-    std::vector<nodes::Definition> rows(nodes::kDefinitionCapacity);
-    std::size_t count = 0;
-    if (!nodes::snapshot(std::span<nodes::Definition>{rows}, count)) {
-        return 0;
-    }
-
+    NodeProgress progress{characterValues, 0, {}};
+    // Same lock order as the account pass: claims first, catalog inside the walk.
     const std::lock_guard<std::mutex> guard(g_lock);
-    std::size_t written = 0;
-    for (std::size_t row = 0; row < count; ++row) {
-        const nodes::Definition& node = rows[row];
-        if (node.definitionIndex < nodes::kLoreNodeFirst
-            || node.definitionIndex > nodes::kLoreNodeLast
-            || node.characterValueIndex == nodes::kUnavailableValueIndex
-            || static_cast<std::size_t>(node.characterValueIndex) >= characterValues.size()) {
-            continue;
-        }
-        std::int32_t claimed = 0;
-        for (std::size_t child = 0; child < node.childCount; ++child) {
-            build_data::records::Definition record{};
-            if (build_data::find_record_definition(node.children[child], record)
-                && record.completionFlagIndex != build_data::records::kUnavailableFlagIndex
-                && claimed_locked(record.completionFlagIndex)) {
-                ++claimed;
+    build_data::nodes::for_each(
+        &progress, [](void* context, const build_data::nodes::Definition& node) noexcept {
+            auto* state = static_cast<NodeProgress*>(context);
+            if (!build_data::nodes::lore_category(node.definitionIndex)
+                || node.characterValueIndex == build_data::nodes::kUnavailableValueIndex
+                || static_cast<std::size_t>(node.characterValueIndex) >= state->values.size()) {
+                return;
             }
-        }
-        characterValues[node.characterValueIndex] = claimed;
-        ++written;
-    }
-    return written;
+            state->values[node.characterValueIndex] = claimed_children(node);
+            ++state->written;
+        });
+    return progress.written;
 }
 
 /** @return Total score of every held claim. */

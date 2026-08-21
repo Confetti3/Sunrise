@@ -69,6 +69,14 @@ std::size_t count() noexcept {
     return g_definitions.count();
 }
 
+/** Calls back for every node, under the shared lock. */
+void for_each(void* context, void (*visit)(void*, const Definition&) noexcept) noexcept {
+    const Lock::Shared guard(g_lock);
+    for (const Definition& node : g_definitions.rows()) {
+        visit(context, node);
+    }
+}
+
 /** Sets the visibility gate of every lore book category. */
 std::size_t apply_visibility(std::span<std::uint8_t> accountFlags) noexcept {
     const Lock::Shared guard(g_lock);
@@ -99,15 +107,6 @@ std::size_t apply_character_visibility(std::span<std::byte> characterFlags) noex
         characterFlags[node.visibilityCharacterFlagIndex] =
             static_cast<std::byte>(unlocks::kFlagSet);
         ++set;
-    }
-    // TEMPORARY: say whether the character scoped gates are actually being written. This is the one
-    // fix in the batch never confirmed to land, and a silent no-op looks identical to a wrong index.
-    std::array<char, 160> line{};
-    const int written = std::snprintf(line.data(), line.size(),
-                                      "ev=charvis set=%zu bank=%zu", set, characterFlags.size());
-    if (written > 0) {
-        core::log::write(core::log::Channel::state, core::log::Level::info,
-                         {line.data(), static_cast<std::size_t>(written)});
     }
     return set;
 }

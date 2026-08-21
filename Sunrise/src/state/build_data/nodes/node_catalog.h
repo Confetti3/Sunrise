@@ -51,6 +51,16 @@ void for_each_driving(void* context,
 std::size_t apply_visibility(std::span<std::uint8_t> accountFlags) noexcept;
 
 /**
+ * Calls back for every node, under the shared lock.
+ *
+ * Copying the table out costs a hundred and fifty kilobytes a call, and both callers wanted only a
+ * few fields of a few rows. The callback must not take the catalog lock again.
+ * @param context Passed through untouched.
+ * @param visit Called once per node in native order.
+ */
+void for_each(void* context, void (*visit)(void*, const Definition&) noexcept) noexcept;
+
+/**
  * Sets the character scoped visibility gates of the lore book categories.
  * @param characterFlags Character bank already filled from the authored policy.
  * @return Number of gates set.

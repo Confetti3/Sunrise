@@ -28,6 +28,11 @@ inline constexpr std::uint16_t kUnavailableValueIndex = 0xFFFFU;
 inline constexpr std::uint16_t kLoreNodeFirst = 815U;
 inline constexpr std::uint16_t kLoreNodeLast = 854U;
 
+/** @return True when this node is a lore book category, the only kind this build counts. */
+[[nodiscard]] constexpr bool lore_category(std::uint16_t definitionIndex) noexcept {
+    return definitionIndex >= kLoreNodeFirst && definitionIndex <= kLoreNodeLast;
+}
+
 /** A node whose gate names no addressable flag carries this instead of an index. */
 inline constexpr std::uint16_t kUnavailableFlagIndex = 0xFFFFU;
 

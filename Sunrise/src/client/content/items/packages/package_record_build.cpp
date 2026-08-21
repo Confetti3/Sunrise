@@ -5,6 +5,7 @@
 #include "../../../../core/logging/log.h"
 
 #include "../../../../state/build_data/runtime.h"
+#include "../../../../middleware/content/packages/tables/unlock_expression.h"
 #include "internal.h"
 
 namespace sunrise::client::content::items::packages {
@@ -27,46 +28,6 @@ void report(const char* stage, unsigned long long detail) noexcept {
     return slot > 0;
 }
 
-/** Reads a value slot out of one expression field of one row, or reports that it names none. */
-[[nodiscard]] bool expression_value_slot(std::span<const std::byte> table,
-                                         std::size_t rowAt,
-                                         std::size_t field,
-                                         std::int16_t& slot) noexcept {
-    std::int64_t count = 0;
-    std::int64_t relative = 0;
-    std::memcpy(&count, table.data() + rowAt + field, sizeof count);
-    std::memcpy(&relative, table.data() + rowAt + field + 8, sizeof relative);
-    if (count < 1 || count > tables::kNodeExpressionCapacity) {
-        return false;
-    }
-    const std::size_t pointerAt = rowAt + field + 8;
-    const std::int64_t target = static_cast<std::int64_t>(pointerAt) + relative
-                                + static_cast<std::int64_t>(tables::kHeaderSkip);
-    if (target < 0
-        || static_cast<std::size_t>(target)
-                   + static_cast<std::size_t>(count) * tables::kUnlockInstructionStride
-               > table.size()) {
-        return false;
-    }
-    const auto base = static_cast<std::size_t>(target);
-    for (std::int64_t index = 0; index < count; ++index) {
-        std::uint32_t opcode = 0;
-        std::uint32_t operand = 0;
-        const std::size_t at =
-            base + static_cast<std::size_t>(index) * tables::kUnlockInstructionStride;
-        std::memcpy(&opcode, table.data() + at, sizeof opcode);
-        std::memcpy(&operand, table.data() + at + 4, sizeof operand);
-        if (opcode > tables::kUnlockOpcodeCeiling) {
-            return false;
-        }
-        if (opcode == tables::kUnlockReadValueOpcode
-            && operand <= static_cast<std::uint32_t>(INT16_MAX)) {
-            slot = static_cast<std::int16_t>(operand);
-            return true;
-        }
-    }
-    return false;
-}
 
 } // namespace
 
@@ -188,7 +149,7 @@ bool build_records(const reader::Source& source,
         definition.scoreValue = score <= 0xFFFFU ? static_cast<std::uint16_t>(score) : 0U;
         std::int16_t categorySlot = 0;
         if (!valueIndexBySlot.empty()
-            && expression_value_slot(std::span<const std::byte>{blob},
+            && tables::expression_value_slot(std::span<const std::byte>{blob},
                                      at,
                                      tables::kRecordCategoryExpressionField,
                                      categorySlot)
