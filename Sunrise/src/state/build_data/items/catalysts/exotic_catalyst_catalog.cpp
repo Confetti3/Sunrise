@@ -15,15 +15,6 @@ Table<Definition, kDefinitionCapacity> g_definitions;
 std::atomic<bool> g_completionEnabled{true};
 
 /**
- * @param left First catalyst definition.
- * @param right Second catalyst definition.
- * @return True when the first native item index is less than the second.
- */
-[[nodiscard]] bool less(const Definition& left, const Definition& right) noexcept {
-    return left.itemDefinitionIndex < right.itemDefinitionIndex;
-}
-
-/**
  * Finds one item in a sorted catalog while its lock is held.
  * @param definitions Catalyst definitions in native item index order.
  * @param itemDefinitionIndex Native item index to find.
@@ -46,7 +37,6 @@ std::atomic<bool> g_completionEnabled{true};
 void clear() noexcept {
     const Lock::Exclusive guard(g_lock);
     g_definitions.clear();
-    g_completionEnabled.store(true, std::memory_order_release);
 }
 
 void set_completion_enabled(bool enabled) noexcept {
@@ -73,7 +63,7 @@ bool valid(std::span<const Definition> definitions) noexcept {
                 && (hasCompletedPlug || hasEffect))
             || (definition.availability != Availability::unsupported
                 && (!hasCompletedPlug || !hasEffect))
-            || (index != 0 && !less(definitions[index - 1], definition))) {
+            || (index != 0 && !definition_index_less(definitions[index - 1], definition))) {
             return false;
         }
     }

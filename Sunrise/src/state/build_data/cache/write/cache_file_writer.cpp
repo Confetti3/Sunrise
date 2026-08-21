@@ -62,7 +62,7 @@ bool write(const wchar_t* directory,
            WriteDisposition disposition) noexcept {
     if (directory == nullptr || path == nullptr || build.imageSize == 0
         || !valid_disposition(disposition) || !counts_fit_header(domains)
-        || !records::valid_domains(domains)) {
+        || !records::valid_domains(build, domains)) {
         return false;
     }
     if (CreateDirectoryW(directory, nullptr) == FALSE && GetLastError() != ERROR_ALREADY_EXISTS) {

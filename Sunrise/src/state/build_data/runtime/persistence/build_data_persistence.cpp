@@ -116,11 +116,6 @@ Context& context() noexcept {
            && hash_names_ready() && constants::find(published);
 }
 
-/** @return True when every extracted domain is complete in State. */
-bool all_domains_ready() noexcept {
-    return required_domains_ready() && exotic_catalysts_ready();
-}
-
 /** Gives mutable views over every fixed snapshot buffer. */
 cache::records::MutableDomains scratch_domains(Context& state) noexcept {
     const auto named = ensure_scratch<content::Definition, content::kDefinitionCatalogCapacity>(
@@ -320,9 +315,10 @@ cache::records::Domains occupied_domains(Context& state,
     };
 }
 
-/** Saves one complete canonical snapshot when every domain is ready. */
-bool persist_if_complete_locked(Context& state) noexcept {
-    if (!all_domains_ready() || state.persisted || !state.enabled) {
+/** Saves one canonical snapshot when all domains required by its build are ready. */
+bool persist_if_ready_locked(Context& state, bool catalystRequired) noexcept {
+    if (!required_domains_ready() || (catalystRequired && !exotic_catalysts_ready())
+        || state.persisted || !state.enabled) {
         return true;
     }
     cache::records::DomainCounts counts{};
@@ -364,16 +360,12 @@ bool persist() noexcept {
         requiredReady, exotic_catalysts_ready(), state.catalystError)) {
     case runtime::persistence::CacheAction::waitForDomains:
         break;
-    case runtime::persistence::CacheAction::skipUnsupportedCatalog:
-        // Catalyst facts are build-pinned. A rejected build must not keep the refresh worker
-        // active or put an incomplete catalog on disk. Other extracted domains stay usable.
-        runtime::persistence::release_scratch_locked(state);
-        state.enabled = false;
-        state.replaceStaleCache = false;
-        result = true;
+    case runtime::persistence::CacheAction::writeRequiredDomains:
+        // Unsupported catalyst facts do not prevent the other build-bound domains from caching.
+        result = runtime::persistence::persist_if_ready_locked(state, false);
         break;
     case runtime::persistence::CacheAction::writeCompleteCache:
-        result = runtime::persistence::persist_if_complete_locked(state);
+        result = runtime::persistence::persist_if_ready_locked(state, true);
         break;
     }
     ReleaseSRWLockExclusive(&state.lock);

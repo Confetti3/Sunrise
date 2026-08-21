@@ -231,8 +231,13 @@ void test_safe_derivation_failures() noexcept {
     Fixture fixture;
     std::size_t count = 0;
     catalysts::Report report{};
+    const catalysts::Facts facts = fixture.facts();
+    expect(catalysts::supports_build(fixture.source().build, facts),
+           "target catalyst facts support their exact executable build");
     catalysts::Source mismatched = fixture.source();
     ++mismatched.build.imageSize;
+    expect(!catalysts::supports_build(mismatched.build, facts),
+           "target catalyst facts reject a different executable build");
     expect(!catalysts::derive(mismatched, fixture.facts(), fixture.output, count, report)
                && count == 0 && report.error == catalysts::Error::unsupportedBuild,
            "build fingerprint mismatch fails only the catalog derivation");
@@ -323,6 +328,9 @@ void test_catalog_application() noexcept {
                && disabledFlags == 2 && disabledPlugs == disabledBefore,
            "global policy disables completion without changing the item");
     catalysts::clear();
+    expect(!catalysts::completion_enabled(),
+           "clearing catalyst records preserves the configured completion policy");
+    catalysts::set_completion_enabled(true);
 }
 
 void test_cache_record() noexcept {
@@ -351,8 +359,8 @@ void test_persistence_action() noexcept {
                == waitForDomains,
            "persistence waits for required domains");
     expect(persistence::cache_action(true, false, catalysts::Error::unsupportedBuild)
-               == skipUnsupportedCatalog,
-           "unsupported builds finish without an incomplete cache");
+               == writeRequiredDomains,
+           "unsupported builds cache every required domain without a catalyst catalog");
     constexpr std::array rejectedErrors{
         catalysts::Error::none,
         catalysts::Error::noCatalyst,

@@ -30,7 +30,7 @@ namespace sunrise::state::build_data::runtime::persistence {
 /** Cache action after one extraction pass. */
 enum class CacheAction {
     waitForDomains,
-    skipUnsupportedCatalog,
+    writeRequiredDomains,
     writeCompleteCache,
 };
 
@@ -39,7 +39,7 @@ enum class CacheAction {
  * @param requiredReady True when all required non-catalyst domains are ready.
  * @param catalystReady True when the complete catalyst catalog is published.
  * @param catalystError Exact result of the last catalyst derivation.
- * @return Wait, skip an unsupported catalog, or write a complete cache.
+ * @return Wait, write required domains, or write every domain.
  */
 [[nodiscard]] constexpr CacheAction cache_action(bool requiredReady,
                                                  bool catalystReady,
@@ -51,7 +51,7 @@ enum class CacheAction {
         return CacheAction::writeCompleteCache;
     }
     return catalystError == items::catalysts::Error::unsupportedBuild
-               ? CacheAction::skipUnsupportedCatalog
+               ? CacheAction::writeRequiredDomains
                : CacheAction::waitForDomains;
 }
 
@@ -96,9 +96,6 @@ struct Context {
 /** @return The process-wide persistence context, shared by lifecycle and writer code. */
 [[nodiscard]] Context& context() noexcept;
 
-/** @return True when every generated domain is complete in State. */
-[[nodiscard]] bool all_domains_ready() noexcept;
-
 /**
  * Clears fixed cache paths, identity, flags, and snapshot storage.
  * @param state Its lock must already be held exclusively.
@@ -125,10 +122,11 @@ void release_scratch_locked(Context& state) noexcept;
 occupied_domains(Context& state, const cache::records::DomainCounts& counts) noexcept;
 
 /**
- * Saves one complete canonical snapshot when every domain is ready.
+ * Saves one canonical snapshot when all domains required by its build are ready.
  * @param state Its lock must already be held exclusively.
- * @return True when no write is due, or the complete State is on disk.
+ * @param catalystRequired True when the snapshot must contain the catalyst catalog.
+ * @return True when no write is due, or the required State is on disk.
  */
-[[nodiscard]] bool persist_if_complete_locked(Context& state) noexcept;
+[[nodiscard]] bool persist_if_ready_locked(Context& state, bool catalystRequired) noexcept;
 
 } // namespace sunrise::state::build_data::runtime::persistence

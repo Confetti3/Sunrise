@@ -7,7 +7,6 @@
 #include "../../abilities/ability_bucket_catalog.h"
 #include "../../hash_names/hash_name_catalog.h"
 #include "../../inventory/buckets/inventory_bucket_catalog.h"
-#include "../../items/catalysts/exotic_catalyst_catalog.h"
 #include "../../items/details/item_detail_catalog.h"
 #include "../../items/socket_plugs/socket_plug_catalog.h"
 #include "../../material_requirements/material_requirement_catalog.h"
@@ -73,16 +72,6 @@ namespace {
                                          const items::socket_plugs::Rule& right) noexcept {
     return left.itemDefinitionIndex < right.itemDefinitionIndex
            || (left.itemDefinitionIndex == right.itemDefinitionIndex && left.lane < right.lane);
-}
-
-/**
- * @param left First catalyst row.
- * @param right Second catalyst row.
- * @return True when the first native item index is less than the second.
- */
-[[nodiscard]] bool catalyst_less(const items::catalysts::Definition& left,
-                                 const items::catalysts::Definition& right) noexcept {
-    return left.itemDefinitionIndex < right.itemDefinitionIndex;
 }
 
 /** @return Native definition-index order for item rows. */
@@ -197,7 +186,8 @@ bool canonicalize(MutableDomains domains, const DomainCounts& counts) noexcept {
     if (!std::is_sorted(socketPlugRules.begin(), socketPlugRules.end(), socket_plug_rule_less)) {
         return false;
     }
-    std::sort(exoticCatalysts.begin(), exoticCatalysts.end(), catalyst_less);
+    std::sort(
+        exoticCatalysts.begin(), exoticCatalysts.end(), items::catalysts::definition_index_less);
     std::sort(inventoryBuckets.begin(), inventoryBuckets.end(), bucket_less);
     const auto abilityBuckets = domains.abilityBuckets.first(counts.abilityBuckets);
     const auto socketEntryTables = domains.socketEntryTables.first(counts.socketEntryTables);
@@ -210,12 +200,12 @@ bool canonicalize(MutableDomains domains, const DomainCounts& counts) noexcept {
 }
 
 /** Checks the structure rules, the sort order, and every cross-domain item reference. */
-bool valid_domains(Domains domains) noexcept {
+bool valid_domains(const BuildIdentity& build, Domains domains) noexcept {
     if (domains.constants.extracted != 1U
         || domains.constants.weaponPowerStatRow >= constants::kStatRowCount || domains.named.empty()
         || domains.items.empty() || domains.collectibles.empty()
         || domains.materialRequirementSets.empty() || domains.socketPlugRules.empty()
-        || domains.socketPlugPools.empty() || domains.exoticCatalysts.empty()
+        || domains.socketPlugPools.empty()
         || domains.inventoryBuckets.empty() || domains.socketEntryLists.empty()
         || !std::all_of(domains.named.begin(), domains.named.end(), valid_name)
         || !strictly_ordered(domains.named, named_less) || !items::valid(domains.items)
@@ -230,7 +220,6 @@ bool valid_domains(Domains domains) noexcept {
         || !strictly_ordered(domains.itemDetails, detail_less)
         || !items::socket_plugs::valid(
             domains.socketPlugRules, domains.socketPlugPools, domains.socketPlugMembers)
-        || !items::catalysts::valid(domains.exoticCatalysts)
         || !abilities::valid(domains.abilityBuckets)
         || !strictly_ordered(domains.abilityBuckets, ability_less)
         || !progressions::valid(domains.progressions)
@@ -282,7 +271,7 @@ bool valid_domains(Domains domains) noexcept {
                                       domains.socketPlugMembers,
                                       domains.items,
                                       domains.itemDetails)
-           && valid_exotic_catalyst_links(domains);
+           && valid_exotic_catalyst_links(build, domains);
 }
 
 } // namespace sunrise::state::build_data::cache::records

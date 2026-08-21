@@ -9,7 +9,7 @@
 
 namespace sunrise::state::build_data::items::catalysts {
 
-/** Clears all build-derived catalyst records and their report. */
+/** Clears all build-derived catalyst records without changing the configured completion policy. */
 void clear() noexcept;
 
 /** @param enabled True to complete released catalysts during item resolution. */

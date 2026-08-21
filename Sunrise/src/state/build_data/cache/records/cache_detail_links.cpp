@@ -111,15 +111,18 @@ bool valid_socket_plug_links(std::span<const items::socket_plugs::Rule> rules,
 }
 
 /** Checks each catalyst against its item, detail, pool, plug, and pinned release state. */
-bool valid_exotic_catalyst_links(Domains domains) noexcept {
-    if (domains.items.empty() || domains.itemDetails.empty()
+bool valid_exotic_catalyst_links(const BuildIdentity& build, Domains domains) noexcept {
+    const items::catalysts::Facts facts = items::catalysts::generated_facts();
+    if (!items::catalysts::supports_build(build, facts)) {
+        return domains.exoticCatalysts.empty();
+    }
+    if (domains.items.empty() || domains.itemDetails.empty() || domains.exoticCatalysts.empty()
         || !items::socket_plugs::valid(
             domains.socketPlugRules, domains.socketPlugPools, domains.socketPlugMembers)) {
         return false;
     }
-    const items::catalysts::Facts facts = items::catalysts::generated_facts();
     const items::catalysts::Source source{
-        {facts.imageTimestamp, facts.imageSize, 0},
+        build,
         domains.items,
         domains.itemDetails,
         domains.socketPlugRules,

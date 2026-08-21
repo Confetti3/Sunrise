@@ -72,6 +72,16 @@ struct Definition {
     Availability availability{Availability::unsupported};
 };
 
+/**
+ * @param left First catalyst definition.
+ * @param right Second catalyst definition.
+ * @return True when the first native item index is less than the second.
+ */
+[[nodiscard]] constexpr bool definition_index_less(const Definition& left,
+                                                   const Definition& right) noexcept {
+    return left.itemDefinitionIndex < right.itemDefinitionIndex;
+}
+
 /** The only state a released catalyst exposes to callers. */
 struct CompletedCatalyst {
     std::uint8_t socketLane{};

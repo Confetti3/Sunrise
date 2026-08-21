@@ -289,6 +289,11 @@ classify_lane(const Source& source, const details::Definition& detail, std::uint
 
 } // namespace
 
+bool supports_build(const BuildIdentity& build, const Facts& facts) noexcept {
+    return facts.imageTimestamp != 0 && facts.imageSize != 0
+           && build.imageTimestamp == facts.imageTimestamp && build.imageSize == facts.imageSize;
+}
+
 bool derive(const Source& source,
             const Facts& facts,
             std::span<Definition> output,
@@ -297,13 +302,11 @@ bool derive(const Source& source,
     count = 0;
     report = {};
     std::fill(output.begin(), output.end(), Definition{});
-    if (facts.imageTimestamp == 0 || facts.imageSize == 0
-        || facts.releasedWeaponHashes.size() > kDefinitionCapacity
+    if (facts.releasedWeaponHashes.size() > kDefinitionCapacity
         || !valid_hashes(facts.releasedWeaponHashes)) {
         return fail(output, count, report, Error::unsupportedBuild);
     }
-    if (source.build.imageTimestamp != facts.imageTimestamp
-        || source.build.imageSize != facts.imageSize) {
+    if (!supports_build(source.build, facts)) {
         return fail(output, count, report, Error::unsupportedBuild);
     }
 
@@ -399,11 +402,7 @@ bool derive(const Source& source,
                 output, count, report, Error::missingReleased, facts.releasedWeaponHashes[index]);
         }
     }
-    std::sort(output.begin(),
-              output.begin() + count,
-              [](const Definition& left, const Definition& right) {
-                  return left.itemDefinitionIndex < right.itemDefinitionIndex;
-              });
+    std::sort(output.begin(), output.begin() + count, definition_index_less);
     return true;
 }
 

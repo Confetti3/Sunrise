@@ -64,4 +64,12 @@ void test_opcode406_item_state() noexcept {
     opcode406::Request request{};
     expect(!opcode406::parse_request(message, request),
            "opcode 406 rejects unknown item-state bits");
+
+    const auto maximumBytes = payload(0x7FFFFFFFU);
+    const sunrise::middleware::web_service::Message maximumMessage{
+        opcode406::kOpcode, 1, maximumBytes};
+    opcode406::Request maximumRequest{};
+    expect(!opcode406::parse_request(maximumMessage, maximumRequest)
+               && maximumRequest.flags == 0x7FFFFFFFU,
+           "opcode 406 decodes the maximum biased value without overflow");
 }

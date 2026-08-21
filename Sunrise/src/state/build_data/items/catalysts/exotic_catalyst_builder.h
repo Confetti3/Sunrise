@@ -34,6 +34,13 @@ struct Source {
 [[nodiscard]] Facts generated_facts() noexcept;
 
 /**
+ * @param build Installed executable identity.
+ * @param facts Build-scoped catalyst facts.
+ * @return True when the facts apply to the installed executable.
+ */
+[[nodiscard]] bool supports_build(const BuildIdentity& build, const Facts& facts) noexcept;
+
+/**
  * Derives all released and placeholder catalyst records without display text.
  * On failure, count is zero and no partial record is visible.
  * @param source Installed build domains and executable identity.

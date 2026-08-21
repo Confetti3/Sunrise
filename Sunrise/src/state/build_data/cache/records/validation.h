@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../../definition.h"
 #include "domains.h"
 
 namespace sunrise::state::build_data::cache::records {
@@ -44,10 +45,12 @@ valid_socket_plug_links(std::span<const items::socket_plugs::Rule> rules,
 
 /**
  * Checks catalyst item, socket, plug, lifecycle, and pinned release links.
+ * @param build Cache build identity.
  * @param domains Complete cache domains.
- * @return True when a fresh derivation exactly matches the candidate catalog.
+ * @return True when a supported build matches exactly, or an unsupported build has no catalog.
  */
-[[nodiscard]] bool valid_exotic_catalyst_links(Domains domains) noexcept;
+[[nodiscard]] bool valid_exotic_catalyst_links(const BuildIdentity& build,
+                                               Domains domains) noexcept;
 
 /**
  * Checks every collectible item index against the complete dense item table.
@@ -59,7 +62,11 @@ valid_socket_plug_links(std::span<const items::socket_plugs::Rule> rules,
 valid_collectible_links(std::span<const collectibles::Definition> collectibleDefinitions,
                         std::span<const items::Definition> itemDefinitions) noexcept;
 
-/** @param domains Complete sorted domains. @return True when every domain passes its checks. */
-[[nodiscard]] bool valid_domains(Domains domains) noexcept;
+/**
+ * @param build Cache build identity.
+ * @param domains Complete sorted domains.
+ * @return True when every domain required by the build passes its checks.
+ */
+[[nodiscard]] bool valid_domains(const BuildIdentity& build, Domains domains) noexcept;
 
 } // namespace sunrise::state::build_data::cache::records

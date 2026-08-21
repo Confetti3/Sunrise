@@ -13,8 +13,7 @@ namespace {
 [[nodiscard]] bool required_domains_present(const records::DomainCounts& counts) noexcept {
     return counts.named != 0 && counts.items != 0 && counts.collectibles != 0
            && counts.materialRequirementSets != 0 && counts.socketPlugRules != 0
-           && counts.socketPlugPools != 0 && counts.exoticCatalysts != 0
-           && counts.inventoryBuckets != 0
+           && counts.socketPlugPools != 0 && counts.inventoryBuckets != 0
            && counts.socketEntryLists != 0 && counts.progressions != 0 && counts.scenarios != 0
            && counts.rosterGroups != 0;
 }
@@ -179,7 +178,8 @@ LoadStatus load(const wchar_t* path,
     bool valid = required_domains_present(pendingCounts) && counts_fit(pendingCounts, output)
                  && read::expected_size(pendingCounts, expectedSize)
                  && static_cast<std::uint64_t>(actualSize.QuadPart) == expectedSize
-                 && read::read_payload(file, header.constants, pendingCounts, output, checksum)
+                 && read::read_payload(
+                     file, expectedBuild, header.constants, pendingCounts, output, checksum)
                  && checksum == header.payloadChecksum;
     const LoadStatus status = close_with(file, valid ? LoadStatus::loaded : LoadStatus::invalid);
     if (status != LoadStatus::loaded) {
