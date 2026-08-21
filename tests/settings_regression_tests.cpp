@@ -1,5 +1,6 @@
 #include <Windows.h>
 
+#include <array>
 #include <crtdbg.h>
 #include <cstdint>
 #include <cstdio>
@@ -115,6 +116,54 @@ void test_optional_catalyst_policy() noexcept {
            "non-boolean catalyst policy is rejected");
 }
 
+void test_settings_file_round_trip() noexcept {
+    constexpr std::string_view document = R"({"version":8,"complete_exotic_catalysts":false})";
+    std::array<char, MAX_PATH + 1> directory{};
+    std::array<char, MAX_PATH + 1> path{};
+    const DWORD directoryLength =
+        GetTempPathA(static_cast<DWORD>(directory.size()), directory.data());
+    if (directoryLength == 0 || directoryLength >= directory.size()
+        || GetTempFileNameA(directory.data(), "sun", 0, path.data()) == 0) {
+        expect(false, "settings round trip creates a temporary file");
+        return;
+    }
+
+    HANDLE file = CreateFileA(
+        path.data(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_TEMPORARY, nullptr);
+    DWORD written = 0;
+    const bool saved =
+        file != INVALID_HANDLE_VALUE
+        && WriteFile(file, document.data(), static_cast<DWORD>(document.size()), &written, nullptr)
+        && written == document.size();
+    if (file != INVALID_HANDLE_VALUE) {
+        CloseHandle(file);
+    }
+
+    std::array<char, 128> reloaded{};
+    file = CreateFileA(path.data(),
+                       GENERIC_READ,
+                       FILE_SHARE_READ,
+                       nullptr,
+                       OPEN_EXISTING,
+                       FILE_ATTRIBUTE_NORMAL,
+                       nullptr);
+    DWORD read = 0;
+    const bool loaded =
+        file != INVALID_HANDLE_VALUE
+        && ReadFile(file, reloaded.data(), static_cast<DWORD>(reloaded.size()), &read, nullptr)
+        && read == document.size();
+    if (file != INVALID_HANDLE_VALUE) {
+        CloseHandle(file);
+    }
+    DeleteFileA(path.data());
+
+    bool enabled = true;
+    expect(saved && loaded
+               && parse_catalyst_policy(std::string_view{reloaded.data(), read}, enabled)
+               && !enabled,
+           "settings file round trip preserves the catalyst policy");
+}
+
 } // namespace
 
 void test_exotic_catalysts() noexcept;
@@ -128,6 +177,7 @@ int main() {
 #endif
     test_item_state_contract();
     test_optional_catalyst_policy();
+    test_settings_file_round_trip();
     test_opcode406_item_state();
     test_exotic_catalysts();
     test_resolved_catalyst_output();

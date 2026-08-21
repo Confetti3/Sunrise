@@ -105,15 +105,20 @@ Context& context() noexcept {
     return g_context;
 }
 
-/** @return True when every extracted domain is complete in State. */
-bool all_domains_ready() noexcept {
+/** @return True when every required extracted domain is complete in State. */
+[[nodiscard]] static bool required_domains_ready() noexcept {
     constants::InvestmentConstants published{};
     return runtime::named::ready() && item_definitions_ready() && configured_item_details_ready()
            && collectible_definitions_ready() && socket_plug_rules_ready()
-           && exotic_catalysts_ready() && material_requirement_sets_ready()
-           && inventory_bucket_descriptors_ready() && socket_entry_lists_ready()
-           && ability_buckets_ready() && progression_definitions_ready() && scenario_layouts_ready()
-           && spawn_sets_ready() && hash_names_ready() && constants::find(published);
+           && material_requirement_sets_ready() && inventory_bucket_descriptors_ready()
+           && socket_entry_lists_ready() && ability_buckets_ready()
+           && progression_definitions_ready() && scenario_layouts_ready() && spawn_sets_ready()
+           && hash_names_ready() && constants::find(published);
+}
+
+/** @return True when every extracted domain is complete in State. */
+bool all_domains_ready() noexcept {
+    return required_domains_ready() && exotic_catalysts_ready();
 }
 
 /** Gives mutable views over every fixed snapshot buffer. */
@@ -348,12 +353,22 @@ bool persist_if_complete_locked(Context& state) noexcept {
 
 namespace sunrise::state::build_data {
 
-/** @return True only when every domain is ready and any needed cache write works. */
+/** @return True when required domains are ready and any safe cache write works. */
 bool persist() noexcept {
     runtime::persistence::Context& state = runtime::persistence::context();
     AcquireSRWLockExclusive(&state.lock);
-    const bool result = runtime::persistence::all_domains_ready()
-                        && runtime::persistence::persist_if_complete_locked(state);
+    const bool requiredReady = runtime::persistence::required_domains_ready();
+    bool result = false;
+    if (requiredReady && !exotic_catalysts_ready()) {
+        // Catalyst facts are build-pinned. A rejected build must not keep the refresh worker
+        // active or put an incomplete catalog on disk. Other extracted domains stay usable.
+        runtime::persistence::release_scratch_locked(state);
+        state.enabled = false;
+        state.replaceStaleCache = false;
+        result = true;
+    } else if (requiredReady) {
+        result = runtime::persistence::persist_if_complete_locked(state);
+    }
     ReleaseSRWLockExclusive(&state.lock);
     return result;
 }

@@ -7,7 +7,6 @@
 #include <span>
 #include <string_view>
 
-#include "../investment/investment.h"
 #include "abilities/definition.h"
 #include "collectibles/collectible_catalog.h"
 #include "constants/definition.h"

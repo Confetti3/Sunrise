@@ -203,6 +203,12 @@ void test_structural_lifecycles() noexcept {
            "stored catalog matches a fresh structural derivation");
 
     auto altered = fixture.output;
+    altered[0].completedPlugDefinitionIndex = Fixture::kLegacyEffect;
+    expect(!catalysts::matches_derived(
+               fixture.source(), fixture.facts(), std::span(altered).first(count)),
+           "catalog rejects a completed plug outside its socket pool");
+
+    altered = fixture.output;
     altered[0].completedPlugDefinitionIndex = Fixture::kLegacyProgress;
     expect(!catalysts::matches_derived(
                fixture.source(), fixture.facts(), std::span(altered).first(count)),

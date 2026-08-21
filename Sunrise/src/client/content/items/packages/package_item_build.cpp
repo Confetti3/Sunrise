@@ -23,7 +23,6 @@
 #include "../../spawn_sets/spawn_set_build.h"
 #include "build.h"
 #include "internal.h"
-#include "package_socket_plug_build.h"
 
 namespace sunrise::client::content::items::packages {
 namespace {
