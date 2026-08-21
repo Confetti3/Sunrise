@@ -1,3 +1,6 @@
+#include <atomic>
+
+#include "../build_data/nodes/node_persistence.h"
 #include "record_claims.h"
 
 #include <array>
@@ -258,6 +261,14 @@ struct NodeProgress {
 
 /** Writes each node's claimed-child count into the value slot its bar reads. */
 std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcept {
+    // The account image is the latest point anything asks for the node table, and on a warm start it
+    // may still be unpublished: the content pass is skipped and an earlier publish can be refused.
+    // Latches on success, so a run that has its table pays nothing.
+    static std::atomic<bool> nodesPublished{false};
+    if (!nodesPublished.load(std::memory_order_relaxed)
+        && build_data::nodes::load_and_publish()) {
+        nodesPublished.store(true, std::memory_order_relaxed);
+    }
     NodeProgress progress{objectiveValues, 0};
     // The claim lock is taken first and the node lock inside the walk. Nothing takes them the other
     // way round, so the order cannot close a cycle.

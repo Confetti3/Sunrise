@@ -1,3 +1,4 @@
+#include "../build_data/nodes/node_persistence.h"
 #include <Windows.h>
 
 #include <algorithm>
@@ -209,6 +210,9 @@ bool initialize(void* module,
     // Claims are held beside the build data cache, so a restart keeps what the client already
     // shows as Acquired. A missing file is a first run, not a failure.
     (void)record_claims::initialize(module);
+    // Publishes the node table if a previous run wrote one, so a warm start counts
+    // categories without needing the package pass to run again.
+    (void)build_data::nodes::initialize(module);
     // A cache hit already has the complete plug relation, so publish canonical profile identities
     // in the first State image.  On a first cache build, snapshot preparation repeats this step
     // after package extraction has published the relation.

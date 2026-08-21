@@ -1,3 +1,4 @@
+#include "../../../../state/build_data/nodes/node_persistence.h"
 #include <Windows.h>
 
 #include <array>
@@ -163,8 +164,12 @@ bool build() noexcept {
                                 storage.child,
                                 storage.nodeRows,
                                 nodeCount)) {
-                    (void)state::build_data::publish_node_definitions(
-                        std::span(storage.nodeRows).first(nodeCount));
+                    if (state::build_data::publish_node_definitions(
+                            std::span(storage.nodeRows).first(nodeCount))) {
+                        // Kept in its own file, so the next start does not need this pass at all.
+                        (void)state::build_data::nodes::store(
+                            std::span(storage.nodeRows).first(nodeCount));
+                    }
                 }
             }
             if (!state::build_data::record_definitions_ready()) {
