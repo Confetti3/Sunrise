@@ -1631,6 +1631,9 @@ void draw_activity(const model::Node& node) noexcept {
     end_properties();
 }
 
+[[nodiscard]] model::NodeId logic_node_for_scenario(std::uint32_t scenarioTag) noexcept;
+[[nodiscard]] std::uint32_t activity_graph_for_scenario(std::uint32_t scenarioTag) noexcept;
+
 void draw_activity_metadata(const model::Node& node) noexcept {
     if (!node.activityMetadata.has_value()) {
         return;
@@ -1659,6 +1662,22 @@ void draw_activity_metadata(const model::Node& node) noexcept {
     property_i32("Activity references", static_cast<std::int32_t>(metadata.referenceCount));
     end_properties();
 
+    if (metadata.activityHash != 0) {
+        ImGui::TextUnformatted("Exact Activity Logic link");
+        const model::NodeId logicNode = logic_node_for_scenario(metadata.activityHash);
+        if (logicNode) {
+            if (ImGui::Button("Open Activity Logic")) {
+                select_node(logicNode);
+            }
+        } else {
+            if (ImGui::Button("Browse Activity Logic")) {
+                g_state.provider.set_activity_logic_browse(metadata.activityHash);
+                g_state.rowsValid = false;
+            }
+            ImGui::TextDisabled("No live matching node; browse uses the exact activity hash.");
+        }
+    }
+
     if (metadata.linkedGraphHashes.empty()) {
         return;
     }
@@ -1682,6 +1701,29 @@ void draw_activity_metadata(const model::Node& node) noexcept {
         }
     }
     return {};
+}
+
+[[nodiscard]] model::NodeId logic_node_for_scenario(std::uint32_t scenarioTag) noexcept {
+    for (const model::Node& node : world().graph.nodes()) {
+        if (node.kind == model::NodeKind::activityLogic
+            && node.producer == model::Producer::activityLogicCatalog
+            && node.nativeKey == scenarioTag) {
+            return node.id;
+        }
+    }
+    return {};
+}
+
+[[nodiscard]] std::uint32_t activity_graph_for_scenario(std::uint32_t scenarioTag) noexcept {
+    for (const model::Node& node : world().graph.nodes()) {
+        if (node.producer == model::Producer::activityCatalog
+            && node.activityMetadata.has_value()
+            && node.activityMetadata->activityHash == scenarioTag
+            && node.activityMetadata->graphHash != 0) {
+            return node.activityMetadata->graphHash;
+        }
+    }
+    return 0;
 }
 
 void draw_activity_logic_metadata(const model::Node& node) noexcept {
@@ -1715,6 +1757,18 @@ void draw_activity_logic_metadata(const model::Node& node) noexcept {
             property_row("Authored quaternion", rotation.data());
         }
         end_properties();
+    }
+    if (metadata.scenarioTag != 0) {
+        const std::uint32_t graphHash = activity_graph_for_scenario(metadata.scenarioTag);
+        ImGui::TextUnformatted("Exact Activity Map link");
+        ImGui::BeginDisabled(graphHash == 0);
+        if (ImGui::Button("Open in Activity Map")) {
+            open_activity_graph(graphHash);
+        }
+        ImGui::EndDisabled();
+        if (graphHash == 0) {
+            ImGui::TextDisabled("No exact Activity Map activity hash is present in this snapshot.");
+        }
     }
     if ((metadata.roleName.find("Trigger") != std::string::npos
          || metadata.roleName.find("Spatial") != std::string::npos)
