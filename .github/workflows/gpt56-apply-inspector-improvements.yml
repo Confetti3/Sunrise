@@ -13,6 +13,7 @@ on:
 
 jobs:
   implement:
+    if: github.actor != 'github-actions[bot]'
     name: Apply Inspector improvements
     runs-on: ubuntu-latest
     steps:
@@ -35,8 +36,12 @@ jobs:
       - name: Apply implementation
         run: python tools/gpt56_apply_inspector_improvements.py
 
-      - name: Remove staged payload
-        run: rm -rf .github/gpt56
+      - name: Restore workflow files and remove staged payload
+        shell: bash
+        run: |
+          git checkout -- .github/workflows/build.yml
+          git checkout -- .github/workflows/gpt56-apply-inspector-improvements.yml
+          rm -rf .github/gpt56
 
       - name: Verify patch hygiene
         run: git diff --check
