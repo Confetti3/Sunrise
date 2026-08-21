@@ -138,6 +138,46 @@ struct Reader final {
            <= static_cast<std::uint8_t>(Confidence::strong);
 }
 
+/** Builds outgoing/incoming edge indexes once after parsing. */
+void build_adjacency(Catalog& catalog) {
+    const std::size_t entityCount = catalog.entities.size();
+    catalog.edgeBySourceOffsets.assign(entityCount + 1U, 0U);
+    catalog.edgeByTargetOffsets.assign(entityCount + 1U, 0U);
+
+    // Count degree per endpoint.
+    for (std::size_t edge = 0; edge < catalog.edges.size(); ++edge) {
+        const std::uint32_t source = catalog.edges[edge].sourceEntityIndex;
+        const std::uint32_t target = catalog.edges[edge].targetEntityIndex;
+        if (source < entityCount) {
+            ++catalog.edgeBySourceOffsets[source + 1U];
+        }
+        if (target < entityCount) {
+            ++catalog.edgeByTargetOffsets[target + 1U];
+        }
+    }
+
+    // Prefix sums -> per-entity start offsets.
+    for (std::size_t entity = 0; entity < entityCount; ++entity) {
+        catalog.edgeBySourceOffsets[entity + 1U] += catalog.edgeBySourceOffsets[entity];
+        catalog.edgeByTargetOffsets[entity + 1U] += catalog.edgeByTargetOffsets[entity];
+    }
+
+    catalog.edgeBySource.assign(catalog.edges.size(), 0U);
+    catalog.edgeByTarget.assign(catalog.edges.size(), 0U);
+    std::vector<std::uint32_t> sourceCursor(catalog.edgeBySourceOffsets);
+    std::vector<std::uint32_t> targetCursor(catalog.edgeByTargetOffsets);
+    for (std::uint32_t edge = 0; edge < catalog.edges.size(); ++edge) {
+        const std::uint32_t source = catalog.edges[edge].sourceEntityIndex;
+        const std::uint32_t target = catalog.edges[edge].targetEntityIndex;
+        if (source < entityCount) {
+            catalog.edgeBySource[sourceCursor[source]++] = edge;
+        }
+        if (target < entityCount) {
+            catalog.edgeByTarget[targetCursor[target]++] = edge;
+        }
+    }
+}
+
 } // namespace
 
 bool validate(const Catalog& catalog, std::string& error) {
@@ -484,7 +524,11 @@ bool load(std::span<const std::byte> bytes, Catalog& catalog, std::string& error
             catalog.edges.push_back(edge);
         }
 
-        return validate(catalog, error);
+        if (!validate(catalog, error)) {
+            return false;
+        }
+        build_adjacency(catalog);
+        return true;
     } catch (...) {
         catalog = {};
         return fail(error, "activity logic catalog allocation or parse failed");
@@ -565,6 +609,32 @@ const Entity* find_entity(const Catalog& catalog, std::uint32_t definitionTag) n
     return iterator != catalog.entities.end() && iterator->definitionTag == definitionTag
                ? &*iterator
                : nullptr;
+}
+
+std::span<const std::uint32_t> outgoing_edges(const Catalog& catalog,
+                                              std::uint32_t entityIndex) noexcept {
+    if (entityIndex >= catalog.entities.size() || catalog.edgeBySourceOffsets.size() != catalog.entities.size() + 1U) {
+        return {};
+    }
+    const std::uint32_t begin = catalog.edgeBySourceOffsets[entityIndex];
+    const std::uint32_t end = catalog.edgeBySourceOffsets[entityIndex + 1U];
+    if (begin >= end || end > catalog.edgeBySource.size()) {
+        return {};
+    }
+    return std::span<const std::uint32_t>(catalog.edgeBySource.data() + begin, end - begin);
+}
+
+std::span<const std::uint32_t> incoming_edges(const Catalog& catalog,
+                                              std::uint32_t entityIndex) noexcept {
+    if (entityIndex >= catalog.entities.size() || catalog.edgeByTargetOffsets.size() != catalog.entities.size() + 1U) {
+        return {};
+    }
+    const std::uint32_t begin = catalog.edgeByTargetOffsets[entityIndex];
+    const std::uint32_t end = catalog.edgeByTargetOffsets[entityIndex + 1U];
+    if (begin >= end || end > catalog.edgeByTarget.size()) {
+        return {};
+    }
+    return std::span<const std::uint32_t>(catalog.edgeByTarget.data() + begin, end - begin);
 }
 
 const char* role_name(Role role) noexcept {

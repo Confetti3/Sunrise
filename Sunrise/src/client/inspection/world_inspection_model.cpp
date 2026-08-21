@@ -239,8 +239,9 @@ NodeId Graph::add(Node node, NodeId parent) {
         append_search(node.searchText, normalize(logic.roleName));
         append_search(node.searchText, normalize(logic.label));
         append_search(node.searchText, normalize(logic.localizedText));
-        for (const std::uint32_t linked : logic.linkedDefinitionTags) {
-            append_hex(node.searchText, linked, 8);
+        for (const ActivityLogicRelationship& relationship : logic.relationships) {
+            append_hex(node.searchText, relationship.definitionTag, 8);
+            append_hex(node.searchText, relationship.nameHash, 8);
         }
     }
 

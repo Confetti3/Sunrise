@@ -157,6 +157,14 @@ struct ActivityMetadata final {
     bool browseOnly{true};
 
 };
+struct ActivityLogicRelationship final {
+    std::uint32_t definitionTag{};
+    std::uint32_t nameHash{};
+    std::uint32_t occurrenceCount{};
+    /** True when this entity is the edge source (outgoing); false when it is the target (incoming). */
+    bool outgoing{true};
+};
+
 struct ActivityLogicMetadata final {
     std::uint32_t scenarioTag{};
     std::uint32_t definitionTag{};
@@ -169,7 +177,7 @@ struct ActivityLogicMetadata final {
     std::string label;
     std::string confidenceName;
     std::string localizedText;
-    std::vector<std::uint32_t> linkedDefinitionTags;
+    std::vector<ActivityLogicRelationship> relationships;
     std::uint64_t worldId{};
     std::uint32_t mapTableTag{};
     std::uint32_t placedEntityTag{};

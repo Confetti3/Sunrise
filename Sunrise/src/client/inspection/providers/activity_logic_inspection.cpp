@@ -101,20 +101,42 @@ State g_state{};
 void attach_links(ActivityLogicMetadata& metadata,
                   const catalog::Catalog& source,
                   std::uint32_t entityIndex) {
-    std::unordered_set<std::uint32_t> linked;
-    for (const catalog::Edge& edge : source.edges) {
-        std::uint32_t other = (std::numeric_limits<std::uint32_t>::max)();
-        if (edge.sourceEntityIndex == entityIndex) {
-            other = edge.targetEntityIndex;
-        } else if (edge.targetEntityIndex == entityIndex) {
-            other = edge.sourceEntityIndex;
+    const auto append_edge = [&metadata, &source](std::uint32_t edgeIndex, bool outgoing) {
+        if (edgeIndex >= source.edges.size()) {
+            return;
         }
-        if (other < source.entities.size()) {
-            linked.insert(source.entities[other].definitionTag);
+        const catalog::Edge& edge = source.edges[edgeIndex];
+        const std::uint32_t other = outgoing ? edge.targetEntityIndex : edge.sourceEntityIndex;
+        if (other >= source.entities.size()) {
+            return;
         }
+        ActivityLogicRelationship relationship{};
+        relationship.definitionTag = source.entities[other].definitionTag;
+        relationship.nameHash = edge.nameHash;
+        relationship.occurrenceCount = edge.occurrenceCount;
+        relationship.outgoing = outgoing;
+        metadata.relationships.push_back(relationship);
+    };
+
+    for (const std::uint32_t edgeIndex : catalog::outgoing_edges(source, entityIndex)) {
+        append_edge(edgeIndex, true);
     }
-    metadata.linkedDefinitionTags.assign(linked.begin(), linked.end());
-    std::ranges::sort(metadata.linkedDefinitionTags);
+    for (const std::uint32_t edgeIndex : catalog::incoming_edges(source, entityIndex)) {
+        append_edge(edgeIndex, false);
+    }
+    std::ranges::sort(metadata.relationships, [](const ActivityLogicRelationship& left,
+                                                const ActivityLogicRelationship& right) {
+        if (left.outgoing != right.outgoing) {
+            return left.outgoing;
+        }
+        if (left.definitionTag != right.definitionTag) {
+            return left.definitionTag < right.definitionTag;
+        }
+        if (left.nameHash != right.nameHash) {
+            return left.nameHash < right.nameHash;
+        }
+        return left.occurrenceCount < right.occurrenceCount;
+    });
 }
 
 [[nodiscard]] std::string digest_hex(const catalog::Digest& digest) {

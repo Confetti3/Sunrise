@@ -87,6 +87,12 @@ struct Catalog final {
     std::vector<Activity> activities;
     std::vector<Entity> entities;
     std::vector<Edge> edges;
+    // Adjacency index built once during load: edge indices grouped by endpoint.
+    // edgeBySourceOffsets has size entities.size()+1; edgeBySource is sorted by source entity.
+    std::vector<std::uint32_t> edgeBySourceOffsets;
+    std::vector<std::uint32_t> edgeBySource;
+    std::vector<std::uint32_t> edgeByTargetOffsets;
+    std::vector<std::uint32_t> edgeByTarget;
 };
 
 enum class LoadState : std::uint8_t {
@@ -109,5 +115,12 @@ struct LoadResult final {
                                         std::uint32_t definitionTag) noexcept;
 [[nodiscard]] const char* role_name(Role role) noexcept;
 [[nodiscard]] const char* confidence_name(Confidence confidence) noexcept;
+
+/** Edge indices whose source is the entity at @p entityIndex. */
+[[nodiscard]] std::span<const std::uint32_t> outgoing_edges(const Catalog& catalog,
+                                                           std::uint32_t entityIndex) noexcept;
+/** Edge indices whose target is the entity at @p entityIndex. */
+[[nodiscard]] std::span<const std::uint32_t> incoming_edges(const Catalog& catalog,
+                                                           std::uint32_t entityIndex) noexcept;
 
 } // namespace sunrise::client::inspection::activity_logic_catalog

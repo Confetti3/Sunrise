@@ -1693,15 +1693,23 @@ void draw_activity_logic_metadata(const model::Node& node) noexcept {
         && !node.transform.has_value()) {
         inspector_text("Static archive identifies spatial/volume logic, but this definition has no proven shape or world transform.", true);
     }
-    if (metadata.linkedDefinitionTags.empty()) {
+    if (metadata.relationships.empty()) {
         return;
     }
     ImGui::TextUnformatted("Serialized definition links");
-    for (const std::uint32_t linked : metadata.linkedDefinitionTags) {
-        std::array<char, 64> label{};
-        std::snprintf(label.data(), label.size(), "Open 0x%08X", linked);
-        ImGui::PushID(static_cast<int>(linked));
-        const model::NodeId target = logic_node_for_definition(linked);
+    for (const model::ActivityLogicRelationship& relationship : metadata.relationships) {
+        std::array<char, 96> label{};
+        std::snprintf(label.data(),
+                      label.size(),
+                      "%s 0x%08X  hash 0x%08X  x%u",
+                      relationship.outgoing ? "Outgoing" : "Incoming",
+                      relationship.definitionTag,
+                      relationship.nameHash,
+                      relationship.occurrenceCount);
+        ImGui::PushID(static_cast<int>(relationship.definitionTag));
+        ImGui::TextDisabled("%s", relationship.outgoing ? "->" : "<-");
+        ImGui::SameLine();
+        const model::NodeId target = logic_node_for_definition(relationship.definitionTag);
         ImGui::BeginDisabled(!target);
         if (ImGui::Button(label.data())) {
             select_node(target);
