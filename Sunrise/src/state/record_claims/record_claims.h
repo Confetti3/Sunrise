@@ -58,21 +58,8 @@ std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcep
 [[nodiscard]] bool claimed(std::uint16_t flagIndex) noexcept;
 
 /**
- * Claims the first chapter of every lore book still showing a redacted title.
- *
- * These categories are gated on their own progress: the client shows no name until the value slot
- * their bar reads is above zero, and with no name there is nothing inside to claim, so the gate
- * cannot open by being played. Claiming one real chapter opens it. A real claim is used rather than
- * a written value so the flag, the score and the count stay in agreement, exactly as they would had
- * the chapter been claimed by hand. A book that already holds a claim is left alone.
- * @return Number of books seeded.
- */
-std::size_t seed_lore_visibility() noexcept;
-
-/**
  * Writes each category's claimed-child count into the character value slot its bar reads.
- * A category counting in the character bank has nowhere to put its count otherwise, and stays
- * redacted while every other book opens.
+ * One book counts in the character bank rather than the account one.
  * @param characterValues Character value bank, already filled from the authored policy.
  * @return Number of categories written.
  */
