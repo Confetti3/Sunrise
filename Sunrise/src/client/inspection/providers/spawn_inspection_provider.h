@@ -41,6 +41,7 @@ struct WorldSnapshot final {
     bool activityLogicPresent{};
     bool activityLogicMatched{};
     bool activityLogicBrowseOnly{};
+    std::uint32_t activityLogicBrowseScenarioTag{};
     NodeId spawnSetNode{};
     std::string packageName;
     std::string mapStem;

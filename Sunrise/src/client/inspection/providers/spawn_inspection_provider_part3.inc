@@ -12,6 +12,7 @@ void SpawnInspectionProvider::rebuild(const Key& key,
     snapshot_.activitySession = key.activitySession;
     snapshot_.activityRevision = key.activityRevision;
     snapshot_.scenarioTag = key.scenarioTag;
+    snapshot_.activityLogicBrowseScenarioTag = key.activityLogicBrowseScenarioTag;
     snapshot_.spawnSetHash = key.spawnSetHash;
     snapshot_.localPlayerHandle = key.localPlayerHandle;
     snapshot_.activityIndex = key.activityIndex;

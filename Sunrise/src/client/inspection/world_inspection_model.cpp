@@ -84,6 +84,28 @@ void append_decimal(std::string& target, std::uint64_t value) {
     if (name == "status") {
         return QueryTerm::Field::status;
     }
+    if (name == "role") {
+        return QueryTerm::Field::role;
+    }
+    if (name == "confidence") {
+        return QueryTerm::Field::confidence;
+    }
+    if (name == "placement" || name == "placed") {
+        return name == "placement" ? QueryTerm::Field::placement
+                                     : QueryTerm::Field::placedEntity;
+    }
+    if (name == "relationship" || name == "linked") {
+        return QueryTerm::Field::relationship;
+    }
+    if (name == "localized" || name == "text") {
+        return QueryTerm::Field::localized;
+    }
+    if (name == "map" || name == "maptable") {
+        return QueryTerm::Field::mapTable;
+    }
+    if (name == "placedentity") {
+        return QueryTerm::Field::placedEntity;
+    }
     return QueryTerm::Field::any;
 }
 
@@ -109,6 +131,59 @@ void append_decimal(std::string& target, std::uint64_t value) {
         std::uint64_t value = 0;
         return node.classHash.has_value() && parse_number(term.value, 16, value)
                && *node.classHash == value;
+    }
+    case QueryTerm::Field::role:
+        return node.activityLogicMetadata.has_value()
+               && normalize(node.activityLogicMetadata->roleName).find(term.value) != std::string::npos;
+    case QueryTerm::Field::confidence:
+        return node.activityLogicMetadata.has_value()
+               && normalize(node.activityLogicMetadata->confidenceName).find(term.value) != std::string::npos;
+    case QueryTerm::Field::placement: {
+        if (!node.activityLogicMetadata.has_value()) {
+            return false;
+        }
+        const bool present = node.activityLogicMetadata->hasPlacement;
+        return (term.value == "yes" || term.value == "true" || term.value == "1")
+                   ? present
+                   : (term.value == "no" || term.value == "false" || term.value == "0")
+                         ? !present
+                         : false;
+    }
+    case QueryTerm::Field::relationship: {
+        if (!node.activityLogicMetadata.has_value()) {
+            return false;
+        }
+        const bool present = !node.activityLogicMetadata->relationships.empty();
+        return (term.value == "yes" || term.value == "true" || term.value == "1")
+                   ? present
+                   : (term.value == "no" || term.value == "false" || term.value == "0")
+                         ? !present
+                         : false;
+    }
+    case QueryTerm::Field::localized: {
+        if (!node.activityLogicMetadata.has_value()) {
+            return false;
+        }
+        const bool present = !node.activityLogicMetadata->localizedText.empty();
+        return (term.value == "yes" || term.value == "true" || term.value == "1")
+                   ? present
+                   : (term.value == "no" || term.value == "false" || term.value == "0")
+                         ? !present
+                         : false;
+    }
+    case QueryTerm::Field::mapTable: {
+        std::uint64_t value = 0;
+        return node.activityLogicMetadata.has_value()
+               && node.activityLogicMetadata->hasPlacement
+               && parse_number(term.value, 16, value)
+               && node.activityLogicMetadata->mapTableTag == value;
+    }
+    case QueryTerm::Field::placedEntity: {
+        std::uint64_t value = 0;
+        return node.activityLogicMetadata.has_value()
+               && node.activityLogicMetadata->hasPlacement
+               && parse_number(term.value, 16, value)
+               && node.activityLogicMetadata->placedEntityTag == value;
     }
     }
     return false;

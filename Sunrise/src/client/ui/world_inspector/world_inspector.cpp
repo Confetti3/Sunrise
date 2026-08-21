@@ -1046,6 +1046,33 @@ void quick_filters() noexcept {
         g_state.errorsOnly = !g_state.errorsOnly;
         g_state.rowsValid = false;
     }
+    ImGui::SameLine();
+    if (ImGui::BeginMenu("Logic filters")) {
+        const auto preset = [](const char* label, const char* query) {
+            if (ImGui::MenuItem(label)) {
+                std::snprintf(g_state.search.data(), g_state.search.size(), "%s", query);
+                g_state.rowsValid = false;
+            }
+        };
+        preset("Spawn rules", "role:spawn");
+        preset("Squads", "role:squad");
+        preset("Triggers", "role:trigger");
+        preset("Spatial", "role:spatial");
+        preset("Objectives", "role:objective");
+        preset("Devices", "role:device");
+        preset("Actions", "role:action");
+        preset("Conditions", "role:condition");
+        ImGui::Separator();
+        preset("Placed only", "placement:yes");
+        preset("Strong evidence only", "confidence:strong");
+        preset("Has relationships", "relationship:yes");
+        ImGui::Separator();
+        if (ImGui::MenuItem("Clear search")) {
+            g_state.search[0] = '\0';
+            g_state.rowsValid = false;
+        }
+        ImGui::EndMenu();
+    }
 }
 
 void draw_disclosure(const TreeRow& row, const ImVec2& minimum, float rowHeight) noexcept {
@@ -2806,8 +2833,11 @@ void draw_toolbar(const camera::Status& status) noexcept {
                                   "%s (%s)",
                                   summary.activityName.c_str(),
                                   summary.destination.c_str());
-                    if (ImGui::MenuItem(label.data(), nullptr,
-                                        browsing && g_state.provider.snapshot().activityLogicNode)) {
+                    if (ImGui::MenuItem(label.data(),
+                                        nullptr,
+                                        browsing
+                                            && g_state.provider.snapshot().activityLogicBrowseScenarioTag
+                                                   == summary.scenarioTag)) {
                         g_state.provider.set_activity_logic_browse(summary.scenarioTag);
                     }
                 }

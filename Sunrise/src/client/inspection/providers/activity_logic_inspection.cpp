@@ -168,7 +168,10 @@ void append_activity_nodes(Graph& graph,
         static_cast<std::size_t>((std::numeric_limits<std::uint32_t>::max)())));
 
     Node root;
-    root.name = activity.name.empty() ? "Activity logic" : "Activity logic / " + activity.name;
+    const std::string activityLabel = activity.name.empty() ? "Activity logic" : activity.name;
+    root.name = browseOnly
+                    ? "Browse only — not correlated to current runtime scenario / " + activityLabel
+                    : "Activity logic / " + activityLabel;
     root.searchText = "authored static activity encounter logic definitions archive";
     root.kind = NodeKind::activityLogic;
     root.status = Status::known;
@@ -262,12 +265,16 @@ void append_activity_nodes(Graph& graph,
     std::array<char, 320> summary{};
     std::snprintf(summary.data(),
                   summary.size(),
-                  "%s scenario 0x%08X (%s): %u definitions, %u exact authored WorldID placements. Definitions are static authored evidence, not proof of live enemies, active triggers, or current encounter state.",
+                  "%s scenario 0x%08X (%s): %u definitions, %u exact authored WorldID placements. %s",
+
                   browseOnly ? "Browsing activity logic" : "Activity logic archive matched",
                   result.scenarioTag,
                   result.activityName.c_str(),
                   result.definitionCount,
-                  result.placementCount);
+                  result.placementCount,
+                  browseOnly
+                      ? "Browse only — not correlated to current runtime scenario."
+                      : "Definitions are static authored evidence, not proof of live enemies, active triggers, or current encounter state.");
     diagnostics.push_back({Diagnostic::Severity::information, summary.data()});
 }
 

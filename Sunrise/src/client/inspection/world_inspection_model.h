@@ -265,6 +265,13 @@ struct QueryTerm final {
         tag,
         classHash,
         status,
+        role,
+        confidence,
+        placement,
+        relationship,
+        localized,
+        mapTable,
+        placedEntity,
     };
 
     Field field{Field::any};
