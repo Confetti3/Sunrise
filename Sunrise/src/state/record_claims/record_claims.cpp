@@ -245,6 +245,8 @@ namespace {
 struct NodeProgress {
     std::span<std::int32_t> values;
     std::size_t written;
+    /** One entry per value index, non-zero where a category's own bar reads. */
+    std::span<const char> categories;
 };
 
 /** True when this account flag bank row is held. The caller owns the claim lock. */
@@ -269,7 +271,25 @@ std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcep
         && build_data::nodes::load_and_publish()) {
         nodesPublished.store(true, std::memory_order_relaxed);
     }
-    NodeProgress progress{objectiveValues, 0};
+    // Every category's own index, so the walk can tell a free slot above a category from the next
+    // category along. Without it, writing the slot above drives whichever book owns that slot.
+    std::vector<char> categoryFlags(objectiveValues.size(), 0);
+    {
+        namespace nodes = build_data::nodes;
+        std::vector<nodes::Definition> all(nodes::kDefinitionCapacity);
+        std::size_t total = 0;
+        if (nodes::snapshot(std::span<nodes::Definition>{all}, total)) {
+            for (std::size_t row = 0; row < total; ++row) {
+                const std::uint16_t index = all[row].valueIndex;
+                if (index != nodes::kUnavailableValueIndex
+                    && static_cast<std::size_t>(index) < categoryFlags.size()) {
+                    categoryFlags[index] = 1;
+                }
+            }
+        }
+    }
+
+    NodeProgress progress{objectiveValues, 0, std::span<const char>{categoryFlags}};
     // The claim lock is taken first and the node lock inside the walk. Nothing takes them the other
     // way round, so the order cannot close a cycle.
     const std::lock_guard<std::mutex> guard(g_lock);
@@ -297,7 +317,13 @@ std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcep
                     ++claimedChapters;
                 }
             }
-            if (static_cast<std::size_t>(node.parentValueIndex) < state->values.size()) {
+            // The parent's bar sits one slot above its category on the books where that slot is
+            // free, confirmed by marker on two of them. Categories are allocated contiguously
+            // though, so for many books the slot above is the next book's category, and writing it
+            // drove the wrong book's bar. Those are skipped: a bar left at zero is wrong, a bar
+            // carrying another book's count is worse. Where those parents read is not yet known.
+            if (static_cast<std::size_t>(node.parentValueIndex) < state->values.size()
+                && state->categories[node.parentValueIndex] == 0) {
                 state->values[node.parentValueIndex] = claimedChapters;
                 ++state->written;
             }
