@@ -117,6 +117,17 @@ void attach_links(ActivityLogicMetadata& metadata,
     std::ranges::sort(metadata.linkedDefinitionTags);
 }
 
+[[nodiscard]] std::string digest_hex(const catalog::Digest& digest) {
+    static constexpr char kHex[] = "0123456789abcdef";
+    std::string out;
+    out.reserve(digest.size() * 2U);
+    for (const std::uint8_t lane : digest) {
+        out.push_back(kHex[lane >> 4U]);
+        out.push_back(kHex[lane & 0x0FU]);
+    }
+    return out;
+}
+
 } // namespace
 
 void initialize(void* module) noexcept {
@@ -154,6 +165,32 @@ AppendResult append(Graph& graph,
                                    : result.diagnostic});
         return result;
     }
+
+    const catalog::Catalog& installed = g_state.catalog;
+    std::string provenance = "Activity logic catalog: schema ";
+    provenance += std::to_string(catalog::kSchemaVersion);
+    provenance += ", converter ";
+    provenance += std::to_string(installed.provenance.converterVersion);
+    provenance += ", source ";
+    provenance += installed.provenance.sourceFormat.empty() ? "unknown"
+                                                             : installed.provenance.sourceFormat;
+    provenance += ", source SHA-256 ";
+    provenance += digest_hex(installed.provenance.sourceDigest);
+    provenance += ", ";
+    provenance += std::to_string(installed.activities.size());
+    provenance += " activities, ";
+    provenance += std::to_string(installed.entities.size());
+    provenance += " definitions, ";
+    std::size_t placementTotal = 0;
+    for (const catalog::Entity& entity : installed.entities) {
+        placementTotal += entity.placements.size();
+    }
+    provenance += std::to_string(placementTotal);
+    provenance += " authored placements, ";
+    provenance += std::to_string(installed.edges.size());
+    provenance += " edges. Static research catalog; not live runtime state.";
+    diagnostics.push_back({Diagnostic::Severity::information, std::move(provenance)});
+
     if (!source.scenarioTag.has_value() || *source.scenarioTag == 0) {
         result.diagnostic = "Activity logic catalog is loaded, but the current scenario tag is unavailable.";
         diagnostics.push_back({Diagnostic::Severity::information, result.diagnostic});

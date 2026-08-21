@@ -1,4 +1,5 @@
 import csv
+import hashlib
 import io
 import struct
 import tempfile
@@ -85,8 +86,17 @@ def main():
         data = output.read_bytes()
         assert data[:8] == b"SLOGIC01"
         schema, header, total, strings_off, strings_size = struct.unpack_from("<IIIII", data, 8)
-        assert schema == 1 and header == 160 and total == len(data)
+        assert schema == 2 and header == 160 and total == len(data)
         assert strings_off + strings_size == len(data)
+        converter_version = struct.unpack_from("<I", data, 60)[0]
+        content_build, generation_timestamp, fmt_off, fmt_len = struct.unpack_from("<IQII", data, 124)
+        assert converter_version == 2
+        assert content_build == 0
+        assert generation_timestamp > 0
+        fmt = data[strings_off + fmt_off: strings_off + fmt_off + fmt_len].decode("utf-8")
+        assert fmt == "destiny2-static-activity-logic-archive-v2"
+        digest = data[28:60]
+        assert digest == hashlib.sha256(source.read_bytes()).digest()
         activity_off, activity_count, activity_stride = struct.unpack_from("<III", data, 64)
         assert activity_count == 1 and activity_stride == 28
         entity_off, entity_count, entity_stride = struct.unpack_from("<III", data, 76)

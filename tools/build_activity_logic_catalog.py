@@ -1,9 +1,10 @@
-import argparse, csv, hashlib, io, re, struct, zipfile
+import argparse, csv, hashlib, io, re, struct, time, zipfile
 from collections import defaultdict
 from pathlib import Path
 
 MAGIC=b"SLOGIC01"
-SCHEMA=1
+SCHEMA=2
+CONVERTER_VERSION=2
 HEADER_SIZE=160
 ACTIVITY_STRIDE=28
 ENTITY_STRIDE=48
@@ -38,13 +39,19 @@ def parse_u64_hex(s):
 def parse_f(s):
     return float(s) if s else 0.0
 
-def build(input_path, output_path):
+def build(input_path, output_path, source_format=None, content_build=None, generation_timestamp=None):
     input_path=Path(input_path)
     source_hasher=hashlib.sha256()
     with input_path.open('rb') as source_file:
         for chunk in iter(lambda: source_file.read(1024 * 1024), b''):
             source_hasher.update(chunk)
     source_digest=source_hasher.digest()
+    if source_format is None:
+        source_format="destiny2-static-activity-logic-archive-v2"
+    if content_build is None:
+        content_build=0
+    if generation_timestamp is None:
+        generation_timestamp=int(time.time())
     with zipfile.ZipFile(input_path) as zf:
         acts=[]
         for row in read_csv(zf,"activities/activity-archive-summaries.csv"):
@@ -175,6 +182,8 @@ def build(input_path, output_path):
         string_map[b]=off
         return off,len(b)
 
+    source_format_off,source_format_len=intern(source_format)
+
     refs=[]
     act_records=[]
     for a in acts:
@@ -213,6 +222,8 @@ def build(input_path, output_path):
     out[0:8]=MAGIC
     struct.pack_into("<IIIII",out,8,SCHEMA,HEADER_SIZE,total,strings_off,len(strings))
     out[28:60]=source_digest
+    struct.pack_into("<I",out,60,CONVERTER_VERSION)
+    struct.pack_into("<IQII",out,124,content_build,generation_timestamp,source_format_off,source_format_len)
     section_desc=[
         (activities_off,len(act_records),ACTIVITY_STRIDE),
         (entities_off,len(entity_records),ENTITY_STRIDE),

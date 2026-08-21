@@ -33,7 +33,7 @@ std::vector<std::byte> fixture() {
     constexpr std::size_t placement = refs + 4;
     constexpr std::size_t edges = placement + 44;
     constexpr std::size_t strings = edges;
-    const char text[] = "encounterdestspawn ruleStrong text";
+    const char text[] = "encounterdestspawn ruleStrong textdestiny2-static-activity-logic-archive-v2";
     constexpr std::size_t stringBytes = sizeof(text) - 1;
     std::vector<std::byte> bytes(strings + stringBytes);
     const char magic[] = "SLOGIC01";
@@ -41,6 +41,10 @@ std::vector<std::byte> fixture() {
     u32(bytes, 8, logic::kSchemaVersion); u32(bytes, 12, logic::kHeaderSize);
     u32(bytes, 16, static_cast<std::uint32_t>(bytes.size()));
     u32(bytes, 20, static_cast<std::uint32_t>(strings)); u32(bytes, 24, stringBytes);
+    u32(bytes, 60, logic::kConverterVersion);
+    // Provenance: contentBuild (0), generationTimestamp, sourceFormat offset/length.
+    u32(bytes, 124, 0); u64(bytes, 128, 0);
+    u32(bytes, 136, 0x22); u32(bytes, 140, 0x29);
     std::size_t d = 64;
     for (auto [off,count,stride] : std::array<std::array<std::uint32_t,3>,5>{{
         {activity,1,28},{entity,1,48},{refs,1,4},{placement,1,44},{edges,0,16}}}) {

@@ -241,12 +241,37 @@ bool load(std::span<const std::byte> bytes, Catalog& catalog, std::string& error
             || stringOffset < headerSize) {
             return fail(error, "activity logic string table is invalid");
         }
-        for (std::size_t index = 0; index < catalog.sourceDigest.size(); ++index) {
+        for (std::size_t index = 0; index < catalog.provenance.sourceDigest.size(); ++index) {
             std::uint8_t value{};
             if (!reader.read_u8(28U + index, value)) {
                 return fail(error, "activity logic source digest is truncated");
             }
-            catalog.sourceDigest[index] = value;
+            catalog.provenance.sourceDigest[index] = value;
+        }
+        std::uint32_t converterVersion{};
+        std::uint32_t contentBuild{};
+        std::uint64_t generationTimestamp{};
+        std::uint32_t sourceFormatOffset{};
+        std::uint32_t sourceFormatLength{};
+        if (!reader.read_u32(60, converterVersion) || !reader.read_u32(124, contentBuild)
+            || !reader.read_u64(128, generationTimestamp)
+            || !reader.read_u32(136, sourceFormatOffset)
+            || !reader.read_u32(140, sourceFormatLength)) {
+            return fail(error, "activity logic provenance header is truncated");
+        }
+        if (converterVersion != kConverterVersion) {
+            return fail(error, "activity logic converter version is unsupported");
+        }
+        catalog.provenance.converterVersion = converterVersion;
+        catalog.provenance.contentBuild = contentBuild;
+        catalog.provenance.generationTimestamp = generationTimestamp;
+        if (!string_at(reader,
+                       stringOffset,
+                       stringSize,
+                       sourceFormatOffset,
+                       sourceFormatLength,
+                       catalog.provenance.sourceFormat)) {
+            return fail(error, "activity logic provenance source format is invalid");
         }
 
         std::array<Section, kSectionCount> sections{};

@@ -10,7 +10,8 @@
 
 namespace sunrise::client::inspection::activity_logic_catalog {
 
-inline constexpr std::uint32_t kSchemaVersion = 1;
+inline constexpr std::uint32_t kSchemaVersion = 2;
+inline constexpr std::uint32_t kConverterVersion = 2;
 inline constexpr std::size_t kDigestSize = 32;
 inline constexpr std::size_t kHeaderSize = 160;
 using Digest = std::array<std::uint8_t, kDigestSize>;
@@ -70,8 +71,19 @@ struct Edge final {
     std::uint32_t occurrenceCount{};
 };
 
-struct Catalog final {
+struct Provenance final {
     Digest sourceDigest{};
+    std::uint32_t converterVersion{};
+    /** Content build evidenced by the source archive; zero means the archive did not prove one. */
+    std::uint32_t contentBuild{};
+    /** Unix epoch seconds when the catalog was generated; zero means not recorded. */
+    std::uint64_t generationTimestamp{};
+    /** Source archive format identifier, e.g. \"destiny2-static-activity-logic-archive-v2\". */
+    std::string sourceFormat;
+};
+
+struct Catalog final {
+    Provenance provenance{};
     std::vector<Activity> activities;
     std::vector<Entity> entities;
     std::vector<Edge> edges;
