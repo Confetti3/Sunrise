@@ -588,9 +588,8 @@ publish_vendor_catalog(std::span<const vendors::IndexEntry> index,
                                           vendors::Definition& definition) noexcept;
 
 /**
- * @return True when required domains are ready and either the full cache write succeeds or the
-
- * * optional catalyst catalog rejects an unsupported build without writing an incomplete cache.
+ * An unsupported catalyst build finishes without writing an incomplete cache.
+ * @return True when required domains are ready and cache persistence safely finishes.
  */
 [[nodiscard]] bool persist() noexcept;
 

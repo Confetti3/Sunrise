@@ -27,6 +27,34 @@
 
 namespace sunrise::state::build_data::runtime::persistence {
 
+/** Cache action after one extraction pass. */
+enum class CacheAction {
+    waitForDomains,
+    skipUnsupportedCatalog,
+    writeCompleteCache,
+};
+
+/**
+ * Selects the only safe persistence action for the current extraction state.
+ * @param requiredReady True when all required non-catalyst domains are ready.
+ * @param catalystReady True when the complete catalyst catalog is published.
+ * @param catalystError Exact result of the last catalyst derivation.
+ * @return Wait, skip an unsupported catalog, or write a complete cache.
+ */
+[[nodiscard]] constexpr CacheAction cache_action(bool requiredReady,
+                                                 bool catalystReady,
+                                                 items::catalysts::Error catalystError) noexcept {
+    if (!requiredReady) {
+        return CacheAction::waitForDomains;
+    }
+    if (catalystReady) {
+        return CacheAction::writeCompleteCache;
+    }
+    return catalystError == items::catalysts::Error::unsupportedBuild
+               ? CacheAction::skipUnsupportedCatalog
+               : CacheAction::waitForDomains;
+}
+
 /** Fixed cache paths, identity, and canonical snapshot storage guarded by one State lock. */
 struct Context {
     SRWLOCK lock{SRWLOCK_INIT};

@@ -360,16 +360,21 @@ bool persist() noexcept {
     AcquireSRWLockExclusive(&state.lock);
     const bool requiredReady = runtime::persistence::required_domains_ready();
     bool result = false;
-    if (requiredReady && !exotic_catalysts_ready()
-        && state.catalystError == items::catalysts::Error::unsupportedBuild) {
+    switch (runtime::persistence::cache_action(
+        requiredReady, exotic_catalysts_ready(), state.catalystError)) {
+    case runtime::persistence::CacheAction::waitForDomains:
+        break;
+    case runtime::persistence::CacheAction::skipUnsupportedCatalog:
         // Catalyst facts are build-pinned. A rejected build must not keep the refresh worker
         // active or put an incomplete catalog on disk. Other extracted domains stay usable.
         runtime::persistence::release_scratch_locked(state);
         state.enabled = false;
         state.replaceStaleCache = false;
         result = true;
-    } else if (requiredReady) {
+        break;
+    case runtime::persistence::CacheAction::writeCompleteCache:
         result = runtime::persistence::persist_if_complete_locked(state);
+        break;
     }
     ReleaseSRWLockExclusive(&state.lock);
     return result;

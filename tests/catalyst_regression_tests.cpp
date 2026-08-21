@@ -10,6 +10,7 @@
 #include "state/build_data/cache/records/codec.h"
 #include "state/build_data/items/catalysts/exotic_catalyst_builder.h"
 #include "state/build_data/items/catalysts/exotic_catalyst_catalog.h"
+#include "state/build_data/runtime/persistence/build_data_persistence.h"
 
 extern int failures;
 
@@ -19,6 +20,7 @@ namespace cache_records = sunrise::state::build_data::cache::records;
 namespace catalysts = sunrise::state::build_data::items::catalysts;
 namespace details = sunrise::state::build_data::items::details;
 namespace items = sunrise::state::build_data::items;
+namespace persistence = sunrise::state::build_data::runtime::persistence;
 namespace socket_plugs = sunrise::state::build_data::items::socket_plugs;
 
 constexpr std::uint32_t kTimestamp = 0x12345678U;
@@ -343,6 +345,30 @@ void test_cache_record() noexcept {
            "catalyst records use one cache bump over upstream version 44");
 }
 
+void test_persistence_action() noexcept {
+    using enum persistence::CacheAction;
+    expect(persistence::cache_action(false, false, catalysts::Error::unsupportedBuild)
+               == waitForDomains,
+           "persistence waits for required domains");
+    expect(persistence::cache_action(true, false, catalysts::Error::unsupportedBuild)
+               == skipUnsupportedCatalog,
+           "unsupported builds finish without an incomplete cache");
+    constexpr std::array rejectedErrors{
+        catalysts::Error::none,
+        catalysts::Error::noCatalyst,
+        catalysts::Error::placeholderOnly,
+        catalysts::Error::missingReleased,
+        catalysts::Error::ambiguousLifecycle,
+        catalysts::Error::invalidSocket,
+    };
+    for (const catalysts::Error error : rejectedErrors) {
+        expect(persistence::cache_action(true, false, error) == waitForDomains,
+               "non-build catalyst failures stay failed closed");
+    }
+    expect(persistence::cache_action(true, true, catalysts::Error::none) == writeCompleteCache,
+           "a complete catalog permits one cache write");
+}
+
 } // namespace
 
 void test_exotic_catalysts() noexcept {
@@ -350,5 +376,6 @@ void test_exotic_catalysts() noexcept {
     test_safe_derivation_failures();
     test_catalog_application();
     test_cache_record();
+    test_persistence_action();
     catalysts::clear();
 }
