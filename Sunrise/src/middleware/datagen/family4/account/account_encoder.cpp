@@ -1,3 +1,6 @@
+#include <atomic>
+
+#include "../../../../state/build_data/nodes/node_catalog.h"
 #include "account_encoder.h"
 
 #include <algorithm>
@@ -97,7 +100,18 @@ bool encode(const state::AccountState& state, std::span<std::byte> output) noexc
     object.acquiredFlags = unlocks.accountFlags;
     // Claims arrive after boot, so they cannot be in the authored policy. Lay them over the
     // bank here, which is the one place every Family-4 account image passes through.
+    // Seeded once the node and record tables are up, which is why it hangs off the image rather
+    // than startup. Latches, so a run whose books are already open pays nothing.
+    static std::atomic<bool> loreSeeded{false};
+    if (!loreSeeded.load(std::memory_order_relaxed)
+        && state::build_data::nodes::count() != 0) {
+        (void)state::record_claims::seed_lore_visibility();
+        loreSeeded.store(true, std::memory_order_relaxed);
+    }
     (void)state::record_claims::apply(object.acquiredFlags);
+    // Lore book categories are gated on a flag they cannot set by being played: with no title shown
+    // there is nothing inside to claim, and nothing to claim leaves the gate shut.
+    (void)state::build_data::nodes::apply_visibility(object.acquiredFlags);
     object.profileUnlockFlags = unlocks.profileFlags;
     object.objectiveValues = unlocks.objectiveValues;
     // Triumph Score is a plain replicated value the client never derives, so total the claims made

@@ -111,8 +111,15 @@ inline constexpr std::size_t kNodeExpressionFieldAlternate = 48;
 /** Records a node owns, four bytes each as a row then a gate. */
 inline constexpr std::size_t kNodeChildRecordField = 136;
 inline constexpr std::size_t kNodeChildRecordStride = 4;
-/** No node expression seen is longer than this. */
-inline constexpr std::int64_t kNodeExpressionCapacity = 32;
+/**
+ * Upper bound on how many instructions a node expression may hold.
+ *
+ * This was thirty-two, which was a guess rather than a measurement, and it silently hid a real gate:
+ * one lore book carries fifty-nine instructions, so its expression was rejected before it was read
+ * and the category looked as though nothing gated it at all. The bound exists only to stop a wild
+ * count being walked as if it were an expression, so it is set well above anything observed.
+ */
+inline constexpr std::int64_t kNodeExpressionCapacity = 128;
 
 /** One unlock expression instruction: an opcode then its operand. */
 inline constexpr std::size_t kUnlockInstructionStride = 8;
@@ -120,6 +127,8 @@ inline constexpr std::size_t kUnlockInstructionStride = 8;
 inline constexpr std::uint32_t kUnlockOpcodeCeiling = 20;
 /** The opcode that reads a value slot. */
 inline constexpr std::uint32_t kUnlockReadValueOpcode = 10;
+/** The opcode that tests a flag. */
+inline constexpr std::uint32_t kUnlockReadFlagOpcode = 1;
 /** Array payloads begin after a sixteen byte header. */
 inline constexpr std::size_t kHeaderSkip = 16;
 
@@ -127,11 +136,15 @@ inline constexpr std::size_t kHeaderSkip = 16;
 inline constexpr std::size_t kUnlockValueMapTableSlot = 113;
 /** Array descriptor of the account object's value mapping table. */
 inline constexpr std::size_t kAccountValueMapDescriptor = 8;
+/** Array descriptor of the character object's value mapping table, sized to that bank. */
+inline constexpr std::size_t kCharacterValueMapDescriptor = 24;
 
 /** Investment root slot of the five unlock flag mapping tables. */
 inline constexpr std::size_t kUnlockFlagMapTableSlot = 111;
 /** Array descriptor of the account object's flag mapping table, the bank flag runs author. */
 inline constexpr std::size_t kAccountFlagMapDescriptor = 8;
+/** Array descriptor of the character object's flag mapping table, sized to that bank. */
+inline constexpr std::size_t kCharacterFlagMapDescriptor = 40;
 /** One mapping row: the unlock hash, then the destination slot its object byte feeds. */
 inline constexpr std::size_t kUnlockMapRowStride = 8;
 /** Destination slot offset inside one mapping row. */

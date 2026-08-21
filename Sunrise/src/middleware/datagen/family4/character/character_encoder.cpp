@@ -1,3 +1,5 @@
+#include "../../../../state/record_claims/record_claims.h"
+#include "../../../../state/build_data/nodes/node_catalog.h"
 #include <atomic>
 
 #include "../../../../state/build_data/nodes/node_persistence.h"
@@ -170,6 +172,12 @@ bool encode(const state::CharacterState& state,
             nodesPublished.store(true, std::memory_order_relaxed);
         }
     }
+
+    // One lore book counts in the character bank rather than the account one.
+    (void)state::record_claims::apply_character_node_progress(object.objectiveValues);
+
+    // One lore book's gate is character scoped rather than account scoped.
+    (void)state::build_data::nodes::apply_character_visibility(object.acquiredFlags);
 
     for (std::size_t index = 0; index < object.objectiveValues.size(); ++index) {
         object.objectiveValues[index] =

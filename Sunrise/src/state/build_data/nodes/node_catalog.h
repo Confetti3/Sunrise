@@ -43,4 +43,18 @@ void for_each_driving(void* context,
 /** @return Number of generated node definitions, read under the lock. */
 [[nodiscard]] std::size_t count() noexcept;
 
+/**
+ * Sets the visibility gate of every lore book category over one account flag bank.
+ * @param accountFlags Bank already filled from the authored policy.
+ * @return Number of gates set.
+ */
+std::size_t apply_visibility(std::span<std::uint8_t> accountFlags) noexcept;
+
+/**
+ * Sets the character scoped visibility gates of the lore book categories.
+ * @param characterFlags Character bank already filled from the authored policy.
+ * @return Number of gates set.
+ */
+std::size_t apply_character_visibility(std::span<std::byte> characterFlags) noexcept;
+
 } // namespace sunrise::state::build_data::nodes
