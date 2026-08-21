@@ -98,15 +98,8 @@ to_record(const constants::InvestmentConstants& value) noexcept {
            && cache::records::canonicalize(scratch, counts);
 }
 
-} // namespace
-
-/** @return The process-wide persistence context, shared by lifecycle and writer code. */
-Context& context() noexcept {
-    return g_context;
-}
-
 /** @return True when every required extracted domain is complete in State. */
-[[nodiscard]] static bool required_domains_ready() noexcept {
+[[nodiscard]] bool required_domains_ready() noexcept {
     constants::InvestmentConstants published{};
     return runtime::named::ready() && item_definitions_ready() && configured_item_details_ready()
            && collectible_definitions_ready() && socket_plug_rules_ready()
@@ -114,6 +107,13 @@ Context& context() noexcept {
            && socket_entry_lists_ready() && ability_buckets_ready()
            && progression_definitions_ready() && scenario_layouts_ready() && spawn_sets_ready()
            && hash_names_ready() && constants::find(published);
+}
+
+} // namespace
+
+/** @return The process-wide persistence context, shared by lifecycle and writer code. */
+Context& context() noexcept {
+    return g_context;
 }
 
 /** Gives mutable views over every fixed snapshot buffer. */

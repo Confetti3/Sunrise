@@ -273,6 +273,30 @@ classify_lane(const Source& source, const details::Definition& detail, std::uint
 }
 
 /**
+ * Appends one complete row or fails the whole staged catalog.
+ * @param output Staged catalog rows.
+ * @param count Used row count.
+ * @param report Build report to update on failure.
+ * @param definition Complete row to append.
+ * @return True when the row fits.
+ */
+[[nodiscard]] bool append_definition(std::span<Definition> output,
+                                     std::size_t& count,
+                                     Report& report,
+                                     const Definition& definition) noexcept {
+    if (count >= output.size() || count >= kDefinitionCapacity) {
+        return fail(output,
+                    count,
+                    report,
+                    Error::capacityExceeded,
+                    definition.itemDefinitionHash,
+                    definition.socketLane);
+    }
+    output[count++] = definition;
+    return true;
+}
+
+/**
  * @param item Source item row.
  * @param detail Source item detail row.
  * @return True for an exotic in one of the three weapon equipment slots.
@@ -348,30 +372,17 @@ bool derive(const Source& source,
             if (release.has_value()) {
                 return fail(output, count, report, *unclear, item->definitionHash, detectedLane);
             }
-            if (count >= output.size() || count >= kDefinitionCapacity) {
-                return fail(output,
-                            count,
-                            report,
-                            Error::invalidSocket,
-                            item->definitionHash,
-                            detectedLane);
-            }
-            output[count++] = Definition{item->definitionHash,
+            const Definition unsupported{item->definitionHash,
                                          item->definitionIndex,
                                          details::kUnavailableItemIndex,
                                          details::kUnavailableItemIndex,
                                          detectedLane,
                                          Availability::unsupported};
+            if (!append_definition(output, count, report, unsupported)) {
+                return false;
+            }
             ++report.unsupported;
             continue;
-        }
-        if (count >= output.size() || count >= kDefinitionCapacity) {
-            return fail(output,
-                        count,
-                        report,
-                        Error::invalidSocket,
-                        item->definitionHash,
-                        completed->socketLane);
         }
         if (release.has_value()) {
             if (releasedFound[*release]) {
@@ -382,18 +393,23 @@ bool derive(const Source& source,
                             item->definitionHash,
                             completed->socketLane);
             }
+        }
+        const Definition definition{item->definitionHash,
+                                    item->definitionIndex,
+                                    completed->completedPlugDefinitionIndex,
+                                    completed->effectDefinitionIndex,
+                                    completed->socketLane,
+                                    release.has_value() ? Availability::released
+                                                        : Availability::placeholder};
+        if (!append_definition(output, count, report, definition)) {
+            return false;
+        }
+        if (release.has_value()) {
             releasedFound[*release] = true;
             ++report.released;
         } else {
             ++report.placeholder;
         }
-        output[count++] =
-            Definition{item->definitionHash,
-                       item->definitionIndex,
-                       completed->completedPlugDefinitionIndex,
-                       completed->effectDefinitionIndex,
-                       completed->socketLane,
-                       release.has_value() ? Availability::released : Availability::placeholder};
     }
 
     for (std::size_t index = 0; index < facts.releasedWeaponHashes.size(); ++index) {
@@ -416,18 +432,7 @@ bool matches_derived(const Source& source,
         || expectedCount != definitions.size()) {
         return false;
     }
-    return std::equal(expected.begin(),
-                      expected.begin() + expectedCount,
-                      definitions.begin(),
-                      [](const Definition& left, const Definition& right) {
-                          return left.itemDefinitionHash == right.itemDefinitionHash
-                                 && left.itemDefinitionIndex == right.itemDefinitionIndex
-                                 && left.completedPlugDefinitionIndex
-                                        == right.completedPlugDefinitionIndex
-                                 && left.effectDefinitionIndex == right.effectDefinitionIndex
-                                 && left.socketLane == right.socketLane
-                                 && left.availability == right.availability;
-                      });
+    return std::equal(expected.begin(), expected.begin() + expectedCount, definitions.begin());
 }
 
 } // namespace sunrise::state::build_data::items::catalysts

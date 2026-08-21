@@ -17,6 +17,7 @@ constexpr std::uint8_t kValueWidth = 32;
 constexpr std::uint8_t kPaddingWidth = 7;
 /** Nonnegative signed 32-bit values have this bit set after native descriptor biasing. */
 constexpr std::uint64_t kValueBias = 0x80000000ULL;
+
 } // namespace
 
 /** Parses the exact native item-state descriptor. */

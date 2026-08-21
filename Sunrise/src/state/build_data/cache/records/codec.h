@@ -139,8 +139,7 @@ namespace sunrise::state::build_data::cache::records {
 
 /**
  * @param value Runtime catalyst relation to pack.
- * @param record Receives the canonical disk
- * form.
+ * @param record Receives the canonical disk form.
  * @return True when the runtime relation has a supported availability value.
  */
 [[nodiscard]] bool encode(const items::catalysts::Definition& value,
@@ -148,8 +147,7 @@ namespace sunrise::state::build_data::cache::records {
 
 /**
  * @param record Canonical disk form to unpack.
- * @param value Receives the runtime catalyst
- * relation.
+ * @param value Receives the runtime catalyst relation.
  * @return True when the disk form has a supported availability value.
  */
 [[nodiscard]] bool decode(const ExoticCatalystRecord& record,

@@ -25,6 +25,7 @@ constexpr std::uint16_t kTrackerSocketType = 518;
 /** FNV-1a constants make pool fingerprints stable and cheap. */
 constexpr std::uint64_t kHashOffsetBasis = 14695981039346656037ULL;
 constexpr std::uint64_t kHashPrime = 1099511628211ULL;
+
 /** Visitor adapter that appends one list member to a bounded lane candidate. */
 struct VisitorContext {
     SocketPlugBuild* build{};

@@ -34,6 +34,7 @@ enum class Error : std::uint8_t {
     missingReleased,
     ambiguousLifecycle,
     invalidSocket,
+    capacityExceeded,
 };
 
 /**
@@ -56,6 +57,8 @@ enum class Error : std::uint8_t {
         return "ambiguous_lifecycle";
     case Error::invalidSocket:
         return "invalid_socket";
+    case Error::capacityExceeded:
+        return "capacity_exceeded";
     }
     return "unknown";
 }
@@ -70,6 +73,12 @@ struct Definition {
     std::uint16_t effectDefinitionIndex{};
     std::uint8_t socketLane{};
     Availability availability{Availability::unsupported};
+
+    /**
+     * @param other Catalyst definition to compare.
+     * @return True when every derived field is equal.
+     */
+    [[nodiscard]] constexpr bool operator==(const Definition& other) const noexcept = default;
 };
 
 /**
