@@ -104,14 +104,7 @@ Context& context() noexcept {
     return g_context;
 }
 
-/**
- * @return True when every extracted domain is complete in State.
- *
- * The nodes domain is not written to the cache, so counting it here means a warm start finds the
- * build data incomplete and extracts again. That is slower than a cache hit and it is correct:
- * without it the node table is empty on every launch but the first, no presentation node is counted,
- * and no progress bar can move whatever the claims say. Persisting nodes would buy the speed back.
- */
+/** @return True when every extracted domain is complete in State. */
 bool all_domains_ready() noexcept {
     constants::InvestmentConstants published{};
     return runtime::named::ready() && item_definitions_ready() && configured_item_details_ready()
@@ -119,7 +112,6 @@ bool all_domains_ready() noexcept {
            && material_requirement_sets_ready() && inventory_bucket_descriptors_ready()
            && socket_entry_lists_ready() && ability_buckets_ready()
            && progression_definitions_ready() && record_definitions_ready()
-           && node_definitions_ready()
            && scenario_layouts_ready() && spawn_sets_ready()
            && hash_names_ready() && constants::find(published);
 }

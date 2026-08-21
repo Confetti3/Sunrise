@@ -265,7 +265,12 @@ std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcep
     build_data::nodes::for_each_driving(
         &progress, [](void* context, const build_data::nodes::Definition& node) noexcept {
             auto* state = static_cast<NodeProgress*>(context);
+            // Two counts, because a category and its parent record keep separate bars. The
+            // category counts every child it owns, the parent record among them; the parent's own
+            // bar counts only the chapters, which is why its denominator is one lower. The parent
+            // is the child that names the category's own value slot.
             std::int32_t claimed = 0;
+            std::int32_t claimedChapters = 0;
             for (std::size_t child = 0; child < node.childCount; ++child) {
                 build_data::records::Definition record{};
                 if (!build_data::find_record_definition(node.children[child], record)
@@ -273,9 +278,17 @@ std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcep
                            == build_data::records::kUnavailableFlagIndex) {
                     continue;
                 }
-                if (claimed_locked(record.completionFlagIndex)) {
-                    ++claimed;
+                if (!claimed_locked(record.completionFlagIndex)) {
+                    continue;
                 }
+                ++claimed;
+                if (record.categoryValueIndex != node.valueIndex) {
+                    ++claimedChapters;
+                }
+            }
+            if (static_cast<std::size_t>(node.parentValueIndex) < state->values.size()) {
+                state->values[node.parentValueIndex] = claimedChapters;
+                ++state->written;
             }
             if (static_cast<std::size_t>(node.valueIndex) < state->values.size()) {
                 state->values[node.valueIndex] = claimed;
@@ -285,10 +298,12 @@ std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcep
                 std::array<char, 160> line{};
                 const int written = std::snprintf(
                     line.data(), line.size(),
-                    "ev=nodeprog node=%u value_index=%u children=%u claimed=%d",
+                    "ev=nodeprog node=%u value_index=%u parent_index=%u children=%u claimed=%d "
+                    "chapters=%d",
                     static_cast<unsigned>(node.definitionIndex),
                     static_cast<unsigned>(node.valueIndex),
-                    static_cast<unsigned>(node.childCount), claimed);
+                    static_cast<unsigned>(node.parentValueIndex),
+                    static_cast<unsigned>(node.childCount), claimed, claimedChapters);
                 if (written > 0) {
                     core::log::write(core::log::Channel::state, core::log::Level::info,
                                      {line.data(), static_cast<std::size_t>(written)});

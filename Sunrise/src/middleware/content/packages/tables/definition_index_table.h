@@ -96,6 +96,10 @@ inline constexpr std::size_t kRecordRowStride = 216;
 inline constexpr std::size_t kRecordCompletionFlagOffset = 100;
 /** Points the record is worth. Zero for lore and for the interval records that score per step. */
 inline constexpr std::size_t kRecordScoreOffset = 92;
+/** A record names its category's value slot here. The record's own bar reads the next slot up. */
+inline constexpr std::size_t kRecordCategoryExpressionField = 120;
+/** A category's parent record reads the slot immediately above the category's own. */
+inline constexpr std::int32_t kNodeParentSlotStep = 1;
 
 /** Investment root slot of the presentation node table. */
 inline constexpr std::size_t kPresentationNodeTableSlot = 63;

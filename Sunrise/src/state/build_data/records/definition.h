@@ -20,6 +20,9 @@ inline constexpr std::uint16_t kTriumphScoreValueIndex = 2115U;
 /** A record whose completion flag no mapping table addresses carries this instead of an index. */
 inline constexpr std::uint16_t kUnavailableFlagIndex = 0xFFFFU;
 
+/** A record naming no category value slot carries this instead of an index. */
+inline constexpr std::uint16_t kUnavailableValueIndex = 0xFFFFU;
+
 /**
  * One record reduced to what a claim needs.
  *
@@ -34,6 +37,13 @@ struct Definition {
     std::uint16_t completionFlagIndex{kUnavailableFlagIndex};
     /** Points this record is worth, which the shipped table keeps at 500 or below. */
     std::uint16_t scoreValue{};
+    /**
+     * Account value index of the category this record names, or kUnavailableValueIndex.
+     *
+     * Only a category's parent record names its category's own slot, so this is what distinguishes
+     * the parent from the chapters beneath it. The parent is excluded from its own progress bar.
+     */
+    std::uint16_t categoryValueIndex{kUnavailableValueIndex};
 };
 
 } // namespace sunrise::state::build_data::records

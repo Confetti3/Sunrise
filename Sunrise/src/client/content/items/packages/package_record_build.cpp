@@ -27,6 +27,47 @@ void report(const char* stage, unsigned long long detail) noexcept {
     return slot > 0;
 }
 
+/** Reads a value slot out of one expression field of one row, or reports that it names none. */
+[[nodiscard]] bool expression_value_slot(std::span<const std::byte> table,
+                                         std::size_t rowAt,
+                                         std::size_t field,
+                                         std::int16_t& slot) noexcept {
+    std::int64_t count = 0;
+    std::int64_t relative = 0;
+    std::memcpy(&count, table.data() + rowAt + field, sizeof count);
+    std::memcpy(&relative, table.data() + rowAt + field + 8, sizeof relative);
+    if (count < 1 || count > tables::kNodeExpressionCapacity) {
+        return false;
+    }
+    const std::size_t pointerAt = rowAt + field + 8;
+    const std::int64_t target = static_cast<std::int64_t>(pointerAt) + relative
+                                + static_cast<std::int64_t>(tables::kHeaderSkip);
+    if (target < 0
+        || static_cast<std::size_t>(target)
+                   + static_cast<std::size_t>(count) * tables::kUnlockInstructionStride
+               > table.size()) {
+        return false;
+    }
+    const auto base = static_cast<std::size_t>(target);
+    for (std::int64_t index = 0; index < count; ++index) {
+        std::uint32_t opcode = 0;
+        std::uint32_t operand = 0;
+        const std::size_t at =
+            base + static_cast<std::size_t>(index) * tables::kUnlockInstructionStride;
+        std::memcpy(&opcode, table.data() + at, sizeof opcode);
+        std::memcpy(&operand, table.data() + at + 4, sizeof operand);
+        if (opcode > tables::kUnlockOpcodeCeiling) {
+            return false;
+        }
+        if (opcode == tables::kUnlockReadValueOpcode
+            && operand <= static_cast<std::uint32_t>(INT16_MAX)) {
+            slot = static_cast<std::int16_t>(operand);
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 /**
@@ -83,6 +124,40 @@ bool build_records(const reader::Source& source,
         }
     }
 
+    // The account value mapping table, read while the blob is still free. A record names its
+    // category's value slot, and that slot has to become an index the same way a flag slot does.
+    std::uint32_t valueMapTag = 0;
+    tables::Array valueMapRows{};
+    std::vector<std::uint16_t> valueIndexBySlot{};
+    if (tables::slot_tag(root, tables::kUnlockValueMapTableSlot, valueMapTag) && valueMapTag != 0
+        && tables::package_of(valueMapTag) != tables::kAbsentPackageId
+        && reader::read_tag(source, scratch, valueMapTag, blob)
+        && tables::find_array_at(std::span<const std::byte>{blob},
+                                 tables::kAccountValueMapDescriptor,
+                                 valueMapRows)
+        && valueMapRows.count != 0
+        && valueMapRows.dataOffset
+                   + static_cast<std::size_t>(valueMapRows.count) * tables::kUnlockMapRowStride
+               <= blob.size()) {
+        valueIndexBySlot.assign(kSlotSpace, domain::kUnavailableValueIndex);
+        for (std::uint64_t row = 0; row < valueMapRows.count; ++row) {
+            std::int16_t slot = 0;
+            std::memcpy(&slot,
+                        blob.data() + valueMapRows.dataOffset
+                            + static_cast<std::size_t>(row) * tables::kUnlockMapRowStride
+                            + tables::kUnlockMapDestinationSlotOffset,
+                        sizeof slot);
+            if (!addressable_slot(slot) || static_cast<std::size_t>(slot) >= kSlotSpace
+                || row > domain::kUnavailableValueIndex) {
+                continue;
+            }
+            std::uint16_t& existing = valueIndexBySlot[static_cast<std::size_t>(slot)];
+            if (existing == domain::kUnavailableValueIndex) {
+                existing = static_cast<std::uint16_t>(row);
+            }
+        }
+    }
+
     std::uint32_t tableTag = 0;
     tables::Array rows{};
     if (!tables::slot_tag(root, tables::kRecordTableSlot, tableTag) || tableTag == 0
@@ -111,6 +186,16 @@ bool build_records(const reader::Source& source,
         definition.definitionIndex = static_cast<std::uint16_t>(row);
         // The shipped table tops out at 500, so anything wider is not a score and is dropped.
         definition.scoreValue = score <= 0xFFFFU ? static_cast<std::uint16_t>(score) : 0U;
+        std::int16_t categorySlot = 0;
+        if (!valueIndexBySlot.empty()
+            && expression_value_slot(std::span<const std::byte>{blob},
+                                     at,
+                                     tables::kRecordCategoryExpressionField,
+                                     categorySlot)
+            && addressable_slot(categorySlot)
+            && static_cast<std::size_t>(categorySlot) < kSlotSpace) {
+            definition.categoryValueIndex = valueIndexBySlot[static_cast<std::size_t>(categorySlot)];
+        }
         if (addressable_slot(slot) && static_cast<std::size_t>(slot) < kSlotSpace) {
             definition.completionFlagIndex = indexBySlot[static_cast<std::size_t>(slot)];
         }

@@ -28,6 +28,13 @@ struct Definition {
     std::uint16_t definitionIndex{};
     /** Account value bank mapping row, or kUnavailableValueIndex when no slot is addressable. */
     std::uint16_t valueIndex{kUnavailableValueIndex};
+    /**
+     * Account value index of the parent record's own bar, one slot above the node's.
+     *
+     * The node's bar counts every child including the parent record; the parent's bar counts only
+     * the chapters. They are separate slots and need separate counts.
+     */
+    std::uint16_t parentValueIndex{kUnavailableValueIndex};
     /** Records this node owns, held at node row `+136`. */
     std::uint8_t childCount{};
     /** Native record rows of the owned records. */

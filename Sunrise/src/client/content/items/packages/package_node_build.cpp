@@ -139,6 +139,14 @@ bool build_nodes(const reader::Source& source,
             if (found != indexBySlot.end()) {
                 definition.valueIndex = found->second;
             }
+            // The parent record's own bar reads the next slot up. Resolve it through the mapping
+            // table rather than adding one to the index: rows happen to run in slot order around
+            // here, but nothing guarantees that.
+            const auto parent = indexBySlot.find(
+                static_cast<std::int16_t>(slot + tables::kNodeParentSlotStep));
+            if (parent != indexBySlot.end()) {
+                definition.parentValueIndex = parent->second;
+            }
         }
 
         // Records the node owns, four bytes each as a row and a gate.
