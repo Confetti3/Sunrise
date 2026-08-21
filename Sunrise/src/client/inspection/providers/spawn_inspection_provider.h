@@ -40,6 +40,7 @@ struct WorldSnapshot final {
     std::uint32_t activityLogicPlacementCount{};
     bool activityLogicPresent{};
     bool activityLogicMatched{};
+    bool activityLogicBrowseOnly{};
     NodeId spawnSetNode{};
     std::string packageName;
     std::string mapStem;
@@ -86,6 +87,9 @@ public:
     /** Refreshes the graph only when current-world identity or readiness changes. */
     [[nodiscard]] bool refresh();
 
+    /** Sets the activity-logic browse scenario; zero restores live-match behavior. */
+    void set_activity_logic_browse(std::uint32_t scenarioTag) noexcept;
+
     [[nodiscard]] const WorldSnapshot& snapshot() const noexcept;
     void reset() noexcept;
 
@@ -115,6 +119,7 @@ private:
         std::int32_t region{-1};
         std::int32_t bubble{-1};
         std::int32_t mapBubble{-1};
+        std::uint32_t activityLogicBrowseScenarioTag{};
         bool sessionPresent{};
         bool scenarioReady{};
         bool scenarioPresent{};
@@ -145,6 +150,7 @@ private:
     Key key_{};
     std::uint32_t generation_{};
     std::uint32_t producerEpoch_{};
+    std::uint32_t browseScenarioTag_{};
     bool keyPresent_{};
 };
 

@@ -150,6 +150,127 @@ void attach_links(ActivityLogicMetadata& metadata,
     return out;
 }
 
+/** Shared hierarchy builder used by both live-match and browse paths. */
+void append_activity_nodes(Graph& graph,
+                                         std::vector<Diagnostic>& diagnostics,
+                                         const catalog::Activity& activity,
+                                         const Source& source,
+                                         NodeId parent,
+                                         AppendResult& result,
+                                         bool browseOnly) {
+    result.matched = true;
+    result.browseOnly = browseOnly;
+    result.scenarioTag = activity.scenarioTag;
+    result.activityName = activity.name;
+    result.destination = activity.destination;
+    result.definitionCount = static_cast<std::uint32_t>((std::min)(
+        activity.entityIndices.size(),
+        static_cast<std::size_t>((std::numeric_limits<std::uint32_t>::max)())));
+
+    Node root;
+    root.name = activity.name.empty() ? "Activity logic" : "Activity logic / " + activity.name;
+    root.searchText = "authored static activity encounter logic definitions archive";
+    root.kind = NodeKind::activityLogic;
+    root.status = Status::known;
+    root.producer = Producer::activityLogicCatalog;
+    root.provenance = Provenance::catalog;
+    root.nativeKey = result.scenarioTag;
+    root.source = source;
+    root.actions = Action::copyId;
+    result.root = graph.add(std::move(root), parent);
+    if (!result.root) {
+        result.diagnostic = "The inspection graph could not create the activity-logic root.";
+        diagnostics.push_back({Diagnostic::Severity::error, result.diagnostic});
+        return;
+    }
+
+    std::array<NodeId, 11> groups{};
+    for (const std::uint32_t entityIndex : activity.entityIndices) {
+        if (entityIndex >= g_state.catalog.entities.size()) {
+            diagnostics.push_back({Diagnostic::Severity::warning,
+                                   "Activity logic catalog contains an out-of-range activity definition reference."});
+            continue;
+        }
+        const catalog::Entity& entity = g_state.catalog.entities[entityIndex];
+        const NodeId group = ensure_group(graph,
+                                          source,
+                                          result.root,
+                                          result.scenarioTag,
+                                          entity.role,
+                                          groups);
+        Node node;
+        node.name = definition_label(entity);
+        node.searchText = std::string("authored activity logic ") + catalog::role_name(entity.role)
+                          + " " + entity.label + " " + entity.localizedText;
+        node.kind = NodeKind::logicEntity;
+        node.status = entity.confidence == catalog::Confidence::strong
+                          ? Status::known
+                          : Status::unknownSemantic;
+        node.producer = Producer::activityLogicCatalog;
+        node.provenance = Provenance::catalog;
+        node.nativeKey = entity.definitionTag;
+        node.source = source;
+        node.tag = entity.definitionTag;
+        node.classHash = entity.classPrimary;
+        node.actions = Action::copyId | Action::copyTag;
+        node.activityLogicMetadata = metadata_for(entity, result.scenarioTag);
+        attach_links(*node.activityLogicMetadata, g_state.catalog, entityIndex);
+        const NodeId entityId = graph.add(std::move(node), group);
+        if (!entityId) {
+            diagnostics.push_back({Diagnostic::Severity::error,
+                                   "The inspection graph reached its node-id capacity while adding activity logic."});
+            break;
+        }
+
+        std::size_t ordinal = 0;
+        for (const catalog::Placement& placement : entity.placements) {
+            Node placementNode;
+            std::array<char, 128> label{};
+            std::snprintf(label.data(),
+                          label.size(),
+                          "Authored placement 0x%016llX",
+                          static_cast<unsigned long long>(placement.worldId));
+            placementNode.name = label.data();
+            placementNode.searchText = "authored exact worldid map placement activity logic";
+            placementNode.kind = NodeKind::logicPlacement;
+            placementNode.status = Status::known;
+            placementNode.producer = Producer::activityLogicCatalog;
+            placementNode.provenance = Provenance::catalog;
+            placementNode.nativeKey = placement_key(entity.definitionTag, placement, ordinal++);
+            placementNode.source = source;
+            placementNode.tag = entity.definitionTag;
+            placementNode.classHash = entity.classPrimary;
+            placementNode.worldId = placement.worldId;
+            placementNode.transform = Transform{placement.position};
+            placementNode.actions = spatial_actions(Action::copyTag);
+            placementNode.activityLogicMetadata = metadata_for(entity, result.scenarioTag);
+            placementNode.activityLogicMetadata->hasPlacement = true;
+            placementNode.activityLogicMetadata->worldId = placement.worldId;
+            placementNode.activityLogicMetadata->mapTableTag = placement.mapTableTag;
+            placementNode.activityLogicMetadata->placedEntityTag = placement.placedEntityTag;
+            placementNode.activityLogicMetadata->authoredRotation = placement.rotation;
+            attach_links(*placementNode.activityLogicMetadata, g_state.catalog, entityIndex);
+            if (!graph.add(std::move(placementNode), entityId)) {
+                diagnostics.push_back({Diagnostic::Severity::error,
+                                       "The inspection graph reached its node-id capacity while adding authored logic placements."});
+                break;
+            }
+            ++result.placementCount;
+        }
+    }
+
+    std::array<char, 320> summary{};
+    std::snprintf(summary.data(),
+                  summary.size(),
+                  "%s scenario 0x%08X (%s): %u definitions, %u exact authored WorldID placements. Definitions are static authored evidence, not proof of live enemies, active triggers, or current encounter state.",
+                  browseOnly ? "Browsing activity logic" : "Activity logic archive matched",
+                  result.scenarioTag,
+                  result.activityName.c_str(),
+                  result.definitionCount,
+                  result.placementCount);
+    diagnostics.push_back({Diagnostic::Severity::information, summary.data()});
+}
+
 } // namespace
 
 void initialize(void* module) noexcept {
@@ -232,114 +353,46 @@ AppendResult append(Graph& graph,
         return result;
     }
 
-    result.matched = true;
-    result.activityName = activity->name;
-    result.destination = activity->destination;
-    result.definitionCount = static_cast<std::uint32_t>((std::min)(
-        activity->entityIndices.size(),
-        static_cast<std::size_t>((std::numeric_limits<std::uint32_t>::max)())));
+    append_activity_nodes(graph, diagnostics, *activity, source, parent, result, false);
+    return result;
+}
 
-    Node root;
-    root.name = activity->name.empty() ? "Activity logic" : "Activity logic / " + activity->name;
-    root.searchText = "authored static activity encounter logic definitions archive";
-    root.kind = NodeKind::activityLogic;
-    root.status = Status::known;
-    root.producer = Producer::activityLogicCatalog;
-    root.provenance = Provenance::catalog;
-    root.nativeKey = result.scenarioTag;
-    root.source = source;
-    root.actions = Action::copyId;
-    result.root = graph.add(std::move(root), parent);
-    if (!result.root) {
-        result.diagnostic = "The inspection graph could not create the activity-logic root.";
-        diagnostics.push_back({Diagnostic::Severity::error, result.diagnostic});
+std::vector<BrowseSummary> browse_activities() noexcept {
+    std::vector<BrowseSummary> result;
+    if (g_state.load.state != catalog::LoadState::ready) {
         return result;
     }
-
-    std::array<NodeId, 11> groups{};
-    for (const std::uint32_t entityIndex : activity->entityIndices) {
-        if (entityIndex >= g_state.catalog.entities.size()) {
-            diagnostics.push_back({Diagnostic::Severity::warning,
-                                   "Activity logic catalog contains an out-of-range activity definition reference."});
-            continue;
-        }
-        const catalog::Entity& entity = g_state.catalog.entities[entityIndex];
-        const NodeId group = ensure_group(graph,
-                                          source,
-                                          result.root,
-                                          result.scenarioTag,
-                                          entity.role,
-                                          groups);
-        Node node;
-        node.name = definition_label(entity);
-        node.searchText = std::string("authored activity logic ") + catalog::role_name(entity.role)
-                          + " " + entity.label + " " + entity.localizedText;
-        node.kind = NodeKind::logicEntity;
-        node.status = entity.confidence == catalog::Confidence::strong
-                          ? Status::known
-                          : Status::unknownSemantic;
-        node.producer = Producer::activityLogicCatalog;
-        node.provenance = Provenance::catalog;
-        node.nativeKey = entity.definitionTag;
-        node.source = source;
-        node.tag = entity.definitionTag;
-        node.classHash = entity.classPrimary;
-        node.actions = Action::copyId | Action::copyTag;
-        node.activityLogicMetadata = metadata_for(entity, result.scenarioTag);
-        attach_links(*node.activityLogicMetadata, g_state.catalog, entityIndex);
-        const NodeId entityId = graph.add(std::move(node), group);
-        if (!entityId) {
-            diagnostics.push_back({Diagnostic::Severity::error,
-                                   "The inspection graph reached its node-id capacity while adding activity logic."});
-            break;
-        }
-
-        std::size_t ordinal = 0;
-        for (const catalog::Placement& placement : entity.placements) {
-            Node placementNode;
-            std::array<char, 128> label{};
-            std::snprintf(label.data(),
-                          label.size(),
-                          "Authored placement 0x%016llX",
-                          static_cast<unsigned long long>(placement.worldId));
-            placementNode.name = label.data();
-            placementNode.searchText = "authored exact worldid map placement activity logic";
-            placementNode.kind = NodeKind::logicPlacement;
-            placementNode.status = Status::known;
-            placementNode.producer = Producer::activityLogicCatalog;
-            placementNode.provenance = Provenance::catalog;
-            placementNode.nativeKey = placement_key(entity.definitionTag, placement, ordinal++);
-            placementNode.source = source;
-            placementNode.tag = entity.definitionTag;
-            placementNode.classHash = entity.classPrimary;
-            placementNode.worldId = placement.worldId;
-            placementNode.transform = Transform{placement.position};
-            placementNode.actions = spatial_actions(Action::copyTag);
-            placementNode.activityLogicMetadata = metadata_for(entity, result.scenarioTag);
-            placementNode.activityLogicMetadata->hasPlacement = true;
-            placementNode.activityLogicMetadata->worldId = placement.worldId;
-            placementNode.activityLogicMetadata->mapTableTag = placement.mapTableTag;
-            placementNode.activityLogicMetadata->placedEntityTag = placement.placedEntityTag;
-            placementNode.activityLogicMetadata->authoredRotation = placement.rotation;
-            attach_links(*placementNode.activityLogicMetadata, g_state.catalog, entityIndex);
-            if (!graph.add(std::move(placementNode), entityId)) {
-                diagnostics.push_back({Diagnostic::Severity::error,
-                                       "The inspection graph reached its node-id capacity while adding authored logic placements."});
-                break;
-            }
-            ++result.placementCount;
-        }
+    result.reserve(g_state.catalog.activities.size());
+    for (const catalog::Activity& activity : g_state.catalog.activities) {
+        result.push_back({activity.scenarioTag, activity.name, activity.destination});
     }
+    return result;
+}
 
-    std::array<char, 320> summary{};
-    std::snprintf(summary.data(),
-                  summary.size(),
-                  "Activity logic archive matched scenario 0x%08X (%s): %u definitions, %u exact authored WorldID placements. Definitions are static authored evidence, not proof of live enemies, active triggers, or current encounter state.",
-                  result.scenarioTag,
-                  result.activityName.c_str(),
-                  result.definitionCount,
-                  result.placementCount);
-    diagnostics.push_back({Diagnostic::Severity::information, summary.data()});
+AppendResult append_browse(Graph& graph,
+                           std::vector<Diagnostic>& diagnostics,
+                           std::uint32_t scenarioTag,
+                           NodeId parent) {
+    AppendResult result{};
+    result.present = g_state.load.state == catalog::LoadState::ready;
+    if (!result.present) {
+        result.diagnostic = "No optional activity logic catalog is installed.";
+        return result;
+    }
+    const catalog::Activity* activity = catalog::find_activity(g_state.catalog, scenarioTag);
+    if (activity == nullptr) {
+        std::array<char, 128> text{};
+        std::snprintf(text.data(),
+                      text.size(),
+                      "Activity logic catalog has no activity for scenario 0x%08X.",
+                      scenarioTag);
+        result.diagnostic = text.data();
+        diagnostics.push_back({Diagnostic::Severity::information, result.diagnostic});
+        return result;
+    }
+    Source source{};
+    source.scenarioTag = scenarioTag;
+    append_activity_nodes(graph, diagnostics, *activity, source, parent, result, true);
     return result;
 }
 

@@ -35,6 +35,7 @@ bool SpawnInspectionProvider::refresh() {
     }
     activity::SessionSnapshot session{};
     server::bap::ActivitySnapshot privateActivity{};
+    next.activityLogicBrowseScenarioTag = browseScenarioTag_;
     const bool privatePresent = server::bap::snapshot_private_activity(privateActivity);
     if (privatePresent) {
         next.sessionPresent =

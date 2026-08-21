@@ -19,6 +19,7 @@ struct AppendResult final {
     NodeId root{};
     bool present{};
     bool matched{};
+    bool browseOnly{};
     std::uint32_t scenarioTag{};
     std::uint32_t definitionCount{};
     std::uint32_t placementCount{};
@@ -26,6 +27,15 @@ struct AppendResult final {
     std::string destination;
     std::string diagnostic;
 };
+
+/** Catalog-level list of browsable activities; empty when no catalog is loaded. */
+struct BrowseSummary final {
+    std::uint32_t scenarioTag{};
+    std::string activityName;
+    std::string destination;
+};
+
+[[nodiscard]] std::vector<BrowseSummary> browse_activities() noexcept;
 
 void initialize(void* module) noexcept;
 void shutdown() noexcept;
@@ -35,5 +45,11 @@ void shutdown() noexcept;
                                   std::vector<Diagnostic>& diagnostics,
                                   const Source& source,
                                   NodeId parent);
+
+/** Appends one specific activity without requiring a live scenario match. */
+[[nodiscard]] AppendResult append_browse(Graph& graph,
+                                         std::vector<Diagnostic>& diagnostics,
+                                         std::uint32_t scenarioTag,
+                                         NodeId parent);
 
 } // namespace sunrise::client::inspection::providers::activity_logic

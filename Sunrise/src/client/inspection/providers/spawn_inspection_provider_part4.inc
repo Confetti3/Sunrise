@@ -137,10 +137,16 @@
     snapshot_.activityCatalogDiagnostic = activityResult.diagnostic;
 
     const activity_logic::AppendResult logicResult =
-        activity_logic::append(snapshot_.graph, snapshot_.diagnostics, source, graphParent);
+        key.activityLogicBrowseScenarioTag != 0
+            ? activity_logic::append_browse(snapshot_.graph,
+                                            snapshot_.diagnostics,
+                                            key.activityLogicBrowseScenarioTag,
+                                            graphParent)
+            : activity_logic::append(snapshot_.graph, snapshot_.diagnostics, source, graphParent);
     snapshot_.activityLogicNode = logicResult.root;
     snapshot_.activityLogicPresent = logicResult.present;
     snapshot_.activityLogicMatched = logicResult.matched;
+    snapshot_.activityLogicBrowseOnly = logicResult.browseOnly;
     snapshot_.activityLogicActivityName = logicResult.activityName;
     snapshot_.activityLogicDestination = logicResult.destination;
     snapshot_.activityLogicDiagnostic = logicResult.diagnostic;
@@ -152,10 +158,15 @@ const WorldSnapshot& SpawnInspectionProvider::snapshot() const noexcept {
     return snapshot_;
 }
 
+void SpawnInspectionProvider::set_activity_logic_browse(std::uint32_t scenarioTag) noexcept {
+    browseScenarioTag_ = scenarioTag;
+}
+
 void SpawnInspectionProvider::reset() noexcept {
     snapshot_ = {};
     key_ = {};
     generation_ = 0;
+    browseScenarioTag_ = 0;
     ++producerEpoch_;
     if (producerEpoch_ == 0) {
         producerEpoch_ = 1;

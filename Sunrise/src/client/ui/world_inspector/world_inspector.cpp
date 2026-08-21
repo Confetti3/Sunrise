@@ -2789,6 +2789,31 @@ void draw_toolbar(const camera::Status& status) noexcept {
             ImGui::EndDisabled();
             ImGui::EndMenu();
         }
+        if (ImGui::BeginMenu("Activity Logic")) {
+            const auto browse = provider::activity_logic::browse_activities();
+            const bool browsing = g_state.provider.snapshot().activityLogicBrowseOnly;
+            if (ImGui::MenuItem("Live scenario match", nullptr, !browsing)) {
+                g_state.provider.set_activity_logic_browse(0);
+            }
+            ImGui::Separator();
+            if (browse.empty()) {
+                ImGui::TextDisabled("No activity logic catalog installed.");
+            } else {
+                for (const provider::activity_logic::BrowseSummary& summary : browse) {
+                    std::array<char, 256> label{};
+                    std::snprintf(label.data(),
+                                  label.size(),
+                                  "%s (%s)",
+                                  summary.activityName.c_str(),
+                                  summary.destination.c_str());
+                    if (ImGui::MenuItem(label.data(), nullptr,
+                                        browsing && g_state.provider.snapshot().activityLogicNode)) {
+                        g_state.provider.set_activity_logic_browse(summary.scenarioTag);
+                    }
+                }
+            }
+            ImGui::EndMenu();
+        }
         if (ImGui::BeginMenu("Overlays")) {
             const InspectorCapabilities available = capabilities();
             if (ImGui::MenuItem("Spawn helpers", nullptr, &g_state.showSpawns)) {
@@ -2923,9 +2948,10 @@ void draw_status(const camera::Status& status) noexcept {
                         available.knownBounds);
     if (available.logicDefinitions != 0) {
         ImGui::SameLine();
-        ImGui::TextDisabled("| Logic %zu / %zu placed",
+        ImGui::TextDisabled("| Logic %zu / %zu placed%s",
                             available.logicDefinitions,
-                            available.logicPlacements);
+                            available.logicPlacements,
+                            world().activityLogicBrowseOnly ? " (browse)" : "");
     }
     if (available.triggerCenters != 0) {
         ImGui::SameLine();
