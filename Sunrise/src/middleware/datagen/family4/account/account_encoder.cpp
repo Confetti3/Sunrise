@@ -1,3 +1,14 @@
+#include "../../../../state/build_data/records/record_persistence.h"
+#include "../../../../state/build_data/records/record_catalog.h"
+#include "../../../../state/build_data/nodes/node_persistence.h"
+#include <atomic>
+#include "../../../../core/logging/log.h"
+#include "../../../../state/build_data/records/definition.h"
+#include <cstdio>
+#include <array>
+#include <span>
+#include <vector>
+#include "../../../../state/build_data/nodes/node_catalog.h"
 #include "../../../../state/record_claims/record_claims.h"
 #include "account_encoder.h"
 
@@ -96,9 +107,30 @@ bool encode(const state::AccountState& state, std::span<std::byte> output) noexc
     object.acquiredFlags = unlocks.accountFlags;
     object.profileUnlockFlags = unlocks.profileFlags;
     object.objectiveValues = unlocks.objectiveValues;
+    // The node and record tables are not in the build data cache, so on a warm start the package
+    // pass is skipped and both are empty. The account image needs them: without nodes no book gate
+    // is satisfied and every book reads as unnamed. Publishing here, latched on success, is what
+    // makes a warm start look like a cold one.
+    {
+        static std::atomic<bool> published{false};
+        if (!published.load(std::memory_order_relaxed)) {
+            const bool haveNodes = state::build_data::nodes::count() != 0
+                                   || state::build_data::nodes::load_and_publish();
+            const bool haveRecords = state::build_data::records::count() != 0
+                                     || state::build_data::records::load_and_publish();
+            if (haveNodes && haveRecords) {
+                published.store(true, std::memory_order_relaxed);
+            }
+        }
+    }
+
     // Claims are laid over the authored bank on the way out, so a claimed record reads Acquired on
     // the next image. The authored policy itself is immutable and is never edited.
     (void)state::record_claims::apply(object.acquiredFlags);
+    // A lore book's category is gated: some read a flag, some test their own progress value. A book
+    // gated on progress cannot open by being played, since with no title shown there is nothing
+    // inside to collect. Satisfying the gate is what makes the book readable at all.
+    (void)state::build_data::nodes::apply_visibility(object.acquiredFlags);
 
     for (layout::CharacterUnlockBlock& block : object.characterUnlocks) {
         block.flags = unlocks.characterFlags;

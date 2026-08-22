@@ -1,3 +1,5 @@
+#include "../../../../state/record_claims/record_claims.h"
+#include "../../../../state/build_data/nodes/node_catalog.h"
 #include "character_encoder.h"
 
 #include <algorithm>
@@ -157,6 +159,11 @@ bool encode(const state::CharacterState& state,
             index < unlocks.characterObjectFlags.size() ? unlocks.characterObjectFlags[index]
                                                         : std::uint8_t{});
     }
+    // One book's gate is character scoped rather than account scoped, and one counts its progress
+    // in the character bank, so both passes run here as well as on the account image.
+    (void)state::build_data::nodes::apply_character_visibility(object.acquiredFlags);
+    (void)state::record_claims::apply_character_node_progress(object.objectiveValues);
+
     for (std::size_t index = 0; index < object.objectiveValues.size(); ++index) {
         object.objectiveValues[index] =
             index < unlocks.characterObjectValues.size() ? unlocks.characterObjectValues[index] : 0;
