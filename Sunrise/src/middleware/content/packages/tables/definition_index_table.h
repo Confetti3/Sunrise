@@ -66,6 +66,22 @@ inline constexpr std::size_t kHeaderSkip = 16;
  * count being walked as if it were an expression, so it is set well above anything observed.
  */
 inline constexpr std::int64_t kNodeExpressionCapacity = 128;
+/** Investment root slot of the presentation node table. */
+inline constexpr std::size_t kPresentationNodeTableSlot = 63;
+/** One node row. Measured from the spacing of four known node hashes, not divided out of the blob. */
+inline constexpr std::size_t kNodeRowStride = 168;
+/** A node's expression sits at one of these two fields, never both. */
+inline constexpr std::size_t kNodeExpressionFieldPrimary = 64;
+inline constexpr std::size_t kNodeExpressionFieldAlternate = 48;
+/** Records a node owns, four bytes each as a row then a gate. */
+inline constexpr std::size_t kNodeChildRecordField = 136;
+inline constexpr std::size_t kNodeChildRecordStride = 4;
+/** A category's parent record reads the slot immediately above the category's own. */
+inline constexpr std::int32_t kNodeParentSlotStep = 1;
+/** Array descriptor of the character object's flag mapping table, sized to that bank. */
+inline constexpr std::size_t kCharacterFlagMapDescriptor = 40;
+/** Array descriptor of the character object's value mapping table, sized to that bank. */
+inline constexpr std::size_t kCharacterValueMapDescriptor = 24;
 inline constexpr std::size_t kUnlockFlagMapTableSlot = 111;
 /** Array descriptor of the account object's flag mapping table. */
 inline constexpr std::size_t kAccountFlagMapDescriptor = 8;

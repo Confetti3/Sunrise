@@ -155,6 +155,18 @@ bool build() noexcept {
                         std::span(storage.progressionRows).first(progressionCount));
                 }
             }
+            if (!state::build_data::node_definitions_ready()) {
+                std::size_t nodeCount = 0;
+                if (build_nodes(source,
+                                storage.scratch,
+                                std::span<const std::byte>{storage.root},
+                                storage.child,
+                                storage.nodeRows,
+                                nodeCount)) {
+                    (void)state::build_data::publish_node_definitions(
+                        std::span(storage.nodeRows).first(nodeCount));
+                }
+            }
             if (!state::build_data::record_definitions_ready()) {
                 std::size_t recordCount = 0;
                 if (build_records(source,

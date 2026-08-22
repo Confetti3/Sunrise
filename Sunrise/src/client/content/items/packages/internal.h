@@ -55,6 +55,10 @@ inline constexpr std::size_t kContainerCandidates = 16;
 /** Lock-owned storage kept off the caller stack, shared by every stage of the pass. */
 struct Storage {
     reader::Scratch scratch{};
+    /** Node rows held until the value slot and owned records are resolved. */
+    std::array<state::build_data::nodes::Definition,
+               state::build_data::nodes::kDefinitionCapacity>
+        nodeRows{};
     /** Record rows held until the completion flag mapping is resolved. */
     std::array<state::build_data::records::Definition,
                state::build_data::records::kDefinitionCapacity>
@@ -357,6 +361,23 @@ void report(std::size_t published, const char* reason) noexcept;
  * @param itemDefinitionCount Number of rows in the installed item index table.
  * @return True when every tag, class, bound, and item link validates and publishes.
  */
+/**
+ * Reads the presentation node table and resolves each node's value slot and owned records.
+ * @param source Package source.
+ * @param scratch Reader scratch.
+ * @param root Investment root bytes.
+ * @param blob Scratch storage for the tables.
+ * @param output Row storage in native node order.
+ * @param count Receives the number of rows read.
+ * @return True when both tables read and every row fits.
+ */
+[[nodiscard]] bool build_nodes(const reader::Source& source,
+                               reader::Scratch& scratch,
+                               std::span<const std::byte> root,
+                               std::vector<std::byte>& blob,
+                               std::span<state::build_data::nodes::Definition> output,
+                               std::size_t& count) noexcept;
+
 /**
  * Reads the records table and resolves each record's completion flag to a bank index.
  * @param source Package source.

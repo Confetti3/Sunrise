@@ -13,6 +13,7 @@
 #include "hash_names/definition.h"
 #include "inventory/buckets/definition.h"
 #include "items/details/definition.h"
+#include "nodes/definition.h"
 #include "records/definition.h"
 #include "items/item_catalog.h"
 #include "items/socket_plugs/definition.h"
@@ -96,6 +97,19 @@ publish_item_definitions(std::span<const items::Definition> definitions) noexcep
                                               items::Definition& definition) noexcept;
 
 /** @return True when the whole dense collectible definition table is in State. */
+
+
+/** @return True when the whole presentation node table is in State. */
+[[nodiscard]] bool node_definitions_ready() noexcept;
+
+/**
+ * Publishes the whole presentation node table in one step.
+ * @param definitions Complete dense rows in native node order.
+ * @return True when the rows pass the domain checks and fit fixed State storage.
+ */
+[[nodiscard]] bool
+publish_node_definitions(std::span<const nodes::Definition> definitions) noexcept;
+
 
 /** @return True when the whole record definition table is in State. */
 [[nodiscard]] bool record_definitions_ready() noexcept;
