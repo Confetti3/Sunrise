@@ -822,6 +822,7 @@
     <ClCompile Include="src\middleware\gameplay\group\migration_messages.cpp" />
     <ClCompile Include="src\middleware\gameplay\group\notice_messages.cpp" />
     <ClCompile Include="src\server\gameplay\group\group_migration_receipts.cpp" />
+    <ClCompile Include="src\state\build_data\sobjects\sobject_catalog.cpp" />
   </ItemGroup>
   <ItemGroup Condition="'$(SunriseRunClangTidy)'=='true'">
     <ClCompile Remove="vendor\detours\detours.cpp" />
@@ -1421,6 +1422,12 @@
     <ClInclude Include="src\middleware\gameplay\group\migration_messages.h" />
     <ClInclude Include="src\middleware\gameplay\group\notice_messages.h" />
     <ClInclude Include="src\server\gameplay\group\group_migration_receipts.h" />
+    <ClInclude Include="src\core\settings\settings_upgrade.h" />
+    <ClInclude Include="src\middleware\web_service\messages\opcode1820.h" />
+    <ClInclude Include="src\middleware\web_service\messages\opcode402.h" />
+    <ClInclude Include="src\middleware\web_service\messages\opcode403.h" />
+    <ClInclude Include="src\middleware\web_service\messages\opcode406.h" />
+    <ClInclude Include="src\state\build_data\sobjects\sobject_catalog.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

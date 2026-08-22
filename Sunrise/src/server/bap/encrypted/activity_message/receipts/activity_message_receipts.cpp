@@ -4,6 +4,10 @@
  * was read so the caller can record one arrival receipt. None of them acts on what it read.
  */
 
+#include <vector>
+#include <algorithm>
+#include "../../../../../state/build_data/collectibles/collectible_catalog.h"
+#include "../../../../../state/build_data/sobjects/sobject_catalog.h"
 #include "activity_message_receipts.h"
 
 #include <array>
@@ -294,6 +298,98 @@ Framed frame_incident(const message::Request& request) noexcept {
            parsed.selectorLength,
            static_cast<unsigned>(parsed.hasOptionalBlock),
            parsed.payloadLength);
+    // Resolve the target against the definition table it indexes, so an incident says what it is
+    // rather than carrying a bare number. Nothing acts on it yet; this is what acting on it needs.
+    if (accepted) {
+        state::build_data::sobjects::Definition definition{};
+        if (state::build_data::sobjects::find(
+                static_cast<std::uint16_t>(parsed.primaryTarget), definition)) {
+            report(core::log::Level::info,
+                   "ev=activity stage=sobject target=%u hash=0x%08X type=%d group=%u ordinal=%u",
+                   parsed.primaryTarget,
+                   definition.nameHash,
+                   definition.typeCode,
+                   static_cast<unsigned>(definition.selectorGroup),
+                   static_cast<unsigned>(definition.nodeOrdinal));
+        } else {
+            report(core::log::Level::warn,
+                   "ev=activity stage=sobject target=%u result=unresolved rows=%zu",
+                   parsed.primaryTarget,
+                   state::build_data::sobjects::count());
+        }
+
+        // The type payload, which is what the schema describes. The parser separates it from
+        // the envelope; reading the whole message body instead puts every field at an offset the
+        // schema does not predict.
+        const std::span<const std::byte> body{parsed.payload.data(), parsed.payloadLength};
+
+        // The common header every type payload starts with: definition 0x80809512. A u32 sequence,
+        // then a three bit discriminator carrying a bias of one, then a 64 bit identity read only
+        // when that discriminator selects the player branch. Decoding it is the cheapest check that
+        // the payload is being read from the right place: the identity should be a SOID.
+        if (body.size() >= 13) {
+            std::uint64_t cursor = 0;
+            const auto take = [&body, &cursor](std::size_t width) noexcept -> std::uint64_t {
+                std::uint64_t value = 0;
+                for (std::size_t step = 0; step < width; ++step) {
+                    const std::size_t at = cursor + step;
+                    const auto byte = static_cast<std::uint8_t>(body[at / 8]);
+                    value = (value << 1U) | ((byte >> (7 - (at % 8))) & 1U);
+                }
+                cursor += width;
+                return value;
+            };
+            const std::uint64_t sequence = take(32);
+            const std::uint64_t kindRaw = take(3);
+            const std::uint64_t identity = take(64);
+            // The nested block follows the header. Its first field is a type-25 tagged union
+            // occupying bits 99 to 122, and the collectible sits in its low fifteen bits -- the same
+            // width Collections uses for a native row index. The bound was not guessed: the bubble
+            // hash appears at bits 126, 158 and 190, three consecutive u32 fields of the nested
+            // block, which fixes where the union has to end, and the character SOID lands at bit 35
+            // exactly where the header schema puts it.
+            // Only type 2 has this layout. Every other type code selects a different schema, and
+            // decoding one of those against this one produces a plausible looking index that means
+            // nothing: target 1121 is type 13 and yielded 21830 that way.
+            constexpr std::int32_t kPickupTypeCode = 2;
+            state::build_data::sobjects::Definition row{};
+            const bool pickupType =
+                state::build_data::sobjects::find(static_cast<std::uint16_t>(parsed.primaryTarget),
+                                                  row)
+                && row.typeCode == kPickupTypeCode;
+
+            constexpr std::size_t kUnionBits = 24;
+            constexpr std::size_t kIndexBits = 15;
+            std::uint32_t collectibleIndex = 0;
+            if (pickupType && body.size() * 8 >= 99 + kUnionBits) {
+                const std::uint64_t unionField = take(kUnionBits);
+                collectibleIndex =
+                    static_cast<std::uint32_t>(unionField & ((1U << kIndexBits) - 1U));
+                state::build_data::collectibles::Definition collectible{};
+                if (state::build_data::collectibles::find(
+                        static_cast<std::uint16_t>(collectibleIndex), collectible)) {
+                    report(core::log::Level::info,
+                           "ev=activity stage=collectible index=%u hash=0x%08X item=%u",
+                           collectibleIndex,
+                           collectible.collectibleHash,
+                           static_cast<unsigned>(collectible.itemDefinitionIndex));
+                } else {
+                    report(core::log::Level::warn,
+                           "ev=activity stage=collectible index=%u result=unknown rows=%zu",
+                           collectibleIndex, state::build_data::collectibles::count());
+                }
+            }
+
+            report(core::log::Level::info,
+                   "ev=activity stage=header target=%u sequence=%llu kind_raw=%llu "
+                   "identity=0x%016llX",
+                   parsed.primaryTarget,
+                   static_cast<unsigned long long>(sequence),
+                   static_cast<unsigned long long>(kindRaw),
+                   static_cast<unsigned long long>(identity));
+        }
+    }
+
     if (!accepted) {
         // A refused target index would index the consumer's table unbounded, so the body is kept
         // and never relayed.
