@@ -20,6 +20,9 @@ inline constexpr std::uint16_t kTriumphScoreValueIndex = 2115U;
 /** A record whose completion flag no mapping table addresses carries this instead of an index. */
 inline constexpr std::uint16_t kUnavailableFlagIndex = 0xFFFFU;
 
+/** A record that displays no lore carries this instead of a row. */
+inline constexpr std::uint16_t kUnavailableLoreRow = 0xFFFFU;
+
 /** A record naming no category value slot carries this instead of an index. */
 inline constexpr std::uint16_t kUnavailableValueIndex = 0xFFFFU;
 
@@ -35,6 +38,13 @@ struct Definition {
     std::uint16_t definitionIndex{};
     /** Account flag bank mapping row, or kUnavailableFlagIndex when the slot is unaddressable. */
     std::uint16_t completionFlagIndex{kUnavailableFlagIndex};
+    /**
+     * Lore row this record displays, or kUnavailableLoreRow when it displays none.
+     *
+     * A chapter of a lore book names one. A book's parent triumph names none, which is a reliable
+     * way to tell a parent from a chapter without relying on its position in the child list.
+     */
+    std::uint16_t loreRow{kUnavailableLoreRow};
     /** Points this record is worth, which the shipped table keeps at 500 or below. */
     std::uint16_t scoreValue{};
     /**

@@ -127,6 +127,11 @@ bool build_collectibles(const reader::Source& source,
         output.collectibleHash = collectibleHash;
         output.collectibleIndex = static_cast<std::uint16_t>(row);
         output.itemDefinitionIndex = itemDefinitionIndex;
+        // The lore row this collectible unlocks. The record displaying the same row is the chapter
+        // it completes, so the two tables join on the row rather than on any hash. Read after the
+        // reset above, or it would be cleared.
+        std::memcpy(&output.loreRow, table.data() + at + tables::kLoreRowOffset,
+                    sizeof output.loreRow);
         if (requirementSetIndex == domain::kUnavailableMaterialRequirementSetIndex) {
             continue;
         }

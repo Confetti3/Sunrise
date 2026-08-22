@@ -13,6 +13,9 @@ inline constexpr std::size_t kDefinitionCapacity = 1U << 15U;
 inline constexpr std::uint16_t kUnavailableItemDefinitionIndex = 0xFFFFU;
 /** A collectible with no acquisition charge carries this native requirement-set sentinel. */
 inline constexpr std::uint16_t kUnavailableMaterialRequirementSetIndex = 0xFFFFU;
+
+/** A collectible that unlocks no lore carries this instead of a row. */
+inline constexpr std::uint16_t kUnavailableLoreRow = 0xFFFFU;
 /** Installed requirement sets contain at most six material rows. */
 inline constexpr std::size_t kMaterialRequirementCapacity = 6;
 
@@ -31,6 +34,13 @@ struct Definition {
     std::uint16_t collectibleIndex{};
     std::uint16_t itemDefinitionIndex{kUnavailableItemDefinitionIndex};
     std::uint16_t materialRequirementSetIndex{kUnavailableMaterialRequirementSetIndex};
+    /**
+     * Lore row this collectible unlocks, or kUnavailableLoreRow when it unlocks none.
+     *
+     * The record that displays the same row is the chapter this collectible completes, so the pair
+     * joins on the row rather than on any hash.
+     */
+    std::uint16_t loreRow{kUnavailableLoreRow};
     std::uint8_t materialRequirementCount{};
     std::array<MaterialRequirement, kMaterialRequirementCapacity> materialRequirements{};
 };

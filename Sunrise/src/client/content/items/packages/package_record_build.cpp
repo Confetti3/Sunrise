@@ -145,6 +145,9 @@ bool build_records(const reader::Source& source,
         domain::Definition& definition = output[static_cast<std::size_t>(row)];
         definition = {};
         definition.definitionIndex = static_cast<std::uint16_t>(row);
+        // The lore row this record displays, or 0xFFFF for a book's parent triumph.
+        std::memcpy(&definition.loreRow, blob.data() + at + tables::kLoreRowOffset,
+                    sizeof definition.loreRow);
         // The shipped table tops out at 500, so anything wider is not a score and is dropped.
         definition.scoreValue = score <= 0xFFFFU ? static_cast<std::uint16_t>(score) : 0U;
         std::int16_t categorySlot = 0;

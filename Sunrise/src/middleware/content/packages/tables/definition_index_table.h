@@ -39,6 +39,19 @@ inline constexpr std::size_t kRecordTableSlot = 72;
 inline constexpr std::size_t kRecordRowStride = 216;
 /** Unlock slot of the record's completion flag, or a non-positive value when it has none. */
 inline constexpr std::size_t kRecordCompletionFlagOffset = 100;
+/**
+ * Lore row a record names, or 0xFFFF when it names none.
+ *
+ * A collectible row carries the same field at the same offset, which is what joins the two: a
+ * collectible and the record it unlocks name one lore row. A record with no lore is a book's parent
+ * triumph rather than one of its chapters.
+ */
+inline constexpr std::size_t kLoreRowOffset = 0x2C;
+/** Investment root slot of the lore table: 1425 rows of sixteen bytes. */
+inline constexpr std::size_t kLoreTableSlot = 52;
+/** One lore row, and the definition hash inside it. */
+inline constexpr std::size_t kLoreRowStride = 16;
+inline constexpr std::size_t kLoreHashOffset = 8;
 /** Points the record is worth. Zero for lore and for the interval records that score per step. */
 inline constexpr std::size_t kRecordScoreOffset = 92;
 /** A record names its category's value slot here. The record's own bar reads the next slot up. */
