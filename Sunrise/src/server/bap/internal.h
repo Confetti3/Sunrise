@@ -182,6 +182,16 @@ struct Session {
     bool abilityRefreshArmed{};
 };
 
+/**
+ * Arms every active peer to re-read the account, including the one that caused the change.
+ *
+ * `publish_account_mutation` deliberately skips the origin, because a web service transaction
+ * carries the new account back in its own response. A change made outside such a transaction has no
+ * response to carry, so the peer that caused it would otherwise keep showing stale state until some
+ * unrelated action happened to stage an image. Picking up a collectible is such a change.
+ */
+void arm_account_resync_everywhere() noexcept;
+
 namespace plaintext {
 
 /**

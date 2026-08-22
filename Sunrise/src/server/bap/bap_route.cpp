@@ -184,6 +184,32 @@ void clear_session(Session& session) noexcept {
 
 } // namespace
 
+/** Arms every active peer to re-read the account, including the origin. */
+void arm_account_resync_everywhere() noexcept {
+    g_accountGeneration = g_accountGeneration == (std::numeric_limits<std::uint64_t>::max)()
+                              ? 1
+                              : g_accountGeneration + 1;
+    std::size_t armed = 0;
+    for (auto& peer : g_sessions) {
+        if (peer.id == 0 || !peer.authenticated || !peer.queuez.family4Active) {
+            continue;
+        }
+        peer.accountResyncGeneration = g_accountGeneration;
+        peer.accountResyncArmed = true;
+        ++armed;
+    }
+    std::array<char, core::log::kLineCapacity> line{};
+    const int count =
+        std::snprintf(line.data(), line.size(),
+                      "ev=queuez stage=resync_arm_all result=ok generation=%llu peers=%zu",
+                      static_cast<unsigned long long>(g_accountGeneration), armed);
+    if (count > 0) {
+        core::log::write(core::log::Channel::server, core::log::Level::debug,
+                         {line.data(), static_cast<std::size_t>(count)});
+    }
+}
+
+
 /** Applies one serialized BAP connection lifecycle event. */
 bool consume(const client::network::BapRequest& request,
              client::network::BapResponse& response) noexcept {

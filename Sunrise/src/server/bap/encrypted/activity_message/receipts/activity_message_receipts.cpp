@@ -9,6 +9,7 @@
 #include <algorithm>
 #include "../../../../../state/build_data/collectibles/collectible_catalog.h"
 #include "../../../../../state/build_data/sobjects/sobject_catalog.h"
+#include "../../../../bap/internal.h"
 #include "activity_message_receipts.h"
 
 #include <array>
@@ -370,6 +371,13 @@ Framed frame_incident(const message::Request& request) noexcept {
                 }
                 const std::uint16_t node = state::lore::book_for_bubble(bubble);
                 const state::lore::GrantOutcome outcome = state::lore::grant_next_chapter(node);
+                if (outcome == state::lore::GrantOutcome::granted) {
+                    // Nothing else will stage an account image for this peer: a pickup is not a web
+                    // service transaction and has no response to carry the change back. Arm every
+                    // peer, the origin included, so the chapter appears without a relaunch and a
+                    // second pickup in the same run sees the first one already held.
+                    bap::arm_account_resync_everywhere();
+                }
                 report(outcome == state::lore::GrantOutcome::granted ? core::log::Level::info
                                                                      : core::log::Level::warn,
                        "ev=activity stage=lore bubble=0x%08X node=%u result=%s record=%u",
