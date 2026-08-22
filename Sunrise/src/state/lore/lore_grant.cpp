@@ -104,10 +104,14 @@ GrantOutcome grant_next_chapter(std::uint16_t node) noexcept {
             continue;
         }
         sawChapter = true;
-        if (record_claims::claimed(record.completionFlagIndex)) {
+        // Finding lore completes a chapter; claiming it is the player's act, not this one. So the
+        // record is left claimable rather than claimed, and a chapter already in either state is
+        // passed over.
+        if (record_claims::claimed(record.completionFlagIndex)
+            || record_claims::claimable(record.completionFlagIndex)) {
             continue;
         }
-        if (!record_claims::claim(record.completionFlagIndex, record.scoreValue)) {
+        if (!record_claims::mark_claimable(record.completionFlagIndex)) {
             return GrantOutcome::refused;
         }
         g_lastGranted.store(record.definitionIndex, std::memory_order_relaxed);

@@ -37,6 +37,8 @@ constexpr std::uint32_t kMaximumEntries = 8192;
 
 std::mutex g_lock;
 std::array<std::uint64_t, kWordCount> g_claimed{};
+/** Records complete but not yet claimed. A claim supersedes this, never the other way round. */
+std::array<std::uint64_t, kWordCount> g_claimable{};
 std::array<std::uint16_t, kIndexCapacity> g_scoreByIndex{};
 std::size_t g_count{};
 std::uint32_t g_score{};
@@ -189,6 +191,7 @@ bool initialize(void* module) noexcept {
 void clear() noexcept {
     const std::lock_guard<std::mutex> guard(g_lock);
     g_claimed.fill(0);
+    g_claimable.fill(0);
     g_scoreByIndex.fill(0);
     g_count = 0;
     g_score = 0;
@@ -231,6 +234,24 @@ std::size_t apply(std::span<std::uint8_t> accountFlags) noexcept {
             }
             if (accountFlags[index] != unlocks::kFlagSet) {
                 accountFlags[index] = unlocks::kFlagSet;
+                ++changed;
+            }
+        }
+    }
+
+    // Claimable records fill in behind the claims: a record that is both stays claimed, since a
+    // claim is the later state and overwriting it would undo what the player did.
+    for (std::size_t word = 0; word < g_claimable.size(); ++word) {
+        std::uint64_t bits = g_claimable[word] & ~g_claimed[word];
+        while (bits != 0) {
+            const auto offset = static_cast<std::size_t>(std::countr_zero(bits));
+            bits &= bits - 1;
+            const std::size_t index = word * kWordBits + offset;
+            if (index >= accountFlags.size()) {
+                continue;
+            }
+            if (accountFlags[index] != unlocks::kFlagAvailable) {
+                accountFlags[index] = unlocks::kFlagAvailable;
                 ++changed;
             }
         }
@@ -374,6 +395,28 @@ std::size_t apply_character_node_progress(std::span<std::int32_t> characterValue
 bool claimed(std::uint16_t flagIndex) noexcept {
     const std::lock_guard<std::mutex> guard(g_lock);
     return claimed_locked(flagIndex);
+}
+
+/** Marks one record complete but unclaimed. */
+bool mark_claimable(std::uint16_t flagIndex) noexcept {
+    if (static_cast<std::size_t>(flagIndex) >= kIndexCapacity) {
+        return false;
+    }
+    const std::lock_guard<std::mutex> guard(g_lock);
+    g_claimable[static_cast<std::size_t>(flagIndex) / kWordBits] |=
+        1ULL << (static_cast<std::size_t>(flagIndex) % kWordBits);
+    return true;
+}
+
+/** @return True when this index is marked claimable. */
+bool claimable(std::uint16_t flagIndex) noexcept {
+    if (static_cast<std::size_t>(flagIndex) >= kIndexCapacity) {
+        return false;
+    }
+    const std::lock_guard<std::mutex> guard(g_lock);
+    return (g_claimable[static_cast<std::size_t>(flagIndex) / kWordBits]
+            & (1ULL << (static_cast<std::size_t>(flagIndex) % kWordBits)))
+           != 0;
 }
 
 /** @return Total score of every held claim. */
