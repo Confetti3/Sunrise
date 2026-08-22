@@ -31,6 +31,15 @@ inline constexpr std::uint16_t kAbsentPackageId = 0xFFFFU;
 /** Element class of the item index table inside the investment container. */
 inline constexpr std::uint32_t kItemIndexTableClass = 0x80807BE8U;
 /** The investment root holds the installed collectible definition table at this slot. */
+/** Investment root slot of the unlock flag mapping tables. */
+inline constexpr std::size_t kUnlockFlagMapTableSlot = 111;
+/** Array descriptor of the account object's flag mapping table. */
+inline constexpr std::size_t kAccountFlagMapDescriptor = 8;
+/** One mapping row: a source and the slot it feeds. */
+inline constexpr std::size_t kUnlockMapRowStride = 8;
+/** The destination slot within one mapping row. */
+inline constexpr std::size_t kUnlockMapDestinationSlotOffset = 4;
+
 inline constexpr std::size_t kCollectibleTableSlot = 19;
 /** Definition class recorded for the installed investment root tag. */
 inline constexpr std::uint32_t kInvestmentRootClass = 0x80807D84U;

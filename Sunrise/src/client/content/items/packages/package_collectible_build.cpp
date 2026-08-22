@@ -1,3 +1,6 @@
+#include <array>
+#include <cstdio>
+#include "../../../../core/logging/log.h"
 #include "../../../../state/build_data/sobjects/sobject_catalog.h"
 #include <cstring>
 #include <limits>
