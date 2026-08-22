@@ -25,8 +25,16 @@ enum class GrantOutcome : std::uint8_t {
     granted,
     /** The bubble is not associated with a book. */
     unknownBook,
-    /** The book has no chapters this build can resolve. */
-    emptyBook,
+    /** The node table is not published, so no book can be read. */
+    noNodeTable,
+    /** The node table is published but does not contain this book. */
+    bookNotFound,
+    /** The book is present but owns no children. */
+    noChildren,
+    /** The children are present but no record resolves, so the record table is missing. */
+    noRecords,
+    /** Records resolve but none of them is a chapter. */
+    noChapters,
     /** Every chapter of the book is already held. */
     bookComplete,
     /** The claim store refused the write. */
@@ -53,5 +61,8 @@ enum class GrantOutcome : std::uint8_t {
 
 /** @return The record row the last successful grant claimed. Only meaningful after `granted`. */
 [[nodiscard]] std::uint16_t last_granted_record() noexcept;
+
+/** @return True when the last grant also gave the collectible's item, which the lore is gated on. */
+[[nodiscard]] bool last_item_granted() noexcept;
 
 } // namespace sunrise::state::lore

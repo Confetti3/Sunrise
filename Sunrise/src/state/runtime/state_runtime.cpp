@@ -1,3 +1,5 @@
+#include "../build_data/records/record_persistence.h"
+#include "../build_data/nodes/node_persistence.h"
 #include "../record_claims/record_claims.h"
 #include <Windows.h>
 
@@ -208,6 +210,8 @@ bool initialize(void* module,
     }
     // Claims are held beside the build data cache, so a restart keeps what the client already shows
     // as Acquired. A missing file is a first run, not a failure.
+    (void)build_data::nodes::initialize(module);
+    (void)build_data::records::initialize(module);
     (void)record_claims::initialize(module);
     // A cache hit already has the complete plug relation, so publish canonical profile identities
     // in the first State image.  On a first cache build, snapshot preparation repeats this step

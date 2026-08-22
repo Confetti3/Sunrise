@@ -831,6 +831,9 @@
     <ClCompile Include="src\state\build_data\nodes\node_catalog.cpp" />
     <ClCompile Include="src\state\record_claims\record_claims.cpp" />
     <ClCompile Include="src\state\lore\lore_grant.cpp" />
+    <ClCompile Include="src\state\activity\current_activity.cpp" />
+    <ClCompile Include="src\state\build_data\nodes\node_persistence.cpp" />
+    <ClCompile Include="src\state\build_data\records\record_persistence.cpp" />
   </ItemGroup>
   <ItemGroup Condition="'$(SunriseRunClangTidy)'=='true'">
     <ClCompile Remove="vendor\detours\detours.cpp" />
@@ -1443,6 +1446,9 @@
     <ClInclude Include="src\state\build_data\nodes\node_catalog.h" />
     <ClInclude Include="src\state\record_claims\record_claims.h" />
     <ClInclude Include="src\state\lore\lore_grant.h" />
+    <ClInclude Include="src\state\activity\current_activity.h" />
+    <ClInclude Include="src\state\build_data\nodes\node_persistence.h" />
+    <ClInclude Include="src\state\build_data\records\record_persistence.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

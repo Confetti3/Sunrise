@@ -70,4 +70,16 @@ void clear() noexcept;
 /** @return Number of installed-build collectible mappings. */
 [[nodiscard]] std::size_t count() noexcept;
 
+/**
+ * Finds the collectible that unlocks one lore row.
+ *
+ * The reverse of the record join: a chapter record and the collectible that grants it name the same
+ * lore row, so this reaches the collectible whose item the account has to own for the lore itself to
+ * be readable rather than obscured.
+ * @param loreRow Lore table row.
+ * @param definition Receives the collectible.
+ * @return True when a collectible names that row.
+ */
+[[nodiscard]] bool find_by_lore_row(std::uint16_t loreRow, Definition& definition) noexcept;
+
 } // namespace sunrise::state::build_data::collectibles
