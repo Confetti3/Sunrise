@@ -4,6 +4,7 @@
  * was read so the caller can record one arrival receipt. None of them acts on what it read.
  */
 
+#include "../../../../../state/lore/lore_grant.h"
 #include <vector>
 #include <algorithm>
 #include "../../../../../state/build_data/collectibles/collectible_catalog.h"
@@ -342,42 +343,41 @@ Framed frame_incident(const message::Request& request) noexcept {
             const std::uint64_t sequence = take(32);
             const std::uint64_t kindRaw = take(3);
             const std::uint64_t identity = take(64);
-            // The nested block follows the header. Its first field is a type-25 tagged union
-            // occupying bits 99 to 122, and the collectible sits in its low fifteen bits -- the same
-            // width Collections uses for a native row index. The bound was not guessed: the bubble
-            // hash appears at bits 126, 158 and 190, three consecutive u32 fields of the nested
-            // block, which fixes where the union has to end, and the character SOID lands at bit 35
-            // exactly where the header schema puts it.
-            // Only type 2 has this layout. Every other type code selects a different schema, and
-            // decoding one of those against this one produces a plausible looking index that means
-            // nothing: target 1121 is type 13 and yielded 21830 that way.
+            // Which book. The payload does not name the chapter it granted -- its only
+            // per-object content is a position -- so the reward is chosen here instead. The bubble
+            // does say which activity the pickup happened in, and an activity's pickups feed one
+            // book, which is a far smaller association than one entry per object in the world.
+            //
+            // The bubble sits at bit 126, the first of three consecutive u32 fields of the nested
+            // block. That position is measured: the same hash appears at 126, 158 and 190, and the
+            // character SOID lands at bit 35 exactly where the header schema puts it.
+            //
+            // Only type 2 carries this layout. Another type read against it yields a plausible
+            // number that means nothing, which is how a counter was once mistaken for an identity.
             constexpr std::int32_t kPickupTypeCode = 2;
+            constexpr std::size_t kBubbleBit = 126;
             state::build_data::sobjects::Definition row{};
             const bool pickupType =
                 state::build_data::sobjects::find(static_cast<std::uint16_t>(parsed.primaryTarget),
                                                   row)
                 && row.typeCode == kPickupTypeCode;
-
-            constexpr std::size_t kUnionBits = 24;
-            constexpr std::size_t kIndexBits = 15;
-            std::uint32_t collectibleIndex = 0;
-            if (pickupType && body.size() * 8 >= 99 + kUnionBits) {
-                const std::uint64_t unionField = take(kUnionBits);
-                collectibleIndex =
-                    static_cast<std::uint32_t>(unionField & ((1U << kIndexBits) - 1U));
-                state::build_data::collectibles::Definition collectible{};
-                if (state::build_data::collectibles::find(
-                        static_cast<std::uint16_t>(collectibleIndex), collectible)) {
-                    report(core::log::Level::info,
-                           "ev=activity stage=collectible index=%u hash=0x%08X item=%u",
-                           collectibleIndex,
-                           collectible.collectibleHash,
-                           static_cast<unsigned>(collectible.itemDefinitionIndex));
-                } else {
-                    report(core::log::Level::warn,
-                           "ev=activity stage=collectible index=%u result=unknown rows=%zu",
-                           collectibleIndex, state::build_data::collectibles::count());
+            if (pickupType && body.size() * 8 >= kBubbleBit + 32) {
+                std::uint32_t bubble = 0;
+                for (std::size_t step = 0; step < 32; ++step) {
+                    const std::size_t at = kBubbleBit + step;
+                    const auto byte = static_cast<std::uint8_t>(body[at / 8]);
+                    bubble = (bubble << 1U) | ((byte >> (7 - (at % 8))) & 1U);
                 }
+                const std::uint16_t node = state::lore::book_for_bubble(bubble);
+                const state::lore::GrantOutcome outcome = state::lore::grant_next_chapter(node);
+                report(outcome == state::lore::GrantOutcome::granted ? core::log::Level::info
+                                                                     : core::log::Level::warn,
+                       "ev=activity stage=lore bubble=0x%08X node=%u result=%s record=%u",
+                       bubble, static_cast<unsigned>(node),
+                       state::lore::grant_outcome_name(outcome),
+                       static_cast<unsigned>(outcome == state::lore::GrantOutcome::granted
+                                                 ? state::lore::last_granted_record()
+                                                 : 0));
             }
 
             report(core::log::Level::info,

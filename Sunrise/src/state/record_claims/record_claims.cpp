@@ -370,6 +370,12 @@ std::size_t apply_character_node_progress(std::span<std::int32_t> characterValue
     return progress.written;
 }
 
+/** @return True when this index is already held. */
+bool claimed(std::uint16_t flagIndex) noexcept {
+    const std::lock_guard<std::mutex> guard(g_lock);
+    return claimed_locked(flagIndex);
+}
+
 /** @return Total score of every held claim. */
 std::uint32_t total_score() noexcept {
     const std::lock_guard<std::mutex> guard(g_lock);

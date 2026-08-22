@@ -830,6 +830,7 @@
     <ClCompile Include="src\state\build_data\nodes\node_build_data_runtime.cpp" />
     <ClCompile Include="src\state\build_data\nodes\node_catalog.cpp" />
     <ClCompile Include="src\state\record_claims\record_claims.cpp" />
+    <ClCompile Include="src\state\lore\lore_grant.cpp" />
   </ItemGroup>
   <ItemGroup Condition="'$(SunriseRunClangTidy)'=='true'">
     <ClCompile Remove="vendor\detours\detours.cpp" />
@@ -1441,6 +1442,7 @@
     <ClInclude Include="src\state\build_data\nodes\definition.h" />
     <ClInclude Include="src\state\build_data\nodes\node_catalog.h" />
     <ClInclude Include="src\state\record_claims\record_claims.h" />
+    <ClInclude Include="src\state\lore\lore_grant.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>
