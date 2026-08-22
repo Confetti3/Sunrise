@@ -13,6 +13,7 @@
 #include "hash_names/definition.h"
 #include "inventory/buckets/definition.h"
 #include "items/details/definition.h"
+#include "records/definition.h"
 #include "items/item_catalog.h"
 #include "items/socket_plugs/definition.h"
 #include "material_requirements/material_requirement_catalog.h"
@@ -95,6 +96,27 @@ publish_item_definitions(std::span<const items::Definition> definitions) noexcep
                                               items::Definition& definition) noexcept;
 
 /** @return True when the whole dense collectible definition table is in State. */
+
+/** @return True when the whole record definition table is in State. */
+[[nodiscard]] bool record_definitions_ready() noexcept;
+
+/**
+ * Publishes the whole record definition table in one step.
+ * @param definitions Complete dense rows in native record order.
+ * @return True when the rows pass the domain checks and fit fixed State storage.
+ */
+[[nodiscard]] bool
+publish_record_definitions(std::span<const records::Definition> definitions) noexcept;
+
+/**
+ * Resolves the native record row an opcode-1801 claim names.
+ * @param definitionIndex Native record row carried by the claim.
+ * @param definition Receives the row, including its completion flag index, only on success.
+ * @return True when the table is complete and the row exists.
+ */
+[[nodiscard]] bool find_record_definition(std::uint16_t definitionIndex,
+                                          records::Definition& definition) noexcept;
+
 [[nodiscard]] bool collectible_definitions_ready() noexcept;
 
 /**

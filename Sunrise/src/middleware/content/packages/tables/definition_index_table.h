@@ -32,6 +32,40 @@ inline constexpr std::uint16_t kAbsentPackageId = 0xFFFFU;
 inline constexpr std::uint32_t kItemIndexTableClass = 0x80807BE8U;
 /** The investment root holds the installed collectible definition table at this slot. */
 /** Investment root slot of the unlock flag mapping tables. */
+/** The investment root holds the progression definition table at this slot. */
+/** Investment root slot of the records and lore table. */
+inline constexpr std::size_t kRecordTableSlot = 72;
+/** One record row, wider than any field this pass reads. */
+inline constexpr std::size_t kRecordRowStride = 216;
+/** Unlock slot of the record's completion flag, or a non-positive value when it has none. */
+inline constexpr std::size_t kRecordCompletionFlagOffset = 100;
+/** Points the record is worth. Zero for lore and for the interval records that score per step. */
+inline constexpr std::size_t kRecordScoreOffset = 92;
+/** A record names its category's value slot here. The record's own bar reads the next slot up. */
+inline constexpr std::size_t kRecordCategoryExpressionField = 120;
+/** Investment root slot of the four unlock value mapping tables. */
+inline constexpr std::size_t kUnlockValueMapTableSlot = 113;
+/** Array descriptor of the account object's value mapping table. */
+inline constexpr std::size_t kAccountValueMapDescriptor = 8;
+/** One unlock expression instruction: an opcode then its operand. */
+inline constexpr std::size_t kUnlockInstructionStride = 8;
+/** Opcodes run to fifteen; anything wider means the field is not an expression. */
+inline constexpr std::uint32_t kUnlockOpcodeCeiling = 20;
+/** The opcode that reads a value slot. */
+inline constexpr std::uint32_t kUnlockReadValueOpcode = 10;
+/** The opcode that tests a flag. */
+inline constexpr std::uint32_t kUnlockReadFlagOpcode = 1;
+/** Array payloads begin after a sixteen byte header. */
+inline constexpr std::size_t kHeaderSkip = 16;
+/**
+ * Upper bound on how many instructions a node expression may hold.
+ *
+ * This was thirty-two, which was a guess rather than a measurement, and it silently hid a real gate:
+ * one lore book carries fifty-nine instructions, so its expression was rejected before it was read
+ * and the category looked as though nothing gated it at all. The bound exists only to stop a wild
+ * count being walked as if it were an expression, so it is set well above anything observed.
+ */
+inline constexpr std::int64_t kNodeExpressionCapacity = 128;
 inline constexpr std::size_t kUnlockFlagMapTableSlot = 111;
 /** Array descriptor of the account object's flag mapping table. */
 inline constexpr std::size_t kAccountFlagMapDescriptor = 8;
