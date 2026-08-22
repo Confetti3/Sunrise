@@ -1,6 +1,15 @@
+#include "../../../../state/build_data/records/record_persistence.h"
+#include "../../../../state/build_data/records/record_catalog.h"
+#include "../../../../state/build_data/nodes/node_persistence.h"
 #include <atomic>
-
+#include "../../../../core/logging/log.h"
+#include "../../../../state/build_data/records/definition.h"
+#include <cstdio>
+#include <array>
+#include <span>
+#include <vector>
 #include "../../../../state/build_data/nodes/node_catalog.h"
+#include "../../../../state/record_claims/record_claims.h"
 #include "account_encoder.h"
 
 #include <algorithm>
@@ -8,8 +17,6 @@
 #include <limits>
 
 #include "../../../../state/build_data/runtime.h"
-#include "../../../../state/build_data/records/definition.h"
-#include "../../../../state/record_claims/record_claims.h"
 #include "../../../../state/unlocks/unlocks_runtime.h"
 #include "../progression/progression_bank_keys.h"
 #include "layout.h"
@@ -98,14 +105,32 @@ bool encode(const state::AccountState& state, std::span<std::byte> output) noexc
     // Acquired flags and objective progress are authored policy, published once per process.
     const state::unlocks::Table& unlocks = state::unlocks::get();
     object.acquiredFlags = unlocks.accountFlags;
-    // Claims arrive after boot, so they cannot be in the authored policy. Lay them over the
-    // bank here, which is the one place every Family-4 account image passes through.
-    (void)state::record_claims::apply(object.acquiredFlags);
-    // Lore book categories are gated on a flag they cannot set by being played: with no title shown
-    // there is nothing inside to claim, and nothing to claim leaves the gate shut.
-    (void)state::build_data::nodes::apply_visibility(object.acquiredFlags);
     object.profileUnlockFlags = unlocks.profileFlags;
     object.objectiveValues = unlocks.objectiveValues;
+    // The node and record tables are not in the build data cache, so on a warm start the package
+    // pass is skipped and both are empty. The account image needs them: without nodes no book gate
+    // is satisfied and every book reads as unnamed. Publishing here, latched on success, is what
+    // makes a warm start look like a cold one.
+    {
+        static std::atomic<bool> published{false};
+        if (!published.load(std::memory_order_relaxed)) {
+            const bool haveNodes = state::build_data::nodes::count() != 0
+                                   || state::build_data::nodes::load_and_publish();
+            const bool haveRecords = state::build_data::records::count() != 0
+                                     || state::build_data::records::load_and_publish();
+            if (haveNodes && haveRecords) {
+                published.store(true, std::memory_order_relaxed);
+            }
+        }
+    }
+
+    // Claims are laid over the authored bank on the way out, so a claimed record reads Acquired on
+    // the next image. The authored policy itself is immutable and is never edited.
+    (void)state::record_claims::apply(object.acquiredFlags);
+    // A lore book's category is gated: some read a flag, some test their own progress value. A book
+    // gated on progress cannot open by being played, since with no title shown there is nothing
+    // inside to collect. Satisfying the gate is what makes the book readable at all.
+    (void)state::build_data::nodes::apply_visibility(object.acquiredFlags);
     // Triumph Score is a plain replicated value the client never derives, so total the claims made
     // this session over whatever the policy authored and publish the sum.
     if (state::build_data::records::kTriumphScoreValueIndex < object.objectiveValues.size()) {
@@ -115,6 +140,7 @@ bool encode(const state::AccountState& state, std::span<std::byte> output) noexc
     // A node's progress bar reads a value slot and shows whatever it holds, so the claimed children
     // have to be counted into it here or the bar never moves.
     (void)state::record_claims::apply_node_progress(object.objectiveValues);
+
     for (layout::CharacterUnlockBlock& block : object.characterUnlocks) {
         block.flags = unlocks.characterFlags;
     }

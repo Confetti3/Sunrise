@@ -1,3 +1,4 @@
+#include "../../../../state/activity/current_activity.h"
 #include "activity_host_manager_route.h"
 
 #include <array>
@@ -59,6 +60,10 @@ choose_copy(const request_selection::ActivityManagerSelectionResult& parsed) noe
  * @param source Parsed selection carrying a package name.
  */
 void report_selection(const request_selection::ActivityManagerSelection& source) noexcept {
+    // Keep the bubble: a pickup later needs to know which activity it happened in, and the incident
+    // that reports it carries the bubble at a different place per incident type.
+    state::activity::set_current_bubble(source.hasArrivalBubbleHash ? source.arrivalBubbleHash
+                                                                    : state::activity::kNoBubble);
     std::array<char, core::log::kLineCapacity> line{};
     const int written =
         std::snprintf(line.data(),

@@ -38,6 +38,19 @@ void clear() noexcept;
 [[nodiscard]] bool claim(std::uint16_t flagIndex, std::uint16_t scoreValue) noexcept;
 
 /**
+ * Marks one record complete but unclaimed, so the client offers it as claimable.
+ *
+ * Finding lore completes a triumph; claiming it is a separate act by the player. A record marked
+ * this way and later claimed carries the claim instead, so the two never conflict.
+ * @param flagIndex Mapping-table row whose object byte feeds the record's completion flag.
+ * @return True when the index is in range and the record is now marked.
+ */
+[[nodiscard]] bool mark_claimable(std::uint16_t flagIndex) noexcept;
+
+/** @return True when this index is marked claimable, whether or not it is also claimed. */
+[[nodiscard]] bool claimable(std::uint16_t flagIndex) noexcept;
+
+/**
  * Lays every held claim over one account flag bank.
  * @param accountFlags Bank already filled from the authored policy.
  * @return Number of bytes this changed, so a caller can tell a no-op from real work.

@@ -32,6 +32,17 @@ using ProgressionBank = std::array<ProgressionLanes, build_data::progressions::k
 
 /** A set acquired flag is stored as its biased 2-bit true value. */
 inline constexpr std::uint8_t kFlagSet = 2;
+
+/**
+ * A record that is complete but not yet claimed, which the client offers as claimable.
+ *
+ * The flag reads as a small enum rather than a boolean: zero and two are the values the authored
+ * policy uses, and one is unused by it. Finding lore should leave a triumph waiting to be claimed
+ * rather than claiming it, which is what this value is for. That reading is inferred from the gap
+ * in the enum, not measured, so a record that stays invisible when set to it is the sign it is
+ * wrong.
+ */
+inline constexpr std::uint8_t kFlagAvailable = 1;
 /** A clear acquired flag is stored as zero. */
 inline constexpr std::uint8_t kFlagClear = 0;
 

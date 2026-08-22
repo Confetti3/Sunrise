@@ -145,6 +145,9 @@ bool build_records(const reader::Source& source,
         domain::Definition& definition = output[static_cast<std::size_t>(row)];
         definition = {};
         definition.definitionIndex = static_cast<std::uint16_t>(row);
+        // The lore row this record displays, or 0xFFFF for a book's parent triumph.
+        std::memcpy(&definition.loreRow, blob.data() + at + tables::kLoreRowOffset,
+                    sizeof definition.loreRow);
         // The shipped table tops out at 500, so anything wider is not a score and is dropped.
         definition.scoreValue = score <= 0xFFFFU ? static_cast<std::uint16_t>(score) : 0U;
         std::int16_t categorySlot = 0;
@@ -162,6 +165,22 @@ bool build_records(const reader::Source& source,
         }
         ++count;
     }
+    // TEMPORARY: what score a lore record actually carries in this build. The published manifest
+    // shows ScoreValue 0 for Confessions Entry I, which does not match the game, so read the rows
+    // rather than trust either. 1707 is the book's parent triumph and 1708 to 1716 its chapters.
+    for (std::uint64_t row = 1707; row <= 1716 && row < count; ++row) {
+        std::array<char, 180> line{};
+        const int told = std::snprintf(
+            line.data(), line.size(), "ev=lorescore record=%llu score=%u lore_row=%u flag=%u",
+            static_cast<unsigned long long>(row), static_cast<unsigned>(output[row].scoreValue),
+            static_cast<unsigned>(output[row].loreRow),
+            static_cast<unsigned>(output[row].completionFlagIndex));
+        if (told > 0) {
+            core::log::write(core::log::Channel::client, core::log::Level::info,
+                             {line.data(), static_cast<std::size_t>(told)});
+        }
+    }
+
     report("ok", static_cast<unsigned long long>(count));
     return count != 0;
 }

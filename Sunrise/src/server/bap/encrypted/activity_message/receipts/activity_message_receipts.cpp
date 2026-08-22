@@ -4,6 +4,13 @@
  * was read so the caller can record one arrival receipt. None of them acts on what it read.
  */
 
+#include "../../../../../state/activity/current_activity.h"
+#include "../../../../../state/lore/lore_grant.h"
+#include <vector>
+#include <algorithm>
+#include "../../../../../state/build_data/collectibles/collectible_catalog.h"
+#include "../../../../../state/build_data/sobjects/sobject_catalog.h"
+#include "../../../../bap/internal.h"
 #include "activity_message_receipts.h"
 
 #include <array>
@@ -294,6 +301,106 @@ Framed frame_incident(const message::Request& request) noexcept {
            parsed.selectorLength,
            static_cast<unsigned>(parsed.hasOptionalBlock),
            parsed.payloadLength);
+    // Resolve the target against the definition table it indexes, so an incident says what it is
+    // rather than carrying a bare number. Nothing acts on it yet; this is what acting on it needs.
+    if (accepted) {
+        state::build_data::sobjects::Definition definition{};
+        if (state::build_data::sobjects::find(
+                static_cast<std::uint16_t>(parsed.primaryTarget), definition)) {
+            report(core::log::Level::info,
+                   "ev=activity stage=sobject target=%u hash=0x%08X type=%d group=%u ordinal=%u",
+                   parsed.primaryTarget,
+                   definition.nameHash,
+                   definition.typeCode,
+                   static_cast<unsigned>(definition.selectorGroup),
+                   static_cast<unsigned>(definition.nodeOrdinal));
+        } else {
+            report(core::log::Level::warn,
+                   "ev=activity stage=sobject target=%u result=unresolved rows=%zu",
+                   parsed.primaryTarget,
+                   state::build_data::sobjects::count());
+        }
+
+        // The type payload, which is what the schema describes. The parser separates it from
+        // the envelope; reading the whole message body instead puts every field at an offset the
+        // schema does not predict.
+        const std::span<const std::byte> body{parsed.payload.data(), parsed.payloadLength};
+
+        // The common header every type payload starts with: definition 0x80809512. A u32 sequence,
+        // then a three bit discriminator carrying a bias of one, then a 64 bit identity read only
+        // when that discriminator selects the player branch. Decoding it is the cheapest check that
+        // the payload is being read from the right place: the identity should be a SOID.
+        if (body.size() >= 13) {
+            std::uint64_t cursor = 0;
+            const auto take = [&body, &cursor](std::size_t width) noexcept -> std::uint64_t {
+                std::uint64_t value = 0;
+                for (std::size_t step = 0; step < width; ++step) {
+                    const std::size_t at = cursor + step;
+                    const auto byte = static_cast<std::uint8_t>(body[at / 8]);
+                    value = (value << 1U) | ((byte >> (7 - (at % 8))) & 1U);
+                }
+                cursor += width;
+                return value;
+            };
+            const std::uint64_t sequence = take(32);
+            const std::uint64_t kindRaw = take(3);
+            const std::uint64_t identity = take(64);
+            // Which book. The payload does not name the chapter it granted -- its only
+            // per-object content is a position -- so the reward is chosen here instead. The bubble
+            // does say which activity the pickup happened in, and an activity's pickups feed one
+            // book, which is a far smaller association than one entry per object in the world.
+            //
+            // The bubble sits at bit 126, the first of three consecutive u32 fields of the nested
+            // block. That position is measured: the same hash appears at 126, 158 and 190, and the
+            // character SOID lands at bit 35 exactly where the header schema puts it.
+            //
+            // Only type 2 carries this layout. Another type read against it yields a plausible
+            // number that means nothing, which is how a counter was once mistaken for an identity.
+            // A vase reports type 2 and a dead ghost type 10. Each type has its own schema, so
+            // the bubble sits somewhere different in each payload, and more types will turn up.
+            // The activity selection already named the bubble once, so it is read from there and
+            // the payload is not decoded at all.
+            constexpr std::array<std::int32_t, 2> kPickupTypeCodes{2, 10};
+            state::build_data::sobjects::Definition row{};
+            bool pickupType = false;
+            if (state::build_data::sobjects::find(static_cast<std::uint16_t>(parsed.primaryTarget),
+                                                  row)) {
+                for (const std::int32_t code : kPickupTypeCodes) {
+                    pickupType = pickupType || row.typeCode == code;
+                }
+            }
+            if (pickupType) {
+                const std::uint32_t bubble = state::activity::current_bubble();
+                const std::uint16_t node = state::lore::book_for_bubble(bubble);
+                const state::lore::GrantOutcome outcome = state::lore::grant_next_chapter(node);
+                if (outcome == state::lore::GrantOutcome::granted) {
+                    // Nothing else will stage an account image for this peer: a pickup is not a web
+                    // service transaction and has no response to carry the change back. Arm every
+                    // peer, the origin included, so the chapter appears without a relaunch and a
+                    // second pickup in the same run sees the first one already held.
+                    bap::arm_account_resync_everywhere();
+                }
+                report(outcome == state::lore::GrantOutcome::granted ? core::log::Level::info
+                                                                     : core::log::Level::warn,
+                       "ev=activity stage=lore bubble=0x%08X node=%u result=%s record=%u item=%d",
+                       bubble, static_cast<unsigned>(node),
+                       state::lore::grant_outcome_name(outcome),
+                       static_cast<unsigned>(outcome == state::lore::GrantOutcome::granted
+                                                 ? state::lore::last_granted_record()
+                                                 : 0),
+                       state::lore::last_item_granted() ? 1 : 0);
+            }
+
+            report(core::log::Level::info,
+                   "ev=activity stage=header target=%u sequence=%llu kind_raw=%llu "
+                   "identity=0x%016llX",
+                   parsed.primaryTarget,
+                   static_cast<unsigned long long>(sequence),
+                   static_cast<unsigned long long>(kindRaw),
+                   static_cast<unsigned long long>(identity));
+        }
+    }
+
     if (!accepted) {
         // A refused target index would index the consumer's table unbounded, so the body is kept
         // and never relayed.

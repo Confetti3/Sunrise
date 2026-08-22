@@ -1,3 +1,4 @@
+#include "../../../../state/build_data/records/record_persistence.h"
 #include "../../../../state/build_data/nodes/node_persistence.h"
 #include <Windows.h>
 
@@ -166,7 +167,9 @@ bool build() noexcept {
                                 nodeCount)) {
                     if (state::build_data::publish_node_definitions(
                             std::span(storage.nodeRows).first(nodeCount))) {
-                        // Kept in its own file, so the next start does not need this pass at all.
+                        // Kept in its own file: the build data cache does not carry this domain, so
+                        // without it a warm start runs with no node table and nothing can be
+                        // granted.
                         (void)state::build_data::nodes::store(
                             std::span(storage.nodeRows).first(nodeCount));
                     }
@@ -180,8 +183,14 @@ bool build() noexcept {
                                   storage.child,
                                   storage.recordRows,
                                   recordCount)) {
-                    (void)state::build_data::publish_record_definitions(
-                        std::span(storage.recordRows).first(recordCount));
+                    if (state::build_data::publish_record_definitions(
+                            std::span(storage.recordRows).first(recordCount))) {
+                        // Kept beside the node table and for the same reason: the build data cache
+                        // does not carry this domain, so a warm start would have no records and
+                        // nothing could resolve a chapter.
+                        (void)state::build_data::records::store(
+                            std::span(storage.recordRows).first(recordCount));
+                    }
                 }
             }
             if (!state::build_data::investment_constants_ready()) {

@@ -43,4 +43,15 @@ void clear() noexcept;
 /** @return Number of generated record definitions, read under the lock. */
 [[nodiscard]] std::size_t count() noexcept;
 
+/**
+ * Finds the record that displays one lore row.
+ *
+ * A collectible and the chapter record it completes name the same lore row, so this is the join
+ * between them. A book's parent triumph names no row and is never returned.
+ * @param loreRow Lore table row, from a collectible or from elsewhere.
+ * @param definition Receives the record.
+ * @return True when exactly one record displays that row.
+ */
+[[nodiscard]] bool find_by_lore_row(std::uint16_t loreRow, Definition& definition) noexcept;
+
 } // namespace sunrise::state::build_data::records

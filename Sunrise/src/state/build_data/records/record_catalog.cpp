@@ -55,6 +55,22 @@ bool snapshot(std::span<Definition> output, std::size_t& count) noexcept {
     return g_definitions.snapshot(output, count);
 }
 
+/** Finds the record that displays one lore row. */
+bool find_by_lore_row(std::uint16_t loreRow, Definition& definition) noexcept {
+    if (loreRow == kUnavailableLoreRow) {
+        return false;
+    }
+    const Lock::Shared guard(g_lock);
+    for (const Definition& row : g_definitions.rows()) {
+        if (row.loreRow != loreRow) {
+            continue;
+        }
+        definition = row;
+        return true;
+    }
+    return false;
+}
+
 /** @return Number of generated record definitions, read under the lock. */
 std::size_t count() noexcept {
     const Lock::Shared guard(g_lock);

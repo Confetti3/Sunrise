@@ -55,6 +55,14 @@ inline constexpr std::size_t kContainerCandidates = 16;
 /** Lock-owned storage kept off the caller stack, shared by every stage of the pass. */
 struct Storage {
     reader::Scratch scratch{};
+    /** Node rows held until the value slot and owned records are resolved. */
+    std::array<state::build_data::nodes::Definition,
+               state::build_data::nodes::kDefinitionCapacity>
+        nodeRows{};
+    /** Record rows held until the completion flag mapping is resolved. */
+    std::array<state::build_data::records::Definition,
+               state::build_data::records::kDefinitionCapacity>
+        recordRows{};
     std::vector<std::byte> container{};
     std::vector<std::byte> child{};
     std::vector<std::byte> root{};
@@ -84,16 +92,7 @@ struct Storage {
         entryBucketRows{};
     std::array<state::build_data::progressions::Definition,
                state::build_data::progressions::kDefinitionCapacity>
-        progressionRows{};
-    /** Record rows held until the completion flag mapping is resolved. */
-    std::array<state::build_data::records::Definition,
-               state::build_data::records::kDefinitionCapacity>
-        recordRows{};
-    /** Node rows held until the value slot and owned records are resolved. */
-    std::array<state::build_data::nodes::Definition,
-               state::build_data::nodes::kDefinitionCapacity>
-        nodeRows{};
-    std::array<state::build_data::collectibles::Definition,
+        progressionRows{};    std::array<state::build_data::collectibles::Definition,
                state::build_data::collectibles::kDefinitionCapacity>
         collectibleRows{};
     std::array<state::build_data::material_requirements::Definition,
@@ -394,6 +393,16 @@ void report(std::size_t published, const char* reason) noexcept;
  * @param root Investment root bytes.
  * @param itemDefinitionCount Number of rows in the installed item index table.
  * @return True when every tag, class, bound, and item link validates and publishes.
+ */
+/**
+ * Reads the records table and resolves each record's completion flag to a bank index.
+ * @param source Package source.
+ * @param scratch Reader scratch.
+ * @param root Investment root bytes.
+ * @param blob Scratch storage for the tables.
+ * @param output Row storage in native record order.
+ * @param count Receives the number of rows read.
+ * @return True when both tables read and every row fits.
  */
 [[nodiscard]] bool build_collectibles(const reader::Source& source,
                                       Storage& storage,
