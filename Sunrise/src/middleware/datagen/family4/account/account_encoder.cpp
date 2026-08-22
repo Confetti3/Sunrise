@@ -1,3 +1,4 @@
+#include "../../../../state/record_claims/record_claims.h"
 #include "account_encoder.h"
 
 #include <algorithm>
@@ -95,6 +96,9 @@ bool encode(const state::AccountState& state, std::span<std::byte> output) noexc
     object.acquiredFlags = unlocks.accountFlags;
     object.profileUnlockFlags = unlocks.profileFlags;
     object.objectiveValues = unlocks.objectiveValues;
+    // Claims are laid over the authored bank on the way out, so a claimed record reads Acquired on
+    // the next image. The authored policy itself is immutable and is never edited.
+    (void)state::record_claims::apply(object.acquiredFlags);
     for (layout::CharacterUnlockBlock& block : object.characterUnlocks) {
         block.flags = unlocks.characterFlags;
     }
