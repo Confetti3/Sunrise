@@ -212,6 +212,8 @@ bool process(const ServiceRoute& route,
             web_service::mutation_if<state::PendingProfileItemAcquisition>(webOutcome);
         const auto* itemDismantle =
             web_service::mutation_if<state::PendingItemDismantle>(webOutcome);
+        const auto* recordRewardGrant =
+            web_service::mutation_if<state::PendingRecordRewardGrant>(webOutcome);
         if (equipmentSwap != nullptr) {
             // Equip is an optimistic Character-screen action. Its status-pair value is the exact
             // Family-4 revision whose following Queuez frame makes it authoritative. Stage that
@@ -450,12 +452,68 @@ bool process(const ServiceRoute& route,
                 transaction.pending = *itemDismantle;
             }
         }
+        if (recordRewardGrant != nullptr) {
+            // A record-claim reward names an item directly rather than a Collections row, so
+            // which acquisition kind actually lands it depends on the granted item's own
+            // inventory bucket. Stage whichever alternative resolved, exactly like the
+            // corresponding opcode-1820 branch above, so the reply below promises the same
+            // version the staged Family-4 update actually carries.
+            auto& transaction = outcome.transaction.emplace<RecordRewardGrantTransaction>();
+            bool staged = false;
+            std::int32_t stagedVersion = 0;
+            if (const auto* itemGrant =
+                    std::get_if<state::PendingItemAcquisition>(&recordRewardGrant->grant)) {
+                auto& update = transaction.update.emplace<queuez::ItemAcquisition>();
+                staged = queuez::stage_item_acquisition(queuezState,
+                                                        itemGrant->accountSoid,
+                                                        itemGrant->characterSoid,
+                                                        itemGrant->acquiredInstanceSoid,
+                                                        itemGrant->profileChanged,
+                                                        update);
+                stagedVersion = update.after.family4Version;
+            } else if (const auto* profileGrant = std::get_if<state::PendingProfileItemAcquisition>(
+                           &recordRewardGrant->grant)) {
+                auto& update = transaction.update.emplace<queuez::ProfileItemAcquisition>();
+                staged = queuez::stage_profile_item_acquisition(queuezState,
+                                                                profileGrant->accountSoid,
+                                                                profileGrant->acquiredInstanceSoid,
+                                                                profileGrant->actionSource,
+                                                                profileGrant->appended,
+                                                                update);
+                stagedVersion = update.after.family4Version;
+            }
+            if (!staged) {
+                core::log::write(core::log::Channel::server,
+                                 core::log::Level::warn,
+                                 "ev=ws1801 stage=reward_preflight result=fail");
+                // Keep the plain claim reply below: the flag-bank claim already committed, so a
+                // reward that cannot be staged falls back to the ordinary account resync instead
+                // of failing the whole request.
+                outcome.transaction = std::monostate{};
+            } else {
+                middleware::web_service::StatusResponse status{};
+                status.value = stagedVersion;
+                if (!middleware::web_service::encode_response(
+                        message,
+                        middleware::web_service::ResponseShape::statusPair,
+                        status,
+                        output,
+                        written)) {
+                    core::log::write(core::log::Channel::server,
+                                     core::log::Level::warn,
+                                     "ev=ws1801 stage=reward_response result=fail");
+                    return false;
+                }
+                transaction.pending = *recordRewardGrant;
+            }
+        }
         // A pick that names the resident character moves nothing, so staging refuses it and the
         // reply still stands on its own.
-        if (webOutcome.hasRecordClaim) {
+        if (webOutcome.hasRecordClaim && std::holds_alternative<std::monostate>(outcome.transaction)) {
             // Every other client action promises the exact Family-4 revision that makes it
             // authoritative, and the claim was answering with the sentinel instead. The account
-            // resync staged later carries the next version, so promise that one here.
+            // resync staged later carries the next version, so promise that one here. A staged
+            // reward above already encoded its own correlated reply and is skipped here.
             middleware::web_service::StatusResponse status{};
             status.value = queuezState.family4Version + 1;
             if (!middleware::web_service::encode_response(

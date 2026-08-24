@@ -36,6 +36,14 @@ inline constexpr std::uint16_t kUnavailableValueIndex = 0xFFFFU;
 struct Definition {
     /** Native record row, which is what an opcode-1801 claim names. */
     std::uint16_t definitionIndex{};
+    /**
+     * Authored DestinyRecordDefinition hash, joining this row to Bungie's manifest.
+     *
+     * Read from row offset +0x28, verified by joining 48 rows to the manifest by name; offset +0
+     * holds degenerate values and is not the hash. Used to look up this record's manifest-sourced
+     * reward items, kept apart from the settings-authored override table.
+     */
+    std::uint32_t definitionHash{};
     /** Account flag bank mapping row, or kUnavailableFlagIndex when the slot is unaddressable. */
     std::uint16_t completionFlagIndex{kUnavailableFlagIndex};
     /**

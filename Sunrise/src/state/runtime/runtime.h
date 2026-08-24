@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <variant>
 
 #include "state.h"
 
@@ -108,6 +109,8 @@ struct PendingItemAcquisition {
     std::uint8_t equipmentSlot{};
     std::uint8_t materialRequirementCount{};
     bool profileChanged{};
+    /** True when the item was granted directly, with no Collections row and no material cost. */
+    bool freeGrant{};
     bool prepared{};
 };
 
@@ -137,7 +140,19 @@ struct PendingProfileItemAcquisition {
     /** True only for installed profile mod/shader rows materialized as Family-4 residents. */
     bool actionSource{};
     bool appended{};
+    /** True when the stack was granted directly, with no Collections row and no material cost. */
+    bool freeGrant{};
     bool prepared{};
+};
+
+/**
+ * Record-claim reward grant prepared for staging.
+ * A record reward names an item directly rather than a Collections row, so the installed item's
+ * own inventory bucket decides which acquisition kind actually lands it; exactly one alternative
+ * of this pair is ever prepared.
+ */
+struct PendingRecordRewardGrant {
+    std::variant<PendingItemAcquisition, PendingProfileItemAcquisition> grant{};
 };
 
 /** One profile material actually credited by a prepared dismantle. */
@@ -330,6 +345,20 @@ void shutdown() noexcept;
                                             std::uint32_t definitionHash,
                                             PendingItemAcquisition& mutation) noexcept;
 
+/**
+ * Prepares one installed equippable definition as a new selected-character inventory instance,
+ * granted directly rather than pulled through a Collections row.
+ *
+ * Used by record-claim reward grants: no material requirement set is charged, and the mutation
+ * carries no collectible to re-verify at commit.
+ *
+ * @param itemDefinitionIndex Native item-definition row the reward names.
+ * @param mutation Gets a checked after-image without changing account State.
+ * @return True when the item and every existing loadout row resolve with one free native row.
+ */
+[[nodiscard]] bool prepare_item_acquisition_for_item(std::uint16_t itemDefinitionIndex,
+                                                     PendingItemAcquisition& mutation) noexcept;
+
 /** Builds the exact full-account after-image while a prepared item pull remains current. */
 [[nodiscard]] bool preview_item_acquisition(const PendingItemAcquisition& mutation,
                                             AccountState& after) noexcept;
@@ -358,6 +387,23 @@ void shutdown() noexcept;
 prepare_profile_item_acquisition(std::uint16_t collectibleIndex,
                                  std::uint32_t definitionHash,
                                  PendingProfileItemAcquisition& mutation) noexcept;
+
+/**
+ * Prepares one installed profile-owned stackable definition for a direct grant, with no Collections
+ * row and no material cost.
+ *
+ * Used by record-claim reward grants. An existing non-full stack is incremented by `quantity`;
+ * otherwise a new dense State entry is appended, still capped at the definition's max stack size.
+ *
+ * @param itemDefinitionIndex Native item-definition row the reward names.
+ * @param quantity Units to grant. Must be positive and must fit the definition's max stack size.
+ * @param mutation Gets the checked profile before/after images without changing account State.
+ * @return True when the definition belongs to the main profile array and the units fit.
+ */
+[[nodiscard]] bool
+prepare_profile_item_acquisition_for_item(std::uint16_t itemDefinitionIndex,
+                                          std::int32_t quantity,
+                                          PendingProfileItemAcquisition& mutation) noexcept;
 
 /**
  * Materializes a prepared profile acquisition over the current account only while its complete

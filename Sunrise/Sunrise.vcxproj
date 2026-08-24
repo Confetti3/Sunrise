@@ -830,6 +830,9 @@
     <ClCompile Include="src\state\build_data\nodes\node_persistence.cpp" />
     <ClCompile Include="src\state\build_data\records\record_build_data_runtime.cpp" />
     <ClCompile Include="src\state\build_data\records\record_catalog.cpp" />
+    <ClCompile Include="src\state\build_data\records\rewards\reward_build_data_runtime.cpp" />
+    <ClCompile Include="src\state\build_data\records\rewards\reward_catalog.cpp" />
+    <ClCompile Include="src\state\build_data\records\rewards\reward_persistence.cpp" />
     <ClCompile Include="src\state\record_claims\record_claims.cpp" />
     <ClCompile Include="src\state\activity\current_activity.cpp" />
     <ClCompile Include="src\state\build_data\records\record_persistence.cpp" />
@@ -1446,6 +1449,9 @@
     <ClInclude Include="src\state\build_data\nodes\node_persistence.h" />
     <ClInclude Include="src\state\build_data\records\definition.h" />
     <ClInclude Include="src\state\build_data\records\record_catalog.h" />
+    <ClInclude Include="src\state\build_data\records\rewards\definition.h" />
+    <ClInclude Include="src\state\build_data\records\rewards\reward_catalog.h" />
+    <ClInclude Include="src\state\build_data\records\rewards\reward_persistence.h" />
     <ClInclude Include="src\state\record_claims\record_claims.h" />
     <ClInclude Include="src\state\activity\current_activity.h" />
     <ClInclude Include="src\state\build_data\records\record_persistence.h" />

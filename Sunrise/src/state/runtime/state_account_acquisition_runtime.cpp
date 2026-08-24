@@ -20,33 +20,33 @@ namespace item_details = build_data::items::details;
 namespace inventory_buckets = build_data::inventory::buckets;
 namespace family4_loadout = middleware::datagen::family4::loadout;
 
-/** Prepares one native-row-checked selected-character inventory insertion. */
-bool prepare_item_acquisition(std::uint16_t collectibleIndex,
-                              std::uint32_t definitionHash,
-                              PendingItemAcquisition& mutation) noexcept {
-    mutation = {};
-    const AccountState account = account_snapshot();
-    build_data::collectibles::Definition collectible{};
-    build_data::items::Definition grantedDefinition{};
-    if (definitionHash == authored_inventory::kNoDefinitionHash || !account::valid(account)
-        || !valid_profile_inventory(account)
-        || !build_data::find_collectible_definition(collectibleIndex, collectible)
-        || collectible.itemDefinitionIndex
-               == build_data::collectibles::kUnavailableItemDefinitionIndex
-        || !build_data::find_item_definition_index(collectible.itemDefinitionIndex,
-                                                   grantedDefinition)
-        || grantedDefinition.definitionHash != definitionHash) {
-        report_acquisition("prepare", "fail", "input", definitionHash, 0, 0, 0, 0, 0, 0);
-        return false;
-    }
+namespace {
 
-    AccountState chargedAccount{};
-    bool profileChanged = false;
-    if (!apply_collection_materials(account, collectible, chargedAccount, profileChanged)) {
-        report_acquisition("prepare", "fail", "materials", definitionHash, 0, 0, 0, 0, 0, 0);
-        return false;
-    }
-
+/**
+ * Shared tail of both `prepare_item_acquisition` and `prepare_item_acquisition_for_item`.
+ * Everything from the acquiring character's selection onward is identical whether the granted
+ * item and its (possible) material charge came from a Collections row or a direct reward; only
+ * how `definitionHash` and the charged account were produced differs between the two callers.
+ * @param account Uncharged snapshot the caller resolved the grant against.
+ * @param chargedAccount Account after any material requirement set was applied; equal to
+ * `account` for a free grant.
+ * @param profileChanged Whether `chargedAccount` differs from `account`.
+ * @param definitionHash Installed item definition hash being granted.
+ * @param collectibleIndex Collections row the grant re-verifies at commit, or 0 for a free grant.
+ * @param materialRequirementSetHash Charged requirement set, or 0 for a free grant.
+ * @param materialRequirementCount Charged requirement row count, or 0 for a free grant.
+ * @param freeGrant True when commit must skip the collectible re-verification entirely.
+ * @param mutation Gets a checked after-image without changing account State.
+ */
+[[nodiscard]] bool finalize_item_acquisition(const AccountState& account,
+                                             const AccountState& chargedAccount,
+                                             bool profileChanged,
+                                             std::uint32_t definitionHash,
+                                             std::uint16_t collectibleIndex,
+                                             std::uint32_t materialRequirementSetHash,
+                                             std::uint8_t materialRequirementCount,
+                                             bool freeGrant,
+                                             PendingItemAcquisition& mutation) noexcept {
     std::size_t characterIndex = account.characterCount;
     for (std::size_t index = 0; index < account.characterCount; ++index) {
         if (account.characters[index].selected) {
@@ -132,7 +132,7 @@ bool prepare_item_acquisition(std::uint16_t collectibleIndex,
     mutation.characterSoid = before.soid;
     mutation.acquiredInstanceSoid = instanceSoid;
     mutation.acquiredDefinitionHash = definitionHash;
-    mutation.materialRequirementSetHash = collectible.materialRequirementSetHash;
+    mutation.materialRequirementSetHash = materialRequirementSetHash;
     mutation.expectedNextInventorySerial = before.nextInventorySerial;
     mutation.characterIndex = characterIndex;
     mutation.expectedInventoryCount = before.inventory.count;
@@ -142,8 +142,9 @@ bool prepare_item_acquisition(std::uint16_t collectibleIndex,
     mutation.collectibleIndex = collectibleIndex;
     mutation.inventoryRow = inventoryRow;
     mutation.equipmentSlot = equipmentSlot;
-    mutation.materialRequirementCount = collectible.materialRequirementCount;
+    mutation.materialRequirementCount = materialRequirementCount;
     mutation.profileChanged = profileChanged;
+    mutation.freeGrant = freeGrant;
     mutation.prepared = true;
     report_acquisition("prepare",
                        "ok",
@@ -156,6 +157,63 @@ bool prepare_item_acquisition(std::uint16_t collectibleIndex,
                        equipmentSlot,
                        after.nextInventorySerial);
     return true;
+}
+
+} // namespace
+
+/** Prepares one native-row-checked selected-character inventory insertion. */
+bool prepare_item_acquisition(std::uint16_t collectibleIndex,
+                              std::uint32_t definitionHash,
+                              PendingItemAcquisition& mutation) noexcept {
+    mutation = {};
+    const AccountState account = account_snapshot();
+    build_data::collectibles::Definition collectible{};
+    build_data::items::Definition grantedDefinition{};
+    if (definitionHash == authored_inventory::kNoDefinitionHash || !account::valid(account)
+        || !valid_profile_inventory(account)
+        || !build_data::find_collectible_definition(collectibleIndex, collectible)
+        || collectible.itemDefinitionIndex
+               == build_data::collectibles::kUnavailableItemDefinitionIndex
+        || !build_data::find_item_definition_index(collectible.itemDefinitionIndex,
+                                                   grantedDefinition)
+        || grantedDefinition.definitionHash != definitionHash) {
+        report_acquisition("prepare", "fail", "input", definitionHash, 0, 0, 0, 0, 0, 0);
+        return false;
+    }
+
+    AccountState chargedAccount{};
+    bool profileChanged = false;
+    if (!apply_collection_materials(account, collectible, chargedAccount, profileChanged)) {
+        report_acquisition("prepare", "fail", "materials", definitionHash, 0, 0, 0, 0, 0, 0);
+        return false;
+    }
+
+    return finalize_item_acquisition(account,
+                                     chargedAccount,
+                                     profileChanged,
+                                     definitionHash,
+                                     collectibleIndex,
+                                     collectible.materialRequirementSetHash,
+                                     collectible.materialRequirementCount,
+                                     false,
+                                     mutation);
+}
+
+/** Prepares one direct selected-character inventory grant, with no Collections row or charge. */
+bool prepare_item_acquisition_for_item(std::uint16_t itemDefinitionIndex,
+                                       PendingItemAcquisition& mutation) noexcept {
+    mutation = {};
+    const AccountState account = account_snapshot();
+    build_data::items::Definition grantedDefinition{};
+    if (!account::valid(account) || !valid_profile_inventory(account)
+        || !build_data::find_item_definition_index(itemDefinitionIndex, grantedDefinition)
+        || grantedDefinition.definitionHash == authored_inventory::kNoDefinitionHash) {
+        report_acquisition("prepare", "fail", "input", 0, 0, 0, 0, 0, 0, 0);
+        return false;
+    }
+
+    return finalize_item_acquisition(
+        account, account, false, grantedDefinition.definitionHash, 0, 0, 0, true, mutation);
 }
 
 /** Produces the full account after-image while a prepared character pull remains current. */
@@ -223,13 +281,23 @@ bool commit_item_acquisition(PendingItemAcquisition& mutation) noexcept {
         return fail("mutation");
     }
 
-    build_data::collectibles::Definition collectible{};
-    if (!build_data::find_collectible_definition(prepared.collectibleIndex, collectible)
-        || collectible.itemDefinitionIndex
-               == build_data::collectibles::kUnavailableItemDefinitionIndex
-        || collectible.materialRequirementSetHash != prepared.materialRequirementSetHash
-        || collectible.materialRequirementCount != prepared.materialRequirementCount) {
-        return fail("collectible");
+    if (prepared.freeGrant) {
+        // A record-reward grant charges nothing and names no Collections row, so there is no
+        // collectible to re-verify; only that the granted definition still resolves at all.
+        build_data::items::Definition grantedDefinition{};
+        if (!build_data::find_item_definition_hash(prepared.acquiredDefinitionHash,
+                                                    grantedDefinition)) {
+            return fail("item_definition");
+        }
+    } else {
+        build_data::collectibles::Definition collectible{};
+        if (!build_data::find_collectible_definition(prepared.collectibleIndex, collectible)
+            || collectible.itemDefinitionIndex
+                   == build_data::collectibles::kUnavailableItemDefinitionIndex
+            || collectible.materialRequirementSetHash != prepared.materialRequirementSetHash
+            || collectible.materialRequirementCount != prepared.materialRequirementCount) {
+            return fail("collectible");
+        }
     }
 
     report_acquisition("commit_begin",
@@ -288,51 +356,43 @@ bool commit_item_acquisition(PendingItemAcquisition& mutation) noexcept {
     return true;
 }
 
-/** Prepares one checked profile-stack increment or append for a Collections pull. */
-bool prepare_profile_item_acquisition(std::uint16_t collectibleIndex,
-                                      std::uint32_t definitionHash,
-                                      PendingProfileItemAcquisition& mutation) noexcept {
-    mutation = {};
-    const AccountState account = account_snapshot();
-    build_data::collectibles::Definition collectible{};
-    build_data::items::Definition item{};
-    item_details::Definition detail{};
-    inventory_buckets::Descriptor bucket{};
-    if (definitionHash == authored_inventory::kNoDefinitionHash || !account::valid(account)
-        || !valid_profile_inventory(account)
-        || !build_data::find_collectible_definition(collectibleIndex, collectible)
-        || collectible.itemDefinitionIndex
-               == build_data::collectibles::kUnavailableItemDefinitionIndex
-        || !build_data::find_item_definition_hash(definitionHash, item)
-        || item.definitionHash != definitionHash
-        || item.definitionIndex != collectible.itemDefinitionIndex
-        || !build_data::find_configured_item_detail(item.definitionIndex, detail)
-        || detail.definitionIndex != item.definitionIndex || detail.definitionHash != definitionHash
-        || detail.bucketId != item.bucketId
-        || detail.instancedDefinitionState != item_details::InstancedDefinitionState::stackable
-        || detail.maxStackSize <= 0
-        || !build_data::find_inventory_bucket_descriptor(detail.bucketId, bucket)
-        || bucket.arraySelector != inventory_buckets::ArraySelector::profile) {
+namespace {
+
+/**
+ * Shared tail of both `prepare_profile_item_acquisition` and
+ * `prepare_profile_item_acquisition_for_item`.
+ * Everything from the existing-stack scan onward is identical whether the granted stack and its
+ * (possible) material charge came from a Collections row or a direct reward; only how
+ * `definitionHash`, `detail`, `actionSource` and the charged account were produced differs.
+ * @param account Uncharged snapshot the caller resolved the grant against.
+ * @param chargedAccount Account after any material requirement set was applied; equal to
+ * `account` for a free grant.
+ * @param definitionHash Installed stackable item definition hash being granted.
+ * @param detail Installed item detail row naming the bucket and max stack size.
+ * @param actionSource Whether the granted definition is a profile action source.
+ * @param quantity Units to grant. Must be positive and must fit the stack.
+ * @param collectibleIndex Collections row the grant re-verifies at commit, or 0 for a free grant.
+ * @param materialRequirementSetHash Charged requirement set, or 0 for a free grant.
+ * @param materialRequirementCount Charged requirement row count, or 0 for a free grant.
+ * @param freeGrant True when commit must skip the collectible re-verification entirely.
+ * @param mutation Gets the checked profile before/after images without changing account State.
+ */
+[[nodiscard]] bool
+finalize_profile_item_acquisition(const AccountState& account,
+                                  const AccountState& chargedAccount,
+                                  std::uint32_t definitionHash,
+                                  const item_details::Definition& detail,
+                                  bool actionSource,
+                                  std::int32_t quantity,
+                                  std::uint16_t collectibleIndex,
+                                  std::uint32_t materialRequirementSetHash,
+                                  std::uint8_t materialRequirementCount,
+                                  bool freeGrant,
+                                  PendingProfileItemAcquisition& mutation) noexcept {
+    if (quantity <= 0) {
         report_profile_acquisition("prepare",
                                    "fail",
-                                   "definition_or_profile",
-                                   definitionHash,
-                                   account.primarySoid,
-                                   0,
-                                   0,
-                                   0,
-                                   account.profileItemCount,
-                                   0,
-                                   0,
-                                   false);
-        return false;
-    }
-    AccountState chargedAccount{};
-    bool materialsChanged = false;
-    if (!apply_collection_materials(account, collectible, chargedAccount, materialsChanged)) {
-        report_profile_acquisition("prepare",
-                                   "fail",
-                                   "materials",
+                                   "quantity",
                                    definitionHash,
                                    account.primarySoid,
                                    0,
@@ -340,14 +400,10 @@ bool prepare_profile_item_acquisition(std::uint16_t collectibleIndex,
                                    0,
                                    account.profileItemCount,
                                    0,
-                                   0,
+                                   quantity,
                                    false);
         return false;
     }
-    (void)materialsChanged;
-    const bool actionSource =
-        build_data::is_profile_action_source(item.definitionIndex, item.bucketId);
-
     std::size_t profileIndex = chargedAccount.profileItemCount;
     std::int32_t previousQuantity = 0;
     std::int32_t previousMutationSerial = 0;
@@ -440,10 +496,10 @@ bool prepare_profile_item_acquisition(std::uint16_t collectibleIndex,
     const std::int32_t acquiredMutationSerial = greatestMutationSerial + 1;
     if (appended) {
         after.profileItems[profileIndex] = {
-            acquiredInstanceSoid, definitionHash, 1, acquiredMutationSerial};
+            acquiredInstanceSoid, definitionHash, quantity, acquiredMutationSerial};
         ++after.profileItemCount;
     } else {
-        ++after.profileItems[profileIndex].quantity;
+        after.profileItems[profileIndex].quantity += quantity;
         after.profileItems[profileIndex].mutationSerial = acquiredMutationSerial;
     }
     const std::int32_t acquiredQuantity = after.profileItems[profileIndex].quantity;
@@ -470,7 +526,7 @@ bool prepare_profile_item_acquisition(std::uint16_t collectibleIndex,
     mutation.accountSoid = account.primarySoid;
     mutation.acquiredInstanceSoid = acquiredInstanceSoid;
     mutation.acquiredDefinitionHash = definitionHash;
-    mutation.materialRequirementSetHash = collectible.materialRequirementSetHash;
+    mutation.materialRequirementSetHash = materialRequirementSetHash;
     mutation.expectedItemCount = account.profileItemCount;
     mutation.afterItemCount = after.profileItemCount;
     mutation.profileIndex = profileIndex;
@@ -480,9 +536,10 @@ bool prepare_profile_item_acquisition(std::uint16_t collectibleIndex,
     mutation.acquiredMutationSerial = acquiredMutationSerial;
     mutation.collectibleIndex = collectibleIndex;
     mutation.bucketId = detail.bucketId;
-    mutation.materialRequirementCount = collectible.materialRequirementCount;
+    mutation.materialRequirementCount = materialRequirementCount;
     mutation.actionSource = actionSource;
     mutation.appended = appended;
+    mutation.freeGrant = freeGrant;
     mutation.prepared = true;
     if (!valid_profile_mutation_shape(mutation)) {
         mutation = {};
@@ -513,6 +570,130 @@ bool prepare_profile_item_acquisition(std::uint16_t collectibleIndex,
                                acquiredQuantity,
                                appended);
     return true;
+}
+
+} // namespace
+
+/** Prepares one checked profile-stack increment or append for a Collections pull. */
+bool prepare_profile_item_acquisition(std::uint16_t collectibleIndex,
+                                      std::uint32_t definitionHash,
+                                      PendingProfileItemAcquisition& mutation) noexcept {
+    mutation = {};
+    const AccountState account = account_snapshot();
+    build_data::collectibles::Definition collectible{};
+    build_data::items::Definition item{};
+    item_details::Definition detail{};
+    inventory_buckets::Descriptor bucket{};
+    if (definitionHash == authored_inventory::kNoDefinitionHash || !account::valid(account)
+        || !valid_profile_inventory(account)
+        || !build_data::find_collectible_definition(collectibleIndex, collectible)
+        || collectible.itemDefinitionIndex
+               == build_data::collectibles::kUnavailableItemDefinitionIndex
+        || !build_data::find_item_definition_hash(definitionHash, item)
+        || item.definitionHash != definitionHash
+        || item.definitionIndex != collectible.itemDefinitionIndex
+        || !build_data::find_configured_item_detail(item.definitionIndex, detail)
+        || detail.definitionIndex != item.definitionIndex || detail.definitionHash != definitionHash
+        || detail.bucketId != item.bucketId
+        || detail.instancedDefinitionState != item_details::InstancedDefinitionState::stackable
+        || detail.maxStackSize <= 0
+        || !build_data::find_inventory_bucket_descriptor(detail.bucketId, bucket)
+        || bucket.arraySelector != inventory_buckets::ArraySelector::profile) {
+        report_profile_acquisition("prepare",
+                                   "fail",
+                                   "definition_or_profile",
+                                   definitionHash,
+                                   account.primarySoid,
+                                   0,
+                                   0,
+                                   0,
+                                   account.profileItemCount,
+                                   0,
+                                   0,
+                                   false);
+        return false;
+    }
+    AccountState chargedAccount{};
+    bool materialsChanged = false;
+    if (!apply_collection_materials(account, collectible, chargedAccount, materialsChanged)) {
+        report_profile_acquisition("prepare",
+                                   "fail",
+                                   "materials",
+                                   definitionHash,
+                                   account.primarySoid,
+                                   0,
+                                   detail.bucketId,
+                                   0,
+                                   account.profileItemCount,
+                                   0,
+                                   0,
+                                   false);
+        return false;
+    }
+    (void)materialsChanged;
+    const bool actionSource =
+        build_data::is_profile_action_source(item.definitionIndex, item.bucketId);
+
+    return finalize_profile_item_acquisition(account,
+                                             chargedAccount,
+                                             definitionHash,
+                                             detail,
+                                             actionSource,
+                                             1,
+                                             collectibleIndex,
+                                             collectible.materialRequirementSetHash,
+                                             collectible.materialRequirementCount,
+                                             false,
+                                             mutation);
+}
+
+/** Prepares one direct profile-stack grant, with no Collections row or material charge. */
+bool prepare_profile_item_acquisition_for_item(std::uint16_t itemDefinitionIndex,
+                                               std::int32_t quantity,
+                                               PendingProfileItemAcquisition& mutation) noexcept {
+    mutation = {};
+    const AccountState account = account_snapshot();
+    build_data::items::Definition item{};
+    item_details::Definition detail{};
+    inventory_buckets::Descriptor bucket{};
+    if (quantity <= 0 || !account::valid(account) || !valid_profile_inventory(account)
+        || !build_data::find_item_definition_index(itemDefinitionIndex, item)
+        || item.definitionHash == authored_inventory::kNoDefinitionHash
+        || !build_data::find_configured_item_detail(item.definitionIndex, detail)
+        || detail.definitionIndex != item.definitionIndex
+        || detail.definitionHash != item.definitionHash || detail.bucketId != item.bucketId
+        || detail.instancedDefinitionState != item_details::InstancedDefinitionState::stackable
+        || detail.maxStackSize <= 0
+        || !build_data::find_inventory_bucket_descriptor(detail.bucketId, bucket)
+        || bucket.arraySelector != inventory_buckets::ArraySelector::profile) {
+        report_profile_acquisition("prepare",
+                                   "fail",
+                                   "definition_or_profile",
+                                   0,
+                                   account.primarySoid,
+                                   0,
+                                   0,
+                                   0,
+                                   account.profileItemCount,
+                                   0,
+                                   0,
+                                   false);
+        return false;
+    }
+    const bool actionSource =
+        build_data::is_profile_action_source(item.definitionIndex, item.bucketId);
+
+    return finalize_profile_item_acquisition(account,
+                                             account,
+                                             item.definitionHash,
+                                             detail,
+                                             actionSource,
+                                             quantity,
+                                             0,
+                                             0,
+                                             0,
+                                             true,
+                                             mutation);
 }
 
 /** Produces the exact account after-image while the captured profile view is still current. */

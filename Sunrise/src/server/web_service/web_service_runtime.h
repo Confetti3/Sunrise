@@ -27,7 +27,8 @@ struct Outcome {
                                   state::PendingProfileItemAcquisition,
                                   state::PendingItemDismantle,
                                   state::PendingSocketPlug,
-                                  state::PendingItemState>;
+                                  state::PendingItemState,
+                                  state::PendingRecordRewardGrant>;
     Mutation mutation{};
 };
 

@@ -13,6 +13,8 @@ namespace sunrise::state {
 inline constexpr std::size_t kCharacterCapacity = 3;
 /** A server-authored dismantle policy: a few rows per rarity and gear class. */
 inline constexpr std::size_t kDismantleRewardPolicyCapacity = 32;
+/** A server-authored record-reward policy: one row per rewarded Triumph. */
+inline constexpr std::size_t kRecordRewardPolicyCapacity = 256;
 
 /** Gear classes a dismantle payout row can be limited to. */
 enum class DismantleGearClass : std::uint8_t {
@@ -47,6 +49,28 @@ same_dismantle_policy_key(const DismantleRewardPolicy& left,
                           const DismantleRewardPolicy& right) noexcept {
     return left.definitionHash == right.definitionHash && left.tierMask == right.tierMask
            && left.classMask == right.classMask && left.masterwork == right.masterwork;
+}
+
+/**
+ * One item granted alongside a record's completion flag when its claim lands.
+ * The map source is deliberately settings-authored for now, kept pluggable behind
+ * `account::find_record_reward` so a later task can source it from extracted build data instead.
+ */
+struct RecordRewardPolicy {
+    /** Native record row an opcode-1801 claim names, matching records::Definition::definitionIndex.
+     */
+    std::uint16_t recordIndex{};
+    /** Native item-definition row the claim grants, resolved the same way Collections resolves one.
+     */
+    std::uint16_t itemIndex{};
+    /** Units granted. Ignored beyond 1 for a non-stackable (character-bucket) item. */
+    std::int32_t quantity{};
+};
+
+/** @return True when both rows reward the same record. */
+[[nodiscard]] constexpr bool
+same_record_reward_key(const RecordRewardPolicy& left, const RecordRewardPolicy& right) noexcept {
+    return left.recordIndex == right.recordIndex;
 }
 
 /** Stable character race values authored independently of package definition mappings. */
@@ -164,6 +188,9 @@ struct AccountState {
     /** Economy policy comes from configuration, never from item-specific runtime constants. */
     std::array<DismantleRewardPolicy, kDismantleRewardPolicyCapacity> dismantleRewards{};
     std::size_t dismantleRewardCount{};
+    /** Server-authored record-claim reward table, empty by default. */
+    std::array<RecordRewardPolicy, kRecordRewardPolicyCapacity> recordRewards{};
+    std::size_t recordRewardCount{};
     /** Account-wide currencies and materials, placed by bucket rather than by authored slot. */
     std::array<account::inventory::ProfileItem, account::inventory::kProfileItemCapacity>
         profileItems{};
@@ -190,6 +217,17 @@ namespace account {
  * @return The character's SOID, or zero when the account owns none.
  */
 [[nodiscard]] std::uint64_t banner_character_soid(const AccountState& state) noexcept;
+
+/**
+ * Finds the configured reward for one claimed record, if any.
+ * @param state Account snapshot carrying the authored reward table.
+ * @param recordIndex Native record row the claim named.
+ * @param reward Receives the matching row only on success.
+ * @return True when the table carries a row for this record.
+ */
+[[nodiscard]] bool find_record_reward(const AccountState& state,
+                                      std::uint16_t recordIndex,
+                                      RecordRewardPolicy& reward) noexcept;
 
 } // namespace account
 

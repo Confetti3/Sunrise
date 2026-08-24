@@ -76,6 +76,16 @@ struct ItemDismantleTransaction {
     queuez::ItemDismantle update{};
 };
 
+/**
+ * Record-claim reward grant and its exact QueueZ after-image.
+ * A record reward lands through whichever acquisition kind its item's bucket resolved to, so the
+ * update carries the matching alternative of the same pair the pending grant itself wraps.
+ */
+struct RecordRewardGrantTransaction {
+    state::PendingRecordRewardGrant pending{};
+    std::variant<queuez::ItemAcquisition, queuez::ProfileItemAcquisition> update{};
+};
+
 /** Optional side effect produced while decoding one authenticated service body. */
 struct ServiceOutcome {
     bool hasSubscription{};
@@ -99,7 +109,8 @@ struct ServiceOutcome {
                                      ItemStateTransaction,
                                      ItemAcquisitionTransaction,
                                      ProfileItemAcquisitionTransaction,
-                                     ItemDismantleTransaction>;
+                                     ItemDismantleTransaction,
+                                     RecordRewardGrantTransaction>;
     Transaction transaction{};
 };
 

@@ -145,6 +145,8 @@ bool build_records(const reader::Source& source,
         domain::Definition& definition = output[static_cast<std::size_t>(row)];
         definition = {};
         definition.definitionIndex = static_cast<std::uint16_t>(row);
+        std::memcpy(&definition.definitionHash, blob.data() + at + tables::kRecordHashOffset,
+                    sizeof definition.definitionHash);
         // The lore row this record displays, or 0xFFFF for a book's parent triumph.
         std::memcpy(&definition.loreRow, blob.data() + at + tables::kLoreRowOffset,
                     sizeof definition.loreRow);

@@ -252,6 +252,23 @@ bool commit(ServiceOutcome& outcome, Publication& publication) noexcept {
                                    : "ev=dismantle stage=transaction_commit result=fail");
         return committed;
     }
+    if (auto* transaction = transaction_if<RecordRewardGrantTransaction>(outcome)) {
+        // Whichever acquisition kind the reward resolved to commits through the exact same path
+        // its opcode-1820 counterpart uses.
+        bool committed = false;
+        if (auto* itemPending =
+                std::get_if<state::PendingItemAcquisition>(&transaction->pending.grant)) {
+            committed = state::commit_item_acquisition(*itemPending);
+        } else if (auto* profilePending = std::get_if<state::PendingProfileItemAcquisition>(
+                       &transaction->pending.grant)) {
+            committed = state::commit_profile_item_acquisition(*profilePending);
+        }
+        core::log::write(core::log::Channel::server,
+                         committed ? core::log::Level::debug : core::log::Level::warn,
+                         committed ? "ev=record_reward stage=transaction_commit result=ok"
+                                   : "ev=record_reward stage=transaction_commit result=fail");
+        return committed;
+    }
     return true;
 }
 

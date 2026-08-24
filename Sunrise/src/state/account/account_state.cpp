@@ -58,6 +58,36 @@ constexpr std::uint8_t kDismantleClassMaskBits =
     return true;
 }
 
+/** @return True when one unused record-reward policy row is canonical zero. */
+[[nodiscard]] bool empty_record_reward(const RecordRewardPolicy& reward) noexcept {
+    return reward.recordIndex == 0 && reward.itemIndex == 0 && reward.quantity == 0;
+}
+
+/** Checks filled record-reward rows, uniqueness by record, and the zero tail. */
+[[nodiscard]] bool valid_record_rewards(const AccountState& state) noexcept {
+    if (state.recordRewardCount > state.recordRewards.size()) {
+        return false;
+    }
+    for (std::size_t index = 0; index < state.recordRewards.size(); ++index) {
+        const RecordRewardPolicy& reward = state.recordRewards[index];
+        if (index >= state.recordRewardCount) {
+            if (!empty_record_reward(reward)) {
+                return false;
+            }
+            continue;
+        }
+        if (reward.quantity <= 0) {
+            return false;
+        }
+        for (std::size_t prior = 0; prior < index; ++prior) {
+            if (same_record_reward_key(state.recordRewards[prior], reward)) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 /** Adds one nonzero globally unique key to a bounded identity set. */
 [[nodiscard]] bool append_identity(std::array<std::uint64_t, kIdentityCapacity>& identities,
                                    std::size_t& count,
@@ -81,17 +111,20 @@ constexpr std::uint8_t kDismantleClassMaskBits =
     }
     if (state.primarySoid == 0) {
         if (state.profileItemCount != 0 || state.characterCount != 0
-            || state.dismantleRewardCount != 0 || state.settings.configured
-            || state.settings.keyBindings.configured) {
+            || state.dismantleRewardCount != 0 || state.recordRewardCount != 0
+            || state.settings.configured || state.settings.keyBindings.configured) {
             return false;
         }
         return std::all_of(
                    state.profileItems.cbegin(), state.profileItems.cend(), empty_profile_item)
                && std::all_of(state.dismantleRewards.cbegin(),
                               state.dismantleRewards.cend(),
-                              empty_dismantle_reward);
+                              empty_dismantle_reward)
+               && std::all_of(
+                   state.recordRewards.cbegin(), state.recordRewards.cend(), empty_record_reward);
     }
-    if (!settings::valid(state.settings) || !valid_dismantle_rewards(state)) {
+    if (!settings::valid(state.settings) || !valid_dismantle_rewards(state)
+        || !valid_record_rewards(state)) {
         return false;
     }
 
@@ -188,6 +221,26 @@ std::uint64_t banner_character_soid(const AccountState& state) noexcept {
         return selected;
     }
     return state.characterCount == 0 ? 0 : state.characters[0].soid;
+}
+
+/**
+ * Finds the configured reward for one claimed record, if any.
+ * @param state Account snapshot carrying the authored reward table.
+ * @param recordIndex Native record row the claim named.
+ * @param reward Receives the matching row only on success.
+ * @return True when the table carries a row for this record.
+ */
+bool find_record_reward(const AccountState& state,
+                        std::uint16_t recordIndex,
+                        RecordRewardPolicy& reward) noexcept {
+    const std::size_t count = (std::min)(state.recordRewardCount, state.recordRewards.size());
+    for (std::size_t index = 0; index < count; ++index) {
+        if (state.recordRewards[index].recordIndex == recordIndex) {
+            reward = state.recordRewards[index];
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace sunrise::state::account

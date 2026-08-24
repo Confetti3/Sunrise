@@ -40,6 +40,12 @@ inline constexpr std::size_t kRecordRowStride = 216;
 /** Unlock slot of the record's completion flag, or a non-positive value when it has none. */
 inline constexpr std::size_t kRecordCompletionFlagOffset = 100;
 /**
+ * Authored DestinyRecordDefinition hash inside one record row.
+ * Measured, not divided out: offset +0 holds degenerate values, and +0x28 was confirmed by joining
+ * 48 rows to Bungie's manifest by name.
+ */
+inline constexpr std::size_t kRecordHashOffset = 0x28;
+/**
  * Lore row a record names, or 0xFFFF when it names none.
  *
  * A collectible row carries the same field at the same offset, which is what joins the two: a

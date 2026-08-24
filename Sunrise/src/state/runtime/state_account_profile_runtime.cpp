@@ -449,7 +449,6 @@ valid_profile_mutation_shape(const PendingProfileItemAcquisition& mutation) noex
         || mutation.afterItemCount > authored_inventory::kProfileItemCapacity
         || mutation.profileIndex >= mutation.afterItemCount || mutation.previousQuantity < 0
         || mutation.acquiredQuantity <= mutation.previousQuantity
-        || mutation.acquiredQuantity - mutation.previousQuantity != 1
         || mutation.previousMutationSerial < 0
         || mutation.acquiredMutationSerial <= mutation.previousMutationSerial) {
         return false;
@@ -509,15 +508,28 @@ valid_profile_mutation_shape(const PendingProfileItemAcquisition& mutation) noex
     item_details::Definition detail{};
     inventory_buckets::Descriptor bucket{};
     build_data::items::Definition item{};
-    build_data::collectibles::Definition collectible{};
-    if (!build_data::find_collectible_definition(mutation.collectibleIndex, collectible)
-        || collectible.itemDefinitionIndex
-               == build_data::collectibles::kUnavailableItemDefinitionIndex
-        || collectible.materialRequirementSetHash != mutation.materialRequirementSetHash
-        || collectible.materialRequirementCount != mutation.materialRequirementCount
-        || !build_data::find_item_definition_hash(mutation.acquiredDefinitionHash, item)
-        || collectible.itemDefinitionIndex != item.definitionIndex
-        || !build_data::find_configured_item_detail(item.definitionIndex, detail)
+    if (!build_data::find_item_definition_hash(mutation.acquiredDefinitionHash, item)) {
+        return false;
+    }
+    if (mutation.freeGrant) {
+        // A record-reward grant charges nothing and names no Collections row, so there is no
+        // collectible to re-verify.
+        if (mutation.collectibleIndex != 0 || mutation.materialRequirementSetHash != 0
+            || mutation.materialRequirementCount != 0) {
+            return false;
+        }
+    } else {
+        build_data::collectibles::Definition collectible{};
+        if (!build_data::find_collectible_definition(mutation.collectibleIndex, collectible)
+            || collectible.itemDefinitionIndex
+                   == build_data::collectibles::kUnavailableItemDefinitionIndex
+            || collectible.materialRequirementSetHash != mutation.materialRequirementSetHash
+            || collectible.materialRequirementCount != mutation.materialRequirementCount
+            || collectible.itemDefinitionIndex != item.definitionIndex) {
+            return false;
+        }
+    }
+    if (!build_data::find_configured_item_detail(item.definitionIndex, detail)
         || detail.definitionHash != mutation.acquiredDefinitionHash
         || detail.definitionIndex != item.definitionIndex || detail.bucketId != item.bucketId
         || detail.bucketId != mutation.bucketId

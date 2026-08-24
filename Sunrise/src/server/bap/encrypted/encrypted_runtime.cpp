@@ -172,7 +172,8 @@ bool consume(Session& session,
         || transaction_if<ItemStateTransaction>(outcome) != nullptr
         || transaction_if<ItemAcquisitionTransaction>(outcome) != nullptr
         || transaction_if<ProfileItemAcquisitionTransaction>(outcome) != nullptr
-        || transaction_if<ItemDismantleTransaction>(outcome) != nullptr;
+        || transaction_if<ItemDismantleTransaction>(outcome) != nullptr
+        || transaction_if<RecordRewardGrantTransaction>(outcome) != nullptr;
     // State commits consume and clear their pending payloads. Retain only the small diagnostic
     // fields needed after publication; QueueZ after-images stay owned by the transaction variant.
     const auto* stagedSocket = transaction_if<SocketPlugTransaction>(outcome);
@@ -341,6 +342,26 @@ bool consume(Session& session,
                     session.queuez.family4Version,
                     static_cast<unsigned>(session.queuez.family4ResidentCount),
                     static_cast<unsigned long long>(transaction->update.dismantledInstanceSoid));
+                if (count > 0) {
+                    core::log::write(core::log::Channel::server,
+                                     core::log::Level::debug,
+                                     {line.data(), static_cast<std::size_t>(count)});
+                }
+            }
+            if (const auto* transaction = transaction_if<RecordRewardGrantTransaction>(outcome)) {
+                const bool profileGrant =
+                    std::holds_alternative<queuez::ProfileItemAcquisition>(transaction->update);
+                std::array<char, core::log::kLineCapacity> line{};
+                const int count = std::snprintf(
+                    line.data(),
+                    line.size(),
+                    "ev=record_reward stage=output_publish result=ok framed_bytes=%zu "
+                    "queuez_published=%u family_version=%d residents=%u profile_grant=%u",
+                    framedSize,
+                    static_cast<unsigned>(publishesQueuez),
+                    session.queuez.family4Version,
+                    static_cast<unsigned>(session.queuez.family4ResidentCount),
+                    static_cast<unsigned>(profileGrant));
                 if (count > 0) {
                     core::log::write(core::log::Channel::server,
                                      core::log::Level::debug,

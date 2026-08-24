@@ -133,6 +133,23 @@ publish_record_definitions(std::span<const records::Definition> definitions) noe
 [[nodiscard]] bool find_record_definition(std::uint16_t definitionIndex,
                                           records::Definition& definition) noexcept;
 
+/**
+ * Finds one manifest-sourced reward for a claimed record, from the shipped generated table.
+ *
+ * This is the fallback source behind `state::account::find_record_reward`: the settings-authored
+ * `record_rewards` table is the operator's override and is tried first, and this is consulted only
+ * when it names nothing for the claimed record. See `state::build_data::records::rewards` for the
+ * shipped table itself. A row naming an item this build never installed (vaulted, or authored in a
+ * later era than this build) is skipped rather than failing the lookup.
+ * @param recordHash records::Definition::definitionHash of the claimed Triumph.
+ * @param itemDefinitionIndex Receives the resolved dense item index only on success.
+ * @param quantity Receives the row's authored quantity only on success.
+ * @return True when the shipped table holds a resolvable reward for this record.
+ */
+[[nodiscard]] bool find_generated_record_reward(std::uint32_t recordHash,
+                                                std::uint16_t& itemDefinitionIndex,
+                                                std::int32_t& quantity) noexcept;
+
 [[nodiscard]] bool collectible_definitions_ready() noexcept;
 
 /**

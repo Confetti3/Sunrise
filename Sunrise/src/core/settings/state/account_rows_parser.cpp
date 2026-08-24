@@ -147,6 +147,89 @@ bool Parser::dismantle_rewards(state::AccountState& output) noexcept {
     }
 }
 
+/**
+ * Parses the record-claim reward table: one item, optionally with a quantity, per record index.
+ * Empty by default, so behavior is unchanged unless the operator populates it.
+ */
+bool Parser::record_rewards(state::AccountState& output) noexcept {
+    output.recordRewards = {};
+    output.recordRewardCount = 0;
+    if (!consume('[')) {
+        return false;
+    }
+    if (consume(']')) {
+        return true;
+    }
+    for (;;) {
+        if (output.recordRewardCount >= output.recordRewards.size() || !consume('{')) {
+            return false;
+        }
+        state::RecordRewardPolicy reward{};
+        bool hasRecordIndex = false;
+        bool hasItemIndex = false;
+        bool hasQuantity = false;
+        for (;;) {
+            std::string_view key;
+            if (!string(key) || !consume(':')) {
+                return false;
+            }
+            std::uint64_t value = 0;
+            if (key == "record_index") {
+                if (hasRecordIndex || !unsigned_integer(value)
+                    || value > (std::numeric_limits<std::uint16_t>::max)()) {
+                    return false;
+                }
+                reward.recordIndex = static_cast<std::uint16_t>(value);
+                hasRecordIndex = true;
+            } else if (key == "item_index") {
+                if (hasItemIndex || !unsigned_integer(value)
+                    || value > (std::numeric_limits<std::uint16_t>::max)()) {
+                    return false;
+                }
+                reward.itemIndex = static_cast<std::uint16_t>(value);
+                hasItemIndex = true;
+            } else if (key == "quantity") {
+                // Halved so a grant added to a stack already at its maximum cannot overflow
+                // before maxStackSize is checked. The real ceiling is the item's own stack size,
+                // enforced where the grant is applied; this only keeps a mis-authored table from
+                // reaching signed overflow.
+                if (hasQuantity || !unsigned_integer(value) || value == 0
+                    || value > (std::numeric_limits<std::int32_t>::max)() / 2) {
+                    return false;
+                }
+                reward.quantity = static_cast<std::int32_t>(value);
+                hasQuantity = true;
+            } else if (!skip_value(0)) {
+                return false;
+            }
+            if (consume('}')) {
+                break;
+            }
+            if (!consume(',')) {
+                return false;
+            }
+        }
+        if (!hasQuantity) {
+            reward.quantity = 1;
+        }
+        if (!hasRecordIndex || !hasItemIndex) {
+            return false;
+        }
+        for (std::size_t index = 0; index < output.recordRewardCount; ++index) {
+            if (state::same_record_reward_key(output.recordRewards[index], reward)) {
+                return false;
+            }
+        }
+        output.recordRewards[output.recordRewardCount++] = reward;
+        if (consume(']')) {
+            return true;
+        }
+        if (!consume(',')) {
+            return false;
+        }
+    }
+}
+
 /** Parses the authored account-wide item array. */
 bool Parser::profile_items(state::AccountState& output) noexcept {
     namespace inventory = state::account::inventory;

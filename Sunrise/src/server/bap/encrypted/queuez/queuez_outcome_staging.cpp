@@ -7,6 +7,124 @@
 #include "queuez_state_validation.h"
 
 namespace sunrise::server::bap::encrypted::queuez {
+namespace {
+
+/**
+ * Stages the character upsert and appended resident an item-acquisition transaction promised.
+ * Shared by the ordinary opcode-1820 transaction and a record-claim reward that resolved to a
+ * character-bucket grant: both stage the exact same way once an `ItemAcquisitionTransaction` is
+ * in hand.
+ */
+[[nodiscard]] bool stage_item_acquisition_push(Scratch& scratch,
+                                               const SessionState& before,
+                                               const ItemAcquisitionTransaction& itemAcquisition,
+                                               std::span<const std::byte, state::kAesKeySize> key,
+                                               std::array<std::byte, state::kBapNonceSize>& nonce,
+                                               std::span<std::byte> response,
+                                               std::size_t& written,
+                                               SessionState& after) noexcept {
+    const ItemAcquisition& acquisition = itemAcquisition.update;
+    const std::size_t appendedIndex = before.family4ResidentCount;
+    bool preservedManifest = acquisition.after.family4ResidentCount == appendedIndex + 1U;
+    for (std::size_t index = 0; preservedManifest && index < appendedIndex; ++index) {
+        preservedManifest = acquisition.after.family4Residents[index].objectSoid
+                                == before.family4Residents[index].objectSoid
+                            && acquisition.after.family4Residents[index].definitionId
+                                   == before.family4Residents[index].definitionId;
+    }
+    if (!valid(acquisition.after) || !preservedManifest
+        || acquisition.accountSoid != itemAcquisition.pending.accountSoid
+        || acquisition.characterSoid != itemAcquisition.pending.characterSoid
+        || acquisition.acquiredInstanceSoid != itemAcquisition.pending.acquiredInstanceSoid
+        || acquisition.updatesAccount != itemAcquisition.pending.profileChanged
+        || acquisition.accountSoid != before.family4RootSoid
+        || acquisition.after.family4RootSoid != before.family4RootSoid
+        || before.family4ResidentCount >= before.family4Residents.size()
+        || before.family4Version == (std::numeric_limits<std::int32_t>::max)()
+        || acquisition.after.family4Version != before.family4Version + 1
+        || acquisition.after.family4Residents[appendedIndex].objectSoid
+               != acquisition.acquiredInstanceSoid
+        || acquisition.after.family4Residents[appendedIndex].definitionId
+               != acquisition.itemInstanceDefinitionId
+        || !push::append_item_acquisition_notification(
+            scratch, acquisition, itemAcquisition.pending, key, nonce, response, written)) {
+        return false;
+    }
+    middleware::secure_channel::advance_nonce(nonce);
+    after = acquisition.after;
+    return true;
+}
+
+/**
+ * Stages the account upsert (and possible manifest append) a profile-acquisition transaction
+ * promised. Shared by the ordinary opcode-1820 transaction and a record-claim reward that
+ * resolved to a profile-bucket grant.
+ */
+[[nodiscard]] bool
+stage_profile_item_acquisition_push(Scratch& scratch,
+                                    const SessionState& before,
+                                    const ProfileItemAcquisitionTransaction& profileAcquisition,
+                                    std::span<const std::byte, state::kAesKeySize> key,
+                                    std::array<std::byte, state::kBapNonceSize>& nonce,
+                                    std::span<std::byte> response,
+                                    std::size_t& written,
+                                    SessionState& after) noexcept {
+    const ProfileItemAcquisition& acquisition = profileAcquisition.update;
+    const std::size_t priorResidentCount = before.family4ResidentCount;
+    const std::size_t expectedResidentCount =
+        priorResidentCount + static_cast<std::size_t>(acquisition.appendedResident);
+    bool validManifest = expectedResidentCount <= acquisition.after.family4Residents.size()
+                         && acquisition.after.family4ResidentCount == expectedResidentCount;
+    for (std::size_t index = 0; validManifest && index < priorResidentCount; ++index) {
+        validManifest = acquisition.after.family4Residents[index].objectSoid
+                            == before.family4Residents[index].objectSoid
+                        && acquisition.after.family4Residents[index].definitionId
+                               == before.family4Residents[index].definitionId;
+    }
+    std::size_t priorProfileResidentMatches = 0;
+    for (std::size_t index = 0; index < priorResidentCount; ++index) {
+        const ResidentObject& resident = before.family4Residents[index];
+        priorProfileResidentMatches += static_cast<std::size_t>(
+            acquisition.acquiredInstanceSoid != 0
+            && resident.objectSoid == acquisition.acquiredInstanceSoid
+            && resident.definitionId == acquisition.itemInstanceDefinitionId);
+    }
+    const bool appendedResidentValid =
+        !acquisition.appendedResident
+        || (priorResidentCount < acquisition.after.family4Residents.size()
+            && acquisition.after.family4Residents[priorResidentCount].objectSoid
+                   == acquisition.acquiredInstanceSoid
+            && acquisition.after.family4Residents[priorResidentCount].definitionId
+                   == acquisition.itemInstanceDefinitionId
+            && priorProfileResidentMatches == 0);
+    const bool sourceIdentityValid =
+        acquisition.actionSource == (acquisition.acquiredInstanceSoid != 0)
+        && (acquisition.actionSource
+                ? acquisition.itemInstanceDefinitionId != 0 && appendedResidentValid
+                      && (acquisition.appendedResident || priorProfileResidentMatches == 1)
+                : acquisition.itemInstanceDefinitionId == 0 && !acquisition.appendedResident
+                      && priorProfileResidentMatches == 0);
+    if (!valid(acquisition.after) || !validManifest || !sourceIdentityValid
+        || acquisition.accountSoid != profileAcquisition.pending.accountSoid
+        || acquisition.acquiredInstanceSoid != profileAcquisition.pending.acquiredInstanceSoid
+        || acquisition.actionSource != profileAcquisition.pending.actionSource
+        || acquisition.appendedResident
+               != (profileAcquisition.pending.appended && profileAcquisition.pending.actionSource)
+        || acquisition.accountSoid != before.family4RootSoid || before.family4ResidentCount == 0
+        || acquisition.accountDefinitionId != before.family4Residents.front().definitionId
+        || acquisition.after.family4RootSoid != before.family4RootSoid
+        || before.family4Version == (std::numeric_limits<std::int32_t>::max)()
+        || acquisition.after.family4Version != before.family4Version + 1
+        || !push::append_profile_item_acquisition_notification(
+            scratch, acquisition, profileAcquisition.pending, key, nonce, response, written)) {
+        return false;
+    }
+    middleware::secure_channel::advance_nonce(nonce);
+    after = acquisition.after;
+    return true;
+}
+
+} // namespace
 
 /** Stages queuez subscription, unsubscription, or character-move output for one peer. */
 bool stage_service_outcome(Scratch& scratch,
@@ -30,6 +148,7 @@ bool stage_service_outcome(Scratch& scratch,
     const auto* itemAcquisition = transaction_if<ItemAcquisitionTransaction>(outcome);
     const auto* profileAcquisition = transaction_if<ProfileItemAcquisitionTransaction>(outcome);
     const auto* itemDismantle = transaction_if<ItemDismantleTransaction>(outcome);
+    const auto* recordRewardGrant = transaction_if<RecordRewardGrantTransaction>(outcome);
     if (outcome.hasSubscription) {
         push::append_queuez_notification(scratch,
                                          before,
@@ -278,97 +397,55 @@ bool stage_service_outcome(Scratch& scratch,
     } else if (itemAcquisition != nullptr) {
         // Body processing staged this exact manifest append before encoding the response version.
         // The character and new item objects must both fit or the State insertion is not committed.
-        const ItemAcquisition& acquisition = itemAcquisition->update;
-        const std::size_t appendedIndex = before.family4ResidentCount;
-        bool preservedManifest = acquisition.after.family4ResidentCount == appendedIndex + 1U;
-        for (std::size_t index = 0; preservedManifest && index < appendedIndex; ++index) {
-            preservedManifest = acquisition.after.family4Residents[index].objectSoid
-                                    == before.family4Residents[index].objectSoid
-                                && acquisition.after.family4Residents[index].definitionId
-                                       == before.family4Residents[index].definitionId;
-        }
-        if (!valid(acquisition.after) || !preservedManifest
-            || acquisition.accountSoid != itemAcquisition->pending.accountSoid
-            || acquisition.characterSoid != itemAcquisition->pending.characterSoid
-            || acquisition.acquiredInstanceSoid != itemAcquisition->pending.acquiredInstanceSoid
-            || acquisition.updatesAccount != itemAcquisition->pending.profileChanged
-            || acquisition.accountSoid != before.family4RootSoid
-            || acquisition.after.family4RootSoid != before.family4RootSoid
-            || before.family4ResidentCount >= before.family4Residents.size()
-            || before.family4Version == (std::numeric_limits<std::int32_t>::max)()
-            || acquisition.after.family4Version != before.family4Version + 1
-            || acquisition.after.family4Residents[appendedIndex].objectSoid
-                   != acquisition.acquiredInstanceSoid
-            || acquisition.after.family4Residents[appendedIndex].definitionId
-                   != acquisition.itemInstanceDefinitionId
-            || !push::append_item_acquisition_notification(
-                scratch, acquisition, itemAcquisition->pending, key, nonce, response, written)) {
+        if (!stage_item_acquisition_push(
+                scratch, before, *itemAcquisition, key, nonce, response, written, after)) {
             core::log::write(core::log::Channel::server,
                              core::log::Level::warn,
                              "ev=queuez stage=acquire result=fail");
             return false;
         }
-        middleware::secure_channel::advance_nonce(nonce);
-        after = acquisition.after;
     } else if (profileAcquisition != nullptr) {
         // A source-backed profile append creates one dependency before the account starts naming
         // it. Existing stacks and non-actionable currency rows preserve the complete manifest.
-        const ProfileItemAcquisition& acquisition = profileAcquisition->update;
-        const std::size_t priorResidentCount = before.family4ResidentCount;
-        const std::size_t expectedResidentCount =
-            priorResidentCount + static_cast<std::size_t>(acquisition.appendedResident);
-        bool validManifest = expectedResidentCount <= acquisition.after.family4Residents.size()
-                             && acquisition.after.family4ResidentCount == expectedResidentCount;
-        for (std::size_t index = 0; validManifest && index < priorResidentCount; ++index) {
-            validManifest = acquisition.after.family4Residents[index].objectSoid
-                                == before.family4Residents[index].objectSoid
-                            && acquisition.after.family4Residents[index].definitionId
-                                   == before.family4Residents[index].definitionId;
-        }
-        std::size_t priorProfileResidentMatches = 0;
-        for (std::size_t index = 0; index < priorResidentCount; ++index) {
-            const ResidentObject& resident = before.family4Residents[index];
-            priorProfileResidentMatches += static_cast<std::size_t>(
-                acquisition.acquiredInstanceSoid != 0
-                && resident.objectSoid == acquisition.acquiredInstanceSoid
-                && resident.definitionId == acquisition.itemInstanceDefinitionId);
-        }
-        const bool appendedResidentValid =
-            !acquisition.appendedResident
-            || (priorResidentCount < acquisition.after.family4Residents.size()
-                && acquisition.after.family4Residents[priorResidentCount].objectSoid
-                       == acquisition.acquiredInstanceSoid
-                && acquisition.after.family4Residents[priorResidentCount].definitionId
-                       == acquisition.itemInstanceDefinitionId
-                && priorProfileResidentMatches == 0);
-        const bool sourceIdentityValid =
-            acquisition.actionSource == (acquisition.acquiredInstanceSoid != 0)
-            && (acquisition.actionSource
-                    ? acquisition.itemInstanceDefinitionId != 0 && appendedResidentValid
-                          && (acquisition.appendedResident || priorProfileResidentMatches == 1)
-                    : acquisition.itemInstanceDefinitionId == 0 && !acquisition.appendedResident
-                          && priorProfileResidentMatches == 0);
-        if (!valid(acquisition.after) || !validManifest || !sourceIdentityValid
-            || acquisition.accountSoid != profileAcquisition->pending.accountSoid
-            || acquisition.acquiredInstanceSoid != profileAcquisition->pending.acquiredInstanceSoid
-            || acquisition.actionSource != profileAcquisition->pending.actionSource
-            || acquisition.appendedResident
-                   != (profileAcquisition->pending.appended
-                       && profileAcquisition->pending.actionSource)
-            || acquisition.accountSoid != before.family4RootSoid || before.family4ResidentCount == 0
-            || acquisition.accountDefinitionId != before.family4Residents.front().definitionId
-            || acquisition.after.family4RootSoid != before.family4RootSoid
-            || before.family4Version == (std::numeric_limits<std::int32_t>::max)()
-            || acquisition.after.family4Version != before.family4Version + 1
-            || !push::append_profile_item_acquisition_notification(
-                scratch, acquisition, profileAcquisition->pending, key, nonce, response, written)) {
+        if (!stage_profile_item_acquisition_push(
+                scratch, before, *profileAcquisition, key, nonce, response, written, after)) {
             core::log::write(core::log::Channel::server,
                              core::log::Level::warn,
                              "ev=queuez stage=profile_acquire result=fail");
             return false;
         }
-        middleware::secure_channel::advance_nonce(nonce);
-        after = acquisition.after;
+    } else if (recordRewardGrant != nullptr) {
+        // A record-claim reward names an item directly rather than a Collections row; whichever
+        // acquisition kind its bucket resolved to stages exactly the same way its opcode-1820
+        // counterpart does above, so this takes priority over the plain resync fallback below.
+        bool staged = false;
+        if (const auto* itemUpdate =
+                std::get_if<ItemAcquisition>(&recordRewardGrant->update)) {
+            ItemAcquisitionTransaction wrapped{};
+            if (const auto* itemPending = std::get_if<state::PendingItemAcquisition>(
+                    &recordRewardGrant->pending.grant)) {
+                wrapped.pending = *itemPending;
+            }
+            wrapped.update = *itemUpdate;
+            staged = stage_item_acquisition_push(
+                scratch, before, wrapped, key, nonce, response, written, after);
+        } else if (const auto* profileUpdate =
+                       std::get_if<ProfileItemAcquisition>(&recordRewardGrant->update)) {
+            ProfileItemAcquisitionTransaction wrapped{};
+            if (const auto* profilePending = std::get_if<state::PendingProfileItemAcquisition>(
+                    &recordRewardGrant->pending.grant)) {
+                wrapped.pending = *profilePending;
+            }
+            wrapped.update = *profileUpdate;
+            staged = stage_profile_item_acquisition_push(
+                scratch, before, wrapped, key, nonce, response, written, after);
+        }
+        if (!staged) {
+            core::log::write(core::log::Channel::server,
+                             core::log::Level::warn,
+                             "ev=queuez stage=record_reward result=fail");
+            return false;
+        }
     } else if (outcome.hasRecordClaim) {
         // A claim rewrites one byte of the account flag bank and leaves the manifest alone, so a
         // full account snapshot at the next version carries it with no other staging.

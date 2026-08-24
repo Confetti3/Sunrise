@@ -1,4 +1,5 @@
 #include "../build_data/records/record_persistence.h"
+#include "../build_data/records/rewards/reward_persistence.h"
 #include "../build_data/nodes/node_persistence.h"
 #include "../record_claims/record_claims.h"
 #include <Windows.h>
@@ -212,6 +213,9 @@ bool initialize(void* module,
     // as Acquired. A missing file is a first run, not a failure.
     (void)build_data::nodes::initialize(module);
     (void)build_data::records::initialize(module);
+    // Only resolves the shipped reward file's path; the file itself loads lazily at first use, the
+    // same as the claim-index and lore-node tables above.
+    (void)build_data::records::rewards::initialize(module);
     (void)record_claims::initialize(module);
     // A cache hit already has the complete plug relation, so publish canonical profile identities
     // in the first State image.  On a first cache build, snapshot preparation repeats this step

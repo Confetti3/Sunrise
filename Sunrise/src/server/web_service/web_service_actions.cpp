@@ -1,6 +1,7 @@
 #include "web_service_actions.h"
 
 #include <array>
+#include <atomic>
 #include <cstdio>
 #include <limits>
 #include <string_view>
@@ -17,6 +18,7 @@
 #include "../../middleware/web_service/messages/opcode801.h"
 #include "../../middleware/web_service/messages/opcode903.h"
 #include "../../state/account/account_state.h"
+#include "../../state/build_data/records/rewards/reward_persistence.h"
 #include "../../state/build_data/runtime.h"
 #include "../../state/runtime/runtime.h"
 
@@ -848,11 +850,144 @@ void acquire_item(const middleware::web_service::Message& message, Outcome& outc
                             mutation.acquiredInstanceSoid);
 }
 
+/** Logs one record-claim reward resolution and its item/quantity destination. */
+void report_record_reward(const middleware::web_service::Message& message,
+                          std::string_view result,
+                          std::string_view reason,
+                          std::uint32_t recordIndex,
+                          std::uint32_t itemIndex,
+                          std::int32_t quantity) noexcept {
+    std::array<char, core::log::kLineCapacity> line{};
+    const int count =
+        std::snprintf(line.data(),
+                      line.size(),
+                      "ev=ws1801 stage=reward result=%.*s reason=%.*s transaction=%u "
+                      "record_index=%u item_index=%u quantity=%d",
+                      static_cast<int>(result.size()),
+                      result.data(),
+                      static_cast<int>(reason.size()),
+                      reason.data(),
+                      static_cast<unsigned>(message.transactionId),
+                      recordIndex,
+                      itemIndex,
+                      quantity);
+    if (count > 0) {
+        core::log::write(core::log::Channel::server,
+                         result == "ok" ? core::log::Level::debug : core::log::Level::warn,
+                         {line.data(), static_cast<std::size_t>(count)});
+    }
+}
+
+/**
+ * Resolves and prepares a claimed record's reward, if any.
+ *
+ * Two sources feed this, in order. The settings-authored `record_rewards` table (see
+ * `state::account::RecordRewardPolicy`) is the operator's manual override and wins whenever it
+ * names this record. Only when it does not is the shipped, manifest-generated table consulted (see
+ * `state::build_data::records::rewards`), which sources the reward Bungie's manifest actually
+ * assigns the Triumph. Neither is required: a record naming no reward in either table, or one whose
+ * item cannot be resolved or no longer fits, leaves the outcome exactly as an unmapped claim
+ * already behaves -- no mutation, so the caller falls back to the plain account resync. The claim
+ * itself already committed by the time this runs, so a reward that cannot be granted never turns a
+ * successful claim into a failed one.
+ * @param message Parsed opcode-1801 request, used only for correlated logging.
+ * @param recordIndex Native record row that was just claimed.
+ * @param recordHash Manifest definition hash of the same record, used only to consult the
+ * generated table when the settings table names nothing for this record.
+ * @param outcome Gets the prepared grant mutation only when one resolves cleanly.
+ */
+void grant_record_reward(const middleware::web_service::Message& message,
+                         std::uint16_t recordIndex,
+                         std::uint32_t recordHash,
+                         Outcome& outcome) noexcept {
+    state::RecordRewardPolicy reward{};
+    if (!state::account::find_record_reward(state::account_snapshot(), recordIndex, reward)) {
+        // No manual override for this record. The shipped table loads lazily, on this first need,
+        // and only ever attempts its one file read once per process: a deployment that ships none
+        // of it, or none at all, must not reopen a missing file on every later claim.
+        static std::atomic<bool> generatedTableAttempted{false};
+        if (!generatedTableAttempted.exchange(true, std::memory_order_relaxed)) {
+            (void)state::build_data::records::rewards::load_and_publish();
+        }
+        std::uint16_t itemIndex = 0;
+        std::int32_t quantity = 0;
+        if (!state::build_data::find_generated_record_reward(recordHash, itemIndex, quantity)) {
+            return;
+        }
+        reward.recordIndex = recordIndex;
+        reward.itemIndex = itemIndex;
+        reward.quantity = quantity;
+    }
+
+    state::build_data::items::Definition definition{};
+    if (!state::build_data::find_item_definition_index(reward.itemIndex, definition)) {
+        report_record_reward(
+            message, "fail", "item_definition", recordIndex, reward.itemIndex, reward.quantity);
+        return;
+    }
+
+    state::build_data::items::details::Definition detail{};
+    state::build_data::inventory::buckets::Descriptor bucket{};
+    if (!state::build_data::find_configured_item_detail(reward.itemIndex, detail)
+        || detail.definitionIndex != reward.itemIndex
+        || detail.definitionHash != definition.definitionHash
+        || detail.bucketId != definition.bucketId
+        || !state::build_data::find_inventory_bucket_descriptor(detail.bucketId, bucket)) {
+        report_record_reward(message,
+                             "fail",
+                             "item_detail_or_bucket",
+                             recordIndex,
+                             reward.itemIndex,
+                             reward.quantity);
+        return;
+    }
+
+    namespace bucket_domain = state::build_data::inventory::buckets;
+    namespace detail_domain = state::build_data::items::details;
+    state::PendingRecordRewardGrant grant{};
+    if (bucket.arraySelector == bucket_domain::ArraySelector::profile) {
+        if (detail.instancedDefinitionState != detail_domain::InstancedDefinitionState::stackable) {
+            report_record_reward(message,
+                                 "fail",
+                                 "profile_item_instanced",
+                                 recordIndex,
+                                 reward.itemIndex,
+                                 reward.quantity);
+            return;
+        }
+        auto& mutation = grant.grant.emplace<state::PendingProfileItemAcquisition>();
+        if (!state::prepare_profile_item_acquisition_for_item(
+                reward.itemIndex, reward.quantity, mutation)) {
+            report_record_reward(
+                message, "fail", "profile_state", recordIndex, reward.itemIndex, reward.quantity);
+            return;
+        }
+    } else if (bucket.arraySelector == bucket_domain::ArraySelector::character) {
+        auto& mutation = grant.grant.emplace<state::PendingItemAcquisition>();
+        if (!state::prepare_item_acquisition_for_item(reward.itemIndex, mutation)) {
+            report_record_reward(
+                message, "fail", "state", recordIndex, reward.itemIndex, reward.quantity);
+            return;
+        }
+    } else {
+        report_record_reward(message,
+                             "fail",
+                             "unsupported_inventory_array",
+                             recordIndex,
+                             reward.itemIndex,
+                             reward.quantity);
+        return;
+    }
+    outcome.mutation = grant;
+    report_record_reward(message, "ok", "ready", recordIndex, reward.itemIndex, reward.quantity);
+}
+
 /** Decodes one opcode-1801 Triumphs claim and reports the record it names. */
 void claim_record(const middleware::web_service::Message& message, Outcome& outcome) noexcept {
-    // Deliberately no mutation. The shared reply path answers an action that prepares nothing with
-    // the refusal status, so preparing a placeholder here would turn a silently-accepted claim into
-    // an explicitly rejected one. Attach the transition here once claimed state is identified.
+    // No mutation is prepared below the claim itself: the shared reply path answers an action
+    // that prepares nothing with the refusal status, so preparing a placeholder here would turn a
+    // silently-accepted claim into an explicitly rejected one. A configured reward is the one
+    // exception, attached only once the claim itself has already landed.
     namespace records = state::build_data::records;
     middleware::web_service::messages::opcode1801::Request request{};
     if (!middleware::web_service::messages::opcode1801::parse_request(message, request)) {
@@ -896,6 +1031,9 @@ void claim_record(const middleware::web_service::Message& message, Outcome& outc
                         request.recordIndex,
                         definition.completionFlagIndex,
                         definition.scoreValue);
+    // Attached only after the claim above has already landed: a reward that fails to resolve or
+    // fit must never turn this already-successful claim into a failure.
+    grant_record_reward(message, request.recordIndex, definition.definitionHash, outcome);
 }
 
 } // namespace sunrise::server::web_service
