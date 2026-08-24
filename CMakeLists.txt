@@ -111,6 +111,7 @@ target_link_libraries(steam_api64 PRIVATE
     kernel32 bcrypt user32 gdi32 dwmapi
     d3dcompiler shell32 ws2_32 synchronization
     windowscodecs
+    winsqlite3
 )
 
 set_target_properties(steam_api64 PROPERTIES

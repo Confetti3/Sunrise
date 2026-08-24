@@ -14,3 +14,4 @@
 # CMake build files
 /build/
 /out/
+/tests/build/

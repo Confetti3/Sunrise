@@ -20,6 +20,16 @@ jobs:
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v2
 
+      - name: Build SQLite persistence test
+        run: >
+          msbuild tests/SQLitePersistenceTests.vcxproj /m
+          /p:Configuration=Release
+          /p:Platform=x64
+          /verbosity:minimal
+
+      - name: Run SQLite persistence test
+        run: .\tests\build\x64\Release\SQLitePersistenceTests.exe
+
       - name: Build
         run: >
           msbuild Sunrise.sln /m

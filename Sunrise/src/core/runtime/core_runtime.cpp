@@ -14,7 +14,7 @@
 #include "../../server/runtime/server_runtime.h"
 #include "../../state/content_manifest/content_manifest_state_runtime.h"
 #include "../../state/entitlements/entitlement_runtime.h"
-#include "../../state/runtime/runtime.h"
+#include "../../state/persistence/sqlite_account_store.h"
 #include "../../state/unlocks/unlocks_runtime.h"
 #include "../filesystem/path.h"
 #include "../logging/log.h"
@@ -114,9 +114,9 @@ bool initialize(void* module) noexcept {
             stage = "ui_logs";
         } else if (!state::entitlements::publish(settings::get().server.entitlements)) {
             stage = "entitlements";
-        } else if (!state::initialize(module,
-                                      settings::get().initialAccount,
-                                      settings::get().initialActivityDefaults)) {
+        } else if (!state::persistence::initialize(module,
+                                                   settings::get().initialAccount,
+                                                   settings::get().initialActivityDefaults)) {
             stage = "state";
         } else if (!initialize_content_manifest(module)) {
             stage = "content_manifest";
@@ -139,7 +139,7 @@ bool initialize(void* module) noexcept {
         server::shutdown();
         middleware::shutdown();
         state::content_manifest::shutdown();
-        state::shutdown();
+        state::persistence::shutdown();
         state::entitlements::clear();
         ui::modules::logs::shutdown();
         ui::modules::hud::shutdown();
@@ -165,6 +165,13 @@ bool shutdown() noexcept {
         ReleaseSRWLockExclusive(&g_runtimeLock);
         return true;
     }
+    // Preserve a coherent snapshot before hook teardown, which can require a later retry. State
+    // stays live until Client fully detaches, and a successful teardown writes the final image.
+    if (!state::persistence::checkpoint("shutdown_attempt")) {
+        // Keep every runtime layer live so a later shutdown attempt can retry the durable write.
+        ReleaseSRWLockExclusive(&g_runtimeLock);
+        return false;
+    }
     if (!client::shutdown()) {
         // Server and State must remain valid while any Client hook is attached.
         ReleaseSRWLockExclusive(&g_runtimeLock);
@@ -174,7 +181,7 @@ bool shutdown() noexcept {
     server::shutdown();
     middleware::shutdown();
     state::content_manifest::shutdown();
-    state::shutdown();
+    state::persistence::shutdown();
     state::entitlements::clear();
     ui::modules::logs::shutdown();
     ui::modules::hud::shutdown();
