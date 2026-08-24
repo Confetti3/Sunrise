@@ -28,6 +28,15 @@ void clear() noexcept;
 /** @param pointer Payload previously returned by allocate, or null. */
 void release(void* pointer) noexcept;
 
+/**
+ * Checks whether pointer is an allocated payload wholly owned by the arena.
+ * This validates
+ * the address range and block header before a release callback
+ * interprets the preceding bytes as
+ * arena metadata.
+ */
+[[nodiscard]] bool owns(const void* pointer) noexcept;
+
 /** @return Current counters and the largest merged free payload. */
 [[nodiscard]] ArenaStats snapshot() noexcept;
 

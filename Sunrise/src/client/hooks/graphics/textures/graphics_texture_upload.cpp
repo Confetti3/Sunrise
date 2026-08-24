@@ -7,6 +7,7 @@
 
 #include <Windows.h>
 
+#include <string>
 #include <string_view>
 #include <wincodec.h>
 
@@ -17,8 +18,8 @@
 namespace sunrise::client::hooks::graphics::textures {
 namespace {
 
-/** A PNG holds one image, so the sheet is always the decoder's first frame. */
-constexpr UINT kSheetFrameIndex = 0;
+/** A PNG holds one image, so every bundled image uses the decoder's first frame. */
+constexpr UINT kImageFrameIndex = 0;
 /** One mip level and one array slice: the sheet is drawn at its own scale. */
 constexpr UINT kSingleLevel = 1;
 /** The texture is not multisampled, which is quality level 0 of one sample. */
@@ -78,15 +79,16 @@ private:
 }
 
 /**
- * Borrows the bundled sheet bytes out of the module resources.
+ * Borrows one bundled image out of the module resources.
+ * @param resourceId Numeric RCDATA identifier.
  * @param bytes Receives the resource bytes, owned by the module.
  * @param size Receives the resource size.
  * @return True when the resource is present and not empty.
  */
-[[nodiscard]] bool bundled_sheet(const void*& bytes, DWORD& size) noexcept {
+[[nodiscard]] bool bundled_image(int resourceId, const void*& bytes, DWORD& size) noexcept {
     const HMODULE module = owning_module();
     const HRSRC resource = module != nullptr
-                               ? FindResourceW(module, MAKEINTRESOURCEW(IDR_LOGO_SHEET), RT_RCDATA)
+                               ? FindResourceW(module, MAKEINTRESOURCEW(resourceId), RT_RCDATA)
                                : nullptr;
     if (resource == nullptr) {
         return false;
@@ -103,15 +105,17 @@ private:
 }
 
 /**
- * Decodes the bundled PNG into one cached bitmap with red, green, blue and alpha bytes.
+ * Decodes one bundled PNG into a bitmap with red, green, blue and alpha bytes.
  * @param factory Imaging factory used for every decode step.
+ * @param resourceId Numeric RCDATA identifier.
  * @param output Receives the decoded bitmap. Null when any step fails.
  * @return True when the bitmap is decoded.
  */
-[[nodiscard]] bool decode_sheet(IWICImagingFactory* factory, IWICBitmap*& output) noexcept {
+[[nodiscard]] bool
+decode_image(IWICImagingFactory* factory, int resourceId, IWICBitmap*& output) noexcept {
     const void* bytes = nullptr;
     DWORD size = 0;
-    if (!bundled_sheet(bytes, size)) {
+    if (!bundled_image(resourceId, bytes, size)) {
         return false;
     }
     IWICStream* stream = nullptr;
@@ -125,7 +129,7 @@ private:
         && SUCCEEDED(stream->InitializeFromMemory(mutableBytes, size))
         && SUCCEEDED(factory->CreateDecoderFromStream(
             stream, nullptr, WICDecodeMetadataCacheOnDemand, &decoder))
-        && SUCCEEDED(decoder->GetFrame(kSheetFrameIndex, &frame))
+        && SUCCEEDED(decoder->GetFrame(kImageFrameIndex, &frame))
         && SUCCEEDED(WICConvertBitmapSource(GUID_WICPixelFormat32bppRGBA, frame, &converted))
         && SUCCEEDED(factory->CreateBitmapFromSource(converted, WICBitmapCacheOnLoad, &output));
     release_com(converted);
@@ -189,48 +193,84 @@ create_texture(ID3D11Device* device, IWICBitmap* bitmap, Uploaded& output) noexc
     return true;
 }
 
-} // namespace
-
-/** Decodes the bundled logo sheet and publishes its view to the Core interface. */
-bool upload_logo_sheet(ID3D11Device* device, Uploaded& output) noexcept {
+[[nodiscard]] bool upload_bundled_image(ID3D11Device* device,
+                                        int resourceId,
+                                        core::ui::textures::Slot slot,
+                                        std::string_view stage,
+                                        Uploaded& output) noexcept {
     if (device == nullptr) {
         return false;
     }
+    const auto failure = [stage](std::string_view reason) noexcept {
+        std::string line("ev=texture stage=");
+        line.append(stage);
+        line.append(" result=fail reason=");
+        line.append(reason);
+        return fail(line);
+    };
+
     const ComScope com;
     if (!com.usable()) {
-        return fail("ev=texture stage=logo_sheet result=fail reason=com");
+        return failure("com");
     }
     IWICImagingFactory* factory = nullptr;
     if (FAILED(CoCreateInstance(
             CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory)))) {
-        return fail("ev=texture stage=logo_sheet result=fail reason=factory");
+        return failure("factory");
     }
     IWICBitmap* bitmap = nullptr;
-    const bool decoded = decode_sheet(factory, bitmap);
+    const bool decoded = decode_image(factory, resourceId, bitmap);
     release_com(factory);
     if (!decoded) {
-        return fail("ev=texture stage=logo_sheet result=fail reason=decode");
+        return failure("decode");
     }
     const bool created = create_texture(device, bitmap, output);
     release_com(bitmap);
     if (!created) {
-        return fail("ev=texture stage=logo_sheet result=fail reason=texture");
+        return failure("texture");
     }
-    core::ui::textures::publish(core::ui::textures::Slot::logoSheet,
-                                reinterpret_cast<ImTextureID>(output.view));
-    core::log::write(core::log::Channel::client,
-                     core::log::Level::debug,
-                     "ev=texture stage=logo_sheet result=ok");
+
+    core::ui::textures::publish(slot, reinterpret_cast<ImTextureID>(output.view));
+    std::string line("ev=texture stage=");
+    line.append(stage);
+    line.append(" result=ok");
+    core::log::write(core::log::Channel::client, core::log::Level::debug, line);
     return true;
 }
 
-/** Empties the published slot, then releases both objects. */
-void release_logo_sheet(Uploaded& uploaded) noexcept {
+void release_bundled_image(core::ui::textures::Slot slot, Uploaded& uploaded) noexcept {
     if (uploaded.view != nullptr) {
-        core::ui::textures::publish(core::ui::textures::Slot::logoSheet, ImTextureID_Invalid);
+        core::ui::textures::publish(slot, ImTextureID_Invalid);
     }
     release_com(uploaded.view);
     release_com(uploaded.texture);
+}
+
+} // namespace
+
+/** Decodes the bundled logo sheet and publishes its view to the Core interface. */
+bool upload_logo_sheet(ID3D11Device* device, Uploaded& output) noexcept {
+    return upload_bundled_image(
+        device, IDR_LOGO_SHEET, core::ui::textures::Slot::logoSheet, "logo_sheet", output);
+}
+
+/** Decodes the bundled inspector icon and publishes its view to the Core interface. */
+bool upload_inspector_icon(ID3D11Device* device, Uploaded& output) noexcept {
+    return upload_bundled_image(device,
+                                IDR_INSPECTOR_ICON,
+                                core::ui::textures::Slot::inspectorIcon,
+                                "inspector_icon",
+                                output);
+}
+
+/** Empties the published logo slot, then releases both objects. */
+void release_logo_sheet(Uploaded& uploaded) noexcept {
+    release_bundled_image(core::ui::textures::Slot::logoSheet, uploaded);
+}
+
+/** Empties the published inspector-icon slot, then releases both objects. */
+void release_inspector_icon(Uploaded& uploaded) noexcept {
+    release_bundled_image(core::ui::textures::Slot::inspectorIcon, uploaded);
 }
 
 } // namespace sunrise::client::hooks::graphics::textures

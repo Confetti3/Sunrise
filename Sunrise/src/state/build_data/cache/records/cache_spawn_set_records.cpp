@@ -79,6 +79,7 @@ bool decode(const SpawnNameHashRecord& record, spawn_sets::NameHash& value) noex
 bool encode(const spawn_sets::Point& value, SpawnPointRecord& record) noexcept {
     record = {};
     record.position = value.position;
+    record.rotation = value.rotation;
     record.nameHash = value.nameHash;
     record.stemIndex = value.stemIndex;
     return true;
@@ -90,7 +91,7 @@ bool decode(const SpawnPointRecord& record, spawn_sets::Point& value) noexcept {
     if (record.reserved != decltype(record.reserved){}) {
         return false;
     }
-    value = {record.position, record.nameHash, record.stemIndex};
+    value = {record.position, record.rotation, record.nameHash, record.stemIndex};
     return true;
 }
 

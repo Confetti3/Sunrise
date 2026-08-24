@@ -151,6 +151,33 @@ using ClassEntryVisitor = bool (*)(void* context, const ClassEntry& entry) noexc
                               ScanResult& result) noexcept;
 
 /**
+ * Reports matching entries only from the named package ids. This avoids a full
+ *
+ * installed-package sweep when a live destination already declares its package set.
+ * Duplicate
+ * ids are ignored.
+ */
+[[nodiscard]] bool scan_class_packages(std::wstring_view directory,
+                                       std::span<const std::uint16_t> packageIds,
+                                       std::uint32_t classId,
+                                       ClassVisitor visitor,
+                                       void* context,
+                                       ScanResult& result) noexcept;
+
+/**
+ * Reports matching entries only from package names beginning `w64_<family>_`.
+ * This includes
+ * the map and its sibling activity packages without reading every
+ * installed package table.
+ */
+[[nodiscard]] bool scan_class_family(std::wstring_view directory,
+                                     std::string_view family,
+                                     std::uint32_t classId,
+                                     ClassVisitor visitor,
+                                     void* context,
+                                     ScanResult& result) noexcept;
+
+/**
  * Reports every installed entry of one tag class with its package family.
  * Only the highest patch of each package is scanned, so a tag is reported once.
  * @param directory Installed packages directory.

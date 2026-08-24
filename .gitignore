@@ -13,4 +13,6 @@
 
 # CMake build files
 /build/
+/bin/
 /out/
+__pycache__/

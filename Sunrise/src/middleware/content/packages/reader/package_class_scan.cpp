@@ -147,6 +147,85 @@ bool scan_class(std::wstring_view directory,
     return scan_class_entries(directory, classId, &visit_legacy, &legacy, result);
 }
 
+bool scan_class_packages(std::wstring_view directory,
+                         std::span<const std::uint16_t> packageIds,
+                         std::uint32_t classId,
+                         ClassVisitor visitor,
+                         void* context,
+                         ScanResult& result) noexcept {
+    result = {};
+    if (directory.empty() || packageIds.empty() || visitor == nullptr) {
+        return false;
+    }
+    LegacyVisitor legacy{visitor, context};
+    SeenSet seen{};
+    for (const std::uint16_t packageId : packageIds) {
+        if (!claim(seen, packageId)) {
+            continue;
+        }
+        if (!scan_package(directory, packageId, classId, &visit_legacy, &legacy, result)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool scan_class_family(std::wstring_view directory,
+                       std::string_view family,
+                       std::uint32_t classId,
+                       ClassVisitor visitor,
+                       void* context,
+                       ScanResult& result) noexcept {
+    result = {};
+    if (directory.empty() || family.empty() || visitor == nullptr) {
+        return false;
+    }
+    Path search{};
+    if (!search_pattern(directory, search)) {
+        return false;
+    }
+    WIN32_FIND_DATAW found{};
+    const HANDLE enumeration = FindFirstFileW(search.chars.data(), &found);
+    if (enumeration == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+    LegacyVisitor legacy{visitor, context};
+    SeenSet seen{};
+    bool complete = true;
+    do {
+        if ((found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+            continue;
+        }
+        const std::wstring_view leaf(found.cFileName);
+        constexpr std::wstring_view kPrefix = L"w64_";
+        if (!leaf.starts_with(kPrefix) || leaf.size() <= kPrefix.size() + family.size()
+            || leaf[kPrefix.size() + family.size()] != L'_') {
+            continue;
+        }
+        bool familyMatch = true;
+        for (std::size_t index = 0; index < family.size(); ++index) {
+            familyMatch =
+                familyMatch && leaf[kPrefix.size() + index] == static_cast<wchar_t>(family[index]);
+        }
+        if (!familyMatch) {
+            continue;
+        }
+        std::uint16_t packageId = 0;
+        std::uint32_t patchIndex = 0;
+        if (!parse_leaf(found.cFileName, packageId, patchIndex) || !claim(seen, packageId)) {
+            continue;
+        }
+        if (!scan_package(directory, packageId, classId, &visit_legacy, &legacy, result)) {
+            complete = false;
+            break;
+        }
+    } while (FindNextFileW(enumeration, &found) != 0);
+    if (complete && GetLastError() != ERROR_NO_MORE_FILES) {
+        complete = false;
+    }
+    return FindClose(enumeration) != FALSE && complete;
+}
+
 /** Reports every installed entry of one tag class with its package family. */
 bool scan_class_entries(std::wstring_view directory,
                         std::uint32_t classId,

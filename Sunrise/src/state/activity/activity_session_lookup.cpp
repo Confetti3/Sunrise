@@ -42,6 +42,20 @@ namespace {
            && same_destination(record.destination, binding.destination);
 }
 
+/** Copies one record and its enclosing State revision into caller-owned storage. */
+void copy_snapshot(const ActivityState& state,
+                   const SessionRecord& record,
+                   SessionSnapshot& output) noexcept {
+    output.binding.destination = record.destination;
+    output.binding.sessionId = record.sessionId;
+    output.binding.createdRevision = record.createdRevision;
+    output.stateRevision = state.stateRevision;
+    output.recordRevision = record.recordRevision;
+    output.joinedRevision = record.joinedRevision;
+    output.reportedRegion = record.membership.region.index;
+    output.joined = record.joined && record.joinedRevision != kInvalidRevision;
+}
+
 } // namespace
 
 /** Tests whether a nonzero activity-session id is still in the bounded table. */
@@ -78,6 +92,23 @@ bool is_joined(std::uint64_t sessionId) noexcept {
     }
     ReleaseSRWLockShared(&runtime::storage::g_stateLock);
     return joined;
+}
+
+/** Copies one committed session's identity and lifecycle revisions. */
+bool snapshot_session(std::uint64_t sessionId, SessionSnapshot& output) noexcept {
+    output = {};
+    if (sessionId == kAbsentSessionId) {
+        return false;
+    }
+    AcquireSRWLockShared(&runtime::storage::g_stateLock);
+    const ActivityState& state = runtime::storage::g_state.activity;
+    const std::size_t slot = transactions::find_session(state, sessionId);
+    const bool found = slot < kSessionCapacity;
+    if (found) {
+        copy_snapshot(state, state.sessions[slot], output);
+    }
+    ReleaseSRWLockShared(&runtime::storage::g_stateLock);
+    return found;
 }
 
 /** Copies the exact destination and generation of one committed session. */

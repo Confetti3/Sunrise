@@ -9,6 +9,8 @@ namespace sunrise::core::ui::textures {
 enum class Slot : std::uint8_t {
     /** Grayscale sprite sheet of the animated Sunrise logo. */
     logoSheet,
+    /** Compact gold project icon used by editor-style workspaces. */
+    inspectorIcon,
     count,
 };
 

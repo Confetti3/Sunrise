@@ -93,6 +93,8 @@ void uninstall() noexcept {
     }
     // Reads go back to the real state before the trampoline that serves them is gone.
     apply_policy(false);
+    clear_claimed_keys();
+    release_key();
     if (!hooking::detour::uninstall(g_handles)) {
         core::log::write(core::log::Channel::client,
                          core::log::Level::warn,

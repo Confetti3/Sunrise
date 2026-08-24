@@ -16,6 +16,17 @@ Destiny 2 Offline Exploration Mod
 - Load into any Destination (matchmade activities are currently broken)
 - Exploration Features (Fly, Noclip, Activity Override, ...)
 - Basic Inventory Management
+- Detached Viewer camera and World Inspector
+
+## Viewer and World Inspector
+
+Viewer adds a detached camera, HUD/audio controls, reusable camera paths, and an editor-style World
+Inspector. The Inspector presents copied runtime observations and optional authored catalogs as a
+searchable graph with spatial helpers, history/compare tools, and schema-versioned JSON/CSV exports.
+It does not modify game rendering when nodes are hidden or isolated.
+
+See [INSPECTOR.md](INSPECTOR.md) for architecture, safety limits, supported-build constraints,
+optional catalog generation, export interfaces, and the manual verification checklist.
 
 ## WIP
 

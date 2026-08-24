@@ -37,8 +37,11 @@ extern std::array<void*, kHandleCount> g_targets;
 
 /**
  * Gives the live trampoline, or the restored export while detaching.
- * @tparam Function Exact export ABI.
- * @return Callable entry for the current attach state, or null before install.
+ * @tparam Function Exact
+ * export ABI.
+ * @param slot Export slot whose callable entry is required.
+ * @return Callable
+ * entry for the current attach state, or null before install.
  */
 template <typename Function> [[nodiscard]] Function original(HookSlot slot) noexcept {
     const auto index = static_cast<std::size_t>(slot);
@@ -49,10 +52,20 @@ template <typename Function> [[nodiscard]] Function original(HookSlot slot) noex
     return reinterpret_cast<Function>(entry);
 }
 
-/** Reports every key released to game code while the interface is open. */
+/**
+ * Reports interface-blocked or feature-claimed keys released to game code.
+ * @param virtualKey
+ * Virtual key queried by the game.
+ * @return Policy-adjusted GetKeyState result.
+ */
 SHORT WINAPI get_key_state(int virtualKey) noexcept;
 
-/** Reports every key released to game code while the interface is open. */
+/**
+ * Reports interface-blocked or feature-claimed keys released to game code.
+ * @param virtualKey
+ * Virtual key queried by the game.
+ * @return Policy-adjusted GetAsyncKeyState result.
+ */
 SHORT WINAPI get_async_key_state(int virtualKey) noexcept;
 
 /**

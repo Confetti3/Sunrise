@@ -29,7 +29,7 @@ inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', '
  * Bump it when a stored shape changes, and when the extraction filling it changes what it writes.
  * A cached row survives a code change, so a corrected walk keeps publishing the old rows.
  */
-inline constexpr std::uint32_t kCacheFormatVersion = 44;
+inline constexpr std::uint32_t kCacheFormatVersion = 45;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */
@@ -341,6 +341,8 @@ struct SpawnNameHashRecord {
 /** Disk form of one spawn point and the set it belongs to. */
 struct SpawnPointRecord {
     std::array<float, spawn_sets::kPositionComponents> position{};
+    /** Authored facing quaternion copied from the package record. */
+    std::array<float, 4> rotation{};
     std::uint32_t nameHash{};
     std::uint16_t stemIndex{};
     /** Must be zero, so the packed point row always matches. */
@@ -425,8 +427,8 @@ static_assert(sizeof(Header)
               == kCacheMagic.size() + 26 * sizeof(std::uint32_t) + 2 * sizeof(std::uint64_t)
                      + sizeof(InvestmentConstants));
 static_assert(sizeof(SpawnPointRecord)
-              == spawn_sets::kPositionComponents * sizeof(float) + sizeof(std::uint32_t)
-                     + sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t));
+              == spawn_sets::kPositionComponents * sizeof(float) + 4 * sizeof(float)
+                     + sizeof(std::uint32_t) + sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t));
 static_assert(sizeof(VendorIndexRecord) == 2 * sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t));
 static_assert(sizeof(VendorDefinitionRecord)
               == 14 * sizeof(std::uint32_t) + 4 * sizeof(std::uint16_t));

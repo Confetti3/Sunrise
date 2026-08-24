@@ -49,6 +49,18 @@ struct SessionBinding {
     std::uint64_t createdRevision{};
 };
 
+/** Caller-owned runtime status for one committed activity-session generation. */
+struct SessionSnapshot {
+    SessionBinding binding{};
+    /** State revision observed under the same lock as the record fields. */
+    std::uint64_t stateRevision{};
+    std::uint64_t recordRevision{};
+    std::uint64_t joinedRevision{};
+    /** Region last reported on this exact session generation, or the absent sentinel. */
+    std::int32_t reportedRegion{membership::kAbsentRegionIndex};
+    bool joined{};
+};
+
 /** One committed activity-session id and its lifecycle revisions. */
 struct SessionRecord {
     /** Scalar destination committed in the same transaction as this session. */

@@ -2,7 +2,8 @@
 
 // Sunrise does not let Dear ImGui read or write files at runtime.
 #define IMGUI_DISABLE_FILE_FUNCTIONS
-// Every Dear ImGui allocation must use Sunrise's bounded static arena.
+// Dear ImGui uses Sunrise's fixed arena first, with tracked process-heap spill
+// only when dense UI storage exceeds the arena; the prior callbacks remain disabled.
 #define IMGUI_DISABLE_DEFAULT_ALLOCATORS
 // The generic shell helper stays off; the credits badge owns its one URL action.
 #define IMGUI_DISABLE_DEFAULT_SHELL_FUNCTIONS

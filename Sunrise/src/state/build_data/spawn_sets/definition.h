@@ -76,6 +76,8 @@ struct NameHash {
 /** One spawn point. The set is named by hash, because the flat bank is built after the points. */
 struct Point {
     std::array<float, kPositionComponents> position{};
+    /** Authored facing copied from the package record; identity when unrotated. */
+    std::array<float, 4> rotation{};
     std::uint32_t nameHash{};
     std::uint16_t stemIndex{};
 };

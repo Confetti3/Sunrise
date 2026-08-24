@@ -33,7 +33,7 @@ namespace {
 
 } // namespace
 
-/** Finds and installs both system DXGI hooks in one transaction. */
+/** Finds and installs every required DXGI/D3D11 hook in one transaction. */
 bool install() noexcept {
     const core::ui::runtime::VisibilitySnapshot visibility = core::ui::runtime::snapshot();
     if (!visibility.initialized || !visibility.enabled) {
@@ -59,6 +59,17 @@ bool install() noexcept {
                               entryPoints[static_cast<std::size_t>(HookSlot::resizeBuffers)]},
         hooking::detour::Spec{g_targets.setFullscreenState,
                               entryPoints[static_cast<std::size_t>(HookSlot::setFullscreenState)]},
+        hooking::detour::Spec{g_targets.omSetRenderTargets,
+                              entryPoints[static_cast<std::size_t>(HookSlot::omSetRenderTargets)]},
+        hooking::detour::Spec{g_targets.omSetRenderTargetsAndUnorderedAccessViews,
+                              entryPoints[static_cast<std::size_t>(
+                                  HookSlot::omSetRenderTargetsAndUnorderedAccessViews)]},
+        hooking::detour::Spec{
+            g_targets.omSetDepthStencilState,
+            entryPoints[static_cast<std::size_t>(HookSlot::omSetDepthStencilState)]},
+        hooking::detour::Spec{
+            g_targets.clearDepthStencilView,
+            entryPoints[static_cast<std::size_t>(HookSlot::clearDepthStencilView)]},
     };
     for (std::size_t index = 0; index < specs.size(); ++index) {
         g_targetEntries[index] = specs[index].target;
@@ -141,7 +152,7 @@ bool uninstall() noexcept {
     return true;
 }
 
-/** @return True only when both system DXGI method hooks are attached. */
+/** @return True only when every system graphics method hook is attached. */
 bool is_installed() noexcept {
     AcquireSRWLockShared(&g_hookLock);
     const bool installed = all_installed();

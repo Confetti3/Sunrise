@@ -21,12 +21,38 @@ using ResizeBuffers =
     HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain*, UINT, UINT, UINT, DXGI_FORMAT, UINT);
 /** SDK ABI for IDXGISwapChain::SetFullscreenState. */
 using SetFullscreenState = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain*, BOOL, IDXGIOutput*);
+/** SDK ABI for ID3D11DeviceContext::OMSetRenderTargets. */
+using OmSetRenderTargets = void(STDMETHODCALLTYPE*)(ID3D11DeviceContext*,
+                                                    UINT,
+                                                    ID3D11RenderTargetView* const*,
+                                                    ID3D11DepthStencilView*);
+/** SDK ABI for ID3D11DeviceContext::OMSetRenderTargetsAndUnorderedAccessViews. */
+using OmSetRenderTargetsAndUnorderedAccessViews =
+    void(STDMETHODCALLTYPE*)(ID3D11DeviceContext*,
+                             UINT,
+                             ID3D11RenderTargetView* const*,
+                             ID3D11DepthStencilView*,
+                             UINT,
+                             UINT,
+                             ID3D11UnorderedAccessView* const*,
+                             const UINT*);
+/** SDK ABI for ID3D11DeviceContext::OMSetDepthStencilState. */
+using OmSetDepthStencilState = void(STDMETHODCALLTYPE*)(ID3D11DeviceContext*,
+                                                        ID3D11DepthStencilState*,
+                                                        UINT);
+/** SDK ABI for ID3D11DeviceContext::ClearDepthStencilView. */
+using ClearDepthStencilView =
+    void(STDMETHODCALLTYPE*)(ID3D11DeviceContext*, ID3D11DepthStencilView*, UINT, FLOAT, UINT8);
 
 /** Stable slots shared by discovery targets and Detours handles. */
 enum class HookSlot : std::size_t {
     present,
     resizeBuffers,
     setFullscreenState,
+    omSetRenderTargets,
+    omSetRenderTargetsAndUnorderedAccessViews,
+    omSetDepthStencilState,
+    clearDepthStencilView,
     count,
 };
 
@@ -38,12 +64,21 @@ inline constexpr std::size_t kPresentMethodIndex = 8;
 inline constexpr std::size_t kResizeBuffersMethodIndex = 13;
 /** SetFullscreenState comes 2 IDXGISwapChain methods after Present. */
 inline constexpr std::size_t kSetFullscreenStateMethodIndex = 10;
+/** ID3D11DeviceContext method slots from the SDK interface definition. */
+inline constexpr std::size_t kOmSetRenderTargetsMethodIndex = 33;
+inline constexpr std::size_t kOmSetRenderTargetsAndUnorderedAccessViewsMethodIndex = 34;
+inline constexpr std::size_t kOmSetDepthStencilStateMethodIndex = 36;
+inline constexpr std::size_t kClearDepthStencilViewMethodIndex = 53;
 
 /** System methods and module references kept through detachment. */
 struct Targets {
     void* present{};
     void* resizeBuffers{};
     void* setFullscreenState{};
+    void* omSetRenderTargets{};
+    void* omSetRenderTargetsAndUnorderedAccessViews{};
+    void* omSetDepthStencilState{};
+    void* clearDepthStencilView{};
     HMODULE d3d11Module{};
     HMODULE dxgiModule{};
 };
@@ -79,9 +114,21 @@ extern Targets g_targets;
 [[nodiscard]] bool executable_image_target(const void* target, HMODULE module) noexcept;
 
 /**
+ * Verifies that the selected production context uses the discovered system entries.
+ * @param
+ * context Candidate production immediate context.
+ * @return True when every observed vtable entry
+ * matches the discovered target.
+ */
+[[nodiscard]] bool context_targets_match(ID3D11DeviceContext* context) noexcept;
+
+/**
  * Returns the active trampoline or the restored target during detachment.
- * @tparam Function Exact SDK method ABI.
- * @return Callable entry for the current attach state.
+ * @tparam Function Exact
+ * SDK method ABI.
+ * @param slot Hook slot whose callable entry is required.
+ * @return Callable
+ * entry for the current attach state.
  */
 template <typename Function> [[nodiscard]] Function original(HookSlot slot) noexcept {
     const std::size_t index = static_cast<std::size_t>(slot);
@@ -94,10 +141,20 @@ template <typename Function> [[nodiscard]] Function original(HookSlot slot) noex
 
 namespace discovery {
 
-/** Finds the system DXGI method targets through one temporary SDK swap chain. */
+/**
+ * Finds the system DXGI method targets through one temporary SDK swap chain.
+ * @param output
+ * Destination for callable targets and retained module references.
+ * @return True when every
+ * required target was discovered and validated.
+ */
 [[nodiscard]] bool resolve(Targets& output) noexcept;
 
-/** Releases retained system-module references and clears the target set. */
+/**
+ * Releases retained system-module references and clears the target set.
+ * @param targets
+ * Target set to release and clear.
+ */
 void release(Targets& targets) noexcept;
 
 } // namespace discovery
@@ -105,7 +162,7 @@ void release(Targets& targets) noexcept;
 namespace replacement {
 
 /** Every replacement body, plus ingress and egress: the bodies a suspended call can sit in. */
-inline constexpr std::size_t kProtectedEntryCount = 5;
+inline constexpr std::size_t kProtectedEntryCount = 9;
 
 /** Direct replacement bodies indexed by HookSlot. */
 using EntryPoints = std::array<void*, kHandleCount>;
@@ -118,7 +175,15 @@ using ProtectedEntries = std::array<hooking::detour::ProtectedCodeEntry, kProtec
 /** @return Unwind-backed call-lifetime bodies needed for safe detachment. */
 [[nodiscard]] ProtectedEntries protected_entries() noexcept;
 
-/** SDK-compatible IDXGISwapChain::Present detour. */
+/**
+ * SDK-compatible IDXGISwapChain::Present detour.
+ * @param swapChain Swap chain supplied by the
+ * SDK call.
+ * @param syncInterval Present synchronization interval.
+ * @param flags DXGI present
+ * flags.
+ * @return HRESULT returned by the original SDK method.
+ */
 HRESULT STDMETHODCALLTYPE present(IDXGISwapChain* swapChain,
                                   UINT syncInterval,
                                   UINT flags) noexcept;

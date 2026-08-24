@@ -4,13 +4,18 @@
 #include <imgui_impl_dx11.h>
 #include <imgui_impl_win32.h>
 
+#include "../../../../core/logging/log.h"
 #include "../../../../core/ui/layout/layout.h"
+#include "../../../../core/ui/modules/logs/logs.h"
 #include "../../../../core/ui/runtime/ui_visibility_runtime.h"
 #include "../../cursor/runtime.h"
 #include "../../inactivity/inactivity_override.h"
 #include "../../polled_input/runtime.h"
+#include "../graphics_hook_replacements.h"
 #include "../input/input.h"
+#include "graphics_depth_observer.h"
 #include "graphics_renderer_report.h"
+#include "native_debug_renderer.h"
 #include "state.h"
 
 namespace sunrise::client::hooks::graphics::renderer {
@@ -24,7 +29,7 @@ constexpr UINT kBackBufferIndex = 0;
  * @param resources Resources of the teardown attempt in progress.
  * @return True when another thread must run the release before teardown retries.
  */
-[[nodiscard]] bool wait_for_capture_release(Resources& resources) noexcept {
+[[nodiscard]] bool wait_for_capture_release(Resources& resources, bool finalTeardown) noexcept {
     if (resources.window == nullptr) {
         return false;
     }
@@ -46,6 +51,14 @@ constexpr UINT kBackBufferIndex = 0;
         GUITHREADINFO information{};
         information.cbSize = sizeof(information);
         if (GetGUIThreadInfo(windowThread, &information) == FALSE) {
+            if (finalTeardown) {
+                g_captureReleaseWindow = nullptr;
+                core::log::write(core::log::Channel::client,
+                                 core::log::Level::warn,
+                                 "ev=shutdown stage=graphics_capture "
+                                 "result=skip reason=query_unavailable");
+                return false;
+            }
             // Unknown cross-thread state stays pending until a later dispatch retries.
             g_captureReleaseWindow = resources.window;
             return true;
@@ -60,6 +73,14 @@ constexpr UINT kBackBufferIndex = 0;
     }
 
     g_captureReleaseWindow = resources.window;
+    if (windowThread != GetCurrentThreadId() && finalTeardown) {
+        g_captureReleaseWindow = nullptr;
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::info,
+                         "ev=shutdown stage=graphics_capture "
+                         "result=skip reason=foreign_thread");
+        return false;
+    }
     return windowThread != GetCurrentThreadId();
 }
 
@@ -114,32 +135,84 @@ constexpr std::array<ViewFormat, 6> kTypelessViewFormats{
  * @param resources Fully or partly started renderer resources.
  * @return False only when a cleanup step must be retried.
  */
-[[nodiscard]] bool shutdown_resources(Resources& resources) noexcept {
-    if (wait_for_capture_release(resources)) {
+[[nodiscard]] bool shutdown_resources(Resources& resources, bool finalTeardown = false) noexcept {
+    if (wait_for_capture_release(resources, finalTeardown)) {
         return false;
     }
+    if (finalTeardown) {
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::debug,
+                         "ev=shutdown stage=graphics_capture result=ok");
+    }
     if (resources.inputInstalled) {
+        if (finalTeardown) {
+            core::log::write(core::log::Channel::client,
+                             core::log::Level::debug,
+                             "ev=shutdown stage=graphics_input phase=begin");
+        }
         if (!input::uninstall_raw_input_window()) {
+            if (finalTeardown) {
+                core::log::write(core::log::Channel::client,
+                                 core::log::Level::error,
+                                 "ev=shutdown stage=graphics_input "
+                                 "result=fail reason=raw_window");
+            }
             return false;
         }
         if (!input::uninstall()) {
+            if (finalTeardown) {
+                core::log::write(core::log::Channel::client,
+                                 core::log::Level::error,
+                                 "ev=shutdown stage=graphics_input "
+                                 "result=fail reason=output_window");
+            }
             return false;
         }
         resources.inputInstalled = false;
     }
+    if (finalTeardown) {
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::debug,
+                         "ev=shutdown stage=graphics_input result=ok");
+    }
     if (resources.dx11BackendInitialized) {
+        if (finalTeardown) {
+            core::log::write(core::log::Channel::client,
+                             core::log::Level::debug,
+                             "ev=shutdown stage=imgui_dx11 phase=begin");
+        }
         ImGui_ImplDX11_Shutdown();
         resources.dx11BackendInitialized = false;
     }
     if (resources.win32BackendInitialized) {
+        if (finalTeardown) {
+            core::log::write(core::log::Channel::client,
+                             core::log::Level::debug,
+                             "ev=shutdown stage=imgui_win32 phase=begin");
+        }
         ImGui_ImplWin32_Shutdown();
         resources.win32BackendInitialized = false;
     }
     if (resources.layoutInitialized) {
+        if (finalTeardown) {
+            core::log::write(core::log::Channel::client,
+                             core::log::Level::debug,
+                             "ev=shutdown stage=ui_layout phase=begin");
+        }
         if (!core::ui::layout::shutdown()) {
+            if (finalTeardown) {
+                core::log::write(core::log::Channel::client,
+                                 core::log::Level::error,
+                                 "ev=shutdown stage=ui_layout result=fail");
+            }
             return false;
         }
         resources.layoutInitialized = false;
+    }
+    if (finalTeardown) {
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::debug,
+                         "ev=shutdown stage=graphics_resources phase=begin");
     }
     release_resources(resources);
     return true;
@@ -185,14 +258,17 @@ constexpr std::array<ViewFormat, 6> kTypelessViewFormats{
         return discard_staged(staged);
     }
     staged.dx11BackendInitialized = true;
-    // The interface draws its card without the logo when the sheet cannot be uploaded.
+    // Optional images do not prevent the functional interface from starting.
     (void)textures::upload_logo_sheet(staged.device, staged.logoSheet);
+    (void)textures::upload_inspector_icon(staged.device, staged.inspectorIcon);
     if (!input::install(staged.window)) {
         report::note(report::Stage::init, report::Reason::windowInput);
         return discard_staged(staged);
     }
     staged.inputInstalled = true;
     g_resources = staged;
+    depth_observer::select_device(
+        g_resources.device, g_resources.context, context_targets_match(g_resources.context));
     report::note_active();
     return true;
 }
@@ -248,7 +324,12 @@ void release_render_target(Resources& resources) noexcept {
 
 /** @param resources SDK resources freed in an order that respects their dependencies. */
 void release_resources(Resources& resources) noexcept {
+    depth_observer::clear_selection();
     release_render_target(resources);
+    frame_capture::release(resources.frameCapture);
+    debug_render::release(resources.debugRender);
+    native_debug::reset();
+    textures::release_inspector_icon(resources.inspectorIcon);
     textures::release_logo_sheet(resources.logoSheet);
     release_com(resources.context);
     release_com(resources.device);
@@ -275,9 +356,16 @@ bool fully_active_locked() noexcept {
 
 /** Shuts the whole renderer down under the exclusive state lock. */
 bool shutdown() noexcept {
+    core::log::write(core::log::Channel::client,
+                     core::log::Level::debug,
+                     "ev=shutdown stage=graphics_renderer phase=begin");
     AcquireSRWLockExclusive(&g_rendererLock);
-    const bool released = shutdown_locked();
+    const bool released = shutdown_resources(g_resources, true);
     ReleaseSRWLockExclusive(&g_rendererLock);
+    core::log::write(core::log::Channel::client,
+                     released ? core::log::Level::info : core::log::Level::error,
+                     released ? "ev=shutdown stage=graphics_renderer result=ok"
+                              : "ev=shutdown stage=graphics_renderer result=fail");
     return released;
 }
 
@@ -317,13 +405,16 @@ void present(IDXGISwapChain* swapChain) noexcept {
         (void)initialize_locked(swapChain);
     }
     bool framed = false;
+    HWND framedWindow = nullptr;
     if (g_resources.swapChain == swapChain && fully_active_locked()) {
         render_frame_locked();
         framed = true;
+        framedWindow = g_resources.window;
     }
     ReleaseSRWLockExclusive(&g_rendererLock);
 
     if (framed) {
+        core::ui::modules::logs::notify_pending_copy(framedWindow, input::kRequiredForwardMessage);
         // The timeout hold enters game code, so it runs only after the renderer lock is gone.
         inactivity::poll();
     }

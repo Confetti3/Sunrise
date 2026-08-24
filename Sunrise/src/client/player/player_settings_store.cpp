@@ -70,6 +70,8 @@ void boolean_for(std::string_view text, std::string_view key, bool& output) noex
  */
 void parse(std::string_view text, Settings& output) noexcept {
     boolean_for(text, "\"infinite_ammo_enabled\"", output.infiniteAmmoEnabled);
+    boolean_for(text, "\"remove_hud\"", output.removeHud);
+    boolean_for(text, "\"hide_weapon\"", output.hideWeapon);
 }
 
 /**
@@ -85,8 +87,12 @@ void parse(std::string_view text, Settings& output) noexcept {
     std::array<char, kFileCapacity> document{};
     const int size = std::snprintf(document.data(),
                                    document.size(),
-                                   "{\n  \"infinite_ammo_enabled\": %s\n}\n",
-                                   settings.infiniteAmmoEnabled ? "true" : "false");
+                                   "{\n  \"infinite_ammo_enabled\": %s,\n"
+                                   "  \"remove_hud\": %s,\n"
+                                   "  \"hide_weapon\": %s\n}\n",
+                                   settings.infiniteAmmoEnabled ? "true" : "false",
+                                   settings.removeHud ? "true" : "false",
+                                   settings.hideWeapon ? "true" : "false");
     if (size <= 0) {
         return false;
     }

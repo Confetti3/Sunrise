@@ -18,7 +18,18 @@ struct Uploaded {
  */
 [[nodiscard]] bool upload_logo_sheet(ID3D11Device* device, Uploaded& output) noexcept;
 
+/**
+ * Decodes the compact inspector icon and publishes its view to the Core interface.
+ * @param device Device that creates and owns the texture.
+ * @param output Receives the created objects. Left alone when any step fails.
+ * @return True when the icon is uploaded and published.
+ */
+[[nodiscard]] bool upload_inspector_icon(ID3D11Device* device, Uploaded& output) noexcept;
+
 /** @param uploaded Objects released and cleared, after the published slot is emptied. */
 void release_logo_sheet(Uploaded& uploaded) noexcept;
+
+/** @param uploaded Inspector-icon objects released after its published slot is emptied. */
+void release_inspector_icon(Uploaded& uploaded) noexcept;
 
 } // namespace sunrise::client::hooks::graphics::textures

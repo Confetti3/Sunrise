@@ -30,6 +30,16 @@ void shutdown() noexcept {
     g_page.release(&internal::reset);
 }
 
+/** Queues one text payload for deferred Win32 clipboard delivery. */
+bool queue_text_copy(std::string_view text) noexcept {
+    return internal::request_copy(text);
+}
+
+/** Posts the existing deferred-action message once for pending clipboard work. */
+void notify_pending_copy(HWND owner, UINT message) noexcept {
+    internal::notify_pending_copy(owner, message);
+}
+
 /** @param owner Active game output window that becomes the clipboard owner. */
 void dispatch_pending_copy(HWND owner) noexcept {
     internal::dispatch_pending_copy(owner);

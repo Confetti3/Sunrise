@@ -179,6 +179,21 @@ bool executable_image_target(const void* target, HMODULE module) noexcept {
            || protection == PAGE_EXECUTE_READWRITE || protection == PAGE_EXECUTE_WRITECOPY;
 }
 
+bool context_targets_match(ID3D11DeviceContext* context) noexcept {
+    if (context == nullptr || g_targets.omSetRenderTargets == nullptr
+        || g_targets.omSetRenderTargetsAndUnorderedAccessViews == nullptr
+        || g_targets.omSetDepthStencilState == nullptr
+        || g_targets.clearDepthStencilView == nullptr) {
+        return false;
+    }
+    void** methods = *reinterpret_cast<void***>(context);
+    return methods[kOmSetRenderTargetsMethodIndex] == g_targets.omSetRenderTargets
+           && methods[kOmSetRenderTargetsAndUnorderedAccessViewsMethodIndex]
+                  == g_targets.omSetRenderTargetsAndUnorderedAccessViews
+           && methods[kOmSetDepthStencilStateMethodIndex] == g_targets.omSetDepthStencilState
+           && methods[kClearDepthStencilViewMethodIndex] == g_targets.clearDepthStencilView;
+}
+
 namespace discovery {
 
 /** Finds the system DXGI targets and keeps no temporary swap chain. */
@@ -209,16 +224,32 @@ bool resolve(Targets& output) noexcept {
         return false;
     }
 
-    void** methods = *reinterpret_cast<void***>(probe.swapChain);
-    void* present = methods[kPresentMethodIndex];
-    void* resizeBuffers = methods[kResizeBuffersMethodIndex];
-    void* setFullscreenState = methods[kSetFullscreenStateMethodIndex];
+    void** swapChainMethods = *reinterpret_cast<void***>(probe.swapChain);
+    void** contextMethods = *reinterpret_cast<void***>(probe.context);
+    void* present = swapChainMethods[kPresentMethodIndex];
+    void* resizeBuffers = swapChainMethods[kResizeBuffersMethodIndex];
+    void* setFullscreenState = swapChainMethods[kSetFullscreenStateMethodIndex];
+    void* omSetRenderTargets = contextMethods[kOmSetRenderTargetsMethodIndex];
+    void* omSetRenderTargetsAndUnorderedAccessViews =
+        contextMethods[kOmSetRenderTargetsAndUnorderedAccessViewsMethodIndex];
+    void* omSetDepthStencilState = contextMethods[kOmSetDepthStencilStateMethodIndex];
+    void* clearDepthStencilView = contextMethods[kClearDepthStencilViewMethodIndex];
     // Distinct entries prove the slots were read from a real vtable, not from a shared thunk.
-    const bool valid = executable_image_target(present, dxgiModule)
-                       && executable_image_target(resizeBuffers, dxgiModule)
-                       && executable_image_target(setFullscreenState, dxgiModule)
-                       && present != resizeBuffers && present != setFullscreenState
-                       && resizeBuffers != setFullscreenState;
+    const bool valid =
+        executable_image_target(present, dxgiModule)
+        && executable_image_target(resizeBuffers, dxgiModule)
+        && executable_image_target(setFullscreenState, dxgiModule)
+        && executable_image_target(omSetRenderTargets, d3d11Module)
+        && executable_image_target(omSetRenderTargetsAndUnorderedAccessViews, d3d11Module)
+        && executable_image_target(omSetDepthStencilState, d3d11Module)
+        && executable_image_target(clearDepthStencilView, d3d11Module) && present != resizeBuffers
+        && present != setFullscreenState && resizeBuffers != setFullscreenState
+        && omSetRenderTargets != omSetRenderTargetsAndUnorderedAccessViews
+        && omSetRenderTargets != omSetDepthStencilState
+        && omSetRenderTargets != clearDepthStencilView
+        && omSetRenderTargetsAndUnorderedAccessViews != omSetDepthStencilState
+        && omSetRenderTargetsAndUnorderedAccessViews != clearDepthStencilView
+        && omSetDepthStencilState != clearDepthStencilView;
     release_probe(probe);
     if (!valid) {
         FreeLibrary(d3d11Module);
@@ -229,7 +260,15 @@ bool resolve(Targets& output) noexcept {
         return false;
     }
 
-    output = Targets{present, resizeBuffers, setFullscreenState, d3d11Module, dxgiModule};
+    output = Targets{present,
+                     resizeBuffers,
+                     setFullscreenState,
+                     omSetRenderTargets,
+                     omSetRenderTargetsAndUnorderedAccessViews,
+                     omSetDepthStencilState,
+                     clearDepthStencilView,
+                     d3d11Module,
+                     dxgiModule};
     return true;
 }
 

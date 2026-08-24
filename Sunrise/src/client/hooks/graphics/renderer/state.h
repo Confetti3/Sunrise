@@ -7,6 +7,8 @@
 #include <dxgi.h>
 
 #include "../textures/graphics_texture_upload.h"
+#include "graphics_debug_render.h"
+#include "graphics_frame_capture.h"
 
 namespace sunrise::client::hooks::graphics::renderer {
 
@@ -18,6 +20,12 @@ struct Resources {
     ID3D11RenderTargetView* renderTarget{};
     /** Bundled logo sheet, uploaded on this device for the interface to draw. */
     textures::Uploaded logoSheet{};
+    /** Compact project icon used by the inspector workspace toolbar. */
+    textures::Uploaded inspectorIcon{};
+    /** Reusable game-frame copy shown inside the inspector viewport. */
+    frame_capture::Storage frameCapture{};
+    /** Depth-tested in-scene helper pass state. */
+    debug_render::Storage debugRender{};
     HWND window{};
     bool layoutInitialized{};
     bool win32BackendInitialized{};
@@ -35,8 +43,24 @@ extern HWND g_captureReleaseWindow;
 
 namespace selection {
 
+/**
+ * Acquires and validates renderer resources for one swap chain.
+ * @param swapChain Candidate
+ * game swap chain.
+ * @param output Destination for Sunrise-owned references and selected
+ * identities.
+ * @return True when the swap chain and required D3D objects were selected.
+ */
 [[nodiscard]] bool acquire(IDXGISwapChain* swapChain, Resources& output) noexcept;
 
+/**
+ * Compares a swap chain's output window with a previously selected window.
+ * @param swapChain
+ * Candidate game swap chain.
+ * @param window Expected output window.
+ * @return True when the
+ * current swap-chain descriptor names the expected window.
+ */
 [[nodiscard]] bool matches_output_window(IDXGISwapChain* swapChain, HWND window) noexcept;
 
 } // namespace selection
@@ -56,7 +80,7 @@ void release_resources(Resources& resources) noexcept;
 /** @return True when the whole presentation stack is ready for frames and input. */
 [[nodiscard]] bool fully_active_locked() noexcept;
 
-/** Runs one Dear ImGui frame. Draws only while the Core UI is visible. */
+/** Runs one Dear ImGui frame. Draws only while the renderer lock is held and UI is visible. */
 void render_frame_locked() noexcept;
 
 } // namespace sunrise::client::hooks::graphics::renderer

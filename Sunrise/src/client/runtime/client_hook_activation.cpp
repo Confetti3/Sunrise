@@ -18,6 +18,7 @@
 #include "../hooks/config_getter/config_getter_lifecycle.h"
 #include "../hooks/cursor/runtime.h"
 #include "../hooks/graphics/graphics_hook_lifecycle.h"
+#include "../hooks/graphics/renderer/native_debug_renderer.h"
 #include "../hooks/inactivity/inactivity_override.h"
 #include "../hooks/infinite_ammo/infinite_ammo.h"
 #include "../hooks/membership_probe/membership_probe.h"
@@ -25,9 +26,14 @@
 #include "../hooks/noclip/runtime.h"
 #include "../hooks/package_trust/package_trust_bypass.h"
 #include "../hooks/polled_input/runtime.h"
+#include "../hooks/presentation/presentation.h"
 #include "../hooks/queuez/queuez_hook_lifecycle.h"
 #include "../hooks/retail_log/retail_log_lifecycle.h"
 #include "../hooks/teleport/runtime.h"
+#include "../hooks/viewer_audio/viewer_audio.h"
+#include "../hooks/viewer_camera/viewer_camera.h"
+#include "../hooks/viewer_objects/viewer_objects.h"
+#include "../hooks/viewer_triggers/viewer_triggers.h"
 #include "../patterns/registry.h"
 #include "../targets/game.h"
 #include "internal.h"
@@ -164,15 +170,28 @@ void clear_game_targets() noexcept {
                                  : "ev=activate stage=package_keys result=fail");
     // Diagnostic capture reports its own outcome and never demotes this stage.
     (void)hooks::retail_log::install();
+    // Read-only build-86657 renderer observation. A signature miss is local, and the bridge
+    // remains disabled until runtime evidence identifies the main-view invocation.
+    (void)hooks::graphics::renderer::native_debug::install_observer();
     (void)hooks::assert_handler::install();
     (void)hooks::config_getter::install();
     // Boot-step fixes scan for their own single-site targets; each reports its own outcome.
     (void)hooks::bootflow::install();
+    // Resolve the read-only object iterator before the camera callback begins polling it.
+    (void)viewer::objects::install();
+    // Native trigger-event ticks publish copied component state for the read-only inspector.
+    (void)viewer::triggers::install();
     // The teleport hooks attach whether or not the feature is on, so the interface can enable it
     // without a restart. Both replacements return immediately while nothing is requested.
     (void)hooks::teleport::install();
     // Noclip owns its Havok-step target, so a patch-specific miss cannot disable teleport.
     (void)hooks::noclip::install();
+    // Presentation owns the independent weapon and HUD policies.
+    (void)hooks::presentation::install();
+    // Viewer Camera overrides only copied pose/FOV outputs and remains optional per build.
+    (void)viewer::camera::install();
+    // Audio follows only the primary Wwise listener and remains optional per build.
+    (void)viewer::audio::install();
     // Attaches whether or not the feature is on, so the interface can enable it without a restart.
     (void)hooks::infinite_ammo::install();
     // Resolves the activity config getter here; the hold itself runs on the frame tick.

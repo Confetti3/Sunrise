@@ -8,6 +8,8 @@
 #define IDR_DETOURS_LICENSE 103
 /** The next module-local RCDATA identifier holds the animated logo sprite sheet, as a PNG. */
 #define IDR_LOGO_SHEET 104
+/** The compact project icon used by technical workspaces, as a PNG. */
+#define IDR_INSPECTOR_ICON 105
 
 /** The four numeric fields of the version resource, in FILEVERSION order. */
 #define SUNRISE_VER_MAJOR 0

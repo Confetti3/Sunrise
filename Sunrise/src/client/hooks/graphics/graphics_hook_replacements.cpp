@@ -4,6 +4,7 @@
 
 #include "../../../core/ui/busy/busy.h"
 #include "graphics_hook_lifecycle.h"
+#include "renderer/graphics_depth_observer.h"
 
 namespace sunrise::client::hooks::graphics::replacement {
 namespace {
@@ -47,7 +48,7 @@ __declspec(noinline) HRESULT STDMETHODCALLTYPE present_body(IDXGISwapChain* swap
     const auto call = original<Present>(HookSlot::present);
     if (call != nullptr) {
         if (rendererEnabled && (flags & DXGI_PRESENT_TEST) == 0) {
-            // TEST probes presentation status and must not submit overlay draw work.
+            // DXGI status probes must not submit overlay draw work.
             renderer::present(swapChain);
         }
         result = call(swapChain, syncInterval, flags);
@@ -114,13 +115,91 @@ __declspec(noinline) HRESULT STDMETHODCALLTYPE set_fullscreen_state_body(
     return result;
 }
 
+__declspec(noinline) void STDMETHODCALLTYPE
+om_set_render_targets_body(ID3D11DeviceContext* context,
+                           UINT targetCount,
+                           ID3D11RenderTargetView* const* targets,
+                           ID3D11DepthStencilView* depthView) noexcept {
+    const bool rendererEnabled = enter_hook_call();
+    const auto call = original<OmSetRenderTargets>(HookSlot::omSetRenderTargets);
+    if (call != nullptr) {
+        call(context, targetCount, targets, depthView);
+    }
+    if (rendererEnabled) {
+        renderer::depth_observer::observe_render_targets(context, depthView);
+    }
+    leave_hook_call();
+}
+
+__declspec(noinline) void STDMETHODCALLTYPE
+om_set_render_targets_uav_body(ID3D11DeviceContext* context,
+                               UINT targetCount,
+                               ID3D11RenderTargetView* const* targets,
+                               ID3D11DepthStencilView* depthView,
+                               UINT unorderedAccessStart,
+                               UINT unorderedAccessCount,
+                               ID3D11UnorderedAccessView* const* unorderedAccessViews,
+                               const UINT* initialCounts) noexcept {
+    const bool rendererEnabled = enter_hook_call();
+    const auto call = original<OmSetRenderTargetsAndUnorderedAccessViews>(
+        HookSlot::omSetRenderTargetsAndUnorderedAccessViews);
+    if (call != nullptr) {
+        call(context,
+             targetCount,
+             targets,
+             depthView,
+             unorderedAccessStart,
+             unorderedAccessCount,
+             unorderedAccessViews,
+             initialCounts);
+    }
+    if (rendererEnabled) {
+        renderer::depth_observer::observe_render_targets(context, depthView);
+    }
+    leave_hook_call();
+}
+
+__declspec(noinline) void STDMETHODCALLTYPE om_set_depth_stencil_state_body(
+    ID3D11DeviceContext* context, ID3D11DepthStencilState* state, UINT stencilReference) noexcept {
+    const bool rendererEnabled = enter_hook_call();
+    const auto call = original<OmSetDepthStencilState>(HookSlot::omSetDepthStencilState);
+    if (call != nullptr) {
+        call(context, state, stencilReference);
+    }
+    if (rendererEnabled) {
+        renderer::depth_observer::observe_depth_state(context, state);
+    }
+    leave_hook_call();
+}
+
+__declspec(noinline) void STDMETHODCALLTYPE
+clear_depth_stencil_view_body(ID3D11DeviceContext* context,
+                              ID3D11DepthStencilView* depthView,
+                              UINT clearFlags,
+                              FLOAT depth,
+                              UINT8 stencil) noexcept {
+    const bool rendererEnabled = enter_hook_call();
+    const auto call = original<ClearDepthStencilView>(HookSlot::clearDepthStencilView);
+    if (call != nullptr) {
+        call(context, depthView, clearFlags, depth, stencil);
+    }
+    if (rendererEnabled) {
+        renderer::depth_observer::observe_depth_clear(context, depthView, clearFlags, depth);
+    }
+    leave_hook_call();
+}
+
 } // namespace
 
 /** @return Direct internal-linkage bodies that cannot become linker thunks. */
 EntryPoints entry_points() noexcept {
     return {reinterpret_cast<void*>(&present_body),
             reinterpret_cast<void*>(&resize_buffers_body),
-            reinterpret_cast<void*>(&set_fullscreen_state_body)};
+            reinterpret_cast<void*>(&set_fullscreen_state_body),
+            reinterpret_cast<void*>(&om_set_render_targets_body),
+            reinterpret_cast<void*>(&om_set_render_targets_uav_body),
+            reinterpret_cast<void*>(&om_set_depth_stencil_state_body),
+            reinterpret_cast<void*>(&clear_depth_stencil_view_body)};
 }
 
 /** @return Every unwind-backed body that can own an admitted replacement call. */
@@ -129,6 +208,13 @@ ProtectedEntries protected_entries() noexcept {
         hooking::detour::ProtectedCodeEntry{reinterpret_cast<void*>(&present_body)},
         hooking::detour::ProtectedCodeEntry{reinterpret_cast<void*>(&resize_buffers_body)},
         hooking::detour::ProtectedCodeEntry{reinterpret_cast<void*>(&set_fullscreen_state_body)},
+        hooking::detour::ProtectedCodeEntry{reinterpret_cast<void*>(&om_set_render_targets_body)},
+        hooking::detour::ProtectedCodeEntry{
+            reinterpret_cast<void*>(&om_set_render_targets_uav_body)},
+        hooking::detour::ProtectedCodeEntry{
+            reinterpret_cast<void*>(&om_set_depth_stencil_state_body)},
+        hooking::detour::ProtectedCodeEntry{
+            reinterpret_cast<void*>(&clear_depth_stencil_view_body)},
         hooking::detour::ProtectedCodeEntry{reinterpret_cast<void*>(&enter_hook_call)},
         hooking::detour::ProtectedCodeEntry{reinterpret_cast<void*>(&leave_hook_call)},
     };

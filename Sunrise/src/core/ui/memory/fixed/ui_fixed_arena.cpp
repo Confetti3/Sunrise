@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <new>
 
@@ -196,6 +197,44 @@ void release(void* pointer) noexcept {
     g_outstandingBytes -= block->requestedBytes;
     block->requestedBytes = 0;
     coalesce(block);
+}
+
+bool owns(const void* pointer) noexcept {
+    if (pointer == nullptr) {
+        return false;
+    }
+
+    const std::uintptr_t address = reinterpret_cast<std::uintptr_t>(pointer);
+    const std::uintptr_t begin = reinterpret_cast<std::uintptr_t>(g_storage.data());
+    const std::uintptr_t end = begin + g_storage.size();
+    if (address < begin + sizeof(Block) || address >= end
+        || (address % kAllocationAlignment) != 0) {
+        return false;
+    }
+
+    // Walk physical metadata from the known arena start. This avoids trusting
+    // bytes immediately before an arbitrary pointer as a Block header.
+    const std::byte* cursor = g_storage.data();
+    const std::byte* const storageEnd = g_storage.data() + g_storage.size();
+    const Block* previous = nullptr;
+    while (cursor < storageEnd) {
+        const std::size_t remaining = static_cast<std::size_t>(storageEnd - cursor);
+        if (remaining < sizeof(Block)) {
+            return false;
+        }
+        const Block* block = reinterpret_cast<const Block*>(cursor);
+        if (block->spanBytes < sizeof(Block) || (block->spanBytes % kAllocationAlignment) != 0
+            || block->spanBytes > remaining || block->previousPhysical != previous) {
+            return false;
+        }
+        if (payload(const_cast<Block*>(block)) == pointer) {
+            return !block->free && block->requestedBytes != 0
+                   && block->requestedBytes <= block->spanBytes - sizeof(Block);
+        }
+        cursor += block->spanBytes;
+        previous = block;
+    }
+    return false;
 }
 
 /** @return Current counters and the largest merged free payload. */

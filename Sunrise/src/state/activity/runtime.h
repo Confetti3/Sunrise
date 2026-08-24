@@ -81,6 +81,14 @@ bool release_session(std::uint64_t sessionId) noexcept;
 [[nodiscard]] bool is_joined(std::uint64_t sessionId) noexcept;
 
 /**
+ * Copies one committed session's identity and lifecycle revisions under the State lock.
+ * @param sessionId Committed nonzero activity-session id.
+ * @param output Cleared, then receives one fixed caller-owned snapshot.
+ * @return True when the session still has a committed record.
+ */
+[[nodiscard]] bool snapshot_session(std::uint64_t sessionId, SessionSnapshot& output) noexcept;
+
+/**
  * Copies the exact destination and generation of one committed session.
  * @param sessionId Committed nonzero activity-session id.
  * @param output Cleared, then receives the immutable binding identity.

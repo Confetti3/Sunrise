@@ -2,7 +2,12 @@
 
 #include <dxgi.h>
 
+#include "../../../inspection/inspection_workspace_host.h"
+#include "../graphics_hook_replacements.h"
+#include "graphics_debug_render.h"
+#include "graphics_depth_observer.h"
 #include "graphics_renderer_report.h"
+#include "native_debug_renderer.h"
 #include "state.h"
 
 namespace sunrise::client::hooks::graphics::renderer {
@@ -21,8 +26,13 @@ void before_surface_change(IDXGISwapChain* swapChain) noexcept {
     AcquireSRWLockExclusive(&g_rendererLock);
     if (g_resources.swapChain == swapChain) {
         if (g_resources.activeSurfaceChanges == 0) {
-            // The first of any overlapping calls drops the RTV until they have all returned.
+            // The first of any overlapping calls drops views tied to the retiring surface.
             release_render_target(g_resources);
+            frame_capture::release(g_resources.frameCapture);
+            debug_render::release(g_resources.debugRender);
+            depth_observer::clear_selection();
+            native_debug::reset();
+            client::inspection::workspace_host::suspend();
         }
         ++g_resources.activeSurfaceChanges;
     }
@@ -46,6 +56,10 @@ void after_surface_change(IDXGISwapChain* swapChain, HRESULT result) noexcept {
                              deviceLost ? report::Reason::deviceLost
                                         : report::Reason::rebuildTarget);
                 (void)shutdown_locked();
+            } else {
+                depth_observer::select_device(g_resources.device,
+                                              g_resources.context,
+                                              context_targets_match(g_resources.context));
             }
         }
     }
