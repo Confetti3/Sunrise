@@ -282,12 +282,7 @@ void append_activity_nodes(Graph& graph,
         std::size_t ordinal = 0;
         for (const catalog::Placement& placement : entity.placements) {
             Node placementNode;
-            std::array<char, 128> label{};
-            std::snprintf(label.data(),
-                          label.size(),
-                          "Authored placement 0x%016llX",
-                          static_cast<unsigned long long>(placement.worldId));
-            placementNode.name = label.data();
+            placementNode.name = definition_label(entity);
             placementNode.searchText = "authored exact worldid map placement activity logic";
             placementNode.kind = NodeKind::logicPlacement;
             placementNode.status = Status::known;
