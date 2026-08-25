@@ -3905,6 +3905,7 @@ void initialize() noexcept {
 }
 
 void shutdown() noexcept {
+    camera::request_active(false);
     viewer_input::reset();
     g_open.store(false, std::memory_order_release);
     g_state.session.reset();
@@ -3914,11 +3915,13 @@ void shutdown() noexcept {
 }
 
 void open() noexcept {
+    camera::request_active(true);
     g_open.store(true, std::memory_order_release);
 }
 
 void close() noexcept {
     g_open.store(false, std::memory_order_release);
+    camera::request_active(false);
     content::statics::cancel();
     suspend();
 }
