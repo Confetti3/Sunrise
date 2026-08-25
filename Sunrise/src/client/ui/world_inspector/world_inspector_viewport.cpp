@@ -680,7 +680,8 @@ Result draw_impl(const inspection::Graph& graph,
     for (const Projected& marker : projected) {
         const bool selectedNode = marker.id == selected;
         const bool hoveredNode = marker.id == result.hovered;
-        if (options.depthGeometryReady && (selectedNode || hoveredNode || options.showLabels)) {
+        if (options.depthGeometryReady && !hoveredNode
+            && (selectedNode || options.showLabels)) {
             const inspection::Node* node = graph.node(marker.id);
             if (node != nullptr) {
                 const ImU32 color =
@@ -690,7 +691,7 @@ Result draw_impl(const inspection::Graph& graph,
                                             color,
                                             imageMinimum,
                                             imageMaximum,
-                                            selectedNode ? 2 : (hoveredNode ? 1 : 0)));
+                                            selectedNode ? 2 : 0));
             }
         }
     }

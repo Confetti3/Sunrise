@@ -3370,7 +3370,7 @@ void draw_activity_logic_browser() noexcept {
     ImGui::EndPopup();
 }
 
-void draw_toolbar(const camera::Status& status) noexcept {
+void draw_toolbar() noexcept {
     ImGui::BeginChild("##world_toolbar",
                       {0.0F, scaled(kToolbarHeight)},
                       ImGuiChildFlags_Borders,
@@ -3397,14 +3397,6 @@ void draw_toolbar(const camera::Status& status) noexcept {
         }
 
         ImGui::Separator();
-        const bool viewerEngaged =
-            status.phase == camera::Phase::entering || status.phase == camera::Phase::active;
-        std::array<char, 64> viewerLabel{};
-        std::snprintf(
-            viewerLabel.data(), viewerLabel.size(), "Camera: %s", camera_phase_label(status.phase));
-        if (ImGui::MenuItem(viewerLabel.data())) {
-            camera::request_active(!viewerEngaged);
-        }
         if (ImGui::BeginMenu("Center view")) {
             const model::Node* selected = selected_node();
             const bool relationshipsAvailable =
@@ -4002,6 +3994,10 @@ void draw_launcher() noexcept {
                     snapshot.stale ? " (refreshing)" : "");
     }
     ImGui::Spacing();
+    if (ImGui::Button("Open World Inspector")) {
+        open();
+    }
+    ImGui::Spacing();
     client::player::Settings presentation = client::player::get();
     bool changed = toggle::control("Hide HUD##inspector_entry", presentation.removeHud);
     changed = toggle::control("Hide weapon##inspector_entry", presentation.hideWeapon)
@@ -4009,12 +4005,6 @@ void draw_launcher() noexcept {
     if (changed) {
         (void)client::player::publish(presentation);
     }
-    ImGui::Spacing();
-    if (ImGui::Button("Open World Inspector")) {
-        open();
-    }
-    ImGui::TextDisabled(
-        "Detached camera controls are available inside Inspector when they are needed.");
 }
 
 bool render(bool uiVisible) noexcept {
@@ -4088,7 +4078,7 @@ bool render(bool uiVisible) noexcept {
     const bool submit = ImGui::Begin("World Inspector", nullptr, kWorkspaceFlags);
     ImGui::PopStyleVar(3);
     if (submit) {
-        draw_toolbar(cameraStatus);
+        draw_toolbar();
 
         const ImVec2 contentOrigin = ImGui::GetCursorScreenPos();
         const float statusHeight = scaled(kStatusHeight);
