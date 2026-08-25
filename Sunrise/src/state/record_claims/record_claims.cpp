@@ -552,10 +552,16 @@ std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcep
                     break;
                 }
             }
-            // The category's own bar, where the node resolved a slot for it.
-            if (node.valueIndex != build_data::nodes::kUnavailableValueIndex
-                && static_cast<std::size_t>(node.valueIndex) < state->values.size()) {
-                state->values[node.valueIndex] = chapters + (haveParent ? 1 : 0);
+            // Eight books name no value at field 136 and so have no table entry, but their parent
+            // slot is still derivable from the shipped allocation -- the slot just past the run of
+            // their children. That derivation drove their bars before this table existed and is
+            // kept as the fallback, not replaced by it: the table is more trustworthy where it
+            // applies, and this is the only source where it does not.
+            if (parentSlot < 0
+                && node.parentValueIndex != build_data::nodes::kUnavailableValueIndex
+                && static_cast<std::size_t>(node.parentValueIndex) < state->values.size()) {
+                state->values[node.parentValueIndex] = chapters;
+                parentSlot = static_cast<std::int32_t>(node.parentValueIndex);
                 ++state->written;
             }
             std::array<char, 160> line{};
