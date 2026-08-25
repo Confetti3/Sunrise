@@ -18,6 +18,17 @@ Destiny 2 Offline Exploration Mod
 - Basic Inventory Management
 - Detached Viewer camera and World Inspector
 
+## World Browser
+
+The **Worlds** page searches destinations extracted from the user's installed packages. Selecting a
+world, bubble, slice set, and optional compatible spawn set configures Sunrise's existing validated
+activity redirect for the next load. Spawn sets from packages the destination does not load remain
+visible for diagnosis but cannot be selected.
+
+An optional Activity Logic catalog can add browse-only authored names. Those annotations never
+authorize or alter a launch selection, and a catalog for another content build remains explicitly
+browse-only.
+
 ## Viewer and World Inspector
 
 Viewer adds a detached camera, HUD/audio controls, reusable camera paths, and an editor-style World

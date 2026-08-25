@@ -99,7 +99,10 @@ bool control(const char* id,
                 }
                 ++shown;
                 ImGui::PushID(static_cast<int>(index));
-                if (ImGui::Selectable(label != nullptr ? label : "", index == selected)) {
+                const ImGuiSelectableFlags flags = items[index].enabled
+                                                       ? ImGuiSelectableFlags_None
+                                                       : ImGuiSelectableFlags_Disabled;
+                if (ImGui::Selectable(label != nullptr ? label : "", index == selected, flags)) {
                     selected = index;
                     picked = true;
                 }

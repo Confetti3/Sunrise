@@ -8,6 +8,7 @@
 #include <unordered_set>
 
 #include "../../../core/filesystem/path.h"
+#include "../../../middleware/gameplay/peer/join_messages.h"
 
 namespace sunrise::client::inspection::providers::activity_logic {
 namespace {
@@ -506,6 +507,20 @@ append(Graph& graph, std::vector<Diagnostic>& diagnostics, const Source& source,
 
 std::span<const BrowseSummary> browse_activities() noexcept {
     return g_state.browseCache;
+}
+
+const BrowseSummary* find_browse_activity(std::uint32_t scenarioTag) noexcept {
+    for (const BrowseSummary& summary : g_state.browseCache) {
+        if (summary.scenarioTag == scenarioTag) {
+            return &summary;
+        }
+    }
+    return nullptr;
+}
+
+bool compatible() noexcept {
+    return g_state.load.state == catalog::LoadState::ready
+           && g_state.catalog.provenance.contentBuild == middleware::gameplay::peer::kHostBuild;
 }
 
 AppendResult append_browse(Graph& graph,

@@ -11,8 +11,8 @@ namespace {
 
 /** A namespaced stable ID keeps Server modules from clashing with Client modules. */
 constexpr std::string_view kOverrideStableId = "server.activity_override";
-/** Short menu label for the activity override page. */
-constexpr std::string_view kOverrideDisplayName = "Activity";
+/** Short menu label for the world browser and activity override page. */
+constexpr std::string_view kOverrideDisplayName = "Worlds";
 
 core::ui::modules::registry::PageRegistration g_overridePage;
 

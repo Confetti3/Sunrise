@@ -513,6 +513,7 @@
     <ClCompile Include="src\state\build_data\runtime\domain_markers.cpp" />
     <ClCompile Include="src\state\build_data\inventory\buckets\inventory_bucket_catalog.cpp" />
     <ClCompile Include="src\state\build_data\runtime\build_data_catalog_runtime.cpp" />
+    <ClCompile Include="src\state\build_data\worlds\world_catalog.cpp" />
     <ClCompile Include="src\state\build_data\named_build_data_runtime.cpp" />
     <ClCompile Include="src\state\build_data\socket_entry_lists\socket_entry_list_catalog.cpp" />
     <ClCompile Include="src\client\content\handles\handle_resolver.cpp" />
@@ -536,6 +537,7 @@
     <ClCompile Include="src\server\runtime\server_runtime.cpp" />
     <ClCompile Include="src\server\ui\runtime\server_ui_module_runtime.cpp" />
     <ClCompile Include="src\server\ui\activity_override\activity_override_panel.cpp" />
+    <ClCompile Include="src\server\ui\activity_override\activity_override_enrichment.cpp" />
     <ClCompile Include="src\server\ui\activity_override\activity_override_lists.cpp" />
     <ClCompile Include="src\server\transport\bap_listener.cpp" />
     <ClCompile Include="src\server\bap\bap_route.cpp" />
@@ -1161,6 +1163,7 @@
     <ClInclude Include="src\client\content\vendors\layout.h" />
     <ClInclude Include="src\client\content\vendors\vendor_build.h" />
     <ClInclude Include="src\state\build_data\scenarios\definition.h" />
+    <ClInclude Include="src\state\build_data\worlds\world_catalog.h" />
     <ClInclude Include="src\state\build_data\runtime\persistence\build_data_persistence.h" />
     <ClInclude Include="src\state\build_data\runtime\persistence\publication_transaction.h" />
     <ClInclude Include="src\state\build_data\cache\internal.h" />
@@ -1190,6 +1193,7 @@
     <ClInclude Include="src\server\runtime\server_runtime.h" />
     <ClInclude Include="src\server\ui\runtime\server_ui_module_runtime.h" />
     <ClInclude Include="src\server\ui\activity_override\activity_override_panel.h" />
+    <ClInclude Include="src\server\ui\activity_override\activity_override_enrichment.h" />
     <ClInclude Include="src\server\ui\activity_override\activity_override_lists.h" />
     <ClInclude Include="src\server\bap\runtime.h" />
     <ClInclude Include="src\server\bap\internal.h" />

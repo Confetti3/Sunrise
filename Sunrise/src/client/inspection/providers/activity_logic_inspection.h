@@ -35,6 +35,8 @@ struct AppendResult final {
 
 /** Cached catalog-level list of browsable activities; empty when no catalog is loaded. */
 [[nodiscard]] std::span<const BrowseSummary> browse_activities() noexcept;
+[[nodiscard]] const BrowseSummary* find_browse_activity(std::uint32_t scenarioTag) noexcept;
+[[nodiscard]] bool compatible() noexcept;
 
 void initialize(void* module) noexcept;
 void shutdown() noexcept;

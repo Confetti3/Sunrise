@@ -11,6 +11,7 @@ inline constexpr std::size_t kFilterCapacity = 64;
 /** One row of a picker list. The label is borrowed for the duration of the call. */
 struct Item {
     const char* label{};
+    bool enabled{true};
 };
 
 /**

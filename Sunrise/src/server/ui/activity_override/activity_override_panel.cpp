@@ -36,7 +36,7 @@ constexpr char kDefaultSpawnRow[] = "none  (client picks)";
 constexpr std::size_t kStatusCapacity = 64;
 /** Widest picker list this module draws, so no list is silently cut short. */
 constexpr std::size_t kItemCapacity =
-    (std::max)(state::build_data::scenarios::kDefinitionCapacity, kSpawnCapacity + 1);
+    (std::max)(state::build_data::worlds::kWorldCapacity, kSpawnCapacity + 1);
 
 /** Row each picker is highlighting. These follow the published selection, not the other way. */
 std::size_t g_activityRow{kNoRow};
@@ -62,13 +62,15 @@ std::size_t g_spawnRow{kNoRow};
                               const Label* labels,
                               std::size_t count,
                               const char* preview,
-                              std::size_t& row) noexcept {
+                              std::size_t& row,
+                              const bool* enabled = nullptr) noexcept {
     label::align();
     ImGui::TextUnformatted(caption);
     std::array<picker::Item, kItemCapacity> items{};
     const std::size_t shown = (std::min)(count, items.size());
     for (std::size_t index = 0; index < shown; ++index) {
         items[index].label = labels[index].data();
+        items[index].enabled = enabled == nullptr || enabled[index];
     }
     return picker::control(
         id, shown != 0 ? preview : kEmptyList, std::span(items).first(shown), row);
@@ -93,15 +95,14 @@ void follow_destination(const forced::ForcedDestination& value, Lists& rows) noe
     (void)std::snprintf(
         preview.data(), preview.size(), "%.*s", static_cast<int>(name.size()), name.data());
     if (!row_picker("activity",
-                    "Activity",
+                    "World",
                     rows.activities.data(),
                     rows.activityCount,
                     name.empty() ? kUnset : preview.data(),
                     g_activityRow)) {
         return false;
     }
-    const Label& picked = rows.activities[g_activityRow];
-    const std::string_view text(picked.data());
+    const std::string_view text = state::build_data::worlds::name_of(rows.worlds[g_activityRow]);
     value.packageName = {};
     std::copy_n(
         text.begin(), (std::min)(text.size(), value.packageName.size()), value.packageName.begin());
@@ -176,16 +177,20 @@ void follow_destination(const forced::ForcedDestination& value, Lists& rows) noe
 [[nodiscard]] bool draw_spawn(forced::ForcedDestination& value, Lists& rows) noexcept {
     // The leading row is what makes the spawn set optional. It forces the default set instead.
     static std::array<Label, kSpawnCapacity + 1> labels{};
+    static std::array<bool, kSpawnCapacity + 1> selectable{};
     labels[0] = {};
+    selectable[0] = true;
     std::copy_n(
         std::string_view(kDefaultSpawnRow).begin(), sizeof kDefaultSpawnRow - 1, labels[0].begin());
     const std::size_t count = (std::min)(rows.spawnCount, labels.size() - 1) + 1;
     for (std::size_t index = 1; index < count; ++index) {
         labels[index] = rows.spawns[index - 1];
+        selectable[index] = rows.spawnSelectable[index - 1];
     }
     const char* const preview =
         value.hasSpawnSetHash && g_spawnRow < count ? labels[g_spawnRow].data() : labels[0].data();
-    if (!row_picker("spawn", "Spawn set", labels.data(), count, preview, g_spawnRow)) {
+    if (!row_picker(
+            "spawn", "Spawn set", labels.data(), count, preview, g_spawnRow, selectable.data())) {
         return false;
     }
     value.hasSpawnSetHash = g_spawnRow != 0;
@@ -199,8 +204,19 @@ void draw_status(const forced::ForcedDestination& value, const Lists& rows) noex
         ImGui::TextUnformatted("waiting for the destination layouts to extract");
         return;
     }
+    if (rows.authored.activityPresent) {
+        ImGui::TextDisabled("authored activity: %.*s%s",
+                            static_cast<int>(rows.authored.activityNameLength),
+                            rows.authored.activityName.data(),
+                            rows.authored.activityBuildMatch ? "" : "  (browse only)");
+        if (rows.authored.destinationLength != 0) {
+            ImGui::TextDisabled("destination: %.*s",
+                                static_cast<int>(rows.authored.destinationLength),
+                                rows.authored.destination.data());
+        }
+    }
     if (!value.enabled) {
-        ImGui::TextDisabled("disabled, activities load normall");
+        ImGui::TextDisabled("disabled, worlds load normally");
         return;
     }
     if (!forced::active(value)) {
@@ -252,8 +268,8 @@ void draw() noexcept {
         g_activityRow = kNoRow;
     }
 
-    core::ui::components::section::header("Activity override",
-                                          "Forces every load to redirect to these values.");
+    core::ui::components::section::header(
+        "World browser", "Search installed worlds and redirect the next activity load.");
 
     bool changed = core::ui::components::toggle::control("Enabled", value.enabled);
     ImGui::SameLine();
