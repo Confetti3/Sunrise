@@ -22,7 +22,6 @@ constexpr std::array kViews{
 constexpr std::array kPanels{
     BottomPanelDescriptor{BottomTab::references, "References"},
     BottomPanelDescriptor{BottomTab::data, "Data"},
-    BottomPanelDescriptor{BottomTab::events, "Changes"},
     BottomPanelDescriptor{BottomTab::compare, "Compare"},
     BottomPanelDescriptor{BottomTab::diagnostics, "Diagnostics"},
 };

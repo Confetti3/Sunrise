@@ -20,6 +20,7 @@
 
 #include "../../../core/logging/log.h"
 #include "../../../core/ui/components/section/ui_section_component.h"
+#include "../../../core/ui/components/toggle/ui_toggle_component.h"
 #include "../../../core/ui/memory/allocator.h"
 #include "../../../core/ui/scaling/dpi/ui_dpi_scaling.h"
 #include "../../../core/ui/textures/ui_texture_slots.h"
@@ -38,7 +39,7 @@
 #include "../../inspection/providers/activity_logic_browse.h"
 #include "../../inspection/providers/spawn_inspection_provider.h"
 #include "../../inspection/world_inspection_model.h"
-#include "../../viewer/viewer_camera_path_store.h"
+#include "../../player/player_settings_store.h"
 #include "../../viewer/viewer_input_ownership.h"
 #include "world_debug_scene_lines.h"
 #include "world_inspector_commands.h"
@@ -62,8 +63,8 @@ namespace logic_browse = client::inspection::providers::activity_logic::browse;
 namespace renderer = client::hooks::graphics::renderer;
 namespace section = core::ui::components::section;
 namespace textures = core::ui::textures;
+namespace toggle = core::ui::components::toggle;
 namespace viewer_input = client::viewer::input;
-namespace camera_paths = client::viewer::paths;
 namespace scenario_state = state::build_data::scenarios;
 
 using commands::copy_camera_position;
@@ -3404,83 +3405,6 @@ void draw_toolbar(const camera::Status& status) noexcept {
         if (ImGui::MenuItem(viewerLabel.data())) {
             camera::request_active(!viewerEngaged);
         }
-        if (ImGui::BeginMenu("Camera Path")) {
-            static std::size_t selectedPath = 0;
-            camera_paths::Library library = camera_paths::get();
-            if (selectedPath >= library.paths.size()) {
-                selectedPath = 0;
-            }
-            for (std::size_t index = 0; index < library.paths.size(); ++index) {
-                if (ImGui::MenuItem(
-                        library.paths[index].name.c_str(), nullptr, selectedPath == index)) {
-                    selectedPath = index;
-                }
-            }
-            ImGui::Separator();
-            const bool pathPresent = selectedPath < library.paths.size();
-            ImGui::BeginDisabled(!status.active || !pathPresent
-                                 || library.paths[selectedPath].keyframes.empty());
-            if (ImGui::MenuItem("Play")) {
-                const camera_paths::CameraPath& stored = library.paths[selectedPath];
-                camera::PlaybackPath path{};
-                path.keyframeCount = (std::min)(stored.keyframes.size(), path.keyframes.size());
-                path.loop = stored.loop;
-                std::snprintf(path.name.data(), path.name.size(), "%s", stored.name.c_str());
-                path.activitySession = world_context().activitySession;
-                path.activityRevision = world_context().activityRevision;
-                for (std::size_t index = 0; index < path.keyframeCount; ++index) {
-                    const camera_paths::Keyframe& source = stored.keyframes[index];
-                    path.keyframes[index].pose.position = source.position;
-                    path.keyframes[index].pose.yaw = source.yaw;
-                    path.keyframes[index].pose.pitch = source.pitch;
-                    path.keyframes[index].pose.fov = source.fov;
-                    std::snprintf(path.keyframes[index].label.data(),
-                                  path.keyframes[index].label.size(),
-                                  "%s",
-                                  source.label.c_str());
-                    path.keyframes[index].travelSeconds = source.travelSeconds;
-                    path.keyframes[index].dwellSeconds = source.dwellSeconds;
-                    path.keyframes[index].captureSnapshot = source.captureSnapshot;
-                }
-                (void)camera::request_playback(path);
-            }
-            ImGui::EndDisabled();
-            ImGui::BeginDisabled(!status.active || !pathPresent
-                                 || library.paths[selectedPath].keyframes.size()
-                                        >= camera_paths::kMaximumKeyframeCount);
-            if (ImGui::MenuItem("Add keyframe from current camera")) {
-                camera_paths::Keyframe keyframe{};
-                keyframe.position = status.pose.position;
-                keyframe.yaw = status.pose.yaw;
-                keyframe.pitch = status.pose.pitch;
-                keyframe.fov = std::clamp(status.pose.fov,
-                                          camera_paths::kMinimumKeyframeFov,
-                                          camera_paths::kMaximumKeyframeFov);
-                keyframe.label =
-                    "Keyframe " + std::to_string(library.paths[selectedPath].keyframes.size() + 1);
-                const model::Node* selected = selected_node();
-                if (selected != nullptr) {
-                    keyframe.selection = camera_paths::SelectionIdentity{
-                        producer_epoch(),
-                        capture::stable_native_key(world(), *selected),
-                        static_cast<std::uint32_t>(selected->producer),
-                        static_cast<std::uint32_t>(selected->kind)};
-                }
-                library.paths[selectedPath].keyframes.push_back(std::move(keyframe));
-                (void)camera_paths::publish(library);
-            }
-            ImGui::EndDisabled();
-            const camera::PlaybackStatus playback = camera::playback_status();
-            ImGui::BeginDisabled(!playback.playing);
-            if (ImGui::MenuItem(playback.paused ? "Resume" : "Pause")) {
-                camera::request_playback_pause(!playback.paused);
-            }
-            if (ImGui::MenuItem("Stop")) {
-                camera::request_playback_stop();
-            }
-            ImGui::EndDisabled();
-            ImGui::EndMenu();
-        }
         if (ImGui::BeginMenu("Center view")) {
             const model::Node* selected = selected_node();
             const bool relationshipsAvailable =
@@ -3696,33 +3620,6 @@ void draw_toolbar(const camera::Status& status) noexcept {
             }
             if (ImGui::MenuItem("Helper labels", nullptr, &g_state.showLabels)) {
                 persist_layout();
-            }
-            ImGui::EndMenu();
-        }
-        if (ImGui::BeginMenu("Advanced")) {
-            const debug_scene::DepthStatus depth = debug_scene::status();
-            const model::SceneFramePtr scene = debug_scene::frame();
-            const model::OverlayStats sceneStats = scene ? scene->stats : model::OverlayStats{};
-            ImGui::TextDisabled("Backend: %s", model::helper_backend_name(depth.backend));
-            ImGui::TextDisabled("Failure: %s", model::helper_failure_name(depth.failureReason));
-            ImGui::TextDisabled("Depth copy: %s", depth.depthAvailable ? "ready" : "unavailable");
-            ImGui::TextDisabled("Depth capability: %s",
-                                model::depth_capability_name(depth.capability));
-            ImGui::TextDisabled("Lines: %zu | glyphs: %zu%s | omitted: %zu | partial: %zu",
-                                depth.submittedLines,
-                                depth.submittedGlyphs,
-                                depth.drawn ? " drawn" : "",
-                                sceneStats.omittedNodes,
-                                sceneStats.partialNodes);
-            ImGui::TextDisabled(
-                "Shown: %zu | view: %zu | detail: %zu | density: %zu | distance: %zu",
-                sceneStats.shownNodes,
-                sceneStats.viewFilteredNodes,
-                sceneStats.detailFilteredNodes,
-                sceneStats.densityFilteredNodes,
-                sceneStats.distanceFilteredNodes);
-            if (sceneStats.truncated) {
-                ImGui::TextColored(kWarning, "Depth helper budget truncated this frame.");
             }
             ImGui::EndMenu();
         }
@@ -4103,6 +4000,14 @@ void draw_launcher() noexcept {
         ImGui::Text("Current world: %s%s",
                     snapshot.packageName.empty() ? "unresolved" : snapshot.packageName.c_str(),
                     snapshot.stale ? " (refreshing)" : "");
+    }
+    ImGui::Spacing();
+    client::player::Settings presentation = client::player::get();
+    bool changed = toggle::control("Hide HUD##inspector_entry", presentation.removeHud);
+    changed = toggle::control("Hide weapon##inspector_entry", presentation.hideWeapon)
+              || changed;
+    if (changed) {
+        (void)client::player::publish(presentation);
     }
     ImGui::Spacing();
     if (ImGui::Button("Open World Inspector")) {
