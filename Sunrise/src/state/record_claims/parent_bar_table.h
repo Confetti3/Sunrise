@@ -25,7 +25,7 @@ struct Bar {
     std::uint16_t valueIndex;
 };
 
-inline constexpr std::array<Bar, 35> kBars{{
+inline constexpr std::array<Bar, 34> kBars{{
     {838U, 2398U},  // Confessions (measured)
     {815U, 1932U},  // The Lawless Frontier — parent record is named "The Tangled Shore" (measured)
     {816U, 1933U},  // The Man They Call Cayde (measured)
@@ -43,7 +43,6 @@ inline constexpr std::array<Bar, 35> kBars{{
     {831U, 1931U},  // The Forsaken Prince (measured)
     {832U, 1936U},  // Truth to Power (measured)
     {833U, 1938U},  // A Drifter's Gambit (measured)
-    {835U, 4619U},  // The Book of Unmaking (field136)
     {836U, 2347U},  // For Every Rose, a Thorn (measured)
     {837U, 2399U},  // The Chronicon (measured)
     {839U, 2514U},  // Unveiling (field136)
