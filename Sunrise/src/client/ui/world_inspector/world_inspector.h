@@ -63,6 +63,9 @@ void shutdown() noexcept;
 /** Opens the full-screen workspace on the next UI frame. */
 void open() noexcept;
 
+/** Draws the compact Sunrise module that enters the full-screen workspace. */
+void draw_launcher() noexcept;
+
 /** Returns to the ordinary Sunrise surface. */
 void close() noexcept;
 

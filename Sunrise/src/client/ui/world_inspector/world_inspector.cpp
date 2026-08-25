@@ -4092,6 +4092,26 @@ EntrySnapshot entry_snapshot() noexcept {
     return result;
 }
 
+void draw_launcher() noexcept {
+    section::header("World Inspector",
+                    "Inspect copied runtime observations and authored evidence for the current "
+                    "world.");
+    const EntrySnapshot snapshot = entry_snapshot();
+    if (!snapshot.sessionPresent) {
+        ImGui::TextDisabled("Waiting for a world session.");
+    } else {
+        ImGui::Text("Current world: %s%s",
+                    snapshot.packageName.empty() ? "unresolved" : snapshot.packageName.c_str(),
+                    snapshot.stale ? " (refreshing)" : "");
+    }
+    ImGui::Spacing();
+    if (ImGui::Button("Open World Inspector")) {
+        open();
+    }
+    ImGui::TextDisabled(
+        "Detached camera controls are available inside Inspector when they are needed.");
+}
+
 bool render(bool uiVisible) noexcept {
     if (!visible()) {
         g_state.viewportNavigation = false;
