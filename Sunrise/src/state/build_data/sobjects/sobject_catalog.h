@@ -33,6 +33,25 @@ struct Definition {
     std::uint16_t selectorGroup{};
     /** Position in that group's node table. */
     std::uint16_t nodeOrdinal{};
+    /**
+     * Row offset +16, "lane 4": a packed pair of u16s whose meaning is chosen by typeCode, not
+     * fixed. On typeCode 10 (dead ghosts and similar) the low half is a DestinyRecordDefinition row
+     * index -- 807 rows carry this type, 360 of them resolving. On typeCode 2 (lore vases and
+     * similar) the high half is a DestinyCollectibleDefinition row index -- 713 rows carry this
+     * type, 709 resolving. Kept raw and read through the accessors below so a caller cannot reach
+     * into the wrong half without first deciding, from typeCode, which one applies.
+     */
+    std::uint32_t lane4{};
+
+    /** @return Lane 4's low half, the record row a typeCode-10 sobject names. */
+    [[nodiscard]] constexpr std::uint16_t recordRow() const noexcept {
+        return static_cast<std::uint16_t>(lane4 & 0xFFFFU);
+    }
+
+    /** @return Lane 4's high half, the collectible row a typeCode-2 sobject names. */
+    [[nodiscard]] constexpr std::uint16_t collectibleRow() const noexcept {
+        return static_cast<std::uint16_t>(lane4 >> 16U);
+    }
 };
 
 /** Clears every generated row. */

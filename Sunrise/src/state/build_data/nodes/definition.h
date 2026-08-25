@@ -50,12 +50,32 @@ struct Definition {
     /** Account value bank mapping row, or kUnavailableValueIndex when no slot is addressable. */
     std::uint16_t valueIndex{kUnavailableValueIndex};
     /**
+     * The raw account-scoped value SLOT this node's expression names, before mapping.
+     *
+     * Parent-slot assignment needs the slot itself, not the mapped row: the shipped allocation
+     * groups books by contiguous slot runs, and the run shape is invisible through indices alone.
+     */
+    std::int16_t valueSlot{-1};
+    /**
+     * The raw character-scoped value SLOT this node's expression names, or -1.
+     *
+     * One lore book's bar reads a slot only the character table carries. Its parent needs the same
+     * run-aware assignment as account-scoped books, keyed by this slot's place in the allocation
+     * sequence.
+     */
+    std::int16_t characterValueSlot{-1};
+    /**
      * Account value index of the parent record's own bar, one slot above the node's.
      *
      * The node's bar counts every child including the parent record; the parent's bar counts only
      * the chapters. They are separate slots and need separate counts.
      */
     std::uint16_t parentValueIndex{kUnavailableValueIndex};
+    /**
+     * Character value index of the parent record's own bar for a character-scoped book, or
+     * kUnavailableValueIndex.
+     */
+    std::uint16_t parentCharacterValueIndex{kUnavailableValueIndex};
     /**
      * Account flag index this node's own gate reads, or kUnavailableFlagIndex.
      *

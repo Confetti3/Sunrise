@@ -2,6 +2,7 @@
 
 #include "record_claims.h"
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cstdio>
@@ -17,6 +18,8 @@
 #include "../build_data/nodes/node_catalog.h"
 #include "../build_data/runtime.h"
 #include "../unlocks/definition.h"
+#include "objective_slot_table.h"
+#include "parent_bar_table.h"
 
 namespace sunrise::state::record_claims {
 namespace {
@@ -35,6 +38,18 @@ constexpr std::size_t kEntrySize = 2 * sizeof(std::uint16_t);
 /** Far above the 2242 records the build ships, and small enough to read in one go. */
 constexpr std::uint32_t kMaximumEntries = 8192;
 
+/**
+ * Completions that have not been claimed live in their own file, beside the claim file.
+ *
+ * Finding lore completes a record without claiming it, and that completion has to outlive the
+ * process the same way a claim does -- otherwise every relaunch forgets what the player collected
+ * and hands the same chapter out again. It is a separate file rather than a column added to the
+ * claim file so the claim format keeps loading unchanged, including files written before this.
+ */
+constexpr std::wstring_view kClaimableFileSuffix = L"\\cache\\record_claimable.bin";
+/** Distinct from kMagic so neither file can ever be read as the other. */
+constexpr std::array<char, 8> kClaimableMagic{'S', 'N', 'R', 'S', 'C', 'M', 'P', '1'};
+
 std::mutex g_lock;
 std::array<std::uint64_t, kWordCount> g_claimed{};
 /** Records complete but not yet claimed. A claim supersedes this, never the other way round. */
@@ -44,6 +59,8 @@ std::size_t g_count{};
 std::uint32_t g_score{};
 core::path::Buffer g_path{};
 bool g_pathReady{};
+core::path::Buffer g_claimablePath{};
+bool g_claimablePathReady{};
 
 void report(const char* stage, const char* result, std::size_t detail) noexcept {
     std::array<char, 128> line{};
@@ -171,6 +188,112 @@ void load_locked() noexcept {
     report("load", "ok", restored);
 }
 
+/** Writes every completion that has not been claimed. The caller holds the lock. */
+void store_claimable_locked() noexcept {
+    if (!g_claimablePathReady) {
+        return;
+    }
+    std::vector<char> document{};
+    document.insert(document.end(), kClaimableMagic.begin(), kClaimableMagic.end());
+    std::size_t held = 0;
+    std::vector<char> entries{};
+    for (std::size_t word = 0; word < g_claimable.size(); ++word) {
+        // A claim is the later state, so a record that reached it needs no claimable row: the claim
+        // file already carries it and load_locked restores it first.
+        std::uint64_t bits = g_claimable[word] & ~g_claimed[word];
+        while (bits != 0) {
+            const auto offset = static_cast<std::size_t>(std::countr_zero(bits));
+            bits &= bits - 1;
+            const auto packedIndex = static_cast<std::uint16_t>(word * kWordBits + offset);
+            constexpr std::uint16_t kUnscored = 0;
+            const auto* indexBytes = reinterpret_cast<const char*>(&packedIndex);
+            const auto* scoreBytes = reinterpret_cast<const char*>(&kUnscored);
+            entries.insert(entries.end(), indexBytes, indexBytes + sizeof packedIndex);
+            entries.insert(entries.end(), scoreBytes, scoreBytes + sizeof kUnscored);
+            ++held;
+        }
+    }
+    const auto count = static_cast<std::uint32_t>(held);
+    const auto* countBytes = reinterpret_cast<const char*>(&count);
+    document.insert(document.end(), countBytes, countBytes + sizeof count);
+    document.insert(document.end(), entries.begin(), entries.end());
+
+    const HANDLE file = CreateFileW(g_claimablePath.chars.data(),
+                                    GENERIC_WRITE,
+                                    0,
+                                    nullptr,
+                                    CREATE_ALWAYS,
+                                    FILE_ATTRIBUTE_NORMAL,
+                                    nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        report("store_claimable", "open_fail", held);
+        return;
+    }
+    DWORD written = 0;
+    const auto size = static_cast<DWORD>(document.size());
+    bool complete =
+        WriteFile(file, document.data(), size, &written, nullptr) != FALSE && written == size;
+    complete = CloseHandle(file) != FALSE && complete;
+    report("store_claimable", complete ? "ok" : "write_fail", held);
+}
+
+/** Reads every unclaimed completion the file holds. The caller holds the lock. */
+void load_claimable_locked() noexcept {
+    const HANDLE file = CreateFileW(g_claimablePath.chars.data(),
+                                    GENERIC_READ,
+                                    FILE_SHARE_READ,
+                                    nullptr,
+                                    OPEN_EXISTING,
+                                    FILE_ATTRIBUTE_NORMAL,
+                                    nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        report("load_claimable", "absent", 0);
+        return;
+    }
+    std::array<char, sizeof(kClaimableMagic) + sizeof(std::uint32_t)> header{};
+    DWORD read = 0;
+    if (ReadFile(file, header.data(), static_cast<DWORD>(header.size()), &read, nullptr) == FALSE
+        || read != header.size()
+        || std::memcmp(header.data(), kClaimableMagic.data(), kClaimableMagic.size()) != 0) {
+        (void)CloseHandle(file);
+        report("load_claimable", "header_fail", 0);
+        return;
+    }
+    std::uint32_t entries = 0;
+    std::memcpy(&entries, header.data() + kClaimableMagic.size(), sizeof entries);
+    if (entries > kMaximumEntries) {
+        (void)CloseHandle(file);
+        report("load_claimable", "count_fail", entries);
+        return;
+    }
+    std::vector<char> payload(static_cast<std::size_t>(entries) * kEntrySize);
+    read = 0;
+    const bool readOk =
+        payload.empty()
+        || (ReadFile(file, payload.data(), static_cast<DWORD>(payload.size()), &read, nullptr)
+                != FALSE
+            && read == payload.size());
+    (void)CloseHandle(file);
+    if (!readOk) {
+        report("load_claimable", "read_fail", entries);
+        return;
+    }
+
+    std::size_t restored = 0;
+    for (std::uint32_t entry = 0; entry < entries; ++entry) {
+        std::uint16_t index = 0;
+        std::memcpy(&index, payload.data() + static_cast<std::size_t>(entry) * kEntrySize,
+                    sizeof index);
+        if (static_cast<std::size_t>(index) >= kIndexCapacity) {
+            continue;
+        }
+        g_claimable[static_cast<std::size_t>(index) / kWordBits] |=
+            std::uint64_t{1} << (static_cast<std::size_t>(index) % kWordBits);
+        ++restored;
+    }
+    report("load_claimable", "ok", restored);
+}
+
 } // namespace
 
 /** Derives the claim file path and loads any claims already held. */
@@ -183,7 +306,18 @@ bool initialize(void* module) noexcept {
         return false;
     }
     g_pathReady = true;
+    // Claims first: load_claimable_locked restores completions that were never claimed, and a
+    // record that has since been claimed must already be known so it is not double counted.
     load_locked();
+
+    g_claimablePathReady = false;
+    if (core::path::artifact_directory(module, g_claimablePath)
+        && core::path::append(g_claimablePath, kClaimableFileSuffix)) {
+        g_claimablePathReady = true;
+        load_claimable_locked();
+    } else {
+        report("initialize", "claimable_path_fail", 0);
+    }
     return true;
 }
 
@@ -214,6 +348,9 @@ bool claim(std::uint16_t flagIndex, std::uint16_t scoreValue) noexcept {
         // Written per claim rather than at shutdown: a crash must not lose what the client is
         // already showing as Acquired.
         store_locked();
+        // The claimable file lists completions still awaiting a claim, so this index has to leave
+        // it now that the claim supersedes it -- otherwise it is carried in both files forever.
+        store_claimable_locked();
     }
     return true;
 }
@@ -239,23 +376,10 @@ std::size_t apply(std::span<std::uint8_t> accountFlags) noexcept {
         }
     }
 
-    // Claimable records fill in behind the claims: a record that is both stays claimed, since a
-    // claim is the later state and overwriting it would undo what the player did.
-    for (std::size_t word = 0; word < g_claimable.size(); ++word) {
-        std::uint64_t bits = g_claimable[word] & ~g_claimed[word];
-        while (bits != 0) {
-            const auto offset = static_cast<std::size_t>(std::countr_zero(bits));
-            bits &= bits - 1;
-            const std::size_t index = word * kWordBits + offset;
-            if (index >= accountFlags.size()) {
-                continue;
-            }
-            if (accountFlags[index] != unlocks::kFlagAvailable) {
-                accountFlags[index] = unlocks::kFlagAvailable;
-                ++changed;
-            }
-        }
-    }
+    // Claimable records are deliberately left alone here: the completion flag is a 2-bit
+    // redeemed-only field with no value that means claimable (all four were measured), so a
+    // claimable record's flag has to stay clear. What makes it read claimable is
+    // apply_claimable_objectives writing its objective value(s) instead -- see that function.
     return changed;
 }
 
@@ -269,6 +393,28 @@ struct NodeProgress {
     std::span<const char> categories;
 };
 
+/**
+ * The objective slot run one record owns, or an empty span when the table does not name it.
+ *
+ * The slot space was derived and verified in game against thirteen measured points; see
+ * objective_slot_table.h. A record's objectives occupy consecutive slots, so the run is found once
+ * rather than a lookup per slot.
+ */
+[[nodiscard]] std::span<const objective_slot_table::ObjectiveSlot> objective_slots_for(
+    std::uint16_t flagIndex) noexcept {
+    const std::span<const objective_slot_table::RecordEntry> table{objective_slot_table::kRecords};
+    const auto found = std::lower_bound(
+        table.begin(), table.end(), flagIndex,
+        [](const objective_slot_table::RecordEntry& entry, std::uint16_t key) {
+            return entry.flagIndex < key;
+        });
+    if (found == table.end() || found->flagIndex != flagIndex) {
+        return {};
+    }
+    return std::span<const objective_slot_table::ObjectiveSlot>{objective_slot_table::kObjectives}
+        .subspan(found->firstObjective, found->objectiveCount);
+}
+
 /** True when this account flag bank row is held. The caller owns the claim lock. */
 [[nodiscard]] bool claimed_locked(std::uint16_t flagIndex) noexcept {
     if (static_cast<std::size_t>(flagIndex) >= kIndexCapacity) {
@@ -277,6 +423,16 @@ struct NodeProgress {
     const std::size_t word = static_cast<std::size_t>(flagIndex) / kWordBits;
     const std::uint64_t bit = std::uint64_t{1} << (static_cast<std::size_t>(flagIndex) % kWordBits);
     return (g_claimed[word] & bit) != 0;
+}
+
+/** True when this account flag bank row is complete but unclaimed. The caller owns the claim lock. */
+[[nodiscard]] bool claimable_locked(std::uint16_t flagIndex) noexcept {
+    if (static_cast<std::size_t>(flagIndex) >= kIndexCapacity) {
+        return false;
+    }
+    const std::size_t word = static_cast<std::size_t>(flagIndex) / kWordBits;
+    const std::uint64_t bit = std::uint64_t{1} << (static_cast<std::size_t>(flagIndex) % kWordBits);
+    return (g_claimable[word] & bit) != 0;
 }
 
 } // namespace
@@ -293,7 +449,11 @@ struct NodeProgress {
         build_data::records::Definition record{};
         if (build_data::find_record_definition(node.children[child], record)
             && record.completionFlagIndex != build_data::records::kUnavailableFlagIndex
-            && claimed_locked(record.completionFlagIndex)) {
+            && (claimed_locked(record.completionFlagIndex)
+                || claimable_locked(record.completionFlagIndex))) {
+            // A book's bar counts chapters FOUND, not chapters redeemed. Finding lore leaves a
+            // record complete and unclaimed, so counting claims alone left every bar reading zero
+            // however many chapters the player had collected.
             ++claimed;
         }
     }
@@ -339,7 +499,7 @@ std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcep
     // The claim lock is taken first and the node lock inside the walk. Nothing takes them the other
     // way round, so the order cannot close a cycle.
     const std::lock_guard<std::mutex> guard(g_lock);
-    build_data::nodes::for_each_driving(
+    build_data::nodes::for_each(
         &progress, [](void* context, const build_data::nodes::Definition& node) noexcept {
             auto* state = static_cast<NodeProgress*>(context);
             // Only the lore books are counted. Every other category that drives a bar keeps what
@@ -348,28 +508,122 @@ std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcep
             if (!build_data::nodes::lore_category(node.definitionIndex)) {
                 return;
             }
-            // Two counts, because a category and its parent record keep separate bars. The category
-            // counts every child it owns, the parent among them; the parent's own bar counts only
-            // the chapters, which is why its denominator is one lower. The parent is the child
-            // naming the category's own value slot.
-            const std::int32_t claimed = claimed_children(node);
-            const std::int32_t claimedChapters = claimed - claimed_parent(node);
-            // The parent's bar sits one slot above its category on the books where that slot is
-            // free, confirmed by marker on two of them. Categories are allocated contiguously
-            // though, so for many books the slot above is the next book's category, and writing it
-            // drove the wrong book's bar. Those are skipped: a bar left at zero is wrong, a bar
-            // carrying another book's count is worse. Where those parents read is not yet known.
-            if (static_cast<std::size_t>(node.parentValueIndex) < state->values.size()
-                && state->categories[node.parentValueIndex] == 0) {
-                state->values[node.parentValueIndex] = claimedChapters;
+            // Counted from the records themselves, not from the node's own value slot: a book's
+            // chapters are the children naming a lore row, and its parent triumph is the child
+            // naming none. Both come from record rows, so neither needs the node's slot to have
+            // resolved -- several books ship with no resolvable slot at all and were skipped
+            // entirely while the count keyed on it.
+            std::int32_t chapters = 0;
+            build_data::records::Definition parent{};
+            bool haveParent = false;
+            for (std::size_t child = 0; child < node.childCount; ++child) {
+                build_data::records::Definition record{};
+                if (!build_data::find_record_definition(node.children[child], record)
+                    || record.completionFlagIndex
+                           == build_data::records::kUnavailableFlagIndex) {
+                    continue;
+                }
+                if (record.loreRow == build_data::records::kUnavailableLoreRow) {
+                    parent = record;
+                    haveParent = true;
+                    continue;
+                }
+                // Claimed only: measured in game, a book's bar moves when a chapter's triumph is
+                // claimed, not when finding the lore makes it claimable.
+                if (claimed_locked(record.completionFlagIndex)) {
+                    ++chapters;
+                }
+            }
+
+            // The bar reads the value index the parent record's own expression names, read out of
+            // the shipped tables rather than derived: writing the parent record's objective slot
+            // was tried and moved nothing, and the node's valueIndex resolves for only some books.
+            std::int32_t parentSlot = -1;
+            if (haveParent) {
+                for (const auto& bar : parent_bar_table::kBars) {
+                    if (bar.recordRow != parent.definitionIndex) {
+                        continue;
+                    }
+                    if (static_cast<std::size_t>(bar.valueIndex) < state->values.size()) {
+                        state->values[bar.valueIndex] = chapters;
+                        parentSlot = static_cast<std::int32_t>(bar.valueIndex);
+                        ++state->written;
+                    }
+                    break;
+                }
+            }
+            // The category's own bar, where the node resolved a slot for it.
+            if (node.valueIndex != build_data::nodes::kUnavailableValueIndex
+                && static_cast<std::size_t>(node.valueIndex) < state->values.size()) {
+                state->values[node.valueIndex] = chapters + (haveParent ? 1 : 0);
                 ++state->written;
             }
-            if (static_cast<std::size_t>(node.valueIndex) < state->values.size()) {
-                state->values[node.valueIndex] = claimed;
-                ++state->written;
+            std::array<char, 160> line{};
+            const int told = std::snprintf(line.data(), line.size(),
+                                           "ev=claims stage=node_bar node=%u children=%u "
+                                           "chapters=%d parent_slot=%d value_slot=%u",
+                                           static_cast<unsigned>(node.definitionIndex),
+                                           static_cast<unsigned>(node.childCount), chapters,
+                                           parentSlot, static_cast<unsigned>(node.valueIndex));
+            if (told > 0) {
+                core::log::write(core::log::Channel::state, core::log::Level::info,
+                                 {line.data(), static_cast<std::size_t>(told)});
             }
         });
     return progress.written;
+}
+
+/**
+ * Writes each claimable-and-unclaimed record's authored objective value(s) into the objective
+ * value bank.
+ *
+ * A triumph is claimable when its objective value equals its completionValue and its completion
+ * flag is clear -- the flag has no value that means claimable, only claimed or nothing, so this is
+ * the only bank that can carry the state. objective_slot_table maps a record's completion-flag
+ * index to the slot(s) its objective(s) occupy; a multi-objective record's slots are consecutive,
+ * found here as a run rather than one lookup per slot.
+ */
+std::size_t apply_claimable_objectives(std::span<std::int32_t> objectiveValues) noexcept {
+    std::size_t written = 0;
+    const std::span<const objective_slot_table::RecordEntry> table{objective_slot_table::kRecords};
+    const std::lock_guard<std::mutex> guard(g_lock);
+    for (std::size_t word = 0; word < g_claimable.size(); ++word) {
+        // Only claimable-and-unclaimed records. Writing claimed ones too was tried and redacted
+        // nearly every lore book: record objective slots share the 2746-5686 range with the value
+        // indices some book gates read (4619, 4719, 4991 among them), so writing a value per claim
+        // trampled those gates. A claim already shows through its completion flag.
+        std::uint64_t bits = g_claimable[word] & ~g_claimed[word];
+        while (bits != 0) {
+            const auto offset = static_cast<std::size_t>(std::countr_zero(bits));
+            bits &= bits - 1;
+            const auto flagIndex = static_cast<std::uint16_t>(word * kWordBits + offset);
+            const auto found = std::lower_bound(
+                table.begin(), table.end(), flagIndex,
+                [](const objective_slot_table::RecordEntry& entry, std::uint16_t key) {
+                    return entry.flagIndex < key;
+                });
+            if (found == table.end() || found->flagIndex != flagIndex) {
+                // No objective slot for this record -- nothing this pass can write for it.
+                continue;
+            }
+            for (std::uint8_t slot = 0; slot < found->objectiveCount; ++slot) {
+                const std::size_t objectiveIndex =
+                    static_cast<std::size_t>(found->firstObjective) + slot;
+                if (objectiveIndex >= objective_slot_table::kObjectives.size()) {
+                    break;
+                }
+                const objective_slot_table::ObjectiveSlot& objective =
+                    objective_slot_table::kObjectives[objectiveIndex];
+                // A bank shorter than the slot space is not an error: the tail simply is not sent.
+                if (static_cast<std::size_t>(objective.slot) >= objectiveValues.size()) {
+                    continue;
+                }
+                objectiveValues[objective.slot] = objective.completionValue;
+                ++written;
+            }
+        }
+    }
+    return written;
 }
 
 /** Writes each category's claimed-child count into the character value slot its bar reads. */
@@ -380,13 +634,24 @@ std::size_t apply_character_node_progress(std::span<std::int32_t> characterValue
     build_data::nodes::for_each(
         &progress, [](void* context, const build_data::nodes::Definition& node) noexcept {
             auto* state = static_cast<NodeProgress*>(context);
-            if (!build_data::nodes::lore_category(node.definitionIndex)
-                || node.characterValueIndex == build_data::nodes::kUnavailableValueIndex
-                || static_cast<std::size_t>(node.characterValueIndex) >= state->values.size()) {
+            if (!build_data::nodes::lore_category(node.definitionIndex)) {
                 return;
             }
-            state->values[node.characterValueIndex] = claimed_children(node);
-            ++state->written;
+            if (node.characterValueIndex != build_data::nodes::kUnavailableValueIndex
+                && static_cast<std::size_t>(node.characterValueIndex) < state->values.size()) {
+                state->values[node.characterValueIndex] = claimed_children(node);
+                ++state->written;
+            }
+            // The character-scoped books need their parent bar fed here too: their category
+            // counts from this bank, and their parent's bar is character-scoped as well. The
+            // parent index was resolved through the character value map at extraction.
+            if (node.parentCharacterValueIndex != build_data::nodes::kUnavailableValueIndex
+                && static_cast<std::size_t>(node.parentCharacterValueIndex)
+                       < state->values.size()) {
+                state->values[node.parentCharacterValueIndex] =
+                    claimed_children(node) - claimed_parent(node);
+                ++state->written;
+            }
         });
     return progress.written;
 }
@@ -405,6 +670,9 @@ bool mark_claimable(std::uint16_t flagIndex) noexcept {
     const std::lock_guard<std::mutex> guard(g_lock);
     g_claimable[static_cast<std::size_t>(flagIndex) / kWordBits] |=
         1ULL << (static_cast<std::size_t>(flagIndex) % kWordBits);
+    // Written through immediately, as mark_claimed does: a pickup is the player's progress and has
+    // to survive the process, not just the session that recorded it.
+    store_claimable_locked();
     return true;
 }
 

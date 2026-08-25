@@ -1,7 +1,8 @@
+#include <algorithm>
 #include <array>
 #include <cstdio>
-#include <cstring>
 #include <unordered_map>
+#include <vector>
 
 #include "../../../../core/logging/log.h"
 #include "../../../../state/build_data/runtime.h"
@@ -22,8 +23,6 @@ void report(const char* stage, unsigned long long detail) noexcept {
                          {line.data(), static_cast<std::size_t>(count)});
     }
 }
-
-
 
 } // namespace
 
@@ -156,6 +155,8 @@ bool build_nodes(const reader::Source& source,
 
     const std::span<const std::byte> table{blob};
     std::size_t driving = 0;
+
+    // Pass 1: resolve every node's own value slot and children.
     for (std::uint64_t row = 0; row < rows.count; ++row) {
         const std::size_t at =
             rows.dataOffset + static_cast<std::size_t>(row) * tables::kNodeRowStride;
@@ -168,22 +169,83 @@ bool build_nodes(const reader::Source& source,
         const bool named =
             tables::expression_value_slot(table, at, tables::kNodeExpressionFieldPrimary, slot)
             || tables::expression_value_slot(table, at, tables::kNodeExpressionFieldAlternate, slot);
+        // A lore book whose expression parses as neither a value read nor a flag test is
+        // indistinguishable from one whose slot simply is not addressable, so the raw instruction
+        // stream is reported for the lore range rather than inferred. Sixteen books resolve no
+        // slot at all and their bars can never move until that is understood.
+        if (domain::lore_category(static_cast<std::uint16_t>(row))) {
+            // Every 8-byte-aligned field in the row is tried, not just the two the resolver
+            // knows: sixteen books carry a flag test where the others carry a value read, so the
+            // value expression that drives their bar must sit in a field nobody has looked at.
+            for (std::size_t field = 0; field + 16 <= tables::kNodeRowStride; field += 8) {
+                std::int16_t probe = 0;
+                if (!tables::expression_value_slot(table, at, field, probe)) {
+                    continue;
+                }
+                std::int64_t count = 0;
+                std::int64_t relative = 0;
+                if (at + field + 16 > table.size()) {
+                    continue;
+                }
+                std::memcpy(&count, table.data() + at + field, sizeof count);
+                std::memcpy(&relative, table.data() + at + field + 8, sizeof relative);
+                std::array<char, 200> head{};
+                int used = std::snprintf(head.data(), head.size(),
+                                         "ev=nodes stage=expr node=%llu field=%zu count=%lld ops=",
+                                         static_cast<unsigned long long>(row), field,
+                                         static_cast<long long>(count));
+                const std::size_t pointerAt = at + field + 8;
+                const std::int64_t target = static_cast<std::int64_t>(pointerAt) + relative
+                                            + static_cast<std::int64_t>(tables::kHeaderSkip);
+                if (count >= 1 && count <= tables::kNodeExpressionCapacity && target >= 0
+                    && static_cast<std::size_t>(target)
+                               + static_cast<std::size_t>(count) * tables::kUnlockInstructionStride
+                           <= table.size()) {
+                    const auto base = static_cast<std::size_t>(target);
+                    for (std::int64_t index = 0; index < count && index < 6; ++index) {
+                        std::uint32_t instruction = 0;
+                        std::uint32_t operand = 0;
+                        const std::size_t insAt =
+                            base + static_cast<std::size_t>(index) * tables::kUnlockInstructionStride;
+                        std::memcpy(&instruction, table.data() + insAt, sizeof instruction);
+                        std::memcpy(&operand, table.data() + insAt + 4, sizeof operand);
+                        used += std::snprintf(head.data() + used,
+                                              head.size() - static_cast<std::size_t>(used),
+                                              "%u:%u ", instruction, operand);
+                    }
+                } else {
+                    used += std::snprintf(head.data() + used,
+                                          head.size() - static_cast<std::size_t>(used), "unparsed");
+                }
+                if (used > 0) {
+                    core::log::write(core::log::Channel::client, core::log::Level::info,
+                                     {head.data(), static_cast<std::size_t>(used)});
+                }
+            }
+        }
         if (named) {
+            definition.valueSlot = slot;
             const auto found = indexBySlot.find(slot);
             if (found != indexBySlot.end()) {
                 definition.valueIndex = found->second;
             }
-            // The parent record's own bar reads the next slot up. Resolve it through the mapping
-            // table rather than adding one to the index: rows happen to run in slot order around
-            // here, but nothing guarantees that.
-            const auto characterSlot = characterValueIndexBySlot.find(slot);
-            if (characterSlot != characterValueIndexBySlot.end()) {
-                definition.characterValueIndex = characterSlot->second;
-            }
-            const auto parent = indexBySlot.find(
-                static_cast<std::int16_t>(slot + tables::kNodeParentSlotStep));
-            if (parent != indexBySlot.end()) {
-                definition.parentValueIndex = parent->second;
+            // The same expression may resolve in the character scope: one lore book's bar reads a
+            // slot only the character table carries, and its parent has to be fed there too.
+            std::int16_t characterSlot = 0;
+            if (tables::expression_value_slot(table,
+                                              at,
+                                              tables::kNodeExpressionFieldPrimary,
+                                              characterSlot)
+                || tables::expression_value_slot(table,
+                                                 at,
+                                                 tables::kNodeExpressionFieldAlternate,
+                                                 characterSlot)) {
+                definition.characterValueSlot = characterSlot;
+                const auto characterResolved =
+                    characterValueIndexBySlot.find(characterSlot);
+                if (characterResolved != characterValueIndexBySlot.end()) {
+                    definition.characterValueIndex = characterResolved->second;
+                }
             }
         }
 
@@ -238,7 +300,79 @@ bool build_nodes(const reader::Source& source,
         }
         ++count;
     }
+
+    // Pass 2: assign each lore book's parent-record bar slot from the shipped allocation.
+    //
+    // The naive rule (parent = category slot + 1) holds only when the slot above a category was
+    // free at allocation time. Categories were handed out in contiguous runs, and a run's parent
+    // slots were deferred to immediately after the run, assigned in reverse category order: the
+    // run's first book takes the last parent slot, its last book takes the first. Verified against
+    // four independent in-game marker readings; see kNodeParentSlotStep in definition_index_table.h.
+    //
+    // Both scopes are walked. Most books are account-scoped; one reads its category from the
+    // character table, and its parent sits in that scope too.
+    {
+        struct BookSlot {
+            std::int32_t slot;
+            std::size_t row;
+        };
+        std::vector<BookSlot> accountBooks;
+        std::vector<BookSlot> characterBooks;
+        for (std::size_t row = 0; row < count; ++row) {
+            const auto& d = output[row];
+            if (!domain::lore_category(d.definitionIndex)) {
+                continue;
+            }
+            if (d.valueSlot >= 0) {
+                accountBooks.push_back({d.valueSlot, row});
+            }
+            if (d.characterValueSlot >= 0) {
+                characterBooks.push_back({d.characterValueSlot, row});
+            }
+        }
+
+        auto assignRuns = [&](std::vector<BookSlot>& books,
+                              const std::unordered_map<std::int16_t, std::uint16_t>& indexBySlot,
+                              auto memberSetter) {
+            std::sort(books.begin(), books.end(),
+                      [](const BookSlot& a, const BookSlot& b) { return a.slot < b.slot; });
+            std::size_t i = 0;
+            while (i < books.size()) {
+                std::size_t j = i;
+                while (j + 1 < books.size() && books[j + 1].slot == books[j].slot + 1) {
+                    ++j;
+                }
+                const std::size_t runLength = j - i + 1;
+                const std::int32_t runEnd = books[j].slot;
+                for (std::size_t k = 0; k < runLength; ++k) {
+                    // Reverse order within the run: book k gets the slot after the run counting
+                    // back from its end.
+                    const std::int32_t parentSlot =
+                        runEnd + static_cast<std::int32_t>(runLength - k);
+                    const auto found = indexBySlot.find(static_cast<std::int16_t>(parentSlot));
+                    if (found != indexBySlot.end()) {
+                        memberSetter(output[books[i + k].row], found->second);
+                    }
+                }
+                i = j + 1;
+            }
+        };
+
+        assignRuns(accountBooks,
+                   indexBySlot,
+                   [](domain::Definition& d, std::uint16_t index) {
+                       d.parentValueIndex = index;
+                   });
+        assignRuns(characterBooks,
+                   characterValueIndexBySlot,
+                   [](domain::Definition& d, std::uint16_t index) {
+                       d.parentCharacterValueIndex = index;
+                   });
+    }
+
     report("ok", static_cast<unsigned long long>(driving));
+
+
     return count != 0;
 }
 

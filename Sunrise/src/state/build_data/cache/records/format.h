@@ -29,8 +29,13 @@ inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', '
  * Current build-data cache format. An older cache is rebuilt rather than read.
  * Bump it when a stored shape changes, and when the extraction filling it changes what it writes.
  * A cached row survives a code change, so a corrected walk keeps publishing the old rows.
+ *
+ * 46: records::Definition gained definitionHash (record-reward lookup). The old cache's record
+ *     rows are four bytes short per row; reading them as the new shape shifts every later field,
+ *     which surfaced as claims resolving to the score value instead of the flag index. Bumped so
+ *     the stale shape is rejected and rebuilt instead of misread.
  */
-inline constexpr std::uint32_t kCacheFormatVersion = 45;
+inline constexpr std::uint32_t kCacheFormatVersion = 46;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */
@@ -238,13 +243,21 @@ struct ProgressionRecord {
     std::uint8_t reserved{};
 };
 
-/** Disk form of one record and the account flag bank row its claim sets. */
+/** Disk form of one record and the account flag bank row its claim sets.
+ *
+ * Carries every runtime field. It did not always: loreRow, categoryValueIndex and definitionHash
+ * were added to records::Definition after this row was laid out, and the positional decode then
+ * filled completionFlagIndex from the disk scoreValue - claims resolved to the score (50/100) as
+ * their flag, which looked like claiming doing nothing at all. The row is now the full shape and
+ * the codec assigns by name; kCacheFormatVersion bump rejects rows written before that.
+ */
 struct RecordDefinitionRecord {
     std::uint16_t definitionIndex{};
+    std::uint32_t definitionHash{};
     std::uint16_t completionFlagIndex{};
+    std::uint16_t loreRow{};
     std::uint16_t scoreValue{};
-    /** Must be zero, so the packed record row always matches. */
-    std::uint16_t reserved{};
+    std::uint16_t categoryValueIndex{};
 };
 
 /** Disk form of one dense socket-entry-list definition. */
@@ -470,7 +483,8 @@ static_assert(sizeof(RosterGroupRecord)
                      + 2 * scenarios::kRosterSlotCapacity * sizeof(std::uint8_t)
                      + scenarios::kRosterSlotCapacity * sizeof(std::uint16_t));
 static_assert(sizeof(ProgressionRecord) == sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t));
-static_assert(sizeof(RecordDefinitionRecord) == 4 * sizeof(std::uint16_t));
+static_assert(sizeof(RecordDefinitionRecord)
+              == sizeof(std::uint16_t) + sizeof(std::uint32_t) + 4 * sizeof(std::uint16_t));
 static_assert(sizeof(AbilityBucketRecord)
               == sizeof(std::uint16_t) + 6 * sizeof(std::uint8_t)
                      + 2 * abilities::kBucketCapacity * sizeof(std::uint8_t)

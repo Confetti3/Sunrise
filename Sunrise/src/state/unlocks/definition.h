@@ -34,16 +34,14 @@ using ProgressionBank = std::array<ProgressionLanes, build_data::progressions::k
 inline constexpr std::uint8_t kFlagSet = 2;
 
 /**
- * A record that is complete but not yet claimed, which the client offers as claimable.
+ * A clear acquired flag is stored as zero.
  *
- * The flag reads as a small enum rather than a boolean: zero and two are the values the authored
- * policy uses, and one is unused by it. Finding lore should leave a triumph waiting to be claimed
- * rather than claiming it, which is what this value is for. That reading is inferred from the gap
- * in the enum, not measured, so a record that stays invisible when set to it is the sign it is
- * wrong.
+ * The flag is a 2-bit field and encodes redeemed state only: all four values were measured (0 and
+ * 1 show nothing, 2 -- kFlagSet -- shows claimed, 3 shows nothing) and none of them means
+ * claimable. Claimable is carried by the objective bank instead: a record reads claimable when its
+ * objective value equals its completionValue while this flag stays clear. See
+ * record_claims::apply_claimable_objectives.
  */
-inline constexpr std::uint8_t kFlagAvailable = 1;
-/** A clear acquired flag is stored as zero. */
 inline constexpr std::uint8_t kFlagClear = 0;
 
 /**

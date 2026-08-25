@@ -23,7 +23,8 @@ bool build_collectibles(const reader::Source& source,
     if (state::build_data::sobjects::count() == 0) {
         namespace sobjects = state::build_data::sobjects;
         // Geometry is documented and asserted rather than divided out: count at +112, rows at +128,
-        // forty bytes each, name hash at +0, selector group at +32, ordinal at +34, type at +36.
+        // forty bytes each, name hash at +0, lane 4 at +16, selector group at +32, ordinal at +34,
+        // type at +36.
         constexpr std::size_t kCountOffset = 112;
         constexpr std::size_t kRowBase = 128;
         constexpr std::size_t kRowStride = 40;
@@ -43,6 +44,7 @@ bool build_collectibles(const reader::Source& source,
             for (std::size_t row = 0; row < rows.size(); ++row) {
                 const std::size_t at = kRowBase + row * kRowStride;
                 std::memcpy(&rows[row].nameHash, blob.data() + at, sizeof(std::uint32_t));
+                std::memcpy(&rows[row].lane4, blob.data() + at + 16, sizeof(std::uint32_t));
                 std::memcpy(&rows[row].selectorGroup, blob.data() + at + 32, sizeof(std::uint16_t));
                 std::memcpy(&rows[row].nodeOrdinal, blob.data() + at + 34, sizeof(std::uint16_t));
                 std::memcpy(&rows[row].typeCode, blob.data() + at + 36, sizeof(std::int32_t));

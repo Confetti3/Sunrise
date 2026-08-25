@@ -67,6 +67,17 @@ std::size_t apply(std::span<std::uint8_t> accountFlags) noexcept;
  */
 std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcept;
 
+/**
+ * Writes each claimable-and-unclaimed record's authored objective value(s) into the objective
+ * value bank, so its triumph reads at completionValue while its completion flag stays clear --
+ * the two conditions the client requires before it will offer a claim. The flag itself is never
+ * touched here: writing it can only mean claimed or nothing, never claimable, so claimable is
+ * carried by the objective bank alone.
+ * @param objectiveValues Account value bank, already filled from the authored policy.
+ * @return Number of values this wrote.
+ */
+std::size_t apply_claimable_objectives(std::span<std::int32_t> objectiveValues) noexcept;
+
 /** @return True when this index is already held. */
 [[nodiscard]] bool claimed(std::uint16_t flagIndex) noexcept;
 

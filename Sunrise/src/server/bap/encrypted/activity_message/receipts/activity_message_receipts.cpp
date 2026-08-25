@@ -6,8 +6,6 @@
 
 #include "../../../../../state/activity/current_activity.h"
 #include "../../../../../state/lore/lore_grant.h"
-#include <vector>
-#include <algorithm>
 #include "../../../../../state/build_data/collectibles/collectible_catalog.h"
 #include "../../../../../state/build_data/sobjects/sobject_catalog.h"
 #include "../../../../bap/internal.h"
@@ -15,6 +13,7 @@
 
 #include <array>
 #include <cstdarg>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 
@@ -294,31 +293,70 @@ Framed frame_incident(const message::Request& request) noexcept {
     const bool accepted = verdict == incident::Verdict::accepted;
     report(accepted ? core::log::Level::debug : core::log::Level::warn,
            "ev=activity stage=incident result=%s target=%u extra=%u selector=%u "
-           "optional=%u payload=%u",
+           "optional=%u payload=%u hdrbits=%u",
            incident::verdict_name(verdict),
            parsed.primaryTarget,
            parsed.extraTargetCount,
            parsed.selectorLength,
            static_cast<unsigned>(parsed.hasOptionalBlock),
-           parsed.payloadLength);
+           parsed.payloadLength,
+           parsed.headerBits);
     // Resolve the target against the definition table it indexes, so an incident says what it is
     // rather than carrying a bare number. Nothing acts on it yet; this is what acting on it needs.
     if (accepted) {
         state::build_data::sobjects::Definition definition{};
-        if (state::build_data::sobjects::find(
-                static_cast<std::uint16_t>(parsed.primaryTarget), definition)) {
+        const bool sobjectFound = state::build_data::sobjects::find(
+            static_cast<std::uint16_t>(parsed.primaryTarget), definition);
+        if (sobjectFound) {
             report(core::log::Level::info,
-                   "ev=activity stage=sobject target=%u hash=0x%08X type=%d group=%u ordinal=%u",
+                   "ev=activity stage=sobject target=%u hash=0x%08X type=%d group=%u ordinal=%u "
+                   "lane4=0x%08X",
                    parsed.primaryTarget,
                    definition.nameHash,
                    definition.typeCode,
                    static_cast<unsigned>(definition.selectorGroup),
-                   static_cast<unsigned>(definition.nodeOrdinal));
+                   static_cast<unsigned>(definition.nodeOrdinal),
+                   definition.lane4);
         } else {
             report(core::log::Level::warn,
                    "ev=activity stage=sobject target=%u result=unresolved rows=%zu",
                    parsed.primaryTarget,
                    state::build_data::sobjects::count());
+        }
+
+        // The decoded world position, only present for the one validated message shape.
+        if (parsed.hasPosition) {
+            report(core::log::Level::info,
+                   "ev=activity stage=incident_pos x=%.4f y=%.4f z=%.4f",
+                   static_cast<double>(parsed.x),
+                   static_cast<double>(parsed.y),
+                   static_cast<double>(parsed.z));
+        }
+
+        // The extra targets, which have never been looked at. They are sobject indices too -- the
+        // parser range-checks them the same way -- and the primary target has turned out to name
+        // only the kind of object, not the instance: one pickup in the Menagerie and another on the
+        // Tangled Shore both reported target 3539. So if anything in the incident distinguishes one
+        // vase from another, this is where it can still be. Logged rather than acted on, because a
+        // guess about which extra means what is exactly the mistake this project keeps paying for.
+        for (std::uint32_t extra = 0; extra < parsed.extraTargetCount; ++extra) {
+            const std::uint32_t target = parsed.extraTargets[extra];
+            state::build_data::sobjects::Definition row{};
+            if (state::build_data::sobjects::find(static_cast<std::uint16_t>(target), row)) {
+                report(core::log::Level::info,
+                       "ev=activity stage=sobject_extra slot=%u target=%u hash=0x%08X type=%d "
+                       "lane4=0x%08X",
+                       extra,
+                       target,
+                       row.nameHash,
+                       row.typeCode,
+                       row.lane4);
+            } else {
+                report(core::log::Level::info,
+                       "ev=activity stage=sobject_extra slot=%u target=%u result=unresolved",
+                       extra,
+                       target);
+            }
         }
 
         // The type payload, which is what the schema describes. The parser separates it from
@@ -345,10 +383,12 @@ Framed frame_incident(const message::Request& request) noexcept {
             const std::uint64_t sequence = take(32);
             const std::uint64_t kindRaw = take(3);
             const std::uint64_t identity = take(64);
-            // Which book. The payload does not name the chapter it granted -- its only
-            // per-object content is a position -- so the reward is chosen here instead. The bubble
-            // does say which activity the pickup happened in, and an activity's pickups feed one
-            // book, which is a far smaller association than one entry per object in the world.
+            // Which reward. Lane 4 of the target's sobject row names it exactly when the type code
+            // resolves one -- a type-10 row's low half is the record itself, no guessing needed --
+            // so that is tried first. Only when it does not resolve does the bubble heuristic below
+            // run: the payload does not name the chapter it granted -- its only per-object content
+            // is a position -- and the bubble at least says which activity the pickup happened in,
+            // which is a far smaller association (one book per activity) than one entry per object.
             //
             // The bubble sits at bit 126, the first of three consecutive u32 fields of the nested
             // block. That position is measured: the same hash appears at 126, 158 and 190, and the
@@ -361,34 +401,121 @@ Framed frame_incident(const message::Request& request) noexcept {
             // The activity selection already named the bubble once, so it is read from there and
             // the payload is not decoded at all.
             constexpr std::array<std::int32_t, 2> kPickupTypeCodes{2, 10};
-            state::build_data::sobjects::Definition row{};
             bool pickupType = false;
-            if (state::build_data::sobjects::find(static_cast<std::uint16_t>(parsed.primaryTarget),
-                                                  row)) {
+            if (sobjectFound) {
                 for (const std::int32_t code : kPickupTypeCodes) {
-                    pickupType = pickupType || row.typeCode == code;
+                    pickupType = pickupType || definition.typeCode == code;
                 }
             }
             if (pickupType) {
-                const std::uint32_t bubble = state::activity::current_bubble();
-                const std::uint16_t node = state::lore::book_for_bubble(bubble);
-                const state::lore::GrantOutcome outcome = state::lore::grant_next_chapter(node);
-                if (outcome == state::lore::GrantOutcome::granted) {
-                    // Nothing else will stage an account image for this peer: a pickup is not a web
-                    // service transaction and has no response to carry the change back. Arm every
-                    // peer, the origin included, so the chapter appears without a relaunch and a
-                    // second pickup in the same run sees the first one already held.
-                    bap::arm_account_resync_everywhere();
+                bool resolvedExactly = false;
+                if (definition.typeCode == 10) {
+                    // typeCode 10's lane-4 low half is a DestinyRecordDefinition row. 360 of 807
+                    // type-10 rows carry one that resolves; the rest fall through to the fallback
+                    // below exactly as they did before this path existed.
+                    const std::uint16_t recordRow = definition.recordRow();
+                    const state::lore::GrantOutcome outcome = state::lore::grant_record(recordRow);
+                    // A row whose lane 4 does not name a chapter is not an exact resolution at
+                    // all, only a number that fell inside the record table, so it falls back.
+                    resolvedExactly = outcome != state::lore::GrantOutcome::recordNotFound
+                                      && outcome != state::lore::GrantOutcome::notAChapter;
+                    if (resolvedExactly && outcome == state::lore::GrantOutcome::granted) {
+                        // Nothing else will stage an account image for this peer: a pickup is not a
+                        // web service transaction and has no response to carry the change back. Arm
+                        // every peer, the origin included, so the record appears without a relaunch.
+                        bap::arm_account_resync_everywhere();
+                    }
+                    if (resolvedExactly) {
+                        report(outcome == state::lore::GrantOutcome::granted
+                                   ? core::log::Level::info
+                                   : core::log::Level::warn,
+                               "ev=activity stage=lore path=exact type=10 target=%u lane4=0x%08X "
+                               "record=%u result=%s",
+                               parsed.primaryTarget,
+                               definition.lane4,
+                               static_cast<unsigned>(recordRow),
+                               state::lore::grant_outcome_name(outcome));
+                    }
+                } else if (definition.typeCode == 2) {
+                    // typeCode 2's lane-4 high half is a DestinyCollectibleDefinition row and
+                    // resolves 709 of 713 times, but nothing in this file's scope owns the
+                    // account-side collections write: record_claims only knows how to claim a
+                    // record's completion flag, and inventing a second mechanism here is exactly
+                    // what this pass was told not to do.
+                    // TODO(lore): grant the item behind collectibleRow once a collections claim
+                    // path exists. Until then this always falls back to the bubble table below.
+                    const std::uint16_t collectibleRow = definition.collectibleRow();
+                    state::build_data::collectibles::Definition collectible{};
+                    const bool collectibleResolves = state::build_data::collectibles::find(
+                        collectibleRow, collectible);
+                    report(core::log::Level::warn,
+                           "ev=activity stage=lore path=exact type=2 target=%u lane4=0x%08X "
+                           "collectible=%u resolves=%d result=not_implemented",
+                           parsed.primaryTarget,
+                           definition.lane4,
+                           static_cast<unsigned>(collectibleRow),
+                           collectibleResolves ? 1 : 0);
                 }
-                report(outcome == state::lore::GrantOutcome::granted ? core::log::Level::info
-                                                                     : core::log::Level::warn,
-                       "ev=activity stage=lore bubble=0x%08X node=%u result=%s record=%u item=%d",
-                       bubble, static_cast<unsigned>(node),
-                       state::lore::grant_outcome_name(outcome),
-                       static_cast<unsigned>(outcome == state::lore::GrantOutcome::granted
-                                                 ? state::lore::last_granted_record()
-                                                 : 0),
-                       state::lore::last_item_granted() ? 1 : 0);
+                if (!resolvedExactly) {
+                    const std::uint32_t bubble = state::activity::current_bubble();
+                    state::lore::GrantOutcome outcome;
+                    const char* path;
+                    std::size_t bucketSize = 0;
+                    std::uint16_t node = state::lore::kNoBook;
+
+                    if (bubble == state::lore::kBubbleUnsetSentinel) {
+                        // caluseum_experience is instanced and so carries no real bubble at all --
+                        // every one of its pickups reports the FNV-1a offset basis here. That makes
+                        // this Confessions by construction, not a bubble_record_table lookup, so the
+                        // sentinel is recognised directly rather than ever being handed to the table.
+                        node = state::lore::kConfessionsNode;
+                        outcome = state::lore::grant_next_chapter(node);
+                        path = "instanced";
+                    } else {
+                        outcome = state::lore::grant_from_bubble_table(bubble, bucketSize);
+                        path = "bubble_table";
+                        if (outcome == state::lore::GrantOutcome::bubbleTableExhausted) {
+                            // Every candidate this bubble's bucket names is already held. Logged
+                            // distinctly here so an exhausted bucket reads differently in the logs
+                            // from a bubble the table never covered, then fall through below rather
+                            // than granting nothing silently.
+                            report(core::log::Level::warn,
+                                   "ev=activity stage=lore path=bubble_table bubble=0x%08X "
+                                   "bucket=%zu result=%s",
+                                   bubble, bucketSize, state::lore::grant_outcome_name(outcome));
+                        }
+                        if (outcome != state::lore::GrantOutcome::granted
+                            && outcome != state::lore::GrantOutcome::refused) {
+                            // Not in the table, or the table's own candidates are exhausted: fall
+                            // through to the same book path this always used. The generated table is
+                            // built from public map data that never recorded every bubble hosting a
+                            // pickup, so a bubble missing from it is a gap in that data rather than a
+                            // place nothing is collectable -- walk whatever book is known for it and
+                            // grant an arbitrary chapter rather than granting nothing.
+                            node = state::lore::legacy_book_for_bubble(bubble);
+                            outcome = state::lore::grant_next_chapter(node);
+                            path = "fallback";
+                        }
+                    }
+
+                    if (outcome == state::lore::GrantOutcome::granted) {
+                        // Nothing else will stage an account image for this peer: a pickup is not a web
+                        // service transaction and has no response to carry the change back. Arm every
+                        // peer, the origin included, so the chapter appears without a relaunch and a
+                        // second pickup in the same run sees the first one already held.
+                        bap::arm_account_resync_everywhere();
+                    }
+                    report(outcome == state::lore::GrantOutcome::granted ? core::log::Level::info
+                                                                         : core::log::Level::warn,
+                           "ev=activity stage=lore path=%s bubble=0x%08X node=%u bucket=%zu "
+                           "result=%s record=%u item=%d",
+                           path, bubble, static_cast<unsigned>(node), bucketSize,
+                           state::lore::grant_outcome_name(outcome),
+                           static_cast<unsigned>(outcome == state::lore::GrantOutcome::granted
+                                                     ? state::lore::last_granted_record()
+                                                     : 0),
+                           state::lore::last_item_granted() ? 1 : 0);
+                }
             }
 
             report(core::log::Level::info,

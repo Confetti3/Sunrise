@@ -83,9 +83,11 @@ bool encode(const build_data::records::Definition& value,
             RecordDefinitionRecord& record) noexcept {
     record = {
         value.definitionIndex,
+        value.definitionHash,
         value.completionFlagIndex,
+        value.loreRow,
         value.scoreValue,
-        kReservedFieldValue,
+        value.categoryValueIndex,
     };
     return true;
 }
@@ -94,10 +96,14 @@ bool encode(const build_data::records::Definition& value,
 bool decode(const RecordDefinitionRecord& record,
             build_data::records::Definition& value) noexcept {
     value = {};
-    if (record.reserved != kReservedFieldValue) {
-        return false;
-    }
-    value = {record.definitionIndex, record.completionFlagIndex, record.scoreValue};
+    // Assigned by name, never positionally: this row outlived two field additions to Definition,
+    // and a positional list silently filled the new fields with the wrong disk values.
+    value.definitionIndex = record.definitionIndex;
+    value.definitionHash = record.definitionHash;
+    value.completionFlagIndex = record.completionFlagIndex;
+    value.loreRow = record.loreRow;
+    value.scoreValue = record.scoreValue;
+    value.categoryValueIndex = record.categoryValueIndex;
     return true;
 }
 

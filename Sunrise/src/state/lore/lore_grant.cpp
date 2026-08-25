@@ -1,6 +1,5 @@
 #include "lore_grant.h"
 
-#include <array>
 #include <atomic>
 #include <cstddef>
 #include <span>
@@ -12,43 +11,40 @@
 #include "../build_data/records/definition.h"
 #include "../build_data/records/record_catalog.h"
 #include "../build_data/records/record_persistence.h"
-#include "../build_data/collectibles/collectible_catalog.h"
-#include "../build_data/inventory/buckets/definition.h"
-#include "../build_data/items/details/definition.h"
-#include "../runtime/runtime.h"
 #include "../build_data/runtime.h"
 #include "../record_claims/record_claims.h"
+#include "bubble_record_table.h"
 
 namespace sunrise::state::lore {
 namespace {
 
-/**
- * Which book an activity's pickups feed.
- *
- * One entry per activity, not one per object. This is the whole of the authored data the chosen
- * design needs, and it is the part that would be replaced if Bungie's own object-to-reward mapping
- * were ever reproduced from activity and spawn data.
- *
- * Only the Menagerie is known so far, measured from its pickups: the bubble its incidents carry
- * against the book those pickups fill.
- */
-struct BubbleBook {
-    std::uint32_t bubble;
-    std::uint16_t node;
-};
-
-constexpr std::array<BubbleBook, 2> kBubbleBooks{{
-    // caluseum_experience, whose vases fill Confessions. Node 838 confirmed against the published
-    // manifest: nine chapters, Entry I on record 1708 carrying lore hash 0x58C9C088.
-    {0x811C9DC5U, 838U},
-    // The destination whose dead ghosts fill Ghost Stories. Node 817 identified by child count --
-    // the manifest lists 23 records and only two books here have 23 chapters -- and by section,
-    // since Ghost Stories sits under The Light and the other candidate, node 847, does not.
-    {0x5FE28198U, 817U},
-}};
-
 std::atomic<std::uint16_t> g_lastGranted{0};
 std::atomic<bool> g_lastItemGranted{false};
+
+/**
+ * Publishes the node and record tables once, so a warm start does not run either path empty.
+ *
+ * On a warm start the package pass is skipped, so neither table is published until something asks
+ * for it. Both grant paths need the record table and the book path also needs the node table, so
+ * both are brought up together here; a caller that only needs records still pays for nodes once,
+ * which costs nothing once the tables are up and is simpler than tracking each domain apart.
+ * @return True once both tables are known published, this call or an earlier one.
+ */
+bool ensure_tables_published() noexcept {
+    namespace nodes = build_data::nodes;
+    namespace records = build_data::records;
+    static std::atomic<bool> published{false};
+    if (published.load(std::memory_order_relaxed)) {
+        return true;
+    }
+    const bool haveNodes = nodes::count() != 0 || nodes::load_and_publish();
+    const bool haveRecords = records::count() != 0 || records::load_and_publish();
+    if (haveNodes && haveRecords) {
+        published.store(true, std::memory_order_relaxed);
+        return true;
+    }
+    return false;
+}
 
 } // namespace
 
@@ -73,18 +69,18 @@ const char* grant_outcome_name(GrantOutcome outcome) noexcept {
         return "book_complete";
     case GrantOutcome::refused:
         return "refused";
+    case GrantOutcome::recordNotFound:
+        return "record_not_found";
+    case GrantOutcome::noFlag:
+        return "no_flag";
+    case GrantOutcome::alreadyHeld:
+        return "already_held";
+    case GrantOutcome::notAChapter:
+        return "not_a_chapter";
+    case GrantOutcome::bubbleTableExhausted:
+        return "bubble_table_exhausted";
     }
     return "unknown";
-}
-
-/** @return The presentation node of the book that activity's pickups feed. */
-std::uint16_t book_for_bubble(std::uint32_t bubble) noexcept {
-    for (const BubbleBook& entry : kBubbleBooks) {
-        if (entry.bubble == bubble) {
-            return entry.node;
-        }
-    }
-    return kNoBook;
 }
 
 /** Grants the next chapter of one book that the account does not already hold. */
@@ -95,17 +91,7 @@ GrantOutcome grant_next_chapter(std::uint16_t node) noexcept {
 
     namespace nodes = build_data::nodes;
     namespace records = build_data::records;
-    // On a warm start the package pass is skipped, so the node table is never published and every
-    // book looks empty. The table is kept in its own file for exactly this; publishing it here
-    // costs nothing once it has succeeded.
-    static std::atomic<bool> published{false};
-    if (!published.load(std::memory_order_relaxed)) {
-        const bool haveNodes = nodes::count() != 0 || nodes::load_and_publish();
-        const bool haveRecords = records::count() != 0 || records::load_and_publish();
-        if (haveNodes && haveRecords) {
-            published.store(true, std::memory_order_relaxed);
-        }
-    }
+    (void)ensure_tables_published();
     std::vector<nodes::Definition> rows(nodes::kDefinitionCapacity);
     std::size_t count = 0;
     if (!nodes::snapshot(std::span<nodes::Definition>{rows}, count) || count == 0) {
@@ -160,6 +146,76 @@ GrantOutcome grant_next_chapter(std::uint16_t node) noexcept {
         return GrantOutcome::bookComplete;
     }
     return sawRecord ? GrantOutcome::noChapters : GrantOutcome::noRecords;
+}
+
+/** Grants one record's completion directly, by the row an sobject's lane 4 names. */
+GrantOutcome grant_record(std::uint16_t definitionIndex) noexcept {
+    namespace records = build_data::records;
+    (void)ensure_tables_published();
+
+    records::Definition record{};
+    if (!records::find(definitionIndex, record)) {
+        return GrantOutcome::recordNotFound;
+    }
+    if (record.completionFlagIndex == records::kUnavailableFlagIndex) {
+        return GrantOutcome::noFlag;
+    }
+    // Same rule as grant_next_chapter: a record naming no lore row is not a chapter. Here it also
+    // means lane 4 did not really name a record -- see GrantOutcome::notAChapter -- so the caller
+    // is told to fall back rather than granting whatever triumph the number happened to land on.
+    if (record.loreRow == records::kUnavailableLoreRow) {
+        return GrantOutcome::notAChapter;
+    }
+    // Same rule as grant_next_chapter: finding lore completes a chapter, claiming it is the
+    // player's own act, so a record already claimed or already offered claimable is left alone
+    // rather than reported as this pickup's doing.
+    if (record_claims::claimed(record.completionFlagIndex)
+        || record_claims::claimable(record.completionFlagIndex)) {
+        return GrantOutcome::alreadyHeld;
+    }
+    if (!record_claims::mark_claimable(record.completionFlagIndex)) {
+        return GrantOutcome::refused;
+    }
+    g_lastGranted.store(definitionIndex, std::memory_order_relaxed);
+    return GrantOutcome::granted;
+}
+
+std::uint16_t legacy_book_for_bubble(std::uint32_t bubble) noexcept {
+    // Thieves' Landing. Its checklist entries are Region Chests, so the Ghost Lore join that built
+    // bubble_record_table.h never produced a bucket for it, but a pickup here does grant a Ghost
+    // Stories chapter -- observed granting record 802 before the table replaced kBubbleBooks.
+    constexpr std::uint32_t kThievesLandingBubble = 0x5FE28198U;
+
+    if (bubble == kThievesLandingBubble) {
+        return kGhostStoriesNode;
+    }
+    return kNoBook;
+}
+
+/**
+ * Grants the first record in one bubble's generated candidate bucket that the account does not
+ * already hold, walking the bucket in table order.
+ */
+GrantOutcome grant_from_bubble_table(std::uint32_t bubble, std::size_t& bucketSize) noexcept {
+    const std::span<const std::uint16_t> rows = bubble_record_table::records_for_bubble(bubble);
+    bucketSize = rows.size();
+    if (rows.empty()) {
+        return GrantOutcome::unknownBook;
+    }
+
+    // Each row is tried through grant_record, which is the one place that already knows how to
+    // check and write a claim -- there is no second mechanism to maintain here. A row this bucket
+    // names but that is already held is exactly the case a later pickup in the same bubble is
+    // meant to skip past, so the walk continues; a row that fails to resolve at all would be a
+    // data problem in the generated table, and is skipped rather than aborting the whole pickup.
+    // Only a claim-store refusal stops the walk outright, the same as grant_next_chapter.
+    for (const std::uint16_t row : rows) {
+        const GrantOutcome outcome = grant_record(row);
+        if (outcome == GrantOutcome::granted || outcome == GrantOutcome::refused) {
+            return outcome;
+        }
+    }
+    return GrantOutcome::bubbleTableExhausted;
 }
 
 /** @return True when the last grant also gave the collectible's item. */

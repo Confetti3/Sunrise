@@ -75,12 +75,27 @@ struct Incident {
     std::uint32_t optionalWordB{};
     /** Bits the body used. Below the payload's own bit count means trailing padding. */
     std::uint32_t consumedBits{};
+    /**
+     * Bit cursor position where the decoded header ends, i.e. immediately before the opaque
+     * payload bytes. Also the shape gate for the decoded position below: only the headerBits == 29
+     * message shape has a validated field layout inside the opaque payload.
+     */
+    std::uint32_t headerBits{};
+    /**
+     * World position, decoded only for the one message shape whose payload layout is validated
+     * (headerBits == 29). Meaningless unless hasPosition is set.
+     */
+    float x{};
+    float y{};
+    float z{};
     /** Set when a compressed selector is present. Its bytes stay opaque. */
     bool hasCompressedSelector{};
     /** Set when the two optional words are present. */
     bool hasOptionalBlock{};
     /** Set when the payload length and its bytes were reached and checked. */
     bool hasPayload{};
+    /** Set when x/y/z were decoded from the validated shape and passed the sanity gate. */
+    bool hasPosition{};
 };
 
 /** @return A short stable name for one verdict, for the log line. */

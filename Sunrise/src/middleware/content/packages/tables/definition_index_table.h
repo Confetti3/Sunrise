@@ -95,7 +95,16 @@ inline constexpr std::size_t kNodeExpressionFieldAlternate = 48;
 /** Records a node owns, four bytes each as a row then a gate. */
 inline constexpr std::size_t kNodeChildRecordField = 136;
 inline constexpr std::size_t kNodeChildRecordStride = 4;
-/** A category's parent record reads the slot immediately above the category's own. */
+/**
+ * How a lore book's parent-record bar slot relates to the category's own.
+ *
+ * The naive rule — parent = category slot + 1 — holds only when the slot above a category is free.
+ * Categories were allocated in contiguous runs, so for those books slot+1 is the next book's
+ * category. The shipped allocation instead defers every run's parent slots to immediately after
+ * the run, assigning them in reverse category order: the first book of a run gets the last parent
+ * slot and vice versa. Verified against four independent in-game marker readings (Pigeon 7060->7061,
+ * Exegete 7284->7285 isolated; Aunor -> 5230 and Ecdysis -> 5229 inside the 5222-5227 run).
+ */
 inline constexpr std::int32_t kNodeParentSlotStep = 1;
 /** Array descriptor of the character object's flag mapping table, sized to that bank. */
 inline constexpr std::size_t kCharacterFlagMapDescriptor = 40;

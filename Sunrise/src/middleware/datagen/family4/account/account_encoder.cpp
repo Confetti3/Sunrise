@@ -140,6 +140,9 @@ bool encode(const state::AccountState& state, std::span<std::byte> output) noexc
     // A node's progress bar reads a value slot and shows whatever it holds, so the claimed children
     // have to be counted into it here or the bar never moves.
     (void)state::record_claims::apply_node_progress(object.objectiveValues);
+    // A record reads claimable when its objective equals completionValue and its flag is clear --
+    // the flag alone can never carry that state, so its objective value(s) are written here instead.
+    (void)state::record_claims::apply_claimable_objectives(object.objectiveValues);
 
     for (layout::CharacterUnlockBlock& block : object.characterUnlocks) {
         block.flags = unlocks.characterFlags;
