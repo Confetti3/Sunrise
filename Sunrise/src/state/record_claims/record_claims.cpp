@@ -539,9 +539,9 @@ std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcep
             // the shipped tables rather than derived: writing the parent record's objective slot
             // was tried and moved nothing, and the node's valueIndex resolves for only some books.
             std::int32_t parentSlot = -1;
-            if (haveParent) {
+            {
                 for (const auto& bar : parent_bar_table::kBars) {
-                    if (bar.recordRow != parent.definitionIndex) {
+                    if (bar.nodeIndex != node.definitionIndex) {
                         continue;
                     }
                     if (static_cast<std::size_t>(bar.valueIndex) < state->values.size()) {
@@ -567,10 +567,12 @@ std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcep
             std::array<char, 160> line{};
             const int told = std::snprintf(line.data(), line.size(),
                                            "ev=claims stage=node_bar node=%u children=%u "
-                                           "chapters=%d parent_slot=%d value_slot=%u",
+                                           "chapters=%d parent_slot=%d value_slot=%u char_value=%u char_parent=%u",
                                            static_cast<unsigned>(node.definitionIndex),
                                            static_cast<unsigned>(node.childCount), chapters,
-                                           parentSlot, static_cast<unsigned>(node.valueIndex));
+                                           parentSlot, static_cast<unsigned>(node.valueIndex),
+                                           static_cast<unsigned>(node.characterValueIndex),
+                                           static_cast<unsigned>(node.parentCharacterValueIndex));
             if (told > 0) {
                 core::log::write(core::log::Channel::state, core::log::Level::info,
                                  {line.data(), static_cast<std::size_t>(told)});
