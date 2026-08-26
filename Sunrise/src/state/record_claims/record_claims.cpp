@@ -585,6 +585,12 @@ std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcep
             // entirely while the count keyed on it.
             std::int32_t chapters = 0;
             std::int32_t collected = 0;
+            // A cumulative book's chapter n completes at value n rather than 1, and every one of
+            // them compares against this node's counter, so it must carry the real total or the
+            // chapters stay hidden. A book whose chapters all complete at 1 needs nothing here --
+            // Dust reads 0 with all nine collected and every chapter still claimable -- so those
+            // keep the sentinel and their bar stays honest.
+            bool cumulative = false;
             build_data::records::Definition parent{};
             bool haveParent = false;
             for (std::size_t child = 0; child < node.childCount; ++child) {
@@ -613,6 +619,22 @@ std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcep
                 if (claimed_locked(record.completionFlagIndex)
                     || claimable_locked(record.completionFlagIndex)) {
                     ++collected;
+                }
+                {
+                    const auto entry = std::lower_bound(
+                        objective_slot_table::kRecords.begin(),
+                        objective_slot_table::kRecords.end(), record.completionFlagIndex,
+                        [](const objective_slot_table::RecordEntry& row,
+                           std::uint16_t flag) noexcept { return row.flagIndex < flag; });
+                    if (entry != objective_slot_table::kRecords.end()
+                        && entry->flagIndex == record.completionFlagIndex
+                        && entry->objectiveCount != 0) {
+                        const std::size_t at = entry->firstObjective;
+                        if (at < objective_slot_table::kObjectives.size()
+                            && objective_slot_table::kObjectives[at].completionValue > 1) {
+                            cumulative = true;
+                        }
+                    }
                 }
             }
 
@@ -657,7 +679,56 @@ std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcep
                 // locked, which is what claiming-only produced. It is only reached when the slot
                 // is not also the book's bar: the guard above skips it when they coincide, and for
                 // those ten the slot is the bar and has to keep counting claims.
-                state->values[node.valueIndex] = chapters;
+                // This slot is the book's collected counter and it gates the chapters: chapter
+                // n is only offered once it reads n, so -1 hides every chapter and 1 offers only
+                // the first. It carries the collected total, and -1 only when nothing has been
+                // collected -- which still satisfies the category's not-zero gate, so the book
+                // opens with a blank bar rather than a false count.
+                // A cumulative book needs its collected total somewhere its chapters can read.
+                // Where the node's own slot is also the bar, putting it there would show collected
+                // as a claim count -- which is wrong, the bar counts claims. Those books have a
+                // second slot and it takes the counter instead, leaving the bar alone.
+                const bool ownSlotIsBar =
+                    parentSlot == static_cast<std::int32_t>(node.valueIndex);
+                std::uint16_t counterSlot = node.valueIndex;
+                if (ownSlotIsBar
+                    && node.parentValueIndex != build_data::nodes::kUnavailableValueIndex) {
+                    counterSlot = node.parentValueIndex;
+                }
+                // Four books are not collected from the world at all -- they are handed out by
+                // an activity or vendor counter, one entry at a time:
+                //   Stolen Intelligence  Zavala rank-up packages
+                //   A Man with No Name   Gambit Prime bounties
+                //   Unveiling            one page a week for visiting Eris Morn
+                //   Revelation           the weekly Lost Sector bounty, four times
+                // Their node value slot is that counter, not a claim count, which is why the
+                // category gates on it and why no other slot in any bank ever revealed them --
+                // the whole account value bank, the flag bank below the record range, the profile
+                // and character banks and the family5 override path were all swept looking for a
+                // separate gate that does not exist. Entries obtained and activity completions
+                // are the same number for these four, so the collected total belongs here and the
+                // parent triumph showing it is faithful rather than a compromise. Revelation sits
+                // in this group despite completing every chapter at 1: it is activity-gated, not
+                // cumulative, which is why it never behaved like the books it otherwise matches.
+                constexpr std::array<std::uint16_t, 4> kActivityAcquired{
+                    823U,  // Stolen Intelligence
+                    839U,  // Unveiling
+                    850U,  // A Man with No Name
+                    853U,  // Revelation
+                };
+                for (const std::uint16_t acquired : kActivityAcquired) {
+                    if (acquired == node.definitionIndex && collected > 0
+                        && static_cast<std::size_t>(node.valueIndex) < state->values.size()) {
+                        state->values[node.valueIndex] = collected;
+                    }
+                }
+                                if (cumulative && collected > 0
+                    && static_cast<std::int32_t>(counterSlot)
+                           < objective_slot_table::kRecordObjectiveRangeStart
+                    && static_cast<std::size_t>(counterSlot) < state->values.size()) {
+                    state->values[counterSlot] = collected;
+                }
+
                 ++state->written;
             }
             // Eight books name no value at field 136 and so have no table entry, but their parent

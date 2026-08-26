@@ -162,7 +162,7 @@ std::size_t apply_category_gates(std::span<std::int32_t> objectiveValues, bool r
             }
         }
         if (objectiveValues[node.valueIndex] == 0) {
-            objectiveValues[node.valueIndex] = sameAsBar ? -1 : 1;
+            objectiveValues[node.valueIndex] = -1;
             ++set;
         }
     }
