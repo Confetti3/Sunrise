@@ -502,7 +502,10 @@ constexpr std::uint16_t kChapterGateLastRow = 106;
 /** Publishes the per-chapter visibility gate of the Year 1 lore chapters. */
 std::size_t apply_chapter_visibility_gates(std::span<std::int32_t> objectiveValues) noexcept {
     const std::span<const objective_slot_table::RecordEntry> table{objective_slot_table::kRecords};
-    std::size_t written = 0;
+    // The largest completion value any chapter in the block asks for. Read from the shipped table
+    // rather than hard-coded: the corrupted-egg records count to nine and Truth to Power's last
+    // chapter to eleven, and a gate written below a chapter's own requirement leaves it redacted.
+    std::int32_t ceiling = 1;
     for (std::uint16_t row = 0; row <= kChapterGateLastRow; ++row) {
         build_data::records::Definition record{};
         if (!build_data::find_record_definition(row, record)
@@ -510,30 +513,38 @@ std::size_t apply_chapter_visibility_gates(std::span<std::int32_t> objectiveValu
             || record.completionFlagIndex == build_data::records::kUnavailableFlagIndex) {
             continue;
         }
-        const std::int32_t slot = kChapterGateBase + static_cast<std::int32_t>(row);
-        if (slot < kChapterGateFirstWritable
-            || static_cast<std::size_t>(slot) >= objectiveValues.size()) {
-            continue;
-        }
-        // The gate is a threshold, so the chapter's own completion value is exactly enough: a
-        // counted chapter -- the corrupted-egg records run to nine -- needs its real count, and a
-        // flat 1 would leave every one of those redacted.
-        std::int32_t need = 1;
         const auto found = std::lower_bound(
             table.begin(), table.end(), record.completionFlagIndex,
             [](const objective_slot_table::RecordEntry& entry, std::uint16_t flag) noexcept {
                 return entry.flagIndex < flag;
             });
-        if (found != table.end() && found->flagIndex == record.completionFlagIndex) {
-            for (std::uint8_t i = 0; i < found->objectiveCount; ++i) {
-                const std::size_t at = static_cast<std::size_t>(found->firstObjective) + i;
-                if (at < objective_slot_table::kObjectives.size()) {
-                    need = std::max(need, objective_slot_table::kObjectives[at].completionValue);
-                }
+        if (found == table.end() || found->flagIndex != record.completionFlagIndex) {
+            continue;
+        }
+        for (std::uint8_t i = 0; i < found->objectiveCount; ++i) {
+            const std::size_t at = static_cast<std::size_t>(found->firstObjective) + i;
+            if (at < objective_slot_table::kObjectives.size()) {
+                ceiling = std::max(ceiling, objective_slot_table::kObjectives[at].completionValue);
             }
         }
-        if (objectiveValues[static_cast<std::size_t>(slot)] < need) {
-            objectiveValues[static_cast<std::size_t>(slot)] = need;
+    }
+
+    // The block is filled uniformly rather than addressed per chapter. Which slot inside it belongs
+    // to which chapter is NOT known: every measurement that located this block wrote one value
+    // across a contiguous span, and a uniform span satisfies a chapter wherever it sits, so none of
+    // them could distinguish the mapping. Addressing it as 1935 + record row was tried and is
+    // wrong -- The Dreaming City's "Riven" vanished while the slots either side of its supposed one
+    // stayed lit, and Truth to Power lost all eleven chapters that a uniform fill had shown.
+    // Filling to the ceiling reproduces the state measured good; resolving the mapping needs a
+    // per-slot sweep with distinct values and is worth doing before anything relies on it.
+    std::size_t written = 0;
+    const std::int32_t last = kChapterGateBase + static_cast<std::int32_t>(kChapterGateLastRow);
+    for (std::int32_t slot = kChapterGateFirstWritable; slot <= last; ++slot) {
+        if (static_cast<std::size_t>(slot) >= objectiveValues.size()) {
+            break;
+        }
+        if (objectiveValues[static_cast<std::size_t>(slot)] < ceiling) {
+            objectiveValues[static_cast<std::size_t>(slot)] = ceiling;
         }
         ++written;
     }
