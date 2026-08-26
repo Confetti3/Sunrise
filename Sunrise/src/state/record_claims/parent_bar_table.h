@@ -42,21 +42,19 @@ namespace sunrise::state::record_claims::parent_bar_table {
  * Node 819, Letters from a Renegade, is the one row the +8 method fails: its shipped objective
  * tracks an unrelated record's value. Its entry below is measured and stands.
  *
- * Ten entries name the same index the node's gate reads, and that is not an error to fix.
- * Confirmed three times in game: the number appears on the book's parent triumph, it tracked the
- * collected count exactly book by book, and pointing the bar instead at node.parentValueIndex
- * changed nothing -- 2351 and its neighbours are not those books' bars.
+ * Ten entries name the same index the node's gate reads. That is real, confirmed repeatedly in
+ * game, and it is not a defect: the gate is a NOT-ZERO test, not a threshold, so the slot can
+ * carry a value the gate accepts and the bar does not display. apply_category_gates publishes -1
+ * for exactly these ten. The book opens, the bar shows nothing while nothing is claimed, and the
+ * claimed count counts up normally over the top of it.
  *
- * One slot, two roles, so it can hold one number. A live account reveals a lore book once
- * something in it has been collected and needs nothing claimed, while a bar elsewhere moves on
- * claim. Here the two coincide: holding claims would hide the book until a claim, and a chapter
- * cannot be claimed while it is invisible, so the count written here is what has been COLLECTED.
- * Their parent triumph therefore reads collected rather than claimed. That is a consequence of
- * the shipped allocation, not a choice, and it is the only value that does not deadlock.
- *
- * Every other bank was swept looking for a separate gate before accepting this: the whole account
- * value bank at 100, the character value bank, the profile and character flag banks, and the
- * account flags around the known visibility run. None of them reveals these books.
+ * Getting here cost a long detour. A non-zero bar forces the category to reveal, which is not the
+ * same as the bar being the gate, and reading it that way produced a chain of wrong conclusions:
+ * that these ten were special, that they had to choose between showing collected or being
+ * unreachable, and that a separate gate slot must exist. It does not. Every slot in the account
+ * value bank was written non-zero looking for one, the flag bank was swept 0-8922, the profile and
+ * character banks with it, and the family5 override path reaches this same index by raw slot and
+ * outranks the bank. The answer was the value, not the address.
  *
  * The original superseded reading follows. That is genuine and confirmed in game:
  * the number appears on the book's parent triumph, and it tracked the collected count exactly,

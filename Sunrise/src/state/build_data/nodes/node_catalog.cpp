@@ -150,8 +150,19 @@ std::size_t apply_category_gates(std::span<std::int32_t> objectiveValues, bool r
         // eight already make.
         // Never lower a value already written -- a non-zero slot is either already open or holds a
         // count from elsewhere, and this pass only ever needs to prove the gate, never reset it.
+        // Where the gate index is also the bar index, a 1 shows as a false claim on the book's
+        // parent triumph. A negative value satisfies a not-zero test while clamping out of the
+        // bar's display range, so it is tried there instead -- the shipped data uses -1 as a
+        // sentinel elsewhere (node 896 carries one, as does the character bank).
+        bool sameAsBar = false;
+        for (const auto& bar : record_claims::parent_bar_table::kBars) {
+            if (bar.nodeIndex == node.definitionIndex) {
+                sameAsBar = bar.valueIndex == node.valueIndex;
+                break;
+            }
+        }
         if (objectiveValues[node.valueIndex] == 0) {
-            objectiveValues[node.valueIndex] = 1;
+            objectiveValues[node.valueIndex] = sameAsBar ? -1 : 1;
             ++set;
         }
     }
