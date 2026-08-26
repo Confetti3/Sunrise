@@ -237,6 +237,8 @@
     <ClCompile Include="src\client\ui\world_inspector\world_inspector_graph.cpp" />
     <ClCompile Include="src\client\ui\world_inspector\world_inspector_graph_layout.cpp" />
     <ClCompile Include="src\client\inspection\bubble_bounds_catalog.cpp" />
+    <ClCompile Include="src\client\inspection\current_location_catalog.cpp" />
+    <ClCompile Include="src\client\inspection\current_location_domain_cache.cpp" />
     <ClCompile Include="src\client\inspection\providers\bubble_bounds_inspection.cpp" />
     <ClCompile Include="src\client\inspection\providers\statics_footprint_inspection.cpp" />
     <ClCompile Include="src\client\inspection\world_inspection_model.cpp" />
@@ -247,6 +249,8 @@
     <ClCompile Include="src\client\inspection\providers\spawn_inspection_provider.cpp" />
     <ClCompile Include="src\client\inspection\inspection_capture.cpp" />
     <ClCompile Include="src\client\inspection\activity_graph_catalog.cpp" />
+    <ClCompile Include="src\client\content\activity\activity_graph_packages.cpp" />
+    <ClCompile Include="src\client\content\bubbles\bubble_bounds_packages.cpp" />
     <ClCompile Include="src\client\inspection\activity_logic_catalog.cpp" />
     <ClCompile Include="src\client\inspection\providers\activity_graph_inspection.cpp" />
     <ClCompile Include="src\client\inspection\providers\activity_logic_inspection.cpp" />
@@ -486,6 +490,7 @@
     <ClCompile Include="src\client\content\scenarios\scenario_collect.cpp" />
     <ClCompile Include="src\client\content\spawn_sets\spawn_set_build.cpp" />
     <ClCompile Include="src\client\content\statics\statics_footprints.cpp" />
+    <ClCompile Include="src\client\content\statics\statics_footprint_cache.cpp" />
     <ClCompile Include="src\client\content\statics\statics_probe.cpp" />
     <ClCompile Include="src\client\content\hash_names\hash_name_build.cpp" />
     <ClCompile Include="src\client\content\hash_names\hash_name_matcher.cpp" />
@@ -517,6 +522,7 @@
     <ClCompile Include="src\state\build_data\named_build_data_runtime.cpp" />
     <ClCompile Include="src\state\build_data\socket_entry_lists\socket_entry_list_catalog.cpp" />
     <ClCompile Include="src\client\content\handles\handle_resolver.cpp" />
+    <ClCompile Include="src\client\content\activity\activity_logic_packages.cpp" />
     <ClCompile Include="src\client\content\activity\activity_tag_reader.cpp" />
     <ClCompile Include="src\client\content\bootstrap\bootstrap_token_publish.cpp" />
     <ClCompile Include="src\client\content\investment\investment_source.cpp" />
@@ -537,7 +543,6 @@
     <ClCompile Include="src\server\runtime\server_runtime.cpp" />
     <ClCompile Include="src\server\ui\runtime\server_ui_module_runtime.cpp" />
     <ClCompile Include="src\server\ui\activity_override\activity_override_panel.cpp" />
-    <ClCompile Include="src\server\ui\activity_override\activity_override_enrichment.cpp" />
     <ClCompile Include="src\server\ui\activity_override\activity_override_lists.cpp" />
     <ClCompile Include="src\server\transport\bap_listener.cpp" />
     <ClCompile Include="src\server\bap\bap_route.cpp" />
@@ -652,6 +657,7 @@
     <ClCompile Include="src\middleware\content\packages\named_tags\named_tag_patch.cpp" />
     <ClCompile Include="src\middleware\content\packages\package_catalog.cpp" />
     <ClCompile Include="src\middleware\content\packages\reader\package_class_scan.cpp" />
+    <ClCompile Include="src\middleware\content\packages\reader\package_misc_hash.cpp" />
     <ClCompile Include="src\middleware\content\packages\reader\package_parallel_read.cpp" />
     <ClCompile Include="src\middleware\content\packages\reader\package_entry_reader.cpp" />
     <ClCompile Include="src\middleware\content\packages\reader\package_header.cpp" />
@@ -951,8 +957,12 @@
     <ClInclude Include="src\client\runtime\runtime.h" />
     <ClInclude Include="src\client\movement\movement_settings_store.h" />
     <ClInclude Include="src\client\inspection\activity_graph_catalog.h" />
+    <ClInclude Include="src\client\content\activity\activity_graph_packages.h" />
+    <ClInclude Include="src\client\content\bubbles\bubble_bounds_packages.h" />
     <ClInclude Include="src\client\inspection\activity_logic_catalog.h" />
     <ClInclude Include="src\client\inspection\bubble_bounds_catalog.h" />
+    <ClInclude Include="src\client\inspection\current_location_catalog.h" />
+    <ClInclude Include="src\client\inspection\current_location_domain_cache.h" />
     <ClInclude Include="src\client\inspection\providers\bubble_bounds_inspection.h" />
     <ClInclude Include="src\client\inspection\providers\statics_footprint_inspection.h" />
     <ClInclude Include="src\client\inspection\providers\activity_graph_inspection.h" />
@@ -973,7 +983,6 @@
     <ClInclude Include="src\client\inspection\inspection_workspace_host.h" />
     <ClInclude Include="src\client\inspection\inspection_settings_store.h" />
     <ClInclude Include="src\client\inspection\providers\spawn_inspection_provider.h" />
-    <ClInclude Include="src\client\inspection\providers\activity_logic_browse.h" />
     <ClInclude Include="src\client\inspection\providers\live_player_inspection.h" />
     <ClInclude Include="src\client\inspection\providers\placed_object_inspection.h" />
     <ClInclude Include="src\client\inspection\inspection_capture.h" />
@@ -1026,11 +1035,13 @@
     <ClInclude Include="src\client\memory\current_process_memory.h" />
     <ClInclude Include="src\client\content\handles\layout.h" />
     <ClInclude Include="src\client\content\handles\handle_resolver.h" />
+    <ClInclude Include="src\client\content\activity\activity_logic_packages.h" />
     <ClInclude Include="src\client\content\activity\source.h" />
     <ClInclude Include="src\client\content\scenarios\scenario_build.h" />
     <ClInclude Include="src\client\content\scenarios\internal.h" />
     <ClInclude Include="src\client\content\spawn_sets\spawn_set_build.h" />
     <ClInclude Include="src\client\content\statics\statics_footprints.h" />
+    <ClInclude Include="src\client\content\statics\statics_footprint_cache.h" />
     <ClInclude Include="src\client\content\statics\statics_footprint_epoch.h" />
     <ClInclude Include="src\client\content\statics\statics_probe.h" />
     <ClInclude Include="src\client\content\hash_names\hash_name_build.h" />
@@ -1193,7 +1204,6 @@
     <ClInclude Include="src\server\runtime\server_runtime.h" />
     <ClInclude Include="src\server\ui\runtime\server_ui_module_runtime.h" />
     <ClInclude Include="src\server\ui\activity_override\activity_override_panel.h" />
-    <ClInclude Include="src\server\ui\activity_override\activity_override_enrichment.h" />
     <ClInclude Include="src\server\ui\activity_override\activity_override_lists.h" />
     <ClInclude Include="src\server\bap\runtime.h" />
     <ClInclude Include="src\server\bap\internal.h" />

@@ -80,6 +80,7 @@ bool load(std::span<const std::byte> bytes, Catalog& catalog, std::string& error
         error = "bubble catalog schema version is unsupported";
         return false;
     }
+    catalog.schemaVersion = schema;
     catalog.contentBuild = read_u32(bytes.data() + 12);
     const std::uint32_t count = read_u32(bytes.data() + 16);
     const std::uint32_t reserved = read_u32(bytes.data() + 20);
@@ -122,7 +123,7 @@ LoadResult load_file(std::wstring_view path, Catalog& catalog) noexcept {
         std::ifstream input(file, std::ios::binary | std::ios::ate);
         if (!input) {
             result.compatibility = Compatibility::missing;
-            result.diagnostic = "optional bubble catalog is absent";
+            result.diagnostic = "bubble-bounds cache is absent";
             return result;
         }
         const std::streampos end = input.tellg();

@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "../bubble_bounds_catalog.h"
@@ -11,23 +12,25 @@
 namespace sunrise::client::inspection::providers::bubble_bounds {
 
 struct State final {
-    bubble_catalog::Catalog catalog;
-    bubble_catalog::LoadResult load;
-    bool initialized{};
+    bubble_catalog::Catalog locationCatalog;
+    std::string locationFamily;
+    std::uint64_t publicationRevision{};
+    bool locationActive{};
 };
 
 struct AppendResult final {
     NodeId groupNode{};
     bool present{};
-    bool buildMatch{};
     std::uint32_t contentBuild{};
     std::size_t bubbleCount{};
     std::string diagnostic;
 };
 
-void initialize(void* module) noexcept;
-void shutdown() noexcept;
 [[nodiscard]] const State& state() noexcept;
+[[nodiscard]] bool activate_location(bubble_catalog::Catalog catalog,
+                                     std::string_view family) noexcept;
+void deactivate_location() noexcept;
+[[nodiscard]] std::uint64_t publication_revision() noexcept;
 
 /**
  * Appends one node per package-derived map-bubble footprint: a catalog-provenance

@@ -1,5 +1,6 @@
 #include "spawn_inspection_provider.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdio>
@@ -92,7 +93,7 @@ void add_capability_diagnostics(std::vector<Diagnostic>& diagnostics) {
          "catalogs."});
     diagnostics.push_back(
         {Diagnostic::Severity::information,
-         "An optional Activity Logic catalog can expose authored squad spawn rules, squads, "
+         "Current-location Activity Logic package evidence can expose authored squad spawn rules, squads, "
          "triggers, "
          "areas/fields, objectives, devices, objects, actions, and conditions. Exact WorldID "
          "placement "
@@ -269,7 +270,6 @@ RefreshResult SpawnInspectionProvider::refresh() {
     }
     activity::SessionSnapshot session{};
     server::bap::ActivitySnapshot privateActivity{};
-    next.activityLogicBrowseScenarioTag = browseScenarioTag_;
     const bool privatePresent = server::bap::snapshot_private_activity(privateActivity);
     if (privatePresent) {
         next.sessionPresent =
@@ -332,6 +332,30 @@ RefreshResult SpawnInspectionProvider::refresh() {
         next.stale = next.stale || !activity::binding_matches(session.binding);
     }
 
+    // Bounded object membership, Havok array slots, and native trigger observations are
+    // non-durable runtime identities. Titan has more occupied objects than the bounded Inspector
+    // copy can hold, so emitter churn continually changed which handles won the 1024-row bound.
+    // Freeze all three memberships for one activity epoch. Matching observations still update
+    // the retained nodes below as value-only changes.
+    if (keyPresent_ && next.activitySession != 0 && next.activitySession == key_.activitySession
+        && next.activityRevision == key_.activityRevision) {
+        next.runtimeObjectHandles = key_.runtimeObjectHandles;
+        next.runtimeObjectTypes = key_.runtimeObjectTypes;
+        next.runtimeObjectDeclaredCount = key_.runtimeObjectDeclaredCount;
+        next.runtimeObjectCount = key_.runtimeObjectCount;
+        next.runtimeObjectsPresent = key_.runtimeObjectsPresent;
+        next.runtimeObjectsTruncated = key_.runtimeObjectsTruncated;
+        next.physicsSlots = key_.physicsSlots;
+        next.physicsDeclaredSlots = key_.physicsDeclaredSlots;
+        next.physicsBodyCount = key_.physicsBodyCount;
+        next.physicsPresent = key_.physicsPresent;
+        next.physicsTruncated = key_.physicsTruncated;
+        next.triggerIdentities = key_.triggerIdentities;
+        next.triggerCount = key_.triggerCount;
+        next.triggersPresent = key_.triggersPresent;
+        next.triggersTruncated = key_.triggersTruncated;
+    }
+
     const auto position_matches =
         [](const Node* node, bool present, const std::array<float, 3>& position) noexcept {
             if (node == nullptr || node->transform.has_value() != present) {
@@ -345,19 +369,41 @@ RefreshResult SpawnInspectionProvider::refresh() {
         changed = changed
                   || (local != nullptr
                       && !position_matches(local, livePlayer.positionPresent, livePlayer.position));
-        if (objects.present && publishedNodes_.runtimeObjects.size() == objects.objectCount) {
-            for (std::size_t index = 0; index < objects.objectCount; ++index) {
-                const Node* node = document_.graph.node(publishedNodes_.runtimeObjects[index]);
-                const auto& observation = objects.objects[index];
+        if (objects.present) {
+            const std::span objectObservations{objects.objects.data(), objects.objectCount};
+            for (const NodeId nodeId : publishedNodes_.runtimeObjects) {
+                const Node* node = document_.graph.node(nodeId);
+                if (node == nullptr || !node->runtimeEntity.has_value()) {
+                    continue;
+                }
+                const auto observationIterator = std::ranges::find(
+                    objectObservations,
+                    *node->runtimeEntity,
+                    &client::viewer::objects::Observation::handle);
+                if (observationIterator == objectObservations.end()) {
+                    continue;
+                }
+                const auto& observation = *observationIterator;
                 changed =
                     changed || node == nullptr || node->runtimeEntity != observation.handle
                     || !position_matches(node, observation.positionPresent, observation.position);
             }
         }
-        if (triggers.present && publishedNodes_.triggers.size() == triggers.triggerCount) {
-            for (std::size_t index = 0; index < triggers.triggerCount; ++index) {
-                const Node* node = document_.graph.node(publishedNodes_.triggers[index]);
-                const auto& observation = triggers.triggers[index];
+        if (triggers.present) {
+            const std::span triggerObservations{triggers.triggers.data(), triggers.triggerCount};
+            for (const NodeId nodeId : publishedNodes_.triggers) {
+                const Node* node = document_.graph.node(nodeId);
+                if (node == nullptr || !node->observationId.has_value()) {
+                    continue;
+                }
+                const auto observationIterator = std::ranges::find(
+                    triggerObservations,
+                    *node->observationId,
+                    observed::trigger_identity);
+                if (observationIterator == triggerObservations.end()) {
+                    continue;
+                }
+                const auto& observation = *observationIterator;
                 changed = changed || node == nullptr
                           || node->observationId != observed::trigger_identity(observation)
                           || node->triggerActive != std::optional<bool>{observation.active}
@@ -383,10 +429,21 @@ RefreshResult SpawnInspectionProvider::refresh() {
                                            true,
                                            audio.position);
         }
-        if (physics.present && publishedNodes_.physicsBodies.size() == physics.bodyCount) {
-            for (std::size_t index = 0; index < physics.bodyCount; ++index) {
-                const Node* node = document_.graph.node(publishedNodes_.physicsBodies[index]);
-                const auto& observation = physics.bodies[index];
+        if (physics.present) {
+            const std::span physicsObservations{physics.bodies.data(), physics.bodyCount};
+            for (const NodeId nodeId : publishedNodes_.physicsBodies) {
+                const Node* node = document_.graph.node(nodeId);
+                if (node == nullptr || !node->observationId.has_value()) {
+                    continue;
+                }
+                const auto observationIterator = std::ranges::find(
+                    physicsObservations,
+                    *node->observationId,
+                    [](const auto& observation) { return observation.slot; });
+                if (observationIterator == physicsObservations.end()) {
+                    continue;
+                }
+                const auto& observation = *observationIterator;
                 changed = changed || node == nullptr
                           || !position_matches(node, true, observation.position)
                           || node->linearVelocity
@@ -760,12 +817,44 @@ void SpawnInspectionProvider::rebuild(const Key& key,
         statics_footprints::append(document_.graph, document_.diagnostics, source, graphParent);
 
     const activity_logic::AppendResult logicResult =
-        key.activityLogicBrowseScenarioTag != 0
-            ? activity_logic::append_browse(document_.graph,
-                                            document_.diagnostics,
-                                            key.activityLogicBrowseScenarioTag,
-                                            graphParent)
-            : activity_logic::append(document_.graph, document_.diagnostics, source, graphParent);
+        activity_logic::append(document_.graph, document_.diagnostics, source, graphParent);
+
+    const Source* activitySource = nullptr;
+    if (activity_graph::state().locationActive
+        && activity_graph::state().activationSource.authoredPreview) {
+        activitySource = &activity_graph::state().activationSource;
+    } else if (activity_logic::state().locationActive
+               && activity_logic::state().activationSource.authoredPreview) {
+        activitySource = &activity_logic::state().activationSource;
+    }
+    const bool activityPreview = activitySource != nullptr;
+    publish_property(document_.graph,
+                     rootId,
+                     "activity_preview_active",
+                     "Authored activity preview",
+                     activityPreview,
+                     Provenance::catalog);
+    if (activityPreview) {
+        publish_property(document_.graph,
+                         rootId,
+                         "activity_preview_package",
+                         "Preview package",
+                         activitySource->packageName,
+                         Provenance::catalog);
+        publish_property(document_.graph,
+                         rootId,
+                         "activity_preview_map_family",
+                         "Preview map family",
+                         activitySource->mapStem,
+                         Provenance::catalog);
+        publish_property(document_.graph,
+                         rootId,
+                         "activity_preview_scenario",
+                         "Preview scenario",
+                         static_cast<std::uint64_t>(
+                             activitySource->scenarioTag.value_or(0)),
+                         Provenance::catalog);
+    }
 
     publish_property(document_.graph,
                      rootId,
@@ -785,15 +874,9 @@ void SpawnInspectionProvider::rebuild(const Key& key,
                      Provenance::catalog);
     publish_property(document_.graph,
                      rootId,
-                     "activity_catalog_version",
-                     "Activity catalog version",
-                     activityResult.version,
-                     Provenance::catalog);
-    publish_property(document_.graph,
-                     rootId,
-                     "activity_catalog_build_match",
-                     "Activity catalog matches build",
-                     activityResult.buildMatch,
+                     "activity_catalog_collector_version",
+                     "Activity Graph collector version",
+                     static_cast<std::uint64_t>(activityResult.collectorVersion),
                      Provenance::catalog);
     publish_property(document_.graph,
                      rootId,
@@ -812,18 +895,6 @@ void SpawnInspectionProvider::rebuild(const Key& key,
                      "activity_logic_destination",
                      "Activity logic destination",
                      logicResult.destination,
-                     Provenance::catalog);
-    publish_property(document_.graph,
-                     rootId,
-                     "activity_logic_browse_only",
-                     "Activity logic browse only",
-                     logicResult.browseOnly,
-                     Provenance::catalog);
-    publish_property(document_.graph,
-                     rootId,
-                     "activity_logic_browse_scenario",
-                     "Activity logic browse scenario",
-                     static_cast<std::uint64_t>(key.activityLogicBrowseScenarioTag),
                      Provenance::catalog);
     publish_property(document_.graph,
                      rootId,
@@ -854,12 +925,6 @@ void SpawnInspectionProvider::rebuild(const Key& key,
                      "bubble_bounds_build",
                      "Bubble bounds build",
                      static_cast<std::uint64_t>(bubbleResult.contentBuild),
-                     Provenance::catalog);
-    publish_property(document_.graph,
-                     rootId,
-                     "bubble_bounds_build_match",
-                     "Bubble bounds match build",
-                     bubbleResult.buildMatch,
                      Provenance::catalog);
     publish_property(document_.graph,
                      rootId,
@@ -910,7 +975,7 @@ void SpawnInspectionProvider::rebuild(const Key& key,
                    activityResult.present ? 1 : 0,
                    epoch,
                    activityResult.present,
-                   activityResult.buildMatch,
+                   activityResult.present,
                    false,
                    activityResult.diagnostic);
     publish_report(document_,
@@ -920,7 +985,7 @@ void SpawnInspectionProvider::rebuild(const Key& key,
                    logicResult.definitionCount,
                    epoch,
                    logicResult.present,
-                   logicResult.matched || logicResult.browseOnly,
+                   logicResult.matched,
                    false,
                    logicResult.diagnostic);
     publish_report(document_,
@@ -930,7 +995,7 @@ void SpawnInspectionProvider::rebuild(const Key& key,
                    bubbleResult.bubbleCount,
                    epoch,
                    bubbleResult.present,
-                   bubbleResult.buildMatch,
+                   bubbleResult.present,
                    false,
                    bubbleResult.diagnostic);
     publish_report(document_,
@@ -966,23 +1031,23 @@ void SpawnInspectionProvider::synchronize_document(
     publish_report(document_,
                    Producer::objectSystem,
                    objects.sequence,
-                   key_.runtimeObjectDeclaredCount,
-                   key_.runtimeObjectCount,
+                   objects.declaredCount,
+                   objects.objectCount,
                    epoch,
                    objectsInstalled,
-                   key_.runtimeObjectsPresent,
-                   key_.runtimeObjectsTruncated,
+                   objects.present,
+                   objects.truncated,
                    objectsInstalled ? std::string{} : "not installed");
     const bool triggersInstalled = client::viewer::triggers::installed();
     publish_report(document_,
                    Producer::trigger,
                    triggers.sequence,
-                   key_.triggerCount,
-                   key_.triggerCount,
+                   triggers.triggerCount,
+                   triggers.triggerCount,
                    epoch,
                    triggersInstalled,
-                   key_.triggersPresent,
-                   key_.triggersTruncated,
+                   triggers.present,
+                   triggers.truncated,
                    triggersInstalled ? std::string{} : "not installed");
     const bool audioInstalled = client::viewer::audio::installed();
     publish_report(document_,
@@ -999,12 +1064,12 @@ void SpawnInspectionProvider::synchronize_document(
     publish_report(document_,
                    Producer::physics,
                    physics.sequence,
-                   key_.physicsDeclaredSlots,
-                   key_.physicsBodyCount,
+                   physics.declaredSlots,
+                   physics.bodyCount,
                    epoch,
                    physicsInstalled,
-                   key_.physicsPresent,
-                   key_.physicsTruncated,
+                   physics.present,
+                   physics.truncated,
                    physicsInstalled ? std::string{} : "not installed");
     if (kind == RefreshKind::structural && document_.graph.rejected_duplicate_keys() != 0) {
         document_.diagnostics.push_back(
@@ -1017,10 +1082,6 @@ const InspectionDocument& SpawnInspectionProvider::snapshot() const noexcept {
     return document_;
 }
 
-void SpawnInspectionProvider::set_activity_logic_browse(std::uint32_t scenarioTag) noexcept {
-    browseScenarioTag_ = scenarioTag;
-}
-
 void SpawnInspectionProvider::reset() noexcept {
     document_ = {};
     publishedNodes_ = {};
@@ -1029,7 +1090,6 @@ void SpawnInspectionProvider::reset() noexcept {
     placedCacheKey_ = {};
     placedCache_.clear();
     placedCachePresent_ = false;
-    browseScenarioTag_ = 0;
     ++producerEpoch_;
     if (producerEpoch_ == 0) {
         producerEpoch_ = 1;

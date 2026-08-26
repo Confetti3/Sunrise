@@ -7,36 +7,13 @@
 #include <unordered_map>
 #include <unordered_set>
 
-#include "../../../core/filesystem/path.h"
 #include "../../../middleware/gameplay/peer/join_messages.h"
 
 namespace sunrise::client::inspection::providers::activity_logic {
 namespace {
 
 namespace catalog = activity_logic_catalog;
-constexpr std::wstring_view kCatalogSuffix = L"\\activity-logic-catalog.bin";
 State g_state{};
-
-void rebuild_browse_cache() {
-    g_state.browseCache.clear();
-    if (g_state.load.state != catalog::LoadState::ready) {
-        return;
-    }
-    g_state.browseCache.reserve(g_state.catalog.activities.size());
-    for (const catalog::Activity& activity : g_state.catalog.activities) {
-        g_state.browseCache.push_back({activity.scenarioTag, activity.name, activity.destination});
-    }
-    std::ranges::stable_sort(g_state.browseCache,
-                             [](const BrowseSummary& left, const BrowseSummary& right) {
-                                 if (left.destination != right.destination) {
-                                     return left.destination < right.destination;
-                                 }
-                                 if (left.activityName != right.activityName) {
-                                     return left.activityName < right.activityName;
-                                 }
-                                 return left.scenarioTag < right.scenarioTag;
-                             });
-}
 
 [[nodiscard]] std::uint64_t group_key(std::uint32_t scenarioTag, catalog::Role role) noexcept {
     return (static_cast<std::uint64_t>(scenarioTag) << 32U)
@@ -174,29 +151,29 @@ void attach_links(ActivityLogicMetadata& metadata,
     return out;
 }
 
-/** Shared hierarchy builder used by both live-match and browse paths. */
+/** Builds the current location's Activity Logic hierarchy. */
 void append_activity_nodes(Graph& graph,
                            std::vector<Diagnostic>& diagnostics,
+                           const catalog::Catalog& evidence,
                            const catalog::Activity& activity,
                            const Source& source,
                            NodeId parent,
-                           AppendResult& result,
-                           bool browseOnly) {
+                           AppendResult& result) {
     result.matched = true;
-    result.browseOnly = browseOnly;
     result.scenarioTag = activity.scenarioTag;
-    result.activityName = activity.name;
+    result.activityName = source.authoredPreview && !source.packageName.empty()
+                              ? source.packageName
+                              : activity.name;
     result.destination = activity.destination;
     result.definitionCount = static_cast<std::uint32_t>(
         (std::min)(activity.entityIndices.size(),
                    static_cast<std::size_t>((std::numeric_limits<std::uint32_t>::max)())));
 
     Node root;
-    const std::string activityLabel = activity.name.empty() ? "Activity logic" : activity.name;
-    root.name = browseOnly
-                    ? "Browse only — not correlated to current runtime scenario / " + activityLabel
-                    : "Activity logic / " + activityLabel;
-    root.searchText = "authored static activity encounter logic definitions archive";
+    const std::string activityLabel = result.activityName.empty() ? "Activity logic"
+                                                                   : result.activityName;
+    root.name = "Activity logic / " + activityLabel;
+    root.searchText = "authored static activity encounter logic definitions " + activityLabel;
     root.kind = NodeKind::activityLogic;
     root.status = Status::known;
     root.producer = Producer::activityLogicCatalog;
@@ -223,13 +200,13 @@ void append_activity_nodes(Graph& graph,
     std::unordered_map<std::uint32_t, NodeId> definitionNodes;
     std::vector<NodeId> relationNodes;
     for (const std::uint32_t entityIndex : activity.entityIndices) {
-        if (entityIndex >= g_state.catalog.entities.size()) {
+        if (entityIndex >= evidence.entities.size()) {
             diagnostics.push_back(
                 {Diagnostic::Severity::warning,
                  "Activity logic catalog contains an out-of-range activity definition reference."});
             continue;
         }
-        const catalog::Entity& entity = g_state.catalog.entities[entityIndex];
+        const catalog::Entity& entity = evidence.entities[entityIndex];
         const std::uint8_t roleIndex = static_cast<std::uint8_t>(entity.role);
         if (roleIndex < roleCounts.size()) {
             ++roleCounts[roleIndex];
@@ -247,8 +224,8 @@ void append_activity_nodes(Graph& graph,
         if (!entity.localizedText.empty()) {
             ++definitionsWithLocalizedText;
         }
-        if (!catalog::outgoing_edges(g_state.catalog, entityIndex).empty()
-            || !catalog::incoming_edges(g_state.catalog, entityIndex).empty()) {
+        if (!catalog::outgoing_edges(evidence, entityIndex).empty()
+            || !catalog::incoming_edges(evidence, entityIndex).empty()) {
             ++definitionsWithRelationships;
         }
         const NodeId group =
@@ -256,7 +233,8 @@ void append_activity_nodes(Graph& graph,
         Node node;
         node.name = definition_label(entity);
         node.searchText = std::string("authored activity logic ") + catalog::role_name(entity.role)
-                          + " " + entity.label + " " + entity.localizedText;
+                          + " " + entity.name + " " + entity.label + " "
+                          + entity.localizedText;
         node.kind = NodeKind::logicEntity;
         node.status = entity.confidence == catalog::Confidence::strong ? Status::known
                                                                        : Status::unknownSemantic;
@@ -268,7 +246,7 @@ void append_activity_nodes(Graph& graph,
         node.classHash = entity.classPrimary;
         node.actions = Action::copyId | Action::copyTag;
         node.activityLogicMetadata = metadata_for(entity, result.scenarioTag);
-        attach_links(*node.activityLogicMetadata, g_state.catalog, entityIndex);
+        attach_links(*node.activityLogicMetadata, evidence, entityIndex);
         const NodeId entityId = graph.add(std::move(node), group);
         if (!entityId) {
             diagnostics.push_back(
@@ -284,7 +262,8 @@ void append_activity_nodes(Graph& graph,
         for (const catalog::Placement& placement : entity.placements) {
             Node placementNode;
             placementNode.name = definition_label(entity);
-            placementNode.searchText = "authored exact worldid map placement activity logic";
+            placementNode.searchText = "authored exact worldid map placement activity logic "
+                                       + entity.name + " " + entity.label;
             placementNode.kind = NodeKind::logicPlacement;
             placementNode.status = Status::known;
             placementNode.producer = Producer::activityLogicCatalog;
@@ -302,7 +281,7 @@ void append_activity_nodes(Graph& graph,
             placementNode.activityLogicMetadata->mapTableTag = placement.mapTableTag;
             placementNode.activityLogicMetadata->placedEntityTag = placement.placedEntityTag;
             placementNode.activityLogicMetadata->authoredRotation = placement.rotation;
-            attach_links(*placementNode.activityLogicMetadata, g_state.catalog, entityIndex);
+            attach_links(*placementNode.activityLogicMetadata, evidence, entityIndex);
             const NodeId placementId = graph.add(std::move(placementNode), entityId);
             if (!placementId) {
                 diagnostics.push_back({Diagnostic::Severity::error,
@@ -342,14 +321,13 @@ void append_activity_nodes(Graph& graph,
         summary.size(),
         "%s scenario 0x%08X (%s): %u definitions, %u exact authored WorldID placements. %s",
 
-        browseOnly ? "Browsing activity logic" : "Activity logic archive matched",
+        "Activity logic package evidence",
         result.scenarioTag,
         result.activityName.c_str(),
         result.definitionCount,
         result.placementCount,
-        browseOnly ? "Browse only — not correlated to current runtime scenario."
-                   : "Definitions are static authored evidence, not proof of live enemies, active "
-                     "triggers, or current encounter state.");
+        "Definitions are static authored evidence, not proof of live enemies, active triggers, "
+        "or current encounter state.");
     diagnostics.push_back({Diagnostic::Severity::information, summary.data()});
 
     std::string coverage = "Activity Logic coverage: ";
@@ -366,7 +344,7 @@ void append_activity_nodes(Graph& graph,
     coverage += std::to_string(result.placementCount);
     coverage += " exact placements, ";
     coverage += std::to_string(definitionsWithRelationships);
-    coverage += " with relationships, ";
+    coverage += " with serialized-name references, ";
     coverage += std::to_string(definitionsWithLocalizedText);
     coverage += " with localized text; roles ";
     bool firstRole = true;
@@ -393,103 +371,102 @@ void append_activity_nodes(Graph& graph,
 
 } // namespace
 
-void initialize(void* module) noexcept {
-    g_state = {};
-    g_state.module = module;
-    g_state.initialized = true;
-    core::path::Buffer path{};
-    if (!core::path::artifact_directory(module, path)
-        || !core::path::append(path, kCatalogSuffix)) {
-        g_state.load.state = catalog::LoadState::missing;
-        g_state.load.diagnostic = "Activity logic catalog artifact path is unavailable.";
-        return;
-    }
-    g_state.load = catalog::load_file(path.chars.data(), g_state.catalog);
-    rebuild_browse_cache();
-}
-
-void shutdown() noexcept {
-    g_state = {};
-}
-
-bool reload() noexcept {
-    if (!g_state.initialized || g_state.module == nullptr) {
-        g_state.reloadDiagnostic =
-            "Activity Logic catalog reload is unavailable before initialization.";
-        return false;
-    }
-    core::path::Buffer path{};
-    if (!core::path::artifact_directory(g_state.module, path)
-        || !core::path::append(path, kCatalogSuffix)) {
-        g_state.reloadDiagnostic = "Activity Logic catalog reload path is unavailable.";
-        return false;
-    }
-    catalog::Catalog candidate;
-    catalog::LoadResult candidateLoad = catalog::load_file(path.chars.data(), candidate);
-    if (candidateLoad.state != catalog::LoadState::ready) {
-        g_state.reloadDiagnostic = candidateLoad.diagnostic.empty()
-                                       ? "Activity Logic catalog reload rejected the candidate."
-                                       : candidateLoad.diagnostic;
-        return false;
-    }
-    g_state.catalog = std::move(candidate);
-    g_state.load = std::move(candidateLoad);
-    rebuild_browse_cache();
-    g_state.reloadDiagnostic.clear();
-    return true;
-}
-
 const State& state() noexcept {
     return g_state;
+}
+
+bool activate_location(catalog::Catalog location, Source source) noexcept {
+    try {
+        std::string error;
+        if (!source.scenarioTag.has_value() || *source.scenarioTag == 0
+            || location.activities.size() != 1
+            || location.activities.front().scenarioTag != *source.scenarioTag
+            || location.provenance.contentBuild != middleware::gameplay::peer::kHostBuild
+            || !catalog::validate(location, error)) {
+            return false;
+        }
+        g_state.locationCatalog = std::move(location);
+        g_state.locationScenarioTag = *source.scenarioTag;
+        g_state.activationSource = std::move(source);
+        g_state.locationActive = true;
+        ++g_state.publicationRevision;
+        if (g_state.publicationRevision == 0) {
+            g_state.publicationRevision = 1;
+        }
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+void deactivate_location() noexcept {
+    if (!g_state.locationActive) {
+        return;
+    }
+    g_state.locationCatalog = {};
+    g_state.locationScenarioTag = 0;
+    g_state.activationSource = {};
+    g_state.locationActive = false;
+    ++g_state.publicationRevision;
+    if (g_state.publicationRevision == 0) {
+        g_state.publicationRevision = 1;
+    }
+}
+
+std::uint64_t publication_revision() noexcept {
+    return g_state.publicationRevision;
 }
 
 AppendResult
 append(Graph& graph, std::vector<Diagnostic>& diagnostics, const Source& source, NodeId parent) {
     AppendResult result{};
-    result.present = g_state.load.state == catalog::LoadState::ready;
-    result.diagnostic = g_state.load.diagnostic;
+    const bool locationMatch =
+        g_state.locationActive
+        && (g_state.activationSource.authoredPreview
+            || (source.scenarioTag.has_value() && *source.scenarioTag == g_state.locationScenarioTag));
+    result.present = locationMatch;
+    result.diagnostic = locationMatch
+                            ? (g_state.activationSource.authoredPreview
+                                   ? "Authored Activity Logic preview loaded."
+                                   : "Current-location Activity Logic cache loaded.")
+                                      : "No matching current-location Activity Logic is active.";
     if (!result.present) {
-        diagnostics.push_back({Diagnostic::Severity::information,
-                               result.diagnostic.empty()
-                                   ? "No optional activity logic catalog is installed."
-                                   : result.diagnostic});
         return result;
     }
 
-    const catalog::Catalog& installed = g_state.catalog;
-    std::string provenance = "Activity logic catalog: schema ";
+    const catalog::Catalog& evidence = g_state.locationCatalog;
+    const Source& evidenceSource =
+        g_state.activationSource.authoredPreview ? g_state.activationSource : source;
+    std::string provenance = "Activity Logic package cache: schema ";
     provenance += std::to_string(catalog::kSchemaVersion);
-    provenance += ", converter ";
-    provenance += std::to_string(installed.provenance.converterVersion);
-    provenance += ", source ";
-    provenance +=
-        installed.provenance.sourceFormat.empty() ? "unknown" : installed.provenance.sourceFormat;
-    provenance += ", source SHA-256 ";
-    provenance += digest_hex(installed.provenance.sourceDigest);
+    provenance += ", collector ";
+    provenance += std::to_string(evidence.provenance.collectorVersion);
+    provenance += ", content SHA-256 ";
+    provenance += digest_hex(evidence.provenance.contentFingerprint);
     provenance += ", ";
-    provenance += std::to_string(installed.activities.size());
+    provenance += std::to_string(evidence.activities.size());
     provenance += " activities, ";
-    provenance += std::to_string(installed.entities.size());
+    provenance += std::to_string(evidence.entities.size());
     provenance += " definitions, ";
     std::size_t placementTotal = 0;
-    for (const catalog::Entity& entity : installed.entities) {
+    for (const catalog::Entity& entity : evidence.entities) {
         placementTotal += entity.placements.size();
     }
     provenance += std::to_string(placementTotal);
     provenance += " authored placements, ";
-    provenance += std::to_string(installed.edges.size());
-    provenance += " edges. Static research catalog; not live runtime state.";
+    provenance += std::to_string(evidence.edges.size());
+    provenance += " serialized-name references. Static authored data; not execution flow or live runtime state.";
     diagnostics.push_back({Diagnostic::Severity::information, std::move(provenance)});
 
-    if (!source.scenarioTag.has_value() || *source.scenarioTag == 0) {
+    if (!evidenceSource.scenarioTag.has_value() || *evidenceSource.scenarioTag == 0) {
         result.diagnostic =
             "Activity logic catalog is loaded, but the current scenario tag is unavailable.";
         diagnostics.push_back({Diagnostic::Severity::information, result.diagnostic});
         return result;
     }
 
-    result.scenarioTag = *source.scenarioTag;
-    const catalog::Activity* activity = catalog::find_activity(g_state.catalog, result.scenarioTag);
+    result.scenarioTag = *evidenceSource.scenarioTag;
+    const catalog::Activity* activity = catalog::find_activity(evidence, result.scenarioTag);
     if (activity == nullptr) {
         std::array<char, 128> text{};
         std::snprintf(text.data(),
@@ -501,52 +478,7 @@ append(Graph& graph, std::vector<Diagnostic>& diagnostics, const Source& source,
         return result;
     }
 
-    append_activity_nodes(graph, diagnostics, *activity, source, parent, result, false);
-    return result;
-}
-
-std::span<const BrowseSummary> browse_activities() noexcept {
-    return g_state.browseCache;
-}
-
-const BrowseSummary* find_browse_activity(std::uint32_t scenarioTag) noexcept {
-    for (const BrowseSummary& summary : g_state.browseCache) {
-        if (summary.scenarioTag == scenarioTag) {
-            return &summary;
-        }
-    }
-    return nullptr;
-}
-
-bool compatible() noexcept {
-    return g_state.load.state == catalog::LoadState::ready
-           && g_state.catalog.provenance.contentBuild == middleware::gameplay::peer::kHostBuild;
-}
-
-AppendResult append_browse(Graph& graph,
-                           std::vector<Diagnostic>& diagnostics,
-                           std::uint32_t scenarioTag,
-                           NodeId parent) {
-    AppendResult result{};
-    result.present = g_state.load.state == catalog::LoadState::ready;
-    if (!result.present) {
-        result.diagnostic = "No optional activity logic catalog is installed.";
-        return result;
-    }
-    const catalog::Activity* activity = catalog::find_activity(g_state.catalog, scenarioTag);
-    if (activity == nullptr) {
-        std::array<char, 128> text{};
-        std::snprintf(text.data(),
-                      text.size(),
-                      "Activity logic catalog has no activity for scenario 0x%08X.",
-                      scenarioTag);
-        result.diagnostic = text.data();
-        diagnostics.push_back({Diagnostic::Severity::information, result.diagnostic});
-        return result;
-    }
-    Source source{};
-    source.scenarioTag = scenarioTag;
-    append_activity_nodes(graph, diagnostics, *activity, source, parent, result, true);
+    append_activity_nodes(graph, diagnostics, evidence, *activity, evidenceSource, parent, result);
     return result;
 }
 

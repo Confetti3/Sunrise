@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cwchar>
+#include <string>
 #include <string_view>
 
 #include "handle_cache.h"
@@ -159,6 +160,72 @@ bool build_path(const Path& stem, std::uint32_t patchIndex, Path& path) noexcept
     const int written = std::swprintf(
         path.chars.data(), path.chars.size(), L"%s_%u.pkg", stem.chars.data(), patchIndex);
     return written > 0;
+}
+
+bool package_stem(std::wstring_view directory,
+                  std::uint16_t packageId,
+                  std::string& output) noexcept {
+    output.clear();
+    try {
+        Path stem{};
+        std::uint32_t patchIndex = 0;
+        if (!find_latest(directory, packageId, stem, patchIndex)) {
+            return false;
+        }
+        const std::wstring_view full(stem.chars.data());
+        const std::size_t separator = full.find_last_of(L"\\/");
+        const std::wstring_view leaf =
+            separator == std::wstring_view::npos ? full : full.substr(separator + 1U);
+        if (leaf.empty()) {
+            return false;
+        }
+        output.reserve(leaf.size());
+        for (const wchar_t value : leaf) {
+            if (value < 0x20 || value > 0x7E) {
+                output.clear();
+                return false;
+            }
+            output.push_back(static_cast<char>(value));
+        }
+        return true;
+    } catch (...) {
+        output.clear();
+        return false;
+    }
+}
+
+bool content_family(std::wstring_view directory,
+                    std::uint16_t packageId,
+                    std::string& output) noexcept {
+    output.clear();
+    try {
+        std::string stem;
+        if (!package_stem(directory, packageId, stem)) {
+            return false;
+        }
+        constexpr std::string_view prefix = "w64_";
+        constexpr std::string_view suffix = "_activities";
+        const std::array<char, 6> identifier{
+            '_',
+            "0123456789abcdef"[(packageId >> 12U) & 0xFU],
+            "0123456789abcdef"[(packageId >> 8U) & 0xFU],
+            "0123456789abcdef"[(packageId >> 4U) & 0xFU],
+            "0123456789abcdef"[packageId & 0xFU],
+            '\0'};
+        if (!stem.starts_with(prefix) || !stem.ends_with(identifier.data())) {
+            return false;
+        }
+        stem.resize(stem.size() - 5U);
+        if (!stem.ends_with(suffix) || stem.size() <= prefix.size() + suffix.size()) {
+            return false;
+        }
+        output.assign(stem.data() + prefix.size(),
+                      stem.size() - prefix.size() - suffix.size());
+        return !output.empty();
+    } catch (...) {
+        output.clear();
+        return false;
+    }
 }
 
 /** Reads an exact byte range from one file. */

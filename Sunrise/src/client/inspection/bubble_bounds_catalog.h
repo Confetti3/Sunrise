@@ -10,7 +10,7 @@
 
 namespace sunrise::client::inspection::bubble_catalog {
 
-inline constexpr std::uint32_t kSchemaVersion = 1;
+inline constexpr std::uint32_t kSchemaVersion = 2;
 inline constexpr std::uint32_t kTargetContentBuild = 86657;
 inline constexpr std::string_view kTargetContentBuildText = "86657";
 inline constexpr std::size_t kHeaderSize = 24;
@@ -27,6 +27,7 @@ struct Bubble final {
 };
 
 struct Catalog final {
+    std::uint32_t schemaVersion{kSchemaVersion};
     std::uint32_t contentBuild{};
     std::string family;
     std::vector<Bubble> bubbles;

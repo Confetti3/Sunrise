@@ -252,13 +252,21 @@ void poll() noexcept {
             next.truncated = true;
             break;
         }
+        const std::uint32_t slot = handle & kObjectIndexMask;
+        const std::uint8_t type =
+            read<std::uint8_t>(base + static_cast<std::size_t>(slot) * stride + kObjectType);
+        // Effect emitters are transient and are not stable Inspector identities. Exclude them
+        // before applying the bounded snapshot capacity so their churn cannot change retained
+        // membership or truncation state.
+        if (type == 0x11) {
+            g_iteratorNext(iterator.data());
+            continue;
+        }
         ++next.declaredCount;
         if (next.objectCount < next.objects.size()) {
             Observation& output = next.objects[next.objectCount++];
             output.handle = handle;
-            const std::uint32_t slot = handle & kObjectIndexMask;
-            output.type =
-                read<std::uint8_t>(base + static_cast<std::size_t>(slot) * stride + kObjectType);
+            output.type = type;
             merge_position(output, positions, positionCount);
         } else {
             next.truncated = true;

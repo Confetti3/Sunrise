@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -120,6 +121,24 @@ struct ScanResult {
     std::size_t matches{};
 };
 
+/** One requested row from a package's misc hash64 table. */
+struct Hash64Value final {
+    std::uint64_t hash{};
+    std::uint32_t tag{};
+    std::uint32_t classId{};
+    bool resolved{};
+};
+
+/** Work performed by a bounded misc-hash lookup. */
+struct Hash64ScanResult final {
+    std::size_t packages{};
+    std::size_t rows{};
+    std::size_t resolved{};
+};
+
+/** Optional cancellation callback for bounded package-table work. */
+using StopRequested = bool (*)(void* context) noexcept;
+
 /** Visitor called once per matching tag. Returning false stops the scan and fails it. */
 using ClassVisitor = bool (*)(void* context, std::uint32_t tag) noexcept;
 
@@ -192,6 +211,34 @@ using ClassEntryVisitor = bool (*)(void* context, const ClassEntry& entry) noexc
                                       ClassEntryVisitor visitor,
                                       void* context,
                                       ScanResult& result) noexcept;
+
+/**
+ * Returns the highest-patch package stem for one package id, without its path,
+ * patch suffix, or extension.
+ */
+[[nodiscard]] bool package_stem(std::wstring_view directory,
+                                std::uint16_t packageId,
+                                std::string& output) noexcept;
+
+/**
+ * Returns the content-family portion of an activities package stem.
+ * For example, w64_mercury_destination_activities_03a3 becomes mercury_destination.
+ */
+[[nodiscard]] bool content_family(std::wstring_view directory,
+                                  std::uint16_t packageId,
+                                  std::string& output) noexcept;
+
+/**
+ * Resolves requested misc hash64 values only from the exact content family and,
+ * if still needed, the shared activities and environments families.
+ * Package names are enumerated, but unrelated package headers and tables are not read.
+ */
+[[nodiscard]] bool resolve_hash64_scoped(std::wstring_view directory,
+                                         std::string_view contentFamily,
+                                         std::span<Hash64Value> values,
+                                         Hash64ScanResult& result,
+                                         StopRequested stopped = nullptr,
+                                         void* stopContext = nullptr) noexcept;
 
 /**
  * Closes the package files the class sweeps keep open.

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -503,15 +504,21 @@ inline void update_triggers(Graph& graph,
                             std::span<const NodeId> nodeIds,
                             const TriggerSnapshot& snapshot,
                             const ObjectSnapshot& objectsSnapshot) noexcept {
-    if (!snapshot.present || nodeIds.size() != snapshot.triggerCount) {
+    if (!snapshot.present) {
         return;
     }
-    for (std::size_t index = 0; index < nodeIds.size(); ++index) {
-        Node* node = graph.node(nodeIds[index]);
-        const triggers::Observation& observation = snapshot.triggers[index];
-        if (node == nullptr || node->observationId != trigger_identity(observation)) {
+    const std::span observations{snapshot.triggers.data(), snapshot.triggerCount};
+    for (const NodeId nodeId : nodeIds) {
+        Node* node = graph.node(nodeId);
+        if (node == nullptr || !node->observationId.has_value()) {
             continue;
         }
+        const auto observationIterator =
+            std::ranges::find(observations, *node->observationId, trigger_identity);
+        if (observationIterator == observations.end()) {
+            continue;
+        }
+        const triggers::Observation& observation = *observationIterator;
         node->triggerEnabled = observation.enabled;
         node->triggerActive = observation.active;
         node->triggerOverlapCount = observation.kind == triggers::Kind::volume
@@ -553,15 +560,21 @@ inline void update_triggers(Graph& graph,
 inline void update_objects(Graph& graph,
                            std::span<const NodeId> nodeIds,
                            const ObjectSnapshot& snapshot) noexcept {
-    if (!snapshot.present || nodeIds.size() != snapshot.objectCount) {
+    if (!snapshot.present) {
         return;
     }
-    for (std::size_t index = 0; index < nodeIds.size(); ++index) {
-        Node* node = graph.node(nodeIds[index]);
-        const objects::Observation& observation = snapshot.objects[index];
-        if (node == nullptr || node->runtimeEntity != observation.handle) {
+    const std::span observations{snapshot.objects.data(), snapshot.objectCount};
+    for (const NodeId nodeId : nodeIds) {
+        Node* node = graph.node(nodeId);
+        if (node == nullptr || !node->runtimeEntity.has_value()) {
             continue;
         }
+        const auto observationIterator = std::ranges::find(
+            observations, *node->runtimeEntity, &objects::Observation::handle);
+        if (observationIterator == observations.end()) {
+            continue;
+        }
+        const objects::Observation& observation = *observationIterator;
         apply_runtime_position(*node, observation.position, observation.positionPresent);
     }
 }
@@ -577,15 +590,21 @@ inline void update_audio(Graph& graph, NodeId nodeId, const AudioSnapshot& snaps
 inline void update_physics(Graph& graph,
                            std::span<const NodeId> nodeIds,
                            const PhysicsSnapshot& snapshot) noexcept {
-    if (!snapshot.present || nodeIds.size() != snapshot.bodyCount) {
+    if (!snapshot.present) {
         return;
     }
-    for (std::size_t index = 0; index < nodeIds.size(); ++index) {
-        Node* node = graph.node(nodeIds[index]);
-        const noclip::PhysicsBodyObservation& observation = snapshot.bodies[index];
-        if (node == nullptr || node->observationId != observation.slot) {
+    const std::span observations{snapshot.bodies.data(), snapshot.bodyCount};
+    for (const NodeId nodeId : nodeIds) {
+        Node* node = graph.node(nodeId);
+        if (node == nullptr || !node->observationId.has_value()) {
             continue;
         }
+        const auto observationIterator = std::ranges::find(
+            observations, *node->observationId, &noclip::PhysicsBodyObservation::slot);
+        if (observationIterator == observations.end()) {
+            continue;
+        }
+        const noclip::PhysicsBodyObservation& observation = *observationIterator;
         apply_runtime_position(*node, observation.position, true);
         node->linearVelocity = observation.velocity;
     }

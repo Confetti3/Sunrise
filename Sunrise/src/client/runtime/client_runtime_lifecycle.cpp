@@ -24,10 +24,8 @@
 #include "../hooks/viewer_triggers/viewer_triggers.h"
 #include "../inactivity/inactivity_settings_store.h"
 #include "../inspection/inspection_capture.h"
+#include "../inspection/current_location_catalog.h"
 #include "../inspection/inspection_settings_store.h"
-#include "../inspection/providers/activity_graph_inspection.h"
-#include "../inspection/providers/activity_logic_inspection.h"
-#include "../inspection/providers/bubble_bounds_inspection.h"
 #include "../movement/movement_settings_store.h"
 #include "../player/player_settings_store.h"
 #include "../targets/game.h"
@@ -49,9 +47,7 @@ bool initialize(void* module) noexcept {
     viewer::initialize(module);
     viewer::paths::initialize(module);
     inspection::settings::initialize(module);
-    inspection::providers::activity_graph::initialize(module);
-    inspection::providers::bubble_bounds::initialize(module);
-    inspection::providers::activity_logic::initialize(module);
+    inspection::current_location_catalog::initialize(module);
     inspection::capture::initialize(module);
     return ui::runtime::initialize();
 }
@@ -229,9 +225,7 @@ bool shutdown() noexcept {
     ui::runtime::shutdown();
     // The reverse of the order the stores initialize in.
     inspection::capture::shutdown();
-    inspection::providers::activity_logic::shutdown();
-    inspection::providers::bubble_bounds::shutdown();
-    inspection::providers::activity_graph::shutdown();
+    inspection::current_location_catalog::shutdown();
     inspection::settings::shutdown();
     viewer::paths::shutdown();
     viewer::shutdown();

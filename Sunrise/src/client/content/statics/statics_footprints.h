@@ -8,8 +8,16 @@
 #include <string_view>
 
 #include "../../../middleware/content/packages/reader/reader.h"
+#include "../../inspection/activity_logic_catalog.h"
+#include "../../inspection/activity_graph_catalog.h"
+#include "../../inspection/bubble_bounds_catalog.h"
+#include "../activity/activity_graph_packages.h"
+#include "../activity/activity_logic_packages.h"
+#include "../bubbles/bubble_bounds_packages.h"
 
 namespace sunrise::client::content::statics {
+
+enum class RequestMode : std::uint8_t { liveLocation, activityPreview };
 
 /** One package-derived statics-collection footprint, in world space. */
 struct Footprint final {
@@ -49,15 +57,21 @@ void shutdown() noexcept;
  * stale publication.
  */
 void request_or_start(std::uint64_t activitySession,
+                      std::uint32_t scenarioTag,
                       std::string_view mapFamily,
                       std::wstring_view packageDirectory,
-                      const middleware::content::packages::reader::BlockKeys& keys) noexcept;
-
-/** Convenience request for existing callers; package inputs are copied first. */
-void advance_pass(std::uint64_t activitySession, std::string_view mapFamily) noexcept;
+                      const middleware::content::packages::reader::BlockKeys& keys,
+                      std::span<const std::uint16_t> packageIds = {},
+                      std::span<const std::byte> contentFingerprint = {},
+                      RequestMode mode = RequestMode::liveLocation) noexcept;
 
 /** True when the published rows belong to this exact live activity session. */
 [[nodiscard]] bool scope_matches(std::uint64_t activitySession) noexcept;
+
+/** True when the most recent immutable worker completion matches the exact request. */
+[[nodiscard]] bool publication_matches(std::uint64_t activitySession,
+                                       std::uint32_t scenarioTag,
+                                       RequestMode mode) noexcept;
 
 /** Monotonic revision advanced only after a complete immutable publication. */
 [[nodiscard]] std::uint64_t publication_revision() noexcept;
@@ -72,6 +86,14 @@ struct Progress final {
     bool allocationFailure{};
 };
 
+/**
+ * Publishes a validated cache snapshot for the current live session. Cached rows still acquire
+ * the session scope at activation time; a persisted activity-session identity is never trusted.
+ */
+[[nodiscard]] bool publish_cached(std::uint64_t activitySession,
+                                  std::span<const Footprint> rows,
+                                  const Progress& progress) noexcept;
+
 /** Copies the current progress counters. */
 [[nodiscard]] Progress progress() noexcept;
 
@@ -80,5 +102,17 @@ struct Progress final {
  * @return True when @p output holds every row.
  */
 [[nodiscard]] bool snapshot(std::span<Footprint> output, std::size_t& count) noexcept;
+
+/** Copies the independently validated Activity Logic result from the same worker publication. */
+[[nodiscard]] bool logic_snapshot(inspection::activity_logic_catalog::Catalog& output,
+                                  activity::logic_packages::Progress& progress) noexcept;
+
+/** Copies the independently validated Activity Graph result from the same worker publication. */
+[[nodiscard]] bool graph_snapshot(inspection::activity_catalog::Catalog& output,
+                                  activity::graph_packages::Progress& progress) noexcept;
+
+/** Copies independently validated package-native bubble bounds from the same publication. */
+[[nodiscard]] bool bubble_snapshot(inspection::bubble_catalog::Catalog& output,
+                                   bubbles::packages::Progress& progress) noexcept;
 
 } // namespace sunrise::client::content::statics

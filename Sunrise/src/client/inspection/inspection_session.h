@@ -16,7 +16,6 @@ public:
     [[nodiscard]] providers::RefreshResult refresh();
     void reset() noexcept;
     void reset_document() noexcept;
-    void set_activity_logic_browse(std::uint32_t scenarioTag) noexcept;
 
     [[nodiscard]] const InspectionDocument& document() const noexcept;
     [[nodiscard]] capture::History& history() noexcept;

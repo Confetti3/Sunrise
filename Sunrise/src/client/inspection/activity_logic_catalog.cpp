@@ -6,6 +6,8 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <set>
+#include <tuple>
 #include <unordered_set>
 #include <utility>
 
@@ -180,8 +182,12 @@ void build_adjacency(Catalog& catalog) {
 
 bool validate(const Catalog& catalog, std::string& error) {
     error.clear();
-    if (catalog.activities.empty() || catalog.entities.empty()) {
-        return fail(error, "activity logic catalog is empty");
+    if (catalog.provenance.collectorVersion != kCollectorVersion
+        || catalog.provenance.contentBuild == 0
+        || std::ranges::all_of(catalog.provenance.contentFingerprint,
+                               [](std::uint8_t value) { return value == 0; })
+        || catalog.activities.empty() || catalog.entities.empty()) {
+        return fail(error, "activity logic cache identity or contents are incomplete");
     }
     if (catalog.activities.size() > kMaximumActivities || catalog.entities.size() > kMaximumEntities
         || catalog.edges.size() > kMaximumEdges) {
@@ -239,10 +245,17 @@ bool validate(const Catalog& catalog, std::string& error) {
         }
     }
 
+    std::set<std::tuple<std::uint32_t, std::uint32_t, std::uint32_t>> edgeKeys;
     for (const Edge& edge : catalog.edges) {
         if (edge.sourceEntityIndex >= catalog.entities.size()
             || edge.targetEntityIndex >= catalog.entities.size()) {
             return fail(error, "activity logic edge references an unknown entity");
+        }
+        if (edge.occurrenceCount == 0) {
+            return fail(error, "activity logic edge occurrence count is zero");
+        }
+        if (!edgeKeys.emplace(edge.sourceEntityIndex, edge.targetEntityIndex, edge.nameHash).second) {
+            return fail(error, "activity logic edge identity is duplicated");
         }
     }
     return true;
@@ -280,38 +293,23 @@ bool load(std::span<const std::byte> bytes, Catalog& catalog, std::string& error
             || stringOffset < headerSize) {
             return fail(error, "activity logic string table is invalid");
         }
-        for (std::size_t index = 0; index < catalog.provenance.sourceDigest.size(); ++index) {
+        for (std::size_t index = 0; index < catalog.provenance.contentFingerprint.size(); ++index) {
             std::uint8_t value{};
             if (!reader.read_u8(28U + index, value)) {
-                return fail(error, "activity logic source digest is truncated");
+                return fail(error, "activity logic content fingerprint is truncated");
             }
-            catalog.provenance.sourceDigest[index] = value;
+            catalog.provenance.contentFingerprint[index] = value;
         }
-        std::uint32_t converterVersion{};
+        std::uint32_t collectorVersion{};
         std::uint32_t contentBuild{};
-        std::uint64_t generationTimestamp{};
-        std::uint32_t sourceFormatOffset{};
-        std::uint32_t sourceFormatLength{};
-        if (!reader.read_u32(60, converterVersion) || !reader.read_u32(124, contentBuild)
-            || !reader.read_u64(128, generationTimestamp)
-            || !reader.read_u32(136, sourceFormatOffset)
-            || !reader.read_u32(140, sourceFormatLength)) {
+        if (!reader.read_u32(60, collectorVersion) || !reader.read_u32(124, contentBuild)) {
             return fail(error, "activity logic provenance header is truncated");
         }
-        if (converterVersion != kConverterVersion) {
-            return fail(error, "activity logic converter version is unsupported");
+        if (collectorVersion != kCollectorVersion) {
+            return fail(error, "activity logic collector version is unsupported");
         }
-        catalog.provenance.converterVersion = converterVersion;
+        catalog.provenance.collectorVersion = collectorVersion;
         catalog.provenance.contentBuild = contentBuild;
-        catalog.provenance.generationTimestamp = generationTimestamp;
-        if (!string_at(reader,
-                       stringOffset,
-                       stringSize,
-                       sourceFormatOffset,
-                       sourceFormatLength,
-                       catalog.provenance.sourceFormat)) {
-            return fail(error, "activity logic provenance source format is invalid");
-        }
 
         std::array<Section, kSectionCount> sections{};
         std::size_t descriptor = 64;
@@ -533,7 +531,7 @@ LoadResult load_file(std::wstring_view path, Catalog& catalog) noexcept {
         if (!std::filesystem::exists(filePath)) {
             catalog = {};
             result.state = LoadState::missing;
-            result.diagnostic = "No optional activity logic catalog is installed.";
+            result.diagnostic = "No cached Activity Logic shard exists.";
             return result;
         }
         const std::uintmax_t size = std::filesystem::file_size(filePath);
@@ -566,7 +564,7 @@ LoadResult load_file(std::wstring_view path, Catalog& catalog) noexcept {
             return result;
         }
         result.state = LoadState::ready;
-        result.diagnostic = "Activity logic catalog loaded.";
+        result.diagnostic = "Activity Logic package cache loaded.";
         return result;
     } catch (...) {
         catalog = {};

@@ -421,7 +421,9 @@ NodeId Graph::add(Node node, NodeId parent) {
         append_hex(node.searchText, node.activityMetadata->activityHash, 8);
         append_hex(node.searchText, node.activityMetadata->graphHash, 8);
         append_hex(node.searchText, node.activityMetadata->nodeHash, 8);
-        append_search(node.searchText, node.activityMetadata->catalogVersion);
+        for (const std::uint32_t state : node.activityMetadata->nativeStateValues) {
+            append_decimal(node.searchText, state);
+        }
     }
     if (node.activityLogicMetadata.has_value()) {
         const ActivityLogicMetadata& logic = *node.activityLogicMetadata;

@@ -617,8 +617,8 @@ Result draw_activity_logic_relationships(const inspection::Graph& graph,
     std::array<char, 256> status{};
     std::snprintf(status.data(),
                   status.size(),
-                  "Serialized Activity Logic relationships - %zu links, %zu unresolved; static "
-                  "catalog evidence",
+                  "Serialized Activity Logic name references - %zu links, %zu unresolved; static "
+                  "authored evidence, not execution flow",
                   metadata.relationships.size(),
                   unresolved);
     drawList->AddText({minimum.x + scaled(8.0F), minimum.y + scaled(8.0F)}, kMuted, status.data());

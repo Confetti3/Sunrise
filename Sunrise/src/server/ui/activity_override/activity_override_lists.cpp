@@ -60,7 +60,6 @@ void clear_spawns(Lists& rows) noexcept {
 
 void clear_destination(Lists& rows) noexcept {
     rows.selected = {};
-    rows.authored = {};
     rows.bubbles = {};
     rows.bubbleOrdinals = {};
     rows.bubbleCount = 0;
@@ -175,22 +174,8 @@ void refresh_activities(Lists& rows) noexcept {
     rows.worlds = {};
     rows.activityCount = 0;
     for (const worlds::Summary& summary : std::span(summaries).first(count)) {
-        enrichment::Summary authored{};
-        enrichment::resolve(summary, authored);
         Label label{};
-        const std::string_view activityName(authored.activityName.data(),
-                                            authored.activityNameLength);
-        if (activityName.empty()) {
-            assign(worlds::name_of(summary), label);
-        } else {
-            (void)std::snprintf(label.data(),
-                                label.size(),
-                                "%.*s  ·  %.*s",
-                                static_cast<int>(worlds::name_of(summary).size()),
-                                worlds::name_of(summary).data(),
-                                static_cast<int>(activityName.size()),
-                                activityName.data());
-        }
+        assign(worlds::name_of(summary), label);
         rows.activities[rows.activityCount] = label;
         rows.worlds[rows.activityCount] = summary;
         ++rows.activityCount;
@@ -205,7 +190,6 @@ void refresh_destination(Lists& rows, std::string_view name) noexcept {
         return;
     }
     rows.selected = details;
-    enrichment::resolve(rows.selected.world, rows.authored);
     build_bubbles(rows);
     build_spawns(rows);
 }
@@ -222,7 +206,6 @@ void refresh_bubble(Lists& rows, std::uint8_t bubble) noexcept {
     clear_slices(rows);
     clear_spawns(rows);
     rows.selected = details;
-    enrichment::resolve(rows.selected.world, rows.authored);
     build_slices(rows, bubble);
     build_spawns(rows);
 }

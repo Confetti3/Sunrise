@@ -204,17 +204,6 @@ void draw_status(const forced::ForcedDestination& value, const Lists& rows) noex
         ImGui::TextUnformatted("waiting for the destination layouts to extract");
         return;
     }
-    if (rows.authored.activityPresent) {
-        ImGui::TextDisabled("authored activity: %.*s%s",
-                            static_cast<int>(rows.authored.activityNameLength),
-                            rows.authored.activityName.data(),
-                            rows.authored.activityBuildMatch ? "" : "  (browse only)");
-        if (rows.authored.destinationLength != 0) {
-            ImGui::TextDisabled("destination: %.*s",
-                                static_cast<int>(rows.authored.destinationLength),
-                                rows.authored.destination.data());
-        }
-    }
     if (!value.enabled) {
         ImGui::TextDisabled("disabled, worlds load normally");
         return;

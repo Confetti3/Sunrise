@@ -14,20 +14,18 @@ namespace sunrise::client::inspection::activity_catalog {
 namespace {
 
 constexpr std::array<std::uint8_t, 8> kMagic{'S', 'A', 'C', 'A', 'T', '0', '0', '1'};
-constexpr std::size_t kSectionCount = 6;
-constexpr std::array<std::uint32_t, kSectionCount> kExpectedStrides{20, 20, 40, 4, 4, 40};
+constexpr std::size_t kSectionCount = 5;
+constexpr std::array<std::uint32_t, kSectionCount> kExpectedStrides{20, 20, 40, 4, 4};
 constexpr std::size_t kActivitySection = 0;
 constexpr std::size_t kGraphSection = 1;
 constexpr std::size_t kNodeSection = 2;
 constexpr std::size_t kActivityRefSection = 3;
 constexpr std::size_t kLinkedRefSection = 4;
-constexpr std::size_t kLocationSection = 5;
 constexpr std::size_t kMaximumFileSize = 256U * 1024U * 1024U;
 constexpr std::uint32_t kMaximumActivities = 100000;
 constexpr std::uint32_t kMaximumGraphs = 10000;
 constexpr std::uint32_t kMaximumNodes = 250000;
 constexpr std::uint32_t kMaximumReferences = 2000000;
-constexpr std::uint32_t kMaximumLocations = 500000;
 
 struct Section final {
     std::uint32_t offset{};
@@ -167,11 +165,13 @@ struct Reader final {
 
 bool validate(const Catalog& catalog, std::string& error) {
     error.clear();
-    if (catalog.contentBuild == 0 || catalog.manifestVersion.empty()) {
+    if (catalog.schemaVersion != kSchemaVersion || catalog.contentBuild == 0
+        || catalog.collectorVersion != kCollectorVersion || catalog.scenarioTag == 0
+        || std::ranges::all_of(catalog.contentFingerprint,
+                               [](std::uint8_t value) { return value == 0; })) {
         return fail(error, "catalog identity is incomplete");
     }
-    if (catalog.activities.size() > kMaximumActivities || catalog.graphs.size() > kMaximumGraphs
-        || catalog.locationReleases.size() > kMaximumLocations) {
+    if (catalog.activities.size() > kMaximumActivities || catalog.graphs.size() > kMaximumGraphs) {
         return fail(error, "catalog count exceeds the supported maximum");
     }
 
@@ -226,7 +226,13 @@ bool validate(const Catalog& catalog, std::string& error) {
             if (!nodeKeys.insert(key).second) {
                 return fail(error, "duplicate graph node key");
             }
-            referenceCount += node.activityHashes.size() + node.linkedGraphHashes.size();
+            if (!std::ranges::all_of(node.stateValues, [](std::uint32_t value) {
+                    return value <= 4U;
+                })) {
+                return fail(error, "graph node native state sequence is invalid");
+            }
+            referenceCount += node.activityHashes.size() + node.linkedGraphHashes.size()
+                              + node.stateValues.size();
             if (referenceCount > kMaximumReferences) {
                 return fail(error, "node reference count exceeds the supported maximum");
             }
@@ -243,22 +249,6 @@ bool validate(const Catalog& catalog, std::string& error) {
         }
     }
 
-    for (const LocationRelease& release : catalog.locationReleases) {
-        for (const float lane : release.spawnPoint) {
-            if (!std::isfinite(lane)) {
-                return fail(error, "location spawn point is not finite");
-            }
-        }
-        for (const float lane : release.publicPosition) {
-            if (!std::isfinite(lane)) {
-                return fail(error, "location public position is not finite");
-            }
-        }
-        const Graph* graph = find_graph(catalog, release.graphHash);
-        if (graph == nullptr || find_node(*graph, release.nodeHash) == nullptr) {
-            return fail(error, "location release references an unknown graph node");
-        }
-    }
     return true;
 }
 
@@ -279,13 +269,13 @@ bool load(std::span<const std::byte> bytes, Catalog& catalog, std::string& error
         std::uint32_t contentBuild{};
         std::uint32_t headerSize{};
         std::uint32_t totalSize{};
-        std::uint32_t versionOffset{};
-        std::uint32_t versionSize{};
+        std::uint32_t collectorVersion{};
+        std::uint32_t scenarioTag{};
         std::uint32_t stringOffset{};
         std::uint32_t stringSize{};
         if (!reader.read_u32(8, schema) || !reader.read_u32(12, contentBuild)
             || !reader.read_u32(16, headerSize) || !reader.read_u32(20, totalSize)
-            || !reader.read_u32(24, versionOffset) || !reader.read_u32(28, versionSize)
+            || !reader.read_u32(24, collectorVersion) || !reader.read_u32(28, scenarioTag)
             || !reader.read_u32(32, stringOffset) || !reader.read_u32(36, stringSize)) {
             return fail(error, "catalog header is truncated");
         }
@@ -329,12 +319,7 @@ bool load(std::span<const std::byte> bytes, Catalog& catalog, std::string& error
                            sections[kLinkedRefSection].offset,
                            sections[kLinkedRefSection].count,
                            sections[kLinkedRefSection].stride,
-                           kMaximumReferences)
-            || !safe_range(bytes.size(),
-                           sections[kLocationSection].offset,
-                           sections[kLocationSection].count,
-                           sections[kLocationSection].stride,
-                           kMaximumLocations)) {
+                           kMaximumReferences)) {
             return fail(error, "catalog section range is invalid");
         }
         std::vector<std::pair<std::size_t, std::size_t>> ranges;
@@ -368,16 +353,13 @@ bool load(std::span<const std::byte> bytes, Catalog& catalog, std::string& error
             }
         }
         const Section strings{stringOffset, stringSize, 1};
-        if (versionSize == 0
-            || !string_at(reader, strings, versionOffset, versionSize, catalog.manifestVersion)) {
-            return fail(error, "catalog version string is invalid");
+        if (!reader.read_bytes(124, catalog.contentFingerprint)) {
+            return fail(error, "catalog content fingerprint is truncated");
         }
-        if (!reader.read_bytes(124, catalog.activityDigest)
-            || !reader.read_bytes(156, catalog.graphDigest)
-            || !reader.read_bytes(188, catalog.locationDigest)) {
-            return fail(error, "catalog source digest block is truncated");
-        }
+        catalog.schemaVersion = schema;
         catalog.contentBuild = contentBuild;
+        catalog.collectorVersion = collectorVersion;
+        catalog.scenarioTag = scenarioTag;
 
         const auto record_offset = [](const Section& section, std::size_t index) noexcept {
             return static_cast<std::size_t>(section.offset)
@@ -466,18 +448,22 @@ bool load(std::span<const std::byte> bytes, Catalog& catalog, std::string& error
             std::uint32_t activityCount{};
             std::uint32_t linkedStart{};
             std::uint32_t linkedCount{};
+            std::uint32_t stateStart{};
+            std::uint32_t stateCount{};
             if (!reader.read_u32(offset, node.graphHash)
                 || !reader.read_u32(offset + 4U, node.nodeHash)
                 || !reader.read_f32(offset + 8U, node.authoredX)
                 || !reader.read_f32(offset + 12U, node.authoredY)
-                || !reader.read_u32(offset + 16U, node.stateHash)
-                || !reader.read_u32(offset + 20U, node.styleHash)
+                || !reader.read_u32(offset + 16U, stateStart)
+                || !reader.read_u32(offset + 20U, stateCount)
                 || !reader.read_u32(offset + 24U, activityStart)
                 || !reader.read_u32(offset + 28U, activityCount)
                 || !reader.read_u32(offset + 32U, linkedStart)
                 || !reader.read_u32(offset + 36U, linkedCount)
                 || activityStart > activityRefs.size()
                 || activityCount > activityRefs.size() - activityStart
+                || stateStart > activityRefs.size()
+                || stateCount > activityRefs.size() - stateStart
                 || linkedStart > linkedRefs.size()
                 || linkedCount > linkedRefs.size() - linkedStart) {
                 return fail(error, "graph node record is invalid");
@@ -485,6 +471,8 @@ bool load(std::span<const std::byte> bytes, Catalog& catalog, std::string& error
             if (expectedNodeGraphs[index] != node.graphHash) {
                 return fail(error, "graph node is outside its owner range");
             }
+            node.stateValues.assign(activityRefs.begin() + stateStart,
+                                    activityRefs.begin() + stateStart + stateCount);
             node.activityHashes.assign(activityRefs.begin() + activityStart,
                                        activityRefs.begin() + activityStart + activityCount);
             node.linkedGraphHashes.assign(linkedRefs.begin() + linkedStart,
@@ -500,25 +488,6 @@ bool load(std::span<const std::byte> bytes, Catalog& catalog, std::string& error
                 return fail(error, "graph node references an unknown owner graph");
             }
             graph->nodes.push_back(std::move(node));
-        }
-
-        catalog.locationReleases.reserve(sections[kLocationSection].count);
-        for (std::size_t index = 0; index < sections[kLocationSection].count; ++index) {
-            const std::size_t offset = record_offset(sections[kLocationSection], index);
-            LocationRelease release{};
-            if (!reader.read_u32(offset, release.locationHash)
-                || !reader.read_u32(offset + 4U, release.graphHash)
-                || !reader.read_u32(offset + 8U, release.nodeHash)
-                || !reader.read_f32(offset + 12U, release.spawnPoint[0])
-                || !reader.read_f32(offset + 16U, release.spawnPoint[1])
-                || !reader.read_f32(offset + 20U, release.spawnPoint[2])
-                || !reader.read_f32(offset + 24U, release.publicPosition[0])
-                || !reader.read_f32(offset + 28U, release.publicPosition[1])
-                || !reader.read_f32(offset + 32U, release.publicPosition[2])
-                || !reader.read_f32(offset + 36U, release.publicPosition[3])) {
-                return fail(error, "location release record is invalid");
-            }
-            catalog.locationReleases.push_back(release);
         }
 
         if (!validate(catalog, error)) {
@@ -545,7 +514,7 @@ LoadResult load_file(std::wstring_view path, Catalog& catalog) noexcept {
         std::ifstream input(file, std::ios::binary | std::ios::ate);
         if (!input) {
             result.compatibility = Compatibility::missing;
-            result.diagnostic = "optional activity catalog is absent";
+            result.diagnostic = "Activity Graph cache is absent";
             return result;
         }
         const std::streampos end = input.tellg();
@@ -571,8 +540,8 @@ LoadResult load_file(std::wstring_view path, Catalog& catalog) noexcept {
         }
         result.compatibility = compatibility(catalog);
         result.diagnostic = result.compatibility == Compatibility::compatible
-                                ? "activity catalog loaded"
-                                : "activity catalog is browse-only for another content build";
+                                ? "Activity Graph package cache loaded"
+                                : "Activity Graph cache targets another content build";
         return result;
     } catch (...) {
         catalog = {};

@@ -4,6 +4,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -26,6 +27,7 @@
 #include "../../../core/ui/textures/ui_texture_slots.h"
 #include "../../../state/build_data/runtime.h"
 #include "../../../state/build_data/scenarios/definition.h"
+#include "../../../state/build_data/worlds/world_catalog.h"
 #include "../../content/statics/statics_footprints.h"
 #include "../../content/statics/statics_probe.h"
 #include "../../hooks/graphics/renderer/graphics_depth_observer.h"
@@ -33,10 +35,10 @@
 #include "../../hooks/graphics/renderer/renderer.h"
 #include "../../hooks/viewer_camera/viewer_camera.h"
 #include "../../inspection/inspection_capture.h"
+#include "../../inspection/current_location_catalog.h"
 #include "../../inspection/inspection_descriptors.h"
 #include "../../inspection/inspection_session.h"
 #include "../../inspection/inspection_settings_store.h"
-#include "../../inspection/providers/activity_logic_browse.h"
 #include "../../inspection/providers/spawn_inspection_provider.h"
 #include "../../inspection/world_inspection_model.h"
 #include "../../player/player_settings_store.h"
@@ -59,13 +61,14 @@ namespace model = client::inspection;
 namespace capture = client::inspection::capture;
 namespace provider = client::inspection::providers;
 namespace activity_catalog = client::inspection::activity_catalog;
-namespace logic_browse = client::inspection::providers::activity_logic::browse;
+namespace location_catalog = client::inspection::current_location_catalog;
 namespace renderer = client::hooks::graphics::renderer;
 namespace section = core::ui::components::section;
 namespace textures = core::ui::textures;
 namespace toggle = core::ui::components::toggle;
 namespace viewer_input = client::viewer::input;
 namespace scenario_state = state::build_data::scenarios;
+namespace worlds = state::build_data::worlds;
 
 using commands::copy_camera_position;
 using commands::copy_id;
@@ -342,6 +345,87 @@ WorkspaceState g_state{};
     return world().context;
 }
 
+[[nodiscard]] bool current_catalog_scope(location_catalog::Scope& output) noexcept {
+    output = {};
+    const model::WorldContext& context = world_context();
+    if (!context.sessionPresent || context.activitySession == 0 || context.scenarioTag == 0
+        || context.packageName.empty()) {
+        return false;
+    }
+    scenario_state::Definition layout{};
+    if (!state::build_data::find_scenario_layout(context.packageName, layout)
+        || layout.packageCount == 0 || layout.packageCount > layout.packages.size()) {
+        return false;
+    }
+    output.activitySession = context.activitySession;
+    output.scenarioTag = context.scenarioTag;
+    output.packageName = context.packageName;
+    output.mapFamily = context.mapStem.empty() ? context.packageName : context.mapStem;
+    output.packageCount = layout.packageCount;
+    std::copy(layout.packages.begin(),
+              layout.packages.begin() + layout.packageCount,
+              output.packageIds.begin());
+    return true;
+}
+
+[[nodiscard]] std::string normalized_map_family(std::string_view family) {
+    constexpr std::string_view destination = "_destination";
+    constexpr std::string_view freeroam = "_freeroam";
+    if (family.ends_with(destination)) {
+        family.remove_suffix(destination.size());
+    } else if (family.ends_with(freeroam)) {
+        family.remove_suffix(freeroam.size());
+    }
+    return std::string(family);
+}
+
+[[nodiscard]] bool activity_selection(const worlds::Summary& summary,
+                                      location_catalog::ActivitySelection& output) noexcept {
+    output = {};
+    const std::string_view name = worlds::name_of(summary);
+    scenario_state::Definition layout{};
+    if (name.empty() || world_context().activitySession == 0
+        || !state::build_data::find_scenario_layout(name, layout) || layout.packageCount == 0
+        || layout.packageCount > layout.packages.size()) {
+        return false;
+    }
+    output.displayName.assign(name);
+    output.scope.activitySession = world_context().activitySession;
+    output.scope.scenarioTag = summary.scenarioTag;
+    output.scope.packageName.assign(name);
+    const std::string_view stem = worlds::stem_of(summary);
+    output.scope.mapFamily.assign(stem.empty() ? name : stem);
+    output.scope.packageCount = layout.packageCount;
+    std::copy(layout.packages.begin(),
+              layout.packages.begin() + layout.packageCount,
+              output.scope.packageIds.begin());
+    return true;
+}
+
+[[nodiscard]] bool contains_ascii_case_insensitive(std::string_view text,
+                                                   std::string_view query) noexcept {
+    if (query.empty()) {
+        return true;
+    }
+    return std::search(text.begin(), text.end(), query.begin(), query.end(), [](char left, char right) {
+               return static_cast<unsigned char>(std::tolower(static_cast<unsigned char>(left)))
+                      == static_cast<unsigned char>(
+                          std::tolower(static_cast<unsigned char>(right)));
+           })
+           != text.end();
+}
+
+[[nodiscard]] bool activity_matches(const worlds::Summary& summary,
+                                    std::string_view query) noexcept {
+    if (query.empty() || contains_ascii_case_insensitive(worlds::name_of(summary), query)
+        || contains_ascii_case_insensitive(worlds::stem_of(summary), query)) {
+        return true;
+    }
+    std::array<char, 16> tag{};
+    std::snprintf(tag.data(), tag.size(), "0x%08X", summary.scenarioTag);
+    return contains_ascii_case_insensitive(tag.data(), query);
+}
+
 [[nodiscard]] const model::ProviderReport* provider_report(model::Producer producer) noexcept {
     const auto found = std::ranges::find_if(
         world().providerReports,
@@ -401,6 +485,11 @@ void publish_scene_frame(const camera::Status& cameraStatus,
                                         debug_scene::kMaximumBoxes,
                                         exactView,
                                         g_state.selection.hovered()};
+        thread_local std::string liveMapFamily;
+        liveMapFamily = normalized_map_family(
+            world_context().mapStem.empty() ? std::string_view(world_context().packageName)
+                                            : std::string_view(world_context().mapStem));
+        query.liveMapFamily = liveMapFamily;
         query.previousPresentation = debug_scene::frame();
         scene.stats =
             debug_scene::collect(scene, world().graph, g_state.admitted, g_state.hidden, query);
@@ -793,8 +882,8 @@ void refresh_layout_scale() noexcept {
 
 [[nodiscard]] bool node_admitted_by_filters(const model::Node& node,
                                             const model::Query& query) noexcept {
-    // Activity graphs are a separate browse dataset. Keeping them out of live admission prevents
-    // hundreds of static catalog rows from overwhelming the Scene Tree and ownership graph.
+    // Activity graphs are package-authored metadata. Keeping them out of live admission prevents
+    // hundreds of non-spatial rows from overwhelming the Scene Tree and ownership graph.
     if (node.producer == model::Producer::activityCatalog) {
         return false;
     }
@@ -1665,6 +1754,9 @@ void draw_source(const model::Node& node) noexcept {
     if (source.bubble.has_value()) {
         property_i32("Bubble", *source.bubble);
     }
+    if (source.authoredPreview) {
+        property_row("Context", "Authored preview - not live");
+    }
     end_properties();
 }
 
@@ -1703,8 +1795,16 @@ void draw_activity_metadata(const model::Node& node) noexcept {
     property_u64("Activity hash", metadata.activityHash, 8);
     property_u64("Graph hash", metadata.graphHash, 8);
     property_u64("Node hash", metadata.nodeHash, 8);
-    property_u64("State hash", metadata.stateHash, 8);
-    property_u64("Style hash", metadata.styleHash, 8);
+    if (!metadata.nativeStateValues.empty()) {
+        std::string states;
+        for (std::size_t index = 0; index < metadata.nativeStateValues.size(); ++index) {
+            if (index != 0) {
+                states.append(", ");
+            }
+            states.append(std::to_string(metadata.nativeStateValues[index]));
+        }
+        property_row("Native state sequence", states.c_str());
+    }
     std::array<char, 96> position{};
     std::snprintf(position.data(),
                   position.size(),
@@ -1713,13 +1813,13 @@ void draw_activity_metadata(const model::Node& node) noexcept {
                   static_cast<double>(metadata.authoredPosition[1]));
     property_row("Authored position", position.data());
     property_u64("Catalog build", metadata.catalogBuild, 8);
-    property_row("Catalog version", metadata.catalogVersion.c_str());
-    property_row("Compatibility", metadata.buildMatch ? "Target build" : "Browse only");
-    property_i32("Location releases", static_cast<std::int32_t>(metadata.releaseCount));
+    property_i32("Collector version", static_cast<std::int32_t>(metadata.collectorVersion));
     property_i32("Activity references", static_cast<std::int32_t>(metadata.referenceCount));
     end_properties();
 
-    if (metadata.activityHash != 0) {
+    const bool exactLogicLink = metadata.activityHash != 0 && node.source.scenarioTag.has_value()
+                                && metadata.activityHash == *node.source.scenarioTag;
+    if (exactLogicLink) {
         ImGui::TextUnformatted("Exact Activity Logic link");
         const model::NodeId logicNode = logic_node_for_scenario(metadata.activityHash);
         if (logicNode) {
@@ -1727,11 +1827,7 @@ void draw_activity_metadata(const model::Node& node) noexcept {
                 select_node(logicNode);
             }
         } else {
-            if (ImGui::Button("Browse Activity Logic")) {
-                g_state.session.set_activity_logic_browse(metadata.activityHash);
-                g_state.rowsValid = false;
-            }
-            ImGui::TextDisabled("No live matching node; browse uses the exact activity hash.");
+            ImGui::TextDisabled("No matching current-location Activity Logic node is active.");
         }
     }
 
@@ -1774,8 +1870,10 @@ void draw_activity_metadata(const model::Node& node) noexcept {
 [[nodiscard]] std::vector<std::uint32_t> activity_graphs_for_scenario(std::uint32_t scenarioTag) {
     std::vector<std::uint32_t> matches;
     for (const model::Node& node : world().graph.nodes()) {
-        if (node.producer == model::Producer::activityCatalog && node.activityMetadata.has_value()
-            && node.activityMetadata->activityHash == scenarioTag
+        if (node.producer == model::Producer::activityCatalog
+            && node.kind == model::NodeKind::activityGraph
+            && node.source.scenarioTag.has_value() && *node.source.scenarioTag == scenarioTag
+            && node.activityMetadata.has_value()
             && node.activityMetadata->graphHash != 0) {
             matches.push_back(node.activityMetadata->graphHash);
         }
@@ -1852,18 +1950,18 @@ void draw_activity_logic_metadata(const model::Node& node) noexcept {
     if (metadata.relationships.empty()) {
         return;
     }
-    if (ImGui::Button("Open relationship graph")) {
+    if (ImGui::Button("Open serialized-reference graph")) {
         g_state.centerMode = CenterMode::logicGraph;
         g_state.relationshipGraphState.fitRequested = true;
     }
-    ImGui::TextUnformatted("Serialized definition links");
+    ImGui::TextUnformatted("Serialized name references (not execution flow)");
     std::size_t relationshipIndex = 0;
     for (const model::ActivityLogicRelationship& relationship : metadata.relationships) {
         std::array<char, 96> label{};
         std::snprintf(label.data(),
                       label.size(),
                       "%s 0x%08X  hash 0x%08X  x%u",
-                      relationship.outgoing ? "Outgoing" : "Incoming",
+                      relationship.outgoing ? "Source contains" : "Referenced by",
                       relationship.definitionTag,
                       relationship.nameHash,
                       relationship.occurrenceCount);
@@ -2314,6 +2412,9 @@ void draw_data() noexcept {
     }
     if (source.bubble.has_value()) {
         data_i32("bubble", "u16", *source.bubble, "runtime");
+    }
+    if (source.authoredPreview) {
+        data_row("authored_preview", "bool", "true", "catalog");
     }
 
     if (node->activityLogicMetadata.has_value()) {
@@ -3107,13 +3208,11 @@ viewport::Result draw_activity_map() noexcept {
     }
     ImGui::EndDisabled();
     ImGui::SameLine();
-    const std::string_view catalogVersion = root_text("activity_catalog_version");
-    ImGui::TextDisabled("%.*s / build %llu / target %u / %s",
-                        static_cast<int>(catalogVersion.size()),
-                        catalogVersion.data(),
+    ImGui::TextDisabled("collector %llu / build %llu / target %u",
+                        static_cast<unsigned long long>(
+                            root_u64("activity_catalog_collector_version")),
                         static_cast<unsigned long long>(root_u64("activity_catalog_build")),
-                        activity_catalog::kTargetContentBuild,
-                        root_bool("activity_catalog_build_match") ? "Target build" : "Browse only");
+                        activity_catalog::kTargetContentBuild);
     ImGui::TextDisabled("Authored positions only; each canvas is one graph coordinate space. No "
                         "node connections are present in this catalog.");
     ImGui::Separator();
@@ -3278,94 +3377,139 @@ viewport::Result draw_activity_map() noexcept {
     return result;
 }
 
-void select_activity_logic_scenario(std::uint32_t scenarioTag) noexcept {
-    g_state.session.set_activity_logic_browse(scenarioTag);
+[[nodiscard]] std::span<const worlds::Summary> activity_rows() noexcept {
+    thread_local std::array<worlds::Summary, worlds::kWorldCapacity> rows{};
+    std::size_t count = 0;
+    std::size_t revision = 0;
+    if (!worlds::snapshot(rows, count, revision)) {
+        return {};
+    }
+    auto visible = std::span{rows}.first(count);
+    std::ranges::stable_sort(visible, [](const worlds::Summary& left,
+                                         const worlds::Summary& right) noexcept {
+        const std::string_view leftStem = worlds::stem_of(left);
+        const std::string_view rightStem = worlds::stem_of(right);
+        if (leftStem != rightStem) {
+            return leftStem < rightStem;
+        }
+        const std::string_view leftName = worlds::name_of(left);
+        const std::string_view rightName = worlds::name_of(right);
+        return leftName != rightName ? leftName < rightName
+                                     : left.scenarioTag < right.scenarioTag;
+    });
+    return visible;
+}
+
+void select_activity(const worlds::Summary& summary) noexcept {
+    location_catalog::ActivitySelection selection{};
+    if (!activity_selection(summary, selection)
+        || !location_catalog::select_activity(selection)) {
+        return;
+    }
+    // An authored activity selection is primarily useful through its Logic placements. Make the
+    // selection observable even when the user previously disabled the Logic filter.
+    g_state.showLogic = true;
     clear_selection();
+    g_state.session.reset_document();
     g_state.rowsValid = false;
 }
 
-void draw_activity_logic_browser() noexcept {
-    if (g_state.activityLogicBrowserOpen) {
-        ImGui::OpenPopup("Activity Logic Browser");
-        g_state.activityLogicBrowserOpen = false;
-    }
-    ImGui::SetNextWindowSize({scaled(700.0F), scaled(520.0F)}, ImGuiCond_Appearing);
-    if (!ImGui::BeginPopup("Activity Logic Browser")) {
+void return_to_live_activity() noexcept {
+    if (!location_catalog::clear_activity_preview()) {
         return;
     }
+    clear_selection();
+    g_state.session.reset_document();
+    g_state.rowsValid = false;
+}
 
-    const auto catalog = provider::activity_logic::browse_activities();
-    const bool browsing = root_bool("activity_logic_browse_only");
-    const std::uint32_t selectedScenario =
-        static_cast<std::uint32_t>(root_u64("activity_logic_browse_scenario"));
-    ImGui::TextUnformatted("Activity Logic catalog");
+void draw_activity_browser() noexcept {
+    if (g_state.activityBrowserOpen) {
+        ImGui::OpenPopup("Activity Browser");
+        g_state.activityBrowserOpen = false;
+    }
+    ImGui::SetNextWindowSize({scaled(720.0F), scaled(520.0F)}, ImGuiCond_Appearing);
+    if (!ImGui::BeginPopup("Activity Browser")) {
+        return;
+    }
+    const location_catalog::PreviewStatus preview = location_catalog::preview_status();
+    ImGui::TextUnformatted("Installed activities");
     ImGui::SameLine();
-    ImGui::TextDisabled("- static authored evidence");
-    if (browsing) {
-        const std::string_view activityName = root_text("activity_logic_activity");
-        const std::string_view destination = root_text("activity_logic_destination");
+    ImGui::TextDisabled("- package-native Graph, Logic, and placements");
+    if (preview.active) {
         ImGui::TextColored(kWarning,
-                           "Pinned static browse: %.*s (%.*s), scenario 0x%08X - not live",
-                           static_cast<int>(activityName.size()),
-                           activityName.data(),
-                           static_cast<int>(destination.size()),
-                           destination.data(),
-                           selectedScenario);
-        if (control_button("Return to live scenario", {0.0F, control_height()}, true, true)) {
-            select_activity_logic_scenario(0);
+                           "AUTHORED PREVIEW - NOT LIVE: %s / 0x%08X",
+                           preview.displayName.c_str(),
+                           preview.scenarioTag);
+        ImGui::TextDisabled("Graph: %s (%zu)  |  Logic: %s (%zu)",
+                            location_catalog::state_name(preview.activityGraph.state),
+                            preview.activityGraph.records,
+                            location_catalog::state_name(preview.activityLogic.state),
+                            preview.activityLogic.records);
+        const std::string liveFamily = normalized_map_family(
+            world_context().mapStem.empty() ? std::string_view(world_context().packageName)
+                                            : std::string_view(world_context().mapStem));
+        if (preview.mapFamily != liveFamily) {
+            ImGui::TextColored(kWarning,
+                               "Different map family: placements remain in the tree; viewport helpers are suppressed.");
+        }
+        if (control_button("Return to live activity", {0.0F, control_height()}, true, true)) {
+            return_to_live_activity();
             ImGui::CloseCurrentPopup();
         }
     }
-
     ImGui::SetNextItemWidth(-1.0F);
-    ImGui::InputTextWithHint("##activity_logic_catalog_search",
-                             "Search activity, destination, or 0x scenario tag",
-                             g_state.activityLogicSearch.data(),
-                             g_state.activityLogicSearch.size());
-    const logic_browse::View view = logic_browse::build(
-        catalog, world_context().scenarioTag, g_state.activityLogicSearch.data());
-    ImGui::TextDisabled("%zu matches / %zu catalog activities; sorted by destination",
-                        view.all.size(),
-                        catalog.size());
+    ImGui::InputTextWithHint("##activity_search",
+                             "Search package, map family, or 0x scenario tag",
+                             g_state.activitySearch.data(),
+                             g_state.activitySearch.size());
+    const std::span<const worlds::Summary> rows = activity_rows();
+    const std::string_view query = g_state.activitySearch.data();
+    std::size_t matches = 0;
+    for (const worlds::Summary& row : rows) {
+        matches += activity_matches(row, query) ? 1U : 0U;
+    }
+    ImGui::TextDisabled("%zu matches / %zu installed activities", matches, rows.size());
     ImGui::Separator();
-
-    const float tableHeight =
-        (std::max)(scaled(300.0F),
-                   ImGui::GetContentRegionAvail().y - control_height() - scaled(12.0F));
-    if (ImGui::BeginTable("##activity_logic_catalog_table",
+    if (ImGui::BeginTable("##activity_table",
                           3,
                           ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH
                               | ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY,
-                          {0.0F, tableHeight})) {
+                          {0.0F, (std::max)(scaled(300.0F), ImGui::GetContentRegionAvail().y)})) {
         ImGui::TableSetupScrollFreeze(0, 1);
-        ImGui::TableSetupColumn("Destination");
-        ImGui::TableSetupColumn("Activity");
-        ImGui::TableSetupColumn("Scenario", ImGuiTableColumnFlags_WidthFixed, scaled(112.0F));
+        ImGui::TableSetupColumn("Map family");
+        ImGui::TableSetupColumn("Activity package");
+        ImGui::TableSetupColumn(
+            "Scenario", ImGuiTableColumnFlags_WidthFixed, scaled(112.0F));
         ImGui::TableHeadersRow();
-        for (const provider::activity_logic::BrowseSummary* summary : view.all) {
-            ImGui::PushID(static_cast<int>(summary->scenarioTag));
+        for (const worlds::Summary& row : rows) {
+            if (!activity_matches(row, query)) {
+                continue;
+            }
+            ImGui::PushID(static_cast<int>(row.scenarioTag));
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
-            ImGui::TextUnformatted(summary->destination.empty() ? "(unknown destination)"
-                                                                : summary->destination.c_str());
+            const std::string_view stem = worlds::stem_of(row);
+            if (stem.empty()) {
+                ImGui::TextDisabled("(unknown)");
+            } else {
+                ImGui::TextUnformatted(stem.data(), stem.data() + stem.size());
+            }
             ImGui::TableNextColumn();
-            const bool selected = browsing && selectedScenario == summary->scenarioTag;
-            if (ImGui::Selectable(summary->activityName.empty() ? "(unnamed activity)"
-                                                                : summary->activityName.c_str(),
+            const std::string_view name = worlds::name_of(row);
+            const bool selected = preview.active && preview.scenarioTag == row.scenarioTag;
+            const std::string label = name.empty() ? std::string("(unnamed)") : std::string(name);
+            if (ImGui::Selectable(label.c_str(),
                                   selected,
                                   ImGuiSelectableFlags_SpanAllColumns)) {
-                select_activity_logic_scenario(summary->scenarioTag);
+                select_activity(row);
                 ImGui::CloseCurrentPopup();
             }
             ImGui::TableNextColumn();
-            ImGui::Text("0x%08X", summary->scenarioTag);
+            ImGui::Text("0x%08X", row.scenarioTag);
             ImGui::PopID();
         }
         ImGui::EndTable();
-    }
-    if (control_button(
-            "Close", {ImGui::GetContentRegionAvail().x, control_height()}, false, true)) {
-        ImGui::CloseCurrentPopup();
     }
     ImGui::EndPopup();
 }
@@ -3446,92 +3590,112 @@ void draw_toolbar() noexcept {
             ImGui::EndDisabled();
             ImGui::EndMenu();
         }
-        if (ImGui::BeginMenu("Activity Logic")) {
-            const auto catalog = provider::activity_logic::browse_activities();
-            const logic_browse::View browse =
-                logic_browse::build(catalog, world_context().scenarioTag);
-            const bool browsing = root_bool("activity_logic_browse_only");
-            const std::uint32_t browseScenario =
-                static_cast<std::uint32_t>(root_u64("activity_logic_browse_scenario"));
-            if (browsing) {
-                const std::string_view activityName = root_text("activity_logic_activity");
-                const std::string_view destination = root_text("activity_logic_destination");
-                ImGui::TextColored(kWarning, "STATIC BROWSE - NOT LIVE");
-                ImGui::TextDisabled("%.*s / %.*s / 0x%08X",
-                                    static_cast<int>(activityName.size()),
-                                    activityName.data(),
-                                    static_cast<int>(destination.size()),
-                                    destination.data(),
-                                    browseScenario);
-                if (ImGui::MenuItem("Return to live scenario")) {
-                    select_activity_logic_scenario(0);
+        if (ImGui::BeginMenu("Activities")) {
+            const location_catalog::PreviewStatus preview = location_catalog::preview_status();
+            if (preview.active) {
+                ImGui::TextColored(kWarning, "AUTHORED PREVIEW - NOT LIVE");
+                ImGui::TextDisabled("%s / 0x%08X",
+                                    preview.displayName.c_str(),
+                                    preview.scenarioTag);
+                ImGui::TextDisabled("Graph: %s (%zu)",
+                                    location_catalog::state_name(preview.activityGraph.state),
+                                    preview.activityGraph.records);
+                ImGui::TextDisabled("Logic: %s (%zu)",
+                                    location_catalog::state_name(preview.activityLogic.state),
+                                    preview.activityLogic.records);
+                if (ImGui::MenuItem("Return to Live Activity")) {
+                    return_to_live_activity();
                 }
-            } else if (browse.current != nullptr) {
-                ImGui::TextDisabled("Live: %s / %s",
-                                    browse.current->activityName.c_str(),
-                                    browse.current->destination.c_str());
-            } else {
-                ImGui::TextDisabled("No exact catalog match for scenario 0x%08X.",
-                                    world_context().scenarioTag);
+                ImGui::Separator();
+            }
+            std::array<char, 256> currentLabel{};
+            std::snprintf(currentLabel.data(),
+                          currentLabel.size(),
+                          "Current live activity: %s",
+                          world_context().packageName.empty()
+                              ? "unresolved"
+                              : world_context().packageName.c_str());
+            if (ImGui::MenuItem(currentLabel.data(), nullptr, !preview.active)) {
+                return_to_live_activity();
             }
 
-            if (browse.current != nullptr) {
-                std::array<char, 256> currentLabel{};
-                std::snprintf(currentLabel.data(),
-                              currentLabel.size(),
-                              "Current activity: %s",
-                              browse.current->activityName.c_str());
-                if (ImGui::MenuItem(currentLabel.data(), nullptr, !browsing)) {
-                    select_activity_logic_scenario(0);
-                }
-                if (!browse.destination.empty()
-                    && ImGui::BeginMenu(
-                        (std::string("This destination: ") + browse.destination).c_str())) {
-                    for (const provider::activity_logic::BrowseSummary* summary : browse.local) {
-                        std::array<char, 256> label{};
-                        std::snprintf(label.data(),
-                                      label.size(),
-                                      "%s  [0x%08X]",
-                                      summary->activityName.c_str(),
-                                      summary->scenarioTag);
-                        if (ImGui::MenuItem(label.data(),
-                                            nullptr,
-                                            browsing && browseScenario == summary->scenarioTag)) {
-                            select_activity_logic_scenario(summary->scenarioTag);
-                        }
+            const std::span<const worlds::Summary> rows = activity_rows();
+            const std::string currentFamily = normalized_map_family(
+                world_context().mapStem.empty() ? std::string_view(world_context().packageName)
+                                                : std::string_view(world_context().mapStem));
+            if (!currentFamily.empty()
+                && ImGui::BeginMenu((std::string("This map family: ") + currentFamily).c_str())) {
+                std::size_t local = 0;
+                for (const worlds::Summary& row : rows) {
+                    const std::string family = normalized_map_family(
+                        worlds::stem_of(row).empty() ? worlds::name_of(row) : worlds::stem_of(row));
+                    if (family != currentFamily || row.scenarioTag == world_context().scenarioTag) {
+                        continue;
                     }
-                    if (browse.local.empty()) {
-                        ImGui::TextDisabled("No other activities at this destination.");
+                    ++local;
+                    const std::string_view name = worlds::name_of(row);
+                    std::array<char, 256> label{};
+                    std::snprintf(label.data(),
+                                  label.size(),
+                                  "%.*s  [0x%08X]",
+                                  static_cast<int>(name.size()),
+                                  name.data(),
+                                  row.scenarioTag);
+                    if (ImGui::MenuItem(label.data(),
+                                        nullptr,
+                                        preview.active && preview.scenarioTag == row.scenarioTag)) {
+                        select_activity(row);
                     }
-                    ImGui::EndMenu();
                 }
+                if (local == 0) {
+                    ImGui::TextDisabled("No other installed activities use this map family.");
+                }
+                ImGui::EndMenu();
             }
-
             ImGui::Separator();
-            if (ImGui::MenuItem("Browse all catalog...")) {
-                g_state.activityLogicBrowserOpen = true;
+            if (ImGui::MenuItem("Browse All Activities...")) {
+                g_state.activityBrowserOpen = true;
             }
-            if (ImGui::MenuItem("Reload catalog")) {
-                const std::uint32_t pinned = browsing ? browseScenario : 0U;
-                if (provider::activity_logic::reload()) {
-                    const bool preserve =
-                        pinned != 0
-                        && logic_browse::contains_scenario(
-                            provider::activity_logic::browse_activities(), pinned);
-                    g_state.session.reset_document();
-                    if (preserve) {
-                        g_state.session.set_activity_logic_browse(pinned);
-                    }
-                    g_state.rowsValid = false;
+            if (rows.empty()) {
+                ImGui::TextDisabled("The runtime scenario roster is unavailable.");
+            }
+            ImGui::EndMenu();
+        }
+        const location_catalog::PreviewStatus toolbarPreview =
+            location_catalog::preview_status();
+        if (toolbarPreview.active) {
+            ImGui::Separator();
+            ImGui::TextColored(kWarning,
+                               "AUTHORED PREVIEW - NOT LIVE: %s",
+                               toolbarPreview.displayName.c_str());
+        }
+        if (ImGui::BeginMenu("Packages")) {
+            location_catalog::Scope scope{};
+            const bool scopeResolved = current_catalog_scope(scope);
+            const location_catalog::Status catalogStatus = location_catalog::status();
+            ImGui::BeginDisabled(!scopeResolved || !catalogStatus.canCollect);
+            if (ImGui::MenuItem("Catalogue Current Location")) {
+                (void)location_catalog::request(scope);
+            }
+            ImGui::EndDisabled();
+            if (!scopeResolved) {
+                ImGui::TextDisabled("Enter a resolved activity location to catalogue its packages.");
+            }
+            ImGui::Separator();
+            const auto domain = [](const char* label,
+                                   const location_catalog::DomainStatus& value) {
+                ImGui::Text("%s: %s (%zu)",
+                            label,
+                            location_catalog::state_name(value.state),
+                            value.records);
+                if (!value.diagnostic.empty() && ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("%s", value.diagnostic.c_str());
                 }
-            }
-            if (!provider::activity_logic::state().reloadDiagnostic.empty()) {
-                ImGui::TextDisabled("%s",
-                                    provider::activity_logic::state().reloadDiagnostic.c_str());
-            }
-            if (catalog.empty()) {
-                ImGui::TextDisabled("No Activity Logic catalog installed.");
-            }
+            };
+            domain("Activity Graph", catalogStatus.activityGraph);
+            domain("Activity Logic", catalogStatus.activityLogic);
+            domain("Bubble bounds", catalogStatus.bubbleBounds);
+            domain("Statics", catalogStatus.statics);
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Overlays")) {
@@ -3634,7 +3798,6 @@ void draw_toolbar() noexcept {
         }
         ImGui::EndMenuBar();
     }
-    draw_activity_logic_browser();
 
     const ImVec2 minimum = ImGui::GetWindowPos();
     const ImVec2 size = ImGui::GetWindowSize();
@@ -3782,6 +3945,14 @@ void draw_status(const camera::Status& status) noexcept {
                       available.warnings);
         (void)colored(segment.data(), available.errors != 0 ? kFailure : kWarning);
     }
+    const location_catalog::PreviewStatus preview = location_catalog::preview_status();
+    if (preview.active) {
+        std::snprintf(segment.data(),
+                      segment.size(),
+                      "| AUTHORED PREVIEW: %s · NOT LIVE",
+                      preview.displayName.c_str());
+        (void)colored(segment.data(), kWarning);
+    }
     std::snprintf(segment.data(),
                   segment.size(),
                   "| %.0f FPS",
@@ -3795,25 +3966,12 @@ void draw_status(const camera::Status& status) noexcept {
                   available.knownBounds);
     (void)disabled(segment.data());
     if (available.logicDefinitions != 0) {
-        if (root_bool("activity_logic_browse_only")) {
-            const std::string_view activityName = root_text("activity_logic_activity");
-            const std::string_view destination = root_text("activity_logic_destination");
-            std::snprintf(segment.data(),
-                          segment.size(),
-                          "| Static browse %.*s / %.*s · not live",
-                          static_cast<int>(activityName.size()),
-                          activityName.data(),
-                          static_cast<int>(destination.size()),
-                          destination.data());
-            (void)colored(segment.data(), kWarning);
-        } else {
-            std::snprintf(segment.data(),
-                          segment.size(),
-                          "| Logic %zu / %zu placed",
-                          available.logicDefinitions,
-                          available.logicPlacements);
-            (void)disabled(segment.data());
-        }
+        std::snprintf(segment.data(),
+                      segment.size(),
+                      "| Logic %zu / %zu placed",
+                      available.logicDefinitions,
+                      available.logicPlacements);
+        (void)disabled(segment.data());
     }
     if (available.triggerCenters != 0) {
         std::snprintf(segment.data(),
@@ -3822,10 +3980,6 @@ void draw_status(const camera::Status& status) noexcept {
                       available.triggerCenters,
                       available.triggerShapes);
         (void)disabled(segment.data());
-    }
-    const model::ProviderReport* activityReport = provider_report(model::Producer::activityCatalog);
-    if (activityReport != nullptr && activityReport->installed && !activityReport->ready) {
-        (void)colored("| Catalog browse-only", kWarning);
     }
     if (world_context().bubble.has_value()) {
         std::snprintf(segment.data(),
@@ -3896,8 +4050,6 @@ void pop_workspace_style() noexcept {
 } // namespace
 
 void initialize() noexcept {
-    content::statics::initialize();
-    content::statics::clear();
     viewport::reset();
     g_state = {};
     g_open.store(false, std::memory_order_release);
@@ -3911,7 +4063,6 @@ void shutdown() noexcept {
     g_state.session.reset();
     viewport::reset();
     g_state = {};
-    content::statics::shutdown();
 }
 
 void open() noexcept {
@@ -3922,7 +4073,8 @@ void open() noexcept {
 void close() noexcept {
     g_open.store(false, std::memory_order_release);
     camera::request_active(false);
-    content::statics::cancel();
+    (void)location_catalog::clear_activity_preview();
+    location_catalog::cancel();
     suspend();
 }
 
@@ -4033,26 +4185,11 @@ bool render(bool uiVisible) noexcept {
     const provider::RefreshResult refresh = g_state.session.refresh();
     const bool rebuilt = refresh.rebuilt();
 
-    // Resolve statics only from packages the active destination declares. A global
-    // class sweep mixes unrelated worlds and makes both the graph and frame hitch.
-    if (world_context().sessionPresent && world_context().activitySession != 0
-        && !world_context().packageName.empty()) {
-        scenario_state::Definition layout{};
-        if (state::build_data::find_scenario_layout(world_context().packageName, layout)) {
-            const std::string_view mapFamily = !world_context().mapStem.empty()
-                                                   ? std::string_view(world_context().mapStem)
-                                                   : std::string_view(world_context().packageName);
-            content::statics::advance_pass(world_context().activitySession, mapFamily);
-            const std::uint64_t footprintRevision = content::statics::publication_revision();
-            if (content::statics::scope_matches(world_context().activitySession)
-                && (g_state.staticsFootprintsAnnouncedScope != world_context().activitySession
-                    || g_state.staticsFootprintsAnnouncedRevision != footprintRevision)) {
-                g_state.staticsFootprintsAnnouncedScope = world_context().activitySession;
-                g_state.staticsFootprintsAnnouncedRevision = footprintRevision;
-                g_state.session.reset_document();
-                g_state.rowsValid = false;
-            }
-        }
+    location_catalog::Scope catalogScope{};
+    (void)current_catalog_scope(catalogScope);
+    if (location_catalog::refresh(catalogScope)) {
+        g_state.session.reset_document();
+        g_state.rowsValid = false;
     }
     if (rebuilt) {
         const bool firstPopulation = !g_state.stableStateInitialized;
@@ -4082,6 +4219,7 @@ bool render(bool uiVisible) noexcept {
     ImGui::PopStyleVar(3);
     if (submit) {
         draw_toolbar();
+        draw_activity_browser();
 
         const ImVec2 contentOrigin = ImGui::GetCursorScreenPos();
         const float statusHeight = scaled(kStatusHeight);

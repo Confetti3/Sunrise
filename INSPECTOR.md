@@ -1,7 +1,7 @@
 # Viewer and World Inspector
 
 Viewer adds a detached camera and inspection workspace for the supported Destiny 2 build. Inspector
-combines copied runtime observations and optional authored catalogs into one searchable,
+combines copied runtime observations and current-location package evidence into one searchable,
 pointer-free document. Each producer reports its own readiness, bounded copy counts, truncation, and
 failure, so one unavailable source does not disable unrelated evidence.
 
@@ -67,7 +67,7 @@ request sequence, engine frame, graph generation, and immutable scene ownership.
 
 ## Supported build and limitations
 
-The native signatures, layout assumptions, image metadata, and optional catalogs target Destiny 2
+The native signatures, layout assumptions, image metadata, and package collectors target Destiny 2
 content build 86657. They are fail-closed on a different or malformed image. This repository does
 not include a game executable, extracted manifests, research corpora, generated catalogs, or other
 copyrighted game data.
@@ -83,32 +83,56 @@ volume shapes, audio emitters, lights, navigation, physics controllers, stable p
 identities, and general live entity bounds do not have proven producers and are not represented as
 placeholder nodes or fake reports.
 
-## Optional catalogs
+## Current-location package catalogues
 
-The three converters accept user-supplied extracted data and write generated output outside source
-control. Sunrise looks for these files beside the installed DLL, normally `bin\x64\Sunrise`:
+The Inspector toolbar's **Packages > Catalogue Current Location** action performs the proven native
+statics, Activity Logic, and Activity Graph passes for the active scenario. The statics pass scans
+only declared packages and the scenario package's exact content-family set. Activity Logic follows the
+verified build-86657 scenario/resource/wrapper chain and publishes validated typed definitions,
+exact map-table placements, and neutral serialized-name references between definitions owned by the
+same reachable resource. Those references mean only "source contains target's serialized name";
+they are not presented as execution flow. Activity Graph reads the three fixed build-86657
+dependency indexes, matches the current scenario's exact named-tag stem, and publishes verified
+graph/node identities, signed authored positions, ordered native state-enum sequences, activity
+references, and graph links. Build 86657 has empty native node-style descriptors, so Sunrise does
+not display an invented zero style. Its modern map-node placement tables do not carry Activity Graph
+node identities and therefore are not published as location releases.
 
-```powershell
-python tools/build_activity_graph_catalog.py `
-  --input <activity-manifest.json> `
-  --output bin\x64\Sunrise\activity-graph-catalog.bin
+Bubble bounds are built in-process from the current scenario's bubble identities and the bounded
+package-native parent, map-container, static-table, and transform chain. Misc hash64 dependencies
+are resolved only from the exact content family and the shared activities/environments families;
+an unresolved dependency never broadens into an installed-package sweep. The declared package IDs
+remain part of the exact cache scope and invalidation key. Each successful domain is cached by
+installed-content fingerprint and scenario tag, then activated automatically on the next Inspector
+open. Sunrise does not load global Inspector catalogue artifacts beside the DLL; package collection
+and these fingerprinted location shards are the only Inspector catalogue sources.
 
-python tools/build_activity_logic_catalog.py `
-  --input <activity-logic.json> `
-  --output bin\x64\Sunrise\activity-logic-catalog.bin
+## Authored activity previews
 
-python tools/build_bubble_bounds_catalog.py `
-  --corpus <mesh-hillshade-bubbles-directory> `
-  --output bin\x64\Sunrise\bubble-bounds-catalog.bin
-```
+The **Activities** menu is populated from the runtime build-data scenario roster. Selecting an
+installed activity activates its matching Graph and Logic cache shards or starts bounded native
+package collection for that activity's declared packages. Preview selection is memory-only, and
+the resulting evidence uses the same fingerprinted cache schemas as live collection.
 
-Missing, malformed, build-mismatched, or capacity-limited catalogs fail locally and publish a
-diagnostic. Browse-only authored data is labeled as such and never presented as current live state.
+Preview nodes are explicitly marked **AUTHORED PREVIEW - NOT LIVE** and contain package, map-family,
+and scenario provenance without runtime session, bubble, spawn, or activity-index claims. Statics
+and bubble bounds always remain attached to the live location. Placement helpers render only when
+the preview and live map families match; cross-map previews keep their full tree and relationship
+data while suppressing viewport helpers. **Return to Live Activity** restores the live Graph and
+Logic shards without recollecting them.
+
+Short-lived object-system emitters are excluded from Inspector structural snapshots. Their recycled
+handles do not rebuild the Scene Tree or disturb selection while effects spawn and expire.
 
 ## Persistence
 
 `viewer.json` owns Viewer camera/input settings. `viewer-paths.json` owns camera paths.
 `inspector.json` owns Inspector layout, filters, overlay detail, and labels.
+
+Current-location package shards live beneath
+`Sunrise\cache\inspection\<content-fingerprint>\<scenario-tag>`. They contain authored package
+evidence only; runtime observations, activity-session identities, native pointers, and package keys
+are never persisted.
 
 Inspector settings use `"schema_version": 1`. A missing file creates defaults. A malformed or
 incompatible file is logged and defaults are used without importing or overwriting `viewer.json`.
@@ -140,14 +164,14 @@ Run this checklist against both Debug and Release builds before committing:
 - Enter/exit detached Viewer camera; verify player anchoring and restored ordinary camera control.
 - Exercise Viewer movement, speed/FOV, HUD visibility, audio listener/mute controls, and input focus.
 - Create, edit, save, reload, play, interrupt, and delete camera paths.
-- Browse every Inspector view and bottom panel; search quoted/bare terms; select, focus, hide,
+- Exercise every Inspector view and bottom panel; search quoted/bare terms; select, focus, hide,
   isolate, restore, and copy values.
 - Exercise selected-only, nearby, adaptive, all, and camera-nearby detail modes.
 - Verify depth helpers become ready and remain correctly occluded; confirm unavailable, stale, and
   rejected depth inputs show an explicit failure with no helper geometry. Resize/reset the device
   and change resolution/window state.
-- Load each optional catalog, verify missing/malformed/build-mismatch diagnostics, and inspect
-  browse-only labeling.
+- Catalogue a current location, verify every domain's ready/unavailable status, then restart and
+  verify matching fingerprinted shards load as cached.
 - Verify safe and rejected Teleport Player Here targets.
 - Restart to verify `viewer.json`, `viewer-paths.json`, and schema-1 `inspector.json`
   persistence and rejection/default behavior.

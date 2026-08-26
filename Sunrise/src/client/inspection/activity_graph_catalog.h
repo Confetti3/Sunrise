@@ -10,7 +10,8 @@
 
 namespace sunrise::client::inspection::activity_catalog {
 
-inline constexpr std::uint32_t kSchemaVersion = 1;
+inline constexpr std::uint32_t kSchemaVersion = 3;
+inline constexpr std::uint32_t kCollectorVersion = 1;
 inline constexpr std::uint32_t kTargetContentBuild = 86657;
 inline constexpr std::size_t kDigestSize = 32;
 inline constexpr std::size_t kHeaderSize = 224;
@@ -28,8 +29,8 @@ struct GraphNode final {
     std::uint32_t nodeHash{};
     float authoredX{};
     float authoredY{};
-    std::uint32_t stateHash{};
-    std::uint32_t styleHash{};
+    /** Ordered, repeatable native build-86657 state enum values. */
+    std::vector<std::uint32_t> stateValues;
     std::vector<std::uint32_t> activityHashes;
     std::vector<std::uint32_t> linkedGraphHashes;
 };
@@ -40,23 +41,14 @@ struct Graph final {
     std::vector<std::uint32_t> linkedGraphHashes;
 };
 
-struct LocationRelease final {
-    std::uint32_t locationHash{};
-    std::uint32_t graphHash{};
-    std::uint32_t nodeHash{};
-    std::array<float, 3> spawnPoint{};
-    std::array<float, 4> publicPosition{};
-};
-
 struct Catalog final {
+    std::uint32_t schemaVersion{kSchemaVersion};
     std::uint32_t contentBuild{};
-    std::string manifestVersion;
-    Digest activityDigest{};
-    Digest graphDigest{};
-    Digest locationDigest{};
+    std::uint32_t collectorVersion{kCollectorVersion};
+    std::uint32_t scenarioTag{};
+    Digest contentFingerprint{};
     std::vector<Activity> activities;
     std::vector<Graph> graphs;
-    std::vector<LocationRelease> locationReleases;
 };
 
 enum class Compatibility : std::uint8_t {

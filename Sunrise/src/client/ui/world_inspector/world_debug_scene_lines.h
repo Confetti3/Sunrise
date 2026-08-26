@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <span>
+#include <string_view>
 #include <unordered_set>
 
 #include "../../inspection/inspection_scene.h"
@@ -23,6 +24,7 @@ struct CollectQuery final {
     inspection::OverlayPolicy policy;
     inspection::RenderViewSnapshot renderView{};
     inspection::SceneFramePtr previousPresentation{};
+    std::string_view liveMapFamily;
     std::size_t maximumBoxes{kMaximumBoxes};
 
     CollectQuery() = default;

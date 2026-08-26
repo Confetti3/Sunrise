@@ -33,10 +33,6 @@ void InspectionSession::reset_document() noexcept {
     provider_.reset();
 }
 
-void InspectionSession::set_activity_logic_browse(std::uint32_t scenarioTag) noexcept {
-    provider_.set_activity_logic_browse(scenarioTag);
-}
-
 const InspectionDocument& InspectionSession::document() const noexcept {
     return provider_.snapshot();
 }

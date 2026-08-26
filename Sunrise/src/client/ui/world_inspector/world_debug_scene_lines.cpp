@@ -427,8 +427,16 @@ CollectStats collect(inspection::SceneFrame& frame,
             : static_cast<std::size_t>((std::clamp)(query.policy.maximumVisibleNodes, 32U, 1024U));
     const std::size_t nodeLimit = (std::min)(query.maximumBoxes, requestedLimit);
 
+    const auto preview_map_matches = [&query](const inspection::Node& node) noexcept {
+        return !node.source.authoredPreview
+               || (!query.liveMapFamily.empty() && node.source.mapStem == query.liveMapFamily);
+    };
+
     const inspection::NodeId focusId = query.selected ? query.selected : query.hovered;
     const inspection::Node* focusNode = focusId ? graph.node(focusId) : nullptr;
+    if (focusNode != nullptr && !preview_map_matches(*focusNode)) {
+        focusNode = nullptr;
+    }
     std::array<float, 3> focusCenter{};
     bool ignoredBounds = false;
     const bool hasFocusCenter =
@@ -504,6 +512,10 @@ CollectStats collect(inspection::SceneFrame& frame,
     };
 
     const auto eligible = [&](const inspection::Node& node, bool selected) noexcept {
+        if (!preview_map_matches(node)) {
+            ++stats.categoryFilteredNodes;
+            return false;
+        }
         if (!selected && !admitted.contains(node.id.value)) {
             return false;
         }

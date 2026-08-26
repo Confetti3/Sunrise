@@ -45,9 +45,6 @@ public:
     /** Refreshes copied world state and classifies no-op, value-only, and graph rebuild changes. */
     [[nodiscard]] RefreshResult refresh();
 
-    /** Sets the activity-logic browse scenario; zero restores live-match behavior. */
-    void set_activity_logic_browse(std::uint32_t scenarioTag) noexcept;
-
     /** Returns the current pointer-free inspection document. */
     [[nodiscard]] const InspectionDocument& snapshot() const noexcept;
     void reset() noexcept;
@@ -97,7 +94,6 @@ private:
         std::int32_t region{-1};
         std::int32_t bubble{-1};
         std::int32_t mapBubble{-1};
-        std::uint32_t activityLogicBrowseScenarioTag{};
         bool sessionPresent{};
         bool scenarioReady{};
         bool scenarioPresent{};
@@ -133,7 +129,6 @@ private:
     Key key_{};
     std::uint32_t generation_{};
     std::uint32_t producerEpoch_{};
-    std::uint32_t browseScenarioTag_{};
     std::uint64_t valueRevision_{};
     PlacedCacheKey placedCacheKey_{};
     std::vector<placed_objects::Snapshot> placedCache_;

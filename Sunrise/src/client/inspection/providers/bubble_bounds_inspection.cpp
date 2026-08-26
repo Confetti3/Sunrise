@@ -6,12 +6,9 @@
 #include <string_view>
 #include <utility>
 
-#include "../../../core/filesystem/path.h"
-
 namespace sunrise::client::inspection::providers::bubble_bounds {
 namespace {
 
-constexpr std::wstring_view kCatalogSuffix = L"\\bubble-bounds-catalog.bin";
 State g_state{};
 
 [[nodiscard]] std::string bubble_label(std::uint64_t tag, const std::string& family) {
@@ -43,52 +40,72 @@ State g_state{};
 
 } // namespace
 
-void initialize(void* module) noexcept {
-    shutdown();
-    g_state.initialized = true;
-    core::path::Buffer path{};
-    if (!core::path::artifact_directory(module, path)
-        || !core::path::append(path, kCatalogSuffix)) {
-        g_state.load.compatibility = bubble_catalog::Compatibility::missing;
-        g_state.load.diagnostic = "Bubble bounds catalog artifact path is unavailable.";
-        return;
-    }
-    g_state.load = bubble_catalog::load_file(path.chars.data(), g_state.catalog);
-}
-
-void shutdown() noexcept {
-    g_state = {};
-}
-
 const State& state() noexcept {
     return g_state;
+}
+
+bool activate_location(bubble_catalog::Catalog location, std::string_view family) noexcept {
+    try {
+        std::string error;
+        if (family.empty() || location.contentBuild != bubble_catalog::kTargetContentBuild
+            || !bubble_catalog::validate(location, error)
+            || !std::ranges::all_of(location.bubbles, [family](const auto& bubble) {
+                   return bubble.family == family;
+               })) {
+            return false;
+        }
+        g_state.locationCatalog = std::move(location);
+        g_state.locationFamily = std::string(family);
+        g_state.locationActive = true;
+        ++g_state.publicationRevision;
+        if (g_state.publicationRevision == 0) {
+            g_state.publicationRevision = 1;
+        }
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+void deactivate_location() noexcept {
+    if (!g_state.locationActive) {
+        return;
+    }
+    g_state.locationCatalog = {};
+    g_state.locationFamily.clear();
+    g_state.locationActive = false;
+    ++g_state.publicationRevision;
+    if (g_state.publicationRevision == 0) {
+        g_state.publicationRevision = 1;
+    }
+}
+
+std::uint64_t publication_revision() noexcept {
+    return g_state.publicationRevision;
 }
 
 AppendResult
 append(Graph& graph, std::vector<Diagnostic>& diagnostics, const Source& source, NodeId parent) {
     AppendResult result{};
-    result.present = g_state.load.compatibility == bubble_catalog::Compatibility::compatible
-                     || g_state.load.compatibility == bubble_catalog::Compatibility::buildMismatch;
-    result.buildMatch = g_state.load.compatibility == bubble_catalog::Compatibility::compatible;
-    result.contentBuild = g_state.catalog.contentBuild;
-    result.diagnostic = g_state.load.diagnostic;
+    const std::string family = active_family(source);
+    const bool locationMatch = g_state.locationActive && g_state.locationFamily == family;
+    result.present = locationMatch;
+    result.diagnostic = locationMatch ? "Current-location bubble-bounds cache loaded."
+                                      : "No matching current-location bubble bounds are active.";
     if (!result.present) {
-        diagnostics.push_back({Diagnostic::Severity::information,
-                               g_state.load.diagnostic.empty()
-                                   ? "No optional bubble bounds catalog is installed."
-                                   : g_state.load.diagnostic});
         return result;
     }
+    const bubble_catalog::Catalog& evidence = g_state.locationCatalog;
+    result.contentBuild = evidence.contentBuild;
 
-    const std::string family = active_family(source);
     if (family.empty()) {
         diagnostics.push_back({Diagnostic::Severity::information,
-                               "Bubble bounds are installed, but the active map family is "
+                               "Bubble bounds are active, but the current map family is "
                                "unavailable."});
         return result;
     }
     const bool hasFamily = std::ranges::any_of(
-        g_state.catalog.bubbles,
+        evidence.bubbles,
         [&family](const bubble_catalog::Bubble& bubble) { return bubble.family == family; });
     if (!hasFamily) {
         diagnostics.push_back(
@@ -98,11 +115,10 @@ append(Graph& graph, std::vector<Diagnostic>& diagnostics, const Source& source,
     }
 
     Node groupNode;
-    groupNode.name = result.buildMatch ? "Map bubbles · " + family
-                                       : "Map bubbles · " + family + " (Browse only)";
+    groupNode.name = "Map bubbles · " + family;
     groupNode.searchText = "map bubble bounds aabb package footprint catalog";
     groupNode.kind = NodeKind::geometry;
-    groupNode.status = result.buildMatch ? Status::known : Status::deferred;
+    groupNode.status = Status::known;
     groupNode.producer = Producer::catalog;
     groupNode.provenance = Provenance::catalog;
     groupNode.nativeKey = result.contentBuild;
@@ -115,7 +131,7 @@ append(Graph& graph, std::vector<Diagnostic>& diagnostics, const Source& source,
         return result;
     }
 
-    for (const bubble_catalog::Bubble& bubble : g_state.catalog.bubbles) {
+    for (const bubble_catalog::Bubble& bubble : evidence.bubbles) {
         if (bubble.family != family) {
             continue;
         }
@@ -123,7 +139,7 @@ append(Graph& graph, std::vector<Diagnostic>& diagnostics, const Source& source,
         node.name = bubble_label(bubble.tag, bubble.family);
         node.searchText = "map bubble bounds aabb package footprint catalog";
         node.kind = NodeKind::geometry;
-        node.status = result.buildMatch ? Status::known : Status::deferred;
+        node.status = Status::known;
         node.producer = Producer::catalog;
         node.provenance = Provenance::catalog;
         node.nativeKey = bubble.tag;

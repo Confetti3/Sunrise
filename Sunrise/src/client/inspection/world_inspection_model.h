@@ -199,6 +199,7 @@ struct Source final {
     std::optional<std::uint64_t> activitySession;
     std::optional<std::int32_t> activityIndex;
     std::optional<std::uint16_t> bubble;
+    bool authoredPreview{};
     [[nodiscard]] friend bool operator==(const Source&, const Source&) noexcept = default;
 };
 
@@ -206,16 +207,12 @@ struct ActivityMetadata final {
     std::uint32_t activityHash{};
     std::uint32_t graphHash{};
     std::uint32_t nodeHash{};
-    std::uint32_t stateHash{};
-    std::uint32_t styleHash{};
+    std::vector<std::uint32_t> nativeStateValues;
     std::array<float, 2> authoredPosition{};
-    std::uint32_t releaseCount{};
     std::uint32_t referenceCount{};
     std::uint32_t catalogBuild{};
-    std::string catalogVersion;
+    std::uint32_t collectorVersion{};
     std::vector<std::uint32_t> linkedGraphHashes;
-    bool buildMatch{};
-    bool browseOnly{true};
 };
 struct ActivityLogicRelationship final {
     std::uint32_t definitionTag{};

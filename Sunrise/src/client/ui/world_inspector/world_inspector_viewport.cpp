@@ -90,6 +90,7 @@ struct ViewportState final {
     ImVec2 gpuPickPointer{};
     inspection::NodeId gpuHovered{};
     bool gpuPickValid{};
+    std::chrono::steady_clock::time_point lastPickRequest{};
 };
 
 [[nodiscard]] ViewportState& state() noexcept {
@@ -539,15 +540,15 @@ Result draw_impl(const inspection::Graph& graph,
         if (retained.pendingPick.sequence != 0) {
             const inspection::PickResult completed = inspection::pick_result();
             if (completed.requestSequence == retained.pendingPick.sequence) {
-                retained.gpuPickValid =
-                    inspection::pick_result_fresh(completed,
-                                                  retained.pendingPick,
-                                                  frame.frameId,
-                                                  options.exactView.engineFrame,
-                                                  options.exactView.publication,
-                                                  options.renderStatus.depthSequence,
-                                                  graph.generation());
-                if (retained.gpuPickValid) {
+                const bool fresh = inspection::pick_result_fresh(completed,
+                                                                 retained.pendingPick,
+                                                                 frame.frameId,
+                                                                 options.exactView.engineFrame,
+                                                                 options.exactView.publication,
+                                                                 options.renderStatus.depthSequence,
+                                                                 graph.generation());
+                if (fresh) {
+                    retained.gpuPickValid = true;
                     retained.gpuHovered = completed.node;
                     retained.gpuPickPointer = retained.pendingPickPointer;
                 }
@@ -579,7 +580,11 @@ Result draw_impl(const inspection::Graph& graph,
             options.exactView.viewport,
             static_cast<std::uint32_t>((std::max)(frame.width, 0.0F)),
             static_cast<std::uint32_t>((std::max)(frame.height, 0.0F)));
-        if (coordinate.valid && retained.pendingPick.sequence == 0) {
+        const auto now = std::chrono::steady_clock::now();
+        constexpr auto kPickInterval = std::chrono::milliseconds(100);
+        const bool pickDue = retained.lastPickRequest.time_since_epoch().count() == 0
+                             || now - retained.lastPickRequest >= kPickInterval;
+        if (coordinate.valid && retained.pendingPick.sequence == 0 && pickDue) {
             if (++retained.pickSequence == 0) {
                 ++retained.pickSequence;
             }
@@ -594,6 +599,7 @@ Result draw_impl(const inspection::Graph& graph,
             inspection::publish_pick_request(request);
             retained.pendingPick = request;
             retained.pendingPickPointer = pointer;
+            retained.lastPickRequest = now;
         }
     }
     if (viewportHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {

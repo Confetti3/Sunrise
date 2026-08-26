@@ -6,7 +6,6 @@
 #include <string_view>
 
 #include "../../../state/build_data/worlds/world_catalog.h"
-#include "activity_override_enrichment.h"
 
 namespace sunrise::server::ui::activity_override {
 
@@ -37,7 +36,6 @@ struct Lists {
 
     /** Reusable catalog view for the selected destination and optional bubble. */
     state::build_data::worlds::Details selected{};
-    enrichment::Summary authored{};
     std::array<Label, kSliceCapacity> slices{};
     std::array<std::uint16_t, kSliceCapacity> sliceValues{};
     std::size_t sliceCount{};

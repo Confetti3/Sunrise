@@ -272,6 +272,7 @@ template <typename Value>
     result += "|" + optional_text(source.activitySession);
     result += "|" + optional_text(source.activityIndex);
     result += "|" + optional_text(source.bubble);
+    result += source.authoredPreview ? "|preview" : "|live";
     return result;
 }
 
@@ -311,12 +312,13 @@ template <typename Value>
     mix(document.graph.breadcrumb(node.id));
     mix(node.source.packageName);
     mix(node.source.mapStem);
+    mix(node.source.authoredPreview ? "preview" : "live");
     return hash == 0 ? 1 : hash;
 }
 
 [[nodiscard]] std::uint32_t identity_epoch(const InspectionDocument&, const Node& node) noexcept {
-    // The optional activity catalog is immutable browse metadata loaded once at startup.
-    // It must not churn identity merely because the live activity producer epoch changes.
+    // Package-authored activity evidence is immutable for one fingerprinted location shard. It
+    // must not churn identity merely because the live activity producer epoch changes.
     return node.producer == Producer::activityCatalog
                    || node.producer == Producer::activityLogicCatalog
                ? 0U
@@ -604,6 +606,8 @@ void append_node_json(std::string& output, const InspectionDocument& document, c
     append_optional_integer(output, "activity_session", node.source.activitySession);
     append_optional_integer(output, "activity_index", node.source.activityIndex);
     append_optional_integer(output, "bubble", node.source.bubble);
+    output.append(", \"authored_preview\": ");
+    output.append(node.source.authoredPreview ? "true" : "false");
     output.append("}");
     output.append(", \"transform\": ");
     if (!node.transform.has_value()) {
@@ -661,22 +665,24 @@ void append_node_json(std::string& output, const InspectionDocument& document, c
         append_number(output, metadata.graphHash);
         output.append(", \"node_hash\": ");
         append_number(output, metadata.nodeHash);
-        output.append(", \"state_hash\": ");
-        append_number(output, metadata.stateHash);
-        output.append(", \"style_hash\": ");
-        append_number(output, metadata.styleHash);
+        output.append(", \"native_state_sequence\": [");
+        for (std::size_t index = 0; index < metadata.nativeStateValues.size(); ++index) {
+            if (index != 0) {
+                output.append(", ");
+            }
+            append_number(output, metadata.nativeStateValues[index]);
+        }
+        output.append("]");
         output.append(", \"authored_position\": [");
         append_float(output, metadata.authoredPosition[0]);
         output.append(", ");
         append_float(output, metadata.authoredPosition[1]);
-        output.append("], \"release_count\": ");
-        append_number(output, metadata.releaseCount);
-        output.append(", \"reference_count\": ");
+        output.append("], \"reference_count\": ");
         append_number(output, metadata.referenceCount);
         output.append(", \"catalog_build\": ");
         append_number(output, metadata.catalogBuild);
-        output.append(", \"catalog_version\": ");
-        append_json_string(output, metadata.catalogVersion);
+        output.append(", \"collector_version\": ");
+        append_number(output, metadata.collectorVersion);
         output.append(", \"linked_graphs\": [");
         for (std::size_t index = 0; index < metadata.linkedGraphHashes.size(); ++index) {
             if (index != 0) {
@@ -684,11 +690,7 @@ void append_node_json(std::string& output, const InspectionDocument& document, c
             }
             append_number(output, metadata.linkedGraphHashes[index]);
         }
-        output.append("]");
-        output.append(", \"build_match\": ");
-        output.append(metadata.buildMatch ? "true" : "false");
-        output.append(", \"browse_only\": ");
-        output.append(metadata.browseOnly ? "true}" : "false}");
+        output.append("]}");
     }
     output.append(", \"activity_logic_metadata\": ");
     if (!node.activityLogicMetadata.has_value()) {
@@ -907,7 +909,7 @@ void append_node_json(std::string& output, const InspectionDocument& document, c
     std::string output =
         "schema_version,captured_tick,image_sha256,image_verified,structure_revision,"
         "value_revision,key,parent_key,kind,producer,status,provenance,name,package,map_stem,"
-        "scenario_tag,spawn_set_hash,activity_session,activity_index,bubble,spatial_kind,"
+        "scenario_tag,spawn_set_hash,activity_session,activity_index,bubble,authored_preview,spatial_kind,"
         "position_x,position_y,position_z,bounds_minimum,bounds_maximum,properties,relations,"
         "authored_metadata\r\n";
     output.reserve(document.graph.nodes().size() * 256U + output.size());
@@ -982,6 +984,8 @@ void append_node_json(std::string& output, const InspectionDocument& document, c
             output.push_back(',');
             append_csv(output, value);
         }
+        output.push_back(',');
+        output.append(node.source.authoredPreview ? "true" : "false");
 
         const SpatialEvidence spatial = spatial_evidence(node);
         output.push_back(',');
@@ -1095,7 +1099,7 @@ History::StateMap History::collect(const InspectionDocument& document) const {
     for (const Node& node : document.graph.nodes()) {
         // Havok array slots are observations, not durable body identities. Export them, but do not
         // claim continuity for change history until a producer can prove a lifetime key.
-        // Browse-only activity metadata is immutable and would only waste the bounded event bank.
+        // Package-authored activity metadata is immutable and would only waste the bounded event bank.
         if (node.producer == Producer::physics || node.producer == Producer::activityCatalog
             || node.producer == Producer::activityLogicCatalog) {
             continue;

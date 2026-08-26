@@ -68,8 +68,8 @@ struct WorkspaceState final {
     graph::State graphState;
     graph::State relationshipGraphState;
     std::array<char, searchCapacity> search{};
-    std::array<char, searchCapacity> activityLogicSearch{};
     std::array<char, searchCapacity> eventFilter{};
+    std::array<char, searchCapacity> activitySearch{};
     CenterMode centerMode{CenterMode::world};
     GraphScope graphScope{GraphScope::selectionNeighborhood};
     std::uint32_t selectedActivityGraphHash{};
@@ -89,7 +89,6 @@ struct WorkspaceState final {
     bool layoutInitialized{};
     bool stableStateInitialized{};
     bool rowsValid{};
-    bool activityLogicBrowserOpen{};
     bool showGeometry{true};
     bool showEntities{true};
     bool showSpawns{true};
@@ -113,11 +112,10 @@ struct WorkspaceState final {
     bool trackTransforms{};
     bool bottomCollapsed{};
     bool viewportNavigation{};
-    std::uint64_t staticsFootprintsAnnouncedScope{};
-    std::uint64_t staticsFootprintsAnnouncedRevision{};
     bool layoutDirty{};
     bool contextRequested{};
     bool focusSearch{};
+    bool activityBrowserOpen{};
     bool revealSelection{};
     inspection::NodeKey treeAnchor;
     float treeAnchorOffset{};
