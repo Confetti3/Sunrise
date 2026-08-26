@@ -657,7 +657,7 @@ std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcep
                 // locked, which is what claiming-only produced. It is only reached when the slot
                 // is not also the book's bar: the guard above skips it when they coincide, and for
                 // those ten the slot is the bar and has to keep counting claims.
-                state->values[node.valueIndex] = collected;
+                state->values[node.valueIndex] = chapters;
                 ++state->written;
             }
             // Eight books name no value at field 136 and so have no table entry, but their parent

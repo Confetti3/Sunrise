@@ -140,16 +140,14 @@ std::size_t apply_category_gates(std::span<std::int32_t> objectiveValues, bool r
         // is acquired from a quest or vendor. That is the same acquisition marker apply_visibility
         // already publishes for the flag-gated books, just held in the value bank instead, so it
         // is satisfied here unconditionally for the same reason.
-        bool acquisitionGate = false;
-        for (const auto& bar : record_claims::parent_bar_table::kBars) {
-            if (bar.nodeIndex == node.definitionIndex) {
-                acquisitionGate = bar.valueIndex != node.valueIndex;
-                break;
-            }
-        }
-        if (!acquisitionGate && !revealAll) {
-            continue;
-        }
+        // Every value-gated category is published, with no distinction between them. All
+        // eighteen carry the identical gate -- READ_VALUE on their own slot, op11, op8 -- so
+        // there is no reading of the shipped data on which some of them should be satisfied and
+        // others left shut. An earlier version skipped the ten whose gate index equals their bar
+        // index, on the theory that writing one would falsify the other. It does not: this pass
+        // only ever raises a zero, so those ten read 1 on their parent triumph while nothing is
+        // claimed and the true count the moment anything is, which is the same bargain the other
+        // eight already make.
         // Never lower a value already written -- a non-zero slot is either already open or holds a
         // count from elsewhere, and this pass only ever needs to prove the gate, never reset it.
         if (objectiveValues[node.valueIndex] == 0) {
