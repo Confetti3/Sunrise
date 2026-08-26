@@ -598,13 +598,11 @@ std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcep
                     haveParent = true;
                     continue;
                 }
-                // Completed, not claimed. A lore record completes when the entry is collected;
-                // claiming it afterwards only pays the score. Counting claims alone left a book
-                // reading zero for entries the player had already found, and since the category's
-                // visibility gate reads this very slot and tests it above zero, a book whose
-                // entries were all collected but unclaimed disappeared outright.
-                if (claimed_locked(record.completionFlagIndex)
-                    || claimable_locked(record.completionFlagIndex)) {
+                // Claimed only. Verified against the live game: a lore book's bar moves when the
+                // chapter's triumph is claimed, not when the entry is collected. Counting
+                // collected entries as well was tried on the reasoning that a record completes on
+                // collection, and it is simply not what the bar does.
+                if (claimed_locked(record.completionFlagIndex)) {
                     ++chapters;
                 }
             }
