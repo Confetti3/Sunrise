@@ -10,6 +10,16 @@
 
 namespace sunrise::state::record_claims::objective_slot_table {
 
+/**
+ * First value-bank slot a record's objective can occupy.
+ *
+ * Below this the bank holds category counters and visibility gates; at and above it every slot
+ * belongs to some record's objective. Three lore nodes name a gate slot inside this range, so any
+ * pass that publishes gates or counters has to stop here or it overwrites a record's objective and
+ * redacts records wholesale -- which is exactly what happened once.
+ */
+inline constexpr std::int32_t kRecordObjectiveRangeStart = 2746;
+
 /** One objective's account value-bank slot and the value it must hold to read complete. */
 struct ObjectiveSlot {
     std::uint16_t slot;

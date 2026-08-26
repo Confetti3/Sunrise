@@ -59,6 +59,17 @@ struct Table {
     ProgressionBank accountProgressions{};
     /** Lanes published into the selected-character object's progression bank. */
     ProgressionBank characterProgressions{};
+    /**
+     * Reveal every lore book regardless of whether anything in it has been collected.
+     *
+     * Eighteen books gate on a value slot tested above zero, and that slot is the same one the
+     * book's own bar counts into, so a book with nothing collected is hidden -- which is what the
+     * live game does too. That is faithful but unhelpful when the point is to show the collection
+     * off, so this publishes the gate anyway. It costs a book its true zero state: a revealed book
+     * with nothing collected reads 1/N rather than 0/N, because the gate and the bar are one slot
+     * and the gate has to be above zero to open. Clear it to get exact live behaviour back.
+     */
+    bool revealAllLoreBooks{true};
 };
 
 } // namespace sunrise::state::unlocks

@@ -67,4 +67,18 @@ void for_each(void* context, void (*visit)(void*, const Definition&) noexcept) n
  */
 std::size_t apply_character_visibility(std::span<std::byte> characterFlags) noexcept;
 
+/**
+ * Sets the value-gate of every lore book category that has no flag gate at all.
+ *
+ * Fifteen books are satisfied by apply_visibility over a flag. Eighteen more have no flag gate:
+ * their expression instead reads a value slot and tests it against zero, and nothing else in this
+ * build ever writes that slot, so they stay redacted forever without this. Call after every other
+ * pass that can touch the value bank -- writing a bar count zeroes the same slot on a mis-sourced
+ * table entry, and once that gate is zero the book stays hidden for the rest of the image.
+ * @param objectiveValues Bank already filled by the authored policy and every value-writing pass.
+ * @return Number of gates set.
+ */
+std::size_t apply_category_gates(std::span<std::int32_t> objectiveValues,
+                                 bool revealAll) noexcept;
+
 } // namespace sunrise::state::build_data::nodes

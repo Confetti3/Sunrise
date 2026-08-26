@@ -174,6 +174,8 @@ bool Parser::unlocks(state::unlocks::Table& output) noexcept {
             parsed = progression_values(output.accountProgressions);
         } else if (key == "character_progressions") {
             parsed = progression_values(output.characterProgressions);
+        } else if (key == "reveal_all_lore_books") {
+            parsed = boolean(output.revealAllLoreBooks);
         } else {
             parsed = skip_value(0);
         }

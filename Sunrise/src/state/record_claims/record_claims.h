@@ -78,6 +78,23 @@ std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcep
  */
 std::size_t apply_claimable_objectives(std::span<std::int32_t> objectiveValues) noexcept;
 
+/**
+ * Publishes the per-chapter visibility gate of the Year 1 lore chapters.
+ *
+ * A lore chapter is displayed only when a value slot of its own holds at least the chapter's
+ * completion value; below that the client shows a redacted entry. The slot is the record's own row
+ * offset into a contiguous block sitting immediately above the Year 1 parent bars -- measured in
+ * game, see kChapterGateBase -- and the test is a threshold, not an equality, which is why probing
+ * the block with a flat 1 lit every chapter that completes at 1 and no other.
+ *
+ * Only the chapters below kChapterGateLastRow need this. Every later chapter is displayed by
+ * default, and the same arithmetic would put their slots inside the record-objective range, where
+ * writing has previously redacted records wholesale.
+ * @param objectiveValues Account value bank.
+ * @return Number of gates published.
+ */
+std::size_t apply_chapter_visibility_gates(std::span<std::int32_t> objectiveValues) noexcept;
+
 /** @return True when this index is already held. */
 [[nodiscard]] bool claimed(std::uint16_t flagIndex) noexcept;
 

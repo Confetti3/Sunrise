@@ -1,4 +1,7 @@
 #include "node_catalog.h"
+
+#include "../../record_claims/objective_slot_table.h"
+#include "../../record_claims/parent_bar_table.h"
 #include "../../../core/logging/log.h"
 #include <cstdio>
 #include <array>
@@ -11,6 +14,18 @@ namespace {
 
 Lock g_lock;
 Table<Definition, kDefinitionCapacity> g_definitions;
+
+/**
+ * First account value-bank slot the record-objective allocation owns.
+ *
+ * Mirrors objective_slot_table::kObjectives.front().slot (2746), documented in
+ * record_claims.cpp/objective_slot_table.h as the base of the 2746-5686 record-objective range.
+ * Not read from that table directly: build_data must not depend upward on record_claims, so the
+ * boundary is restated here as its own constant rather than reached for across the layer.
+ * Three lore nodes (820, 835, 837) name a valueIndex inside this range -- writing to it has
+ * previously trampled record objectives wholesale, so this guard exists to keep this pass off it.
+ */
+
 
 } // namespace
 
@@ -89,6 +104,58 @@ std::size_t apply_visibility(std::span<std::uint8_t> accountFlags) noexcept {
         }
         accountFlags[node.visibilityFlagIndex] = unlocks::kFlagSet;
         ++set;
+    }
+    return set;
+}
+
+/** Sets the value-gate of every lore book category that has no flag gate at all. */
+std::size_t apply_category_gates(std::span<std::int32_t> objectiveValues, bool revealAll) noexcept {
+    const Lock::Shared guard(g_lock);
+    std::size_t set = 0;
+    for (const Definition& node : g_definitions.rows()) {
+        if (node.definitionIndex < kLoreNodeFirst || node.definitionIndex > kLoreNodeLast) {
+            continue;
+        }
+        // apply_visibility already owns the flag-gated books; a node with a flag gate is not one of
+        // this pass's eighteen and must be left alone.
+        if (node.visibilityFlagIndex != kUnavailableFlagIndex
+            || node.visibilityCharacterFlagIndex != kUnavailableFlagIndex) {
+            continue;
+        }
+        if (node.valueIndex == kUnavailableValueIndex
+            || static_cast<std::size_t>(node.valueIndex) >= objectiveValues.size()) {
+            continue;
+        }
+        // Three lore nodes name a valueIndex inside the record-objective range and must never be
+        // written here: that slot belongs to a record's objective, not this node's own gate, and
+        // stamping it has previously redacted large numbers of records in one pass.
+        if (static_cast<std::int32_t>(node.valueIndex) >= record_claims::objective_slot_table::kRecordObjectiveRangeStart) {
+            continue;
+        }
+        // Whether this gate is the book's own bar decides who is allowed to open it. Ten books
+        // read their gate from the very slot their bar counts into, so collecting an entry opens
+        // them by itself, exactly as the live game does -- forcing those is a presentation choice
+        // and stays behind revealAll. The other eight name a gate slot distinct from their bar:
+        // nothing on this server ever writes it, because on a real account it is set when the book
+        // is acquired from a quest or vendor. That is the same acquisition marker apply_visibility
+        // already publishes for the flag-gated books, just held in the value bank instead, so it
+        // is satisfied here unconditionally for the same reason.
+        bool acquisitionGate = false;
+        for (const auto& bar : record_claims::parent_bar_table::kBars) {
+            if (bar.nodeIndex == node.definitionIndex) {
+                acquisitionGate = bar.valueIndex != node.valueIndex;
+                break;
+            }
+        }
+        if (!acquisitionGate && !revealAll) {
+            continue;
+        }
+        // Never lower a value already written -- a non-zero slot is either already open or holds a
+        // count from elsewhere, and this pass only ever needs to prove the gate, never reset it.
+        if (objectiveValues[node.valueIndex] == 0) {
+            objectiveValues[node.valueIndex] = 1;
+            ++set;
+        }
     }
     return set;
 }

@@ -481,6 +481,65 @@ struct NodeProgress {
 }
 
 /** Writes each node's claimed-child count into the value slot its bar reads. */
+/**
+ * Base the per-chapter visibility block is addressed from: a chapter's gate is kChapterGateBase
+ * plus its own record row. Measured in game rather than derived -- the block was located by writing
+ * markers across the bank and reading which chapters appeared, and this base is the unique fit for
+ * four independent readings, including A Drifter's Gambit losing exactly its last chapter at one
+ * segment edge and Most Loyal staying dark until the block was extended past the twenty-two rows
+ * that separate it.
+ */
+constexpr std::int32_t kChapterGateBase = 1935;
+/**
+ * Rows 1-6 land on 1936-1941, which are parent bars of other books and already hold their counts.
+ * Those satisfy the threshold on their own and must not be overwritten, so the block is only
+ * written from here up.
+ */
+constexpr std::int32_t kChapterGateFirstWritable = 1942;
+/** The last row whose chapter needs a gate. Beyond it every chapter is displayed by default. */
+constexpr std::uint16_t kChapterGateLastRow = 106;
+
+/** Publishes the per-chapter visibility gate of the Year 1 lore chapters. */
+std::size_t apply_chapter_visibility_gates(std::span<std::int32_t> objectiveValues) noexcept {
+    const std::span<const objective_slot_table::RecordEntry> table{objective_slot_table::kRecords};
+    std::size_t written = 0;
+    for (std::uint16_t row = 0; row <= kChapterGateLastRow; ++row) {
+        build_data::records::Definition record{};
+        if (!build_data::find_record_definition(row, record)
+            || record.loreRow == build_data::records::kUnavailableLoreRow
+            || record.completionFlagIndex == build_data::records::kUnavailableFlagIndex) {
+            continue;
+        }
+        const std::int32_t slot = kChapterGateBase + static_cast<std::int32_t>(row);
+        if (slot < kChapterGateFirstWritable
+            || static_cast<std::size_t>(slot) >= objectiveValues.size()) {
+            continue;
+        }
+        // The gate is a threshold, so the chapter's own completion value is exactly enough: a
+        // counted chapter -- the corrupted-egg records run to nine -- needs its real count, and a
+        // flat 1 would leave every one of those redacted.
+        std::int32_t need = 1;
+        const auto found = std::lower_bound(
+            table.begin(), table.end(), record.completionFlagIndex,
+            [](const objective_slot_table::RecordEntry& entry, std::uint16_t flag) noexcept {
+                return entry.flagIndex < flag;
+            });
+        if (found != table.end() && found->flagIndex == record.completionFlagIndex) {
+            for (std::uint8_t i = 0; i < found->objectiveCount; ++i) {
+                const std::size_t at = static_cast<std::size_t>(found->firstObjective) + i;
+                if (at < objective_slot_table::kObjectives.size()) {
+                    need = std::max(need, objective_slot_table::kObjectives[at].completionValue);
+                }
+            }
+        }
+        if (objectiveValues[static_cast<std::size_t>(slot)] < need) {
+            objectiveValues[static_cast<std::size_t>(slot)] = need;
+        }
+        ++written;
+    }
+    return written;
+}
+
 std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcept {
     // Every category's own index, so the walk can tell a free slot above a category from the next
     // category along. Without it, writing the slot above drives whichever book owns that slot.
@@ -528,9 +587,13 @@ std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcep
                     haveParent = true;
                     continue;
                 }
-                // Claimed only: measured in game, a book's bar moves when a chapter's triumph is
-                // claimed, not when finding the lore makes it claimable.
-                if (claimed_locked(record.completionFlagIndex)) {
+                // Completed, not claimed. A lore record completes when the entry is collected;
+                // claiming it afterwards only pays the score. Counting claims alone left a book
+                // reading zero for entries the player had already found, and since the category's
+                // visibility gate reads this very slot and tests it above zero, a book whose
+                // entries were all collected but unclaimed disappeared outright.
+                if (claimed_locked(record.completionFlagIndex)
+                    || claimable_locked(record.completionFlagIndex)) {
                     ++chapters;
                 }
             }
@@ -544,6 +607,11 @@ std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcep
                     if (bar.nodeIndex != node.definitionIndex) {
                         continue;
                     }
+                    // A table entry naming the node's own gate is legitimate: ten books drive
+                    // their bar from the very slot that gates the category, so the count belongs
+                    // here even though writing zero into it would redact the book on its own.
+                    // What prevents that is ordering, not a guard -- nodes::apply_category_gates
+                    // runs after this pass and raises a zero gate back to one.
                     if (static_cast<std::size_t>(bar.valueIndex) < state->values.size()) {
                         state->values[bar.valueIndex] = chapters;
                         parentSlot = static_cast<std::int32_t>(bar.valueIndex);
@@ -551,6 +619,20 @@ std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcep
                     }
                     break;
                 }
+            }
+            // A book whose gate slot is not its bar slot needs the count in both. That slot is the
+            // book's entries-read counter: the category opens when it rises above zero, and on a
+            // cumulative book -- where chapter n completes at value n rather than 1 -- every
+            // chapter compares against it, so a token 1 left chapters 2 upward locked however
+            // correct their own objectives were. Kept below the record-objective range for the
+            // same reason apply_category_gates is: three books name a slot inside it that belongs
+            // to a record's objective, and writing a count there redacts records wholesale.
+            if (node.valueIndex != build_data::nodes::kUnavailableValueIndex
+                && static_cast<std::int32_t>(node.valueIndex) < objective_slot_table::kRecordObjectiveRangeStart
+                && static_cast<std::size_t>(node.valueIndex) < state->values.size()
+                && static_cast<std::int32_t>(node.valueIndex) != parentSlot) {
+                state->values[node.valueIndex] = chapters;
+                ++state->written;
             }
             // Eight books name no value at field 136 and so have no table entry, but their parent
             // slot is still derivable from the shipped allocation -- the slot just past the run of
