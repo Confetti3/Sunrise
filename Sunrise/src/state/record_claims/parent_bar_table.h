@@ -51,7 +51,7 @@ struct Bar {
     std::uint16_t valueIndex;
 };
 
-inline constexpr std::array<Bar, 34> kBars{{
+inline constexpr std::array<Bar, 35> kBars{{
     {838U, 2398U},  // Confessions (measured)
     {815U, 1932U},  // The Lawless Frontier — parent record is named "The Tangled Shore" (measured)
     {816U, 1933U},  // The Man They Call Cayde (measured)
@@ -86,6 +86,7 @@ inline constexpr std::array<Bar, 34> kBars{{
     {828U, 2575U},  // Constellations — decoded, unconfirmed (gate 2574)
     {829U, 2665U},  // Duress and Egress — decoded, unconfirmed (gate 2664)
     {854U, 2583U},  // The Liar — decoded, unconfirmed (gate 2584)
+    {835U, 2265U},  // The Book of Unmaking (measured)
 }};
 
 } // namespace sunrise::state::record_claims::parent_bar_table
