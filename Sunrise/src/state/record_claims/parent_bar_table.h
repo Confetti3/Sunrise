@@ -42,7 +42,30 @@ namespace sunrise::state::record_claims::parent_bar_table {
  * Node 819, Letters from a Renegade, is the one row the +8 method fails: its shipped objective
  * tracks an unrelated record's value. Its entry below is measured and stands.
  *
- * An entry naming the node's own gate is therefore legitimate, not a defect. What keeps such a
+ * Ten entries name the same index the node's gate reads, and that is not an error to fix.
+ * Confirmed three times in game: the number appears on the book's parent triumph, it tracked the
+ * collected count exactly book by book, and pointing the bar instead at node.parentValueIndex
+ * changed nothing -- 2351 and its neighbours are not those books' bars.
+ *
+ * One slot, two roles, so it can hold one number. A live account reveals a lore book once
+ * something in it has been collected and needs nothing claimed, while a bar elsewhere moves on
+ * claim. Here the two coincide: holding claims would hide the book until a claim, and a chapter
+ * cannot be claimed while it is invisible, so the count written here is what has been COLLECTED.
+ * Their parent triumph therefore reads collected rather than claimed. That is a consequence of
+ * the shipped allocation, not a choice, and it is the only value that does not deadlock.
+ *
+ * Every other bank was swept looking for a separate gate before accepting this: the whole account
+ * value bank at 100, the character value bank, the profile and character flag banks, and the
+ * account flags around the known visibility run. None of them reveals these books.
+ *
+ * The original superseded reading follows. That is genuine and confirmed in game:
+ * the number appears on the book's parent triumph, and it tracked the collected count exactly,
+ * book by book, when that count was written there. So the slot is the parent bar AND the gate.
+ *
+ * That is not a contradiction to resolve by dropping the entries -- they were dropped once on the
+ * theory that the index was a category-header counter, and it is not. It does mean those ten books
+ * cannot reveal themselves: the bar counts claims, a hidden chapter cannot be claimed, so the gate
+ * can never rise on its own. Something outside this table opens them on a live account. What keeps such a
  * book visible at zero chapters is ordering alone: nodes::apply_category_gates runs after this
  * pass and raises a zero gate back to one. That call must stay last -- see account_encoder.
  */
@@ -72,21 +95,21 @@ inline constexpr std::array<Bar, 35> kBars{{
     {848U, 2267U},  // The Black Armory Papers (measured)
     {849U, 2348U},  // Ecdysis (measured)
     {851U, 2397U},  // Nothing Ends (measured)
-    {822U, 2342U},  // Dust — gate is bar (measured 2342, equals its gate)
-    {823U, 2344U},  // Stolen Intelligence — gate is bar
-    {825U, 2520U},  // Luna's Lost — gate is bar
-    {826U, 2521U},  // Letters from Eris — gate is bar
-    {839U, 2514U},  // Unveiling — gate is bar
-    {840U, 2517U},  // Last Days on Kraken Mare — gate is bar
-    {841U, 2519U},  // Inquisition of the Damned — gate is bar
-    {850U, 2341U},  // A Man with No Name — gate is bar
-    {852U, 2516U},  // Aspect — gate is bar
-    {853U, 2518U},  // Revelation — gate is bar
     {824U, 2349U},  // The Warlock Aunor — decoded, unconfirmed (gate 2346)
     {828U, 2575U},  // Constellations — decoded, unconfirmed (gate 2574)
     {829U, 2665U},  // Duress and Egress — decoded, unconfirmed (gate 2664)
     {854U, 2583U},  // The Liar — decoded, unconfirmed (gate 2584)
     {835U, 2265U},  // The Book of Unmaking (measured)
+    {850U, 2341U},  // A Man with No Name — gate and parent bar are one slot; see below
+    {822U, 2342U},  // Dust — gate and parent bar are one slot; see below
+    {823U, 2344U},  // Stolen Intelligence — gate and parent bar are one slot; see below
+    {839U, 2514U},  // Unveiling — gate and parent bar are one slot; see below
+    {852U, 2516U},  // Aspect — gate and parent bar are one slot; see below
+    {840U, 2517U},  // Last Days on Kraken Mare — gate and parent bar are one slot; see below
+    {853U, 2518U},  // Revelation — gate and parent bar are one slot; see below
+    {841U, 2519U},  // Inquisition of the Damned — gate and parent bar are one slot; see below
+    {825U, 2520U},  // Luna's Lost — gate and parent bar are one slot; see below
+    {826U, 2521U},  // Letters from Eris — gate and parent bar are one slot; see below
 }};
 
 } // namespace sunrise::state::record_claims::parent_bar_table

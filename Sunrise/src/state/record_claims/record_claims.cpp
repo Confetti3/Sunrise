@@ -584,6 +584,7 @@ std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcep
             // resolved -- several books ship with no resolvable slot at all and were skipped
             // entirely while the count keyed on it.
             std::int32_t chapters = 0;
+            std::int32_t collected = 0;
             build_data::records::Definition parent{};
             bool haveParent = false;
             for (std::size_t child = 0; child < node.childCount; ++child) {
@@ -604,6 +605,14 @@ std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcep
                 // collection, and it is simply not what the bar does.
                 if (claimed_locked(record.completionFlagIndex)) {
                     ++chapters;
+                }
+                // The category tile counts what has been collected, not what has been claimed.
+                // It has to: the tile's counter is also the gate that reveals the book, and a
+                // book that stayed hidden until a claim could never be opened at all, since a
+                // chapter cannot be claimed while it is invisible.
+                if (claimed_locked(record.completionFlagIndex)
+                    || claimable_locked(record.completionFlagIndex)) {
+                    ++collected;
                 }
             }
 
@@ -629,18 +638,26 @@ std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcep
                     break;
                 }
             }
-            // A book whose gate slot is not its bar slot needs the count in both. That slot is the
-            // book's entries-read counter: the category opens when it rises above zero, and on a
-            // cumulative book -- where chapter n completes at value n rather than 1 -- every
-            // chapter compares against it, so a token 1 left chapters 2 upward locked however
-            // correct their own objectives were. Kept below the record-objective range for the
-            // same reason apply_category_gates is: three books name a slot inside it that belongs
-            // to a record's objective, and writing a count there redacts records wholesale.
+            // The node's own value slot is the category tile's counter, and it is a different
+            // number from the parent triumph's bar: the tile counts entries collected, the bar
+            // counts triumphs claimed. Conflating them is what made ten books look as though
+            // their gate were their bar -- writing the bar revealed them, but only because a
+            // category with progress shows itself. On a cumulative book every chapter compares
+            // against this counter too, so it has to carry the real total and not a token 1.
+            // Kept below the record-objective range for the same reason apply_category_gates is:
+            // three books name a slot inside it that belongs to a record's objective, and writing
+            // a count there redacts records wholesale.
             if (node.valueIndex != build_data::nodes::kUnavailableValueIndex
                 && static_cast<std::int32_t>(node.valueIndex) < objective_slot_table::kRecordObjectiveRangeStart
                 && static_cast<std::size_t>(node.valueIndex) < state->values.size()
-                && static_cast<std::int32_t>(node.valueIndex) != parentSlot) {
-                state->values[node.valueIndex] = chapters;
+                ) {
+                // Collected, not claimed. This slot is the book's entries counter, and on a
+                // cumulative book every chapter compares against it -- chapter n completes at n --
+                // so a counter tracking claims leaves exactly one chapter claimable and the rest
+                // locked, which is what claiming-only produced. It is only reached when the slot
+                // is not also the book's bar: the guard above skips it when they coincide, and for
+                // those ten the slot is the bar and has to keep counting claims.
+                state->values[node.valueIndex] = collected;
                 ++state->written;
             }
             // Eight books name no value at field 136 and so have no table entry, but their parent
