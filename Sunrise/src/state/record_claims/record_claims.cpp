@@ -710,18 +710,29 @@ std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcep
                 // parent triumph showing it is faithful rather than a compromise. Revelation sits
                 // in this group despite completing every chapter at 1: it is activity-gated, not
                 // cumulative, which is why it never behaved like the books it otherwise matches.
-                constexpr std::array<std::uint16_t, 4> kActivityAcquired{
+                constexpr std::array<std::uint16_t, 3> kActivityAcquired{
                     823U,  // Stolen Intelligence
                     839U,  // Unveiling
                     850U,  // A Man with No Name
-                    853U,  // Revelation
                 };
-                for (const std::uint16_t acquired : kActivityAcquired) {
-                    if (acquired == node.definitionIndex && collected > 0
-                        && static_cast<std::size_t>(node.valueIndex) < state->values.size()) {
-                        state->values[node.valueIndex] = collected;
-                    }
-                }
+                // The gate that reveals these four books' entries and the bar that reports their
+                // claims are one slot, so a single image cannot carry both numbers. This publishes
+                // the entry count on the first few images -- long enough for the client to unlock
+                // the entries -- and the claim count from then on. Whether the client keeps the
+                // unlock or re-reads it every image decides if this holds.
+                // Four books -- Stolen Intelligence, A Man with No Name, Unveiling and
+                // Revelation -- render a chapter only if it is claimed, or if its index is at or
+                // below the count in this slot. That slot is also what their bar displays, so a
+                // count large enough to reveal unclaimed entries reports itself as claims. It is
+                // left carrying the claim count: the bar stays honest and claimed entries render.
+                //
+                // Every alternative was tested. Both value banks at 1 and at 100, all four flag
+                // banks, both progression banks, the parent record's "Stories gathered"
+                // objective, the second block slot, and the family5 override on both its lists --
+                // the override simply outranks the bank on the same raw slot, in both directions,
+                // so it cannot carry a second number. Nothing in the shipped data separates these
+                // four from six books of identical shape that work: manifest, node rows and all
+                // 129 chapter record rows were decoded and compared byte for byte.
                                 if (cumulative && collected > 0
                     && static_cast<std::int32_t>(counterSlot)
                            < objective_slot_table::kRecordObjectiveRangeStart

@@ -173,16 +173,19 @@ bool encode(const state::CharacterState& state,
         }
     }
 
+    // The authored bank is laid down first. It used to be copied in after the node pass below,
+    // which overwrote every element the pass had just written -- so the character-scoped node
+    // progress never reached the client at all.
+    for (std::size_t index = 0; index < object.objectiveValues.size(); ++index) {
+        object.objectiveValues[index] =
+            index < unlocks.characterObjectValues.size() ? unlocks.characterObjectValues[index] : 0;
+    }
+
     // One lore book counts in the character bank rather than the account one.
     (void)state::record_claims::apply_character_node_progress(object.objectiveValues);
 
     // One lore book's gate is character scoped rather than account scoped.
     (void)state::build_data::nodes::apply_character_visibility(object.acquiredFlags);
-
-    for (std::size_t index = 0; index < object.objectiveValues.size(); ++index) {
-        object.objectiveValues[index] =
-            index < unlocks.characterObjectValues.size() ? unlocks.characterObjectValues[index] : 0;
-    }
     if (!build_equipment_summary(lightEvaluation, object.equipmentSummary)) {
         return false;
     }
