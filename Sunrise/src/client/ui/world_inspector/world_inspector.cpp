@@ -100,11 +100,11 @@ struct BottomPanelDescriptor final {
 };
 
 constexpr std::array kWorkspaceViews{
+    WorkspaceViewDescriptor{
+        CenterMode::world, "World", "Copied spatial observations and explicitly known evidence."},
     WorkspaceViewDescriptor{CenterMode::overview,
                             "Overview",
                             "Current-activity ownership, authored links, and relationships."},
-    WorkspaceViewDescriptor{
-        CenterMode::world, "World", "Copied spatial observations and explicitly known evidence."},
     WorkspaceViewDescriptor{
         CenterMode::nodeGraph, "Node Graph", "Ownership and filtered hierarchy navigation."},
     WorkspaceViewDescriptor{CenterMode::relationships,

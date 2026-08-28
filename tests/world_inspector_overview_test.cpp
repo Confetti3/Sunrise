@@ -279,9 +279,27 @@ int main() {
         static_cast<std::size_t>(variableVisual - variableModel.nodes.begin());
     const std::size_t ownerIndex =
         static_cast<std::size_t>(ownerVisual - variableModel.nodes.begin());
-    if (variablePositions[rootIndex][0] >= variablePositions[variableIndex][0]
-        || variablePositions[variableIndex][0] >= variablePositions[ownerIndex][0]) {
+    const auto separated = [](const std::array<float, 2>& left,
+                              const std::array<float, 2>& right) {
+        const float dx = left[0] - right[0];
+        const float dy = left[1] - right[1];
+        return dx * dx + dy * dy > 1.0F;
+    };
+    if (variablePositions.empty() || variablePositions[0] != std::array<float, 2>{}
+        || !separated(variablePositions[rootIndex], variablePositions[variableIndex])
+        || !separated(variablePositions[variableIndex], variablePositions[ownerIndex])) {
         return 19;
+    }
+    const overview::Model selectedVariableModel =
+        overview::build(graph, eligible, preview, 64, variableId);
+    if (selectedVariableModel.revision != variableModel.revision
+        || selectedVariableModel.nodes.size() != variableModel.nodes.size()) {
+        return 20;
+    }
+    for (std::size_t index = 0; index < variableModel.nodes.size(); ++index) {
+        if (selectedVariableModel.nodes[index].identity != variableModel.nodes[index].identity) {
+            return 20;
+        }
     }
     for (std::uint64_t index = 0; index < 8U; ++index) {
         inspection::Node context = make_node("unrelated context",
@@ -306,9 +324,14 @@ int main() {
                    ? std::array<float, 2>{(std::numeric_limits<float>::quiet_NaN)(), 0.0F}
                    : withContextPositions[static_cast<std::size_t>(found - withContext.nodes.begin())];
     };
-    if (position_for(logicRootId) != variablePositions[rootIndex]
-        || position_for(variableId) != variablePositions[variableIndex]
-        || position_for(ownerId) != variablePositions[ownerIndex]) {
+    const auto rootWithContext = position_for(logicRootId);
+    const auto variableWithContext = position_for(variableId);
+    const auto ownerWithContext = position_for(ownerId);
+    if (!std::isfinite(rootWithContext[0]) || !std::isfinite(rootWithContext[1])
+        || !std::isfinite(variableWithContext[0]) || !std::isfinite(variableWithContext[1])
+        || !std::isfinite(ownerWithContext[0]) || !std::isfinite(ownerWithContext[1])
+        || !separated(rootWithContext, variableWithContext)
+        || !separated(variableWithContext, ownerWithContext)) {
         return 22;
     }
 
@@ -343,6 +366,36 @@ int main() {
         overview::build(copiedRelationGraph, copiedEligible, preview, 64);
     if (copiedModel.nodes.size() != 4U || copiedModel.compacted != 11U) {
         return 17;
+    }
+
+    overview::Model fullLayout;
+    fullLayout.nodes.push_back({{}, 1U, overview::Lane::context, true});
+    for (std::size_t index = 1; index <= 320U; ++index) {
+        fullLayout.nodes.push_back(
+            {{}, 0xB0000000U + index, overview::Lane::context, false});
+        fullLayout.edges.push_back(
+            {index == 1U ? 0U : index / 2U, index, overview::EdgeKind::ownership});
+    }
+    std::vector<std::array<float, 2>> fullPositions;
+    overview::layout(fullLayout, fullPositions);
+    if (fullPositions.size() != fullLayout.nodes.size()) {
+        return 23;
+    }
+    float minimumX = (std::numeric_limits<float>::max)();
+    float minimumY = (std::numeric_limits<float>::max)();
+    float maximumX = (std::numeric_limits<float>::lowest)();
+    float maximumY = (std::numeric_limits<float>::lowest)();
+    for (const auto& position : fullPositions) {
+        if (!std::isfinite(position[0]) || !std::isfinite(position[1])) {
+            return 24;
+        }
+        minimumX = (std::min)(minimumX, position[0]);
+        minimumY = (std::min)(minimumY, position[1]);
+        maximumX = (std::max)(maximumX, position[0]);
+        maximumY = (std::max)(maximumY, position[1]);
+    }
+    if (maximumX - minimumX < 500.0F || maximumY - minimumY < 500.0F) {
+        return 25;
     }
     return 0;
 }

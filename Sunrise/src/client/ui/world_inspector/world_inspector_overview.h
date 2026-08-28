@@ -71,7 +71,7 @@ struct Model final {
                           std::size_t maximumNodes,
                           inspection::NodeId selected = {});
 
-/** Produces deterministic, finite topology-lane positions aligned with Model::nodes. */
+/** Produces deterministic, finite force-directed positions aligned with Model::nodes. */
 void layout(const Model& model, std::vector<std::array<float, 2>>& positions);
 
 } // namespace sunrise::client::ui::world_inspector::overview

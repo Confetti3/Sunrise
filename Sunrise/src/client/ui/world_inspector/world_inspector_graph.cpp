@@ -37,7 +37,7 @@ constexpr ImU32 kRelationshipOutgoing = IM_COL32(245, 126, 84, 230);
 constexpr ImU32 kText = IM_COL32(231, 231, 224, 255);
 constexpr ImU32 kMuted = IM_COL32(145, 149, 158, 255);
 constexpr ImU32 kSelection = IM_COL32(228, 181, 79, 255);
-constexpr ImU32 kOverviewOwnership = IM_COL32(124, 132, 150, 125);
+constexpr ImU32 kOverviewOwnership = IM_COL32(124, 132, 150, 82);
 constexpr ImU32 kOverviewReference = IM_COL32(89, 178, 255, 210);
 constexpr ImU32 kOverviewLogic = IM_COL32(245, 126, 84, 225);
 constexpr ImU32 kOverviewAuthored = IM_COL32(174, 124, 239, 215);
@@ -201,6 +201,10 @@ void draw_background(ImDrawList& drawList,
         const float y = minimum.y + offsetY + static_cast<float>(line) * grid;
         drawList.AddLine({minimum.x, y}, {maximum.x, y}, kGrid, 1.0F);
     }
+}
+
+void draw_overview_background(ImDrawList& drawList, ImVec2 minimum, ImVec2 maximum) noexcept {
+    drawList.AddRectFilled(minimum, maximum, kBackground);
 }
 
 void draw_routed_edge(
@@ -504,7 +508,7 @@ Result draw_overview(const inspection::Graph& graph,
         }
         state.cachedInputRevision = inputRevision;
         state.cachedSelected = selected;
-        state.fitRequested = state.fitRequested || inputChanged;
+        state.fitRequested = state.fitRequested || inputChanged || topologyChanged;
     }
     if (state.fitRequested) {
         fit_overview(state, size);
@@ -536,7 +540,7 @@ Result draw_overview(const inspection::Graph& graph,
     }
 
     ImDrawList* drawList = ImGui::GetWindowDrawList();
-    draw_background(*drawList, minimum, maximum, State{state.pan, state.zoom});
+    draw_overview_background(*drawList, minimum, maximum);
     drawList->PushClipRect(minimum, maximum, true);
 
     const ImVec2 pointer = ImGui::GetIO().MousePos;
@@ -569,27 +573,28 @@ Result draw_overview(const inspection::Graph& graph,
         if (edge.kind == overview::EdgeKind::ownership && !focused) {
             const inspection::Node* targetNode =
                 targetVisual.hub ? nullptr : graph.node(targetVisual.source);
-            if (sourceVisual.lane != overview::Lane::context
-                || targetVisual.lane != overview::Lane::context || targetNode == nullptr
-                || targetNode->children.empty()) {
+            const bool structural = targetNode != nullptr && !targetNode->children.empty();
+            const bool semantic = targetVisual.lane != overview::Lane::context;
+            if (!structural && !semantic) {
                 continue;
             }
         }
         if ((edge.kind == overview::EdgeKind::reference
              || edge.kind == overview::EdgeKind::logic
              || edge.kind == overview::EdgeKind::runtimeAssociation)
-            && !focused && state.zoom < 1.25F) {
+            && !focused) {
             continue;
         }
         const ImVec2 from = overview_point(minimum, state, edge.source);
         const ImVec2 to = overview_point(minimum, state, edge.target);
-        const ImU32 color = focused ? multiply_alpha(overview_edge_color(edge.kind), 1.2F)
+        const ImU32 color = focused ? multiply_alpha(overview_edge_color(edge.kind), 2.2F)
                                     : overview_edge_color(edge.kind);
         const float thickness = scaled(focused ? 2.0F
                                                : (edge.kind == overview::EdgeKind::ownership ? 1.0F
                                                                                             : 1.6F));
         drawList->AddLine(from, to, color, thickness);
-        if (edge.kind != overview::EdgeKind::ownership) {
+        if (edge.kind != overview::EdgeKind::ownership
+            && (focused || overview_semantic_edge(edge.kind))) {
             const float dx = to.x - from.x;
             const float dy = to.y - from.y;
             const float length = std::sqrt(dx * dx + dy * dy);
@@ -642,37 +647,6 @@ Result draw_overview(const inspection::Graph& graph,
         }
     }
 
-    struct LaneHeading final {
-        overview::Lane lane;
-        const char* label;
-        ImU32 color;
-    };
-    constexpr std::array<LaneHeading, 4> headings{{
-        {overview::Lane::context, "CONTEXT", kMuted},
-        {overview::Lane::behaviorRoot, "BEHAVIOR ROOTS", kOverviewLogic},
-        {overview::Lane::variable, "VARIABLES", kOverviewVariableRead},
-        {overview::Lane::stateVarOwner, "STATEVAR OWNERS", kOverviewAuthored},
-    }};
-    for (const LaneHeading& heading : headings) {
-        float totalX = 0.0F;
-        std::size_t count = 0;
-        for (std::size_t index = 0; index < state.model.nodes.size(); ++index) {
-            if (state.model.nodes[index].lane == heading.lane && !state.model.nodes[index].hub) {
-                totalX += state.positions[index][0];
-                ++count;
-            }
-        }
-        if (count == 0) {
-            continue;
-        }
-        const float laneX = minimum.x + state.pan.x
-                            + totalX / static_cast<float>(count) * state.zoom;
-        const ImVec2 textSize = ImGui::CalcTextSize(heading.label);
-        drawList->AddText({laneX - textSize.x * 0.5F, minimum.y + scaled(29.0F)},
-                          multiply_alpha(heading.color, 0.85F),
-                          heading.label);
-    }
-
     std::vector<label_layout::Candidate> candidates;
     std::vector<std::size_t> labelNodes;
     std::vector<bool> linkedNodes(state.model.nodes.size(), false);
@@ -709,15 +683,15 @@ Result draw_overview(const inspection::Graph& graph,
                 priority = 4;
                 break;
             case overview::Lane::behaviorRoot:
-                priority = linkedNodes[index] ? 3 : (state.zoom >= 1.15F ? 1 : -1);
+                priority = linkedNodes[index] ? 3 : (state.zoom >= 0.85F ? 1 : -1);
                 break;
             case overview::Lane::stateVarOwner:
-                priority = state.zoom >= 0.9F ? 2 : -1;
+                priority = state.zoom >= 0.75F ? 2 : -1;
                 break;
             case overview::Lane::context:
-                priority = node != nullptr && !node->children.empty() && state.zoom >= 1.15F
+                priority = node != nullptr && !node->children.empty() && state.zoom >= 0.7F
                                ? 1
-                               : (state.zoom >= 1.65F ? 0 : -1);
+                               : (state.zoom >= 1.05F ? 0 : -1);
                 break;
             }
         }
@@ -757,12 +731,11 @@ Result draw_overview(const inspection::Graph& graph,
         const std::string_view label = visual.hub ? std::string_view(scope.label)
                                                  : (node != nullptr ? std::string_view(node->name)
                                                                     : std::string_view{});
-        drawList->AddRectFilled({placed.rect.minimumX - scaled(2.0F),
-                                 placed.rect.minimumY - scaled(1.0F)},
-                                {placed.rect.maximumX + scaled(2.0F),
-                                 placed.rect.maximumY + scaled(1.0F)},
-                                kOverviewLabelBackground,
-                                scaled(2.0F));
+        const ImVec2 labelPosition{placed.rect.minimumX, placed.rect.minimumY};
+        drawList->AddText({labelPosition.x + scaled(1.0F), labelPosition.y + scaled(1.0F)},
+                          kOverviewLabelBackground,
+                          label.data(),
+                          label.data() + label.size());
         drawList->AddText({placed.rect.minimumX, placed.rect.minimumY},
                           visual.hub ? kSelection : kText,
                           label.data(),

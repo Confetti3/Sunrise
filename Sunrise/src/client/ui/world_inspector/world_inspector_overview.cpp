@@ -1,8 +1,8 @@
 #include "world_inspector_overview.h"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
-#include <span>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -248,6 +248,12 @@ Model build(const inspection::Graph& graph,
         output.omitted = candidates.size() - maximumNodes;
         candidates.resize(maximumNodes);
     }
+    std::ranges::stable_sort(candidates, [](const auto* left, const auto* right) {
+        const std::uint64_t leftIdentity = node_identity(*left);
+        const std::uint64_t rightIdentity = node_identity(*right);
+        return leftIdentity != rightIdentity ? leftIdentity < rightIdentity
+                                             : left->id.value < right->id.value;
+    });
 
     output.nodes.reserve(candidates.size() + 1U);
     output.nodes.push_back(Node{{}, kHubIdentity, Lane::context, true});
@@ -375,108 +381,87 @@ void layout(const Model& model, std::vector<std::array<float, 2>>& positions) {
     if (model.nodes.empty()) {
         return;
     }
-    constexpr float kContextHubX = -1040.0F;
-    constexpr float kContextX = -760.0F;
-    constexpr float kRootX = -180.0F;
-    constexpr float kVariableX = 240.0F;
-    constexpr float kOwnerX = 660.0F;
-    constexpr float kVariableSpacing = 140.0F;
-    constexpr float kEndpointSpacing = 48.0F;
+    constexpr float kPi = 3.14159265358979323846F;
+    constexpr std::size_t kIterations = 96;
+    constexpr float kRepulsion = 9200.0F;
+    constexpr float kSpringStrength = 0.018F;
+    constexpr float kGravity = 0.0035F;
+    constexpr float kDamping = 0.82F;
+    constexpr float kMaximumStep = 15.0F;
 
-    std::array<std::vector<std::size_t>, 4> lanes;
-    for (std::size_t index = 0; index < model.nodes.size(); ++index) {
-        lanes[static_cast<std::size_t>(model.nodes[index].lane)].push_back(index);
-    }
-    for (auto& lane : lanes) {
-        std::ranges::stable_sort(lane, [&model](std::size_t left, std::size_t right) {
-            return model.nodes[left].identity < model.nodes[right].identity;
-        });
-    }
-
-    auto& variables = lanes[static_cast<std::size_t>(Lane::variable)];
-    const float variableStart = -static_cast<float>(variables.size() - (variables.empty() ? 0U : 1U))
-                                * kVariableSpacing * 0.5F;
-    for (std::size_t row = 0; row < variables.size(); ++row) {
-        positions[variables[row]] = {kVariableX, variableStart + static_cast<float>(row) * kVariableSpacing};
+    // Stable identity-derived seeds keep repeated layouts identical while allowing the graph to
+    // settle as one connected constellation instead of imposing semantic columns.
+    for (std::size_t index = 1; index < model.nodes.size(); ++index) {
+        std::uint64_t seed = model.nodes[index].identity;
+        seed ^= seed >> 30U;
+        seed *= 0xBF58476D1CE4E5B9ULL;
+        seed ^= seed >> 27U;
+        seed *= 0x94D049BB133111EBULL;
+        seed ^= seed >> 31U;
+        const float angle = static_cast<float>(seed & 0xFFFFU) / 65535.0F * 2.0F * kPi;
+        const float radius = 170.0F
+                             + static_cast<float>((seed >> 16U) & 0xFFFFU) / 65535.0F * 250.0F;
+        positions[index] = {std::cos(angle) * radius, std::sin(angle) * radius};
     }
 
-    const auto place_endpoints = [&](std::span<const std::size_t> indices,
-                                     float x,
-                                     EdgeKind firstKind,
-                                     EdgeKind secondKind) {
-        struct Row final {
-            std::size_t index{};
-            float desired{};
-            float placed{};
-        };
-        std::vector<Row> rows;
-        rows.reserve(indices.size());
-        std::size_t fallback = 0;
-        for (const std::size_t index : indices) {
-            float total = 0.0F;
-            std::size_t count = 0;
-            for (const Edge& edge : model.edges) {
-                if (edge.kind != firstKind && edge.kind != secondKind) {
-                    continue;
+    std::vector<std::array<float, 2>> velocity(model.nodes.size());
+    for (std::size_t iteration = 0; iteration < kIterations; ++iteration) {
+        for (std::size_t left = 0; left < model.nodes.size(); ++left) {
+            for (std::size_t right = left + 1U; right < model.nodes.size(); ++right) {
+                float dx = positions[left][0] - positions[right][0];
+                float dy = positions[left][1] - positions[right][1];
+                float distanceSquared = dx * dx + dy * dy;
+                if (distanceSquared < 1.0F) {
+                    const std::uint64_t pair = model.nodes[left].identity ^ model.nodes[right].identity;
+                    const float angle = static_cast<float>(pair & 0xFFFFU) / 65535.0F * 2.0F * kPi;
+                    dx = std::cos(angle);
+                    dy = std::sin(angle);
+                    distanceSquared = 1.0F;
                 }
-                const std::size_t other = edge.source == index   ? edge.target
-                                          : edge.target == index ? edge.source
-                                                                 : model.nodes.size();
-                if (other < model.nodes.size() && model.nodes[other].lane == Lane::variable) {
-                    total += positions[other][1];
-                    ++count;
-                }
+                const float distance = std::sqrt(distanceSquared);
+                const float force = (std::min)(kRepulsion / distanceSquared, 7.0F);
+                const float forceX = dx / distance * force;
+                const float forceY = dy / distance * force;
+                velocity[left][0] += forceX;
+                velocity[left][1] += forceY;
+                velocity[right][0] -= forceX;
+                velocity[right][1] -= forceY;
             }
-            const float desired = count != 0
-                                      ? total / static_cast<float>(count)
-                                      : variableStart + static_cast<float>(variables.size() + fallback++)
-                                                            * kVariableSpacing;
-            rows.push_back({index, desired, desired});
         }
-        std::ranges::stable_sort(rows, [&model](const Row& left, const Row& right) {
-            return left.desired != right.desired
-                       ? left.desired < right.desired
-                       : model.nodes[left.index].identity < model.nodes[right.index].identity;
-        });
-        float previous = (std::numeric_limits<float>::lowest)();
-        float correction = 0.0F;
-        for (Row& row : rows) {
-            row.placed = (std::max)(row.desired, previous + kEndpointSpacing);
-            previous = row.placed;
-            correction += row.placed - row.desired;
-        }
-        if (!rows.empty()) {
-            correction /= static_cast<float>(rows.size());
-        }
-        for (const Row& row : rows) {
-            positions[row.index] = {x, row.placed - correction};
-        }
-    };
 
-    place_endpoints(lanes[static_cast<std::size_t>(Lane::behaviorRoot)],
-                    kRootX,
-                    EdgeKind::logicVariableRead,
-                    EdgeKind::logicVariableWrite);
-    place_endpoints(lanes[static_cast<std::size_t>(Lane::stateVarOwner)],
-                    kOwnerX,
-                    EdgeKind::authoredLink,
-                    EdgeKind::authoredLink);
+        for (const Edge& edge : model.edges) {
+            if (edge.source >= model.nodes.size() || edge.target >= model.nodes.size()) {
+                continue;
+            }
+            const float dx = positions[edge.target][0] - positions[edge.source][0];
+            const float dy = positions[edge.target][1] - positions[edge.source][1];
+            const float distance = (std::max)(std::sqrt(dx * dx + dy * dy), 1.0F);
+            const float desired = edge.kind == EdgeKind::ownership ? 105.0F : 145.0F;
+            const float force = (distance - desired) * kSpringStrength;
+            const float forceX = dx / distance * force;
+            const float forceY = dy / distance * force;
+            velocity[edge.source][0] += forceX;
+            velocity[edge.source][1] += forceY;
+            velocity[edge.target][0] -= forceX;
+            velocity[edge.target][1] -= forceY;
+        }
 
-    auto& context = lanes[static_cast<std::size_t>(Lane::context)];
-    const auto hub = std::ranges::find(context, std::size_t{0});
-    if (hub != context.end()) {
-        context.erase(hub);
-    }
-    positions[0] = {kContextHubX, 0.0F};
-    constexpr std::size_t kContextColumns = 3;
-    const std::size_t contextRows = (context.size() + kContextColumns - 1U) / kContextColumns;
-    const float contextStart = -static_cast<float>(contextRows - (contextRows == 0 ? 0U : 1U))
-                               * 74.0F * 0.5F;
-    for (std::size_t index = 0; index < context.size(); ++index) {
-        const std::size_t column = index % kContextColumns;
-        const std::size_t row = index / kContextColumns;
-        positions[context[index]] = {kContextX + (static_cast<float>(column) - 1.0F) * 130.0F,
-                                     contextStart + static_cast<float>(row) * 74.0F};
+        for (std::size_t index = 1; index < model.nodes.size(); ++index) {
+            velocity[index][0] -= positions[index][0] * kGravity;
+            velocity[index][1] -= positions[index][1] * kGravity;
+            velocity[index][0] *= kDamping;
+            velocity[index][1] *= kDamping;
+            const float speed = std::sqrt(velocity[index][0] * velocity[index][0]
+                                          + velocity[index][1] * velocity[index][1]);
+            if (speed > kMaximumStep) {
+                velocity[index][0] *= kMaximumStep / speed;
+                velocity[index][1] *= kMaximumStep / speed;
+            }
+            positions[index][0] += velocity[index][0];
+            positions[index][1] += velocity[index][1];
+        }
+        positions[0] = {};
+        velocity[0] = {};
     }
 }
 
