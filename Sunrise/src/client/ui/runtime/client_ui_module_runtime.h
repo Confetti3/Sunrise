@@ -2,10 +2,10 @@
 
 namespace sunrise::client::ui::runtime {
 
-/** @return True when the Client module owns its Core UI registry slot. */
+/** @return True when all Client pages own their Core UI registry slots. */
 [[nodiscard]] bool initialize() noexcept;
 
-/** Removes the Client module from the Core UI registry. */
+/** Removes the Client pages and HUD extension from the Core UI registry. */
 void shutdown() noexcept;
 
 } // namespace sunrise::client::ui::runtime

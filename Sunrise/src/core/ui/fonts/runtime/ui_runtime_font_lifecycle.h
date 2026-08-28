@@ -2,31 +2,10 @@
 
 #include <Windows.h>
 
-#include <cstddef>
-
 namespace sunrise::core::ui::fonts::runtime {
 
 /** 16 pixels is the authored text height at the unscaled 96-DPI layout. */
 inline constexpr float kAuthoredBasePixelSize = 16.0F;
-
-/** Font source chosen for the current Dear ImGui atlas. */
-enum class Source {
-    /** No font lifecycle is active. */
-    unavailable,
-    /** Dear ImGui's built-in scalable font is active. */
-    embeddedDefault,
-    /** The installed game font is borrowed from fixed Sunrise storage. */
-    installed,
-};
-
-/** Font lifecycle state read under the lock. Carries no font bytes or file paths. */
-struct Snapshot {
-    bool initialized{};
-    Source source{Source::unavailable};
-    std::size_t installedByteCount{};
-    float basePixelSize{};
-    float scale{};
-};
 
 /**
  * Adds one installed or embedded font to the current empty Dear ImGui context.
@@ -52,8 +31,5 @@ struct Snapshot {
  * @return False when the owning context is not current or the atlas is locked.
  */
 [[nodiscard]] bool shutdown() noexcept;
-
-/** @return One snapshot of the font source, size, and scale, read under the lock. */
-[[nodiscard]] Snapshot snapshot() noexcept;
 
 } // namespace sunrise::core::ui::fonts::runtime

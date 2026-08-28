@@ -40,12 +40,10 @@ if(lto_supported)
     )
 endif()
 target_include_directories(steam_api64
-    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/Sunrise/src"
-)
-
-# sunrise.rc names its payloads relative to itself, so its directory has to be on the include path.
-target_include_directories(steam_api64
-    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/Sunrise/resources"
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/Sunrise/src"
+        # Resource payloads are included relative to this directory.
+        "${CMAKE_CURRENT_SOURCE_DIR}/Sunrise/resources"
 )
 
 target_include_directories(steam_api64 SYSTEM PRIVATE
@@ -75,22 +73,21 @@ target_compile_definitions(steam_api64 PRIVATE
     IMGUI_USER_CONFIG="core/ui/imgui_user_config.h"
 )
 
-if(MSVC OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    # Clang warnings are more strict the MSVC I guess, this only works on real clang
-    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-        list(APPEND STRICT_WARNING_FLAGS
-            -Wno-unused-const-variable
-            -Wno-unused-function
-            -Wno-braced-scalar-init
-            -Wno-missing-braces
-            -Wno-missing-designated-field-initializers
-            -Wno-cast-function-type-mismatch
-        )
-    endif()
-
-    set_source_files_properties(${SUNRISE_SOURCES} PROPERTIES
-        COMPILE_OPTIONS "${STRICT_WARNING_FLAGS}"
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    set(CLANG_COMPATIBILITY_FLAGS
+        -Wno-unused-const-variable
+        -Wno-unused-function
+        -Wno-braced-scalar-init
+        -Wno-missing-braces
+        -Wno-missing-designated-field-initializers
+        -Wno-cast-function-type-mismatch
     )
+    set_source_files_properties(${SUNRISE_SOURCES} PROPERTIES
+        COMPILE_OPTIONS "${CLANG_COMPATIBILITY_FLAGS}"
+    )
+endif()
+
+if(MSVC OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     set_source_files_properties(${VENDOR_SOURCES} PROPERTIES
         COMPILE_OPTIONS "/W3"
     )

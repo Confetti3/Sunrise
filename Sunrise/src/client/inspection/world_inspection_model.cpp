@@ -195,10 +195,9 @@ parse_number(std::string_view text, int defaultBase, std::uint64_t& output) noex
                                                                                     : false;
     }
     case QueryTerm::Field::relationship: {
-        if (!node.activityLogicMetadata.has_value()) {
-            return false;
-        }
-        const bool present = !node.activityLogicMetadata->relationships.empty();
+        const bool present = !node.relations.empty()
+                             || (node.activityLogicMetadata.has_value()
+                                 && !node.activityLogicMetadata->relationships.empty());
         return (term.value == "yes" || term.value == "true" || term.value == "1")   ? present
                : (term.value == "no" || term.value == "false" || term.value == "0") ? !present
                                                                                     : false;

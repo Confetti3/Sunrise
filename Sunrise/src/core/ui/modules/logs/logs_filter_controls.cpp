@@ -6,10 +6,10 @@
 #include <imgui.h>
 #include <string_view>
 
-#include "../../../components/filter/ui_filter_component.h"
-#include "../../../scaling/dpi/ui_dpi_scaling.h"
+#include "../../components/filter/ui_filter_component.h"
+#include "../../scaling/dpi/ui_dpi_scaling.h"
 
-namespace sunrise::core::ui::modules::logs::internal::filters {
+namespace sunrise::core::ui::modules::logs::internal {
 namespace {
 
 /** One null byte lets Dear ImGui edit the full text-filter buffer. */
@@ -65,8 +65,7 @@ SelectionState g_selection;
 
 } // namespace
 
-/** Draws the exact-channel selector and stores the selection. */
-void draw_channel() noexcept {
+void draw_channel_filter() noexcept {
     ImGui::SetNextItemWidth(scaling::dpi::pixels(kChannelFilterWidth));
     if (!ImGui::BeginCombo("##log_channel", kChannelChoices[g_selection.channelChoice].label)) {
         return;
@@ -83,8 +82,7 @@ void draw_channel() noexcept {
     ImGui::EndCombo();
 }
 
-/** Draws the exact-level selector and stores the selection. */
-void draw_level() noexcept {
+void draw_level_filter() noexcept {
     ImGui::SetNextItemWidth(scaling::dpi::pixels(kLevelFilterWidth));
     if (!ImGui::BeginCombo("##log_level", kLevelChoices[g_selection.levelChoice].label)) {
         return;
@@ -101,14 +99,12 @@ void draw_level() noexcept {
     ImGui::EndCombo();
 }
 
-/** Draws the text query input and stores the query. */
-void draw_text() noexcept {
+void draw_text_filter() noexcept {
     (void)components::filter::input(
         "log_text", "Filter text", g_selection.text.data(), g_selection.text.size());
 }
 
-/** @return A filter built from the current selections. */
-log::view::Filter current() noexcept {
+log::view::Filter current_filter() noexcept {
     log::view::Filter filter;
     const ChannelChoice& channelChoice = kChannelChoices[g_selection.channelChoice];
     if (channelChoice.filtered) {
@@ -122,9 +118,8 @@ log::view::Filter current() noexcept {
     return filter;
 }
 
-/** Clears every selection at a UI lifecycle boundary. */
-void reset() noexcept {
+void reset_filters() noexcept {
     g_selection = {};
 }
 
-} // namespace sunrise::core::ui::modules::logs::internal::filters
+} // namespace sunrise::core::ui::modules::logs::internal

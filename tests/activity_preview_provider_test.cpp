@@ -55,6 +55,23 @@ logic_catalog::Catalog logic_value() {
         {0x80810001U, 0x80820001U, 7, {1.0F, 2.0F, 3.0F}, {0.0F, 0.0F, 0.0F, 1.0F}});
     value.entities.push_back(std::move(entity));
     value.activities = {{0x80B00001U, "fleet_strike", "fleet", {0}}};
+    value.stateVars.push_back({0x80830001U,
+                               0x80830002U,
+                               7,
+                               0,
+                               10,
+                               -1,
+                               -1,
+                               false,
+                               0,
+                               0,
+                               "variable 0x80830002",
+                               false,
+                               {}});
+    value.stateVarBindings.push_back({0x80840001U, 0x80830001U, 0});
+    value.logicRoots.push_back({0x80850001U, 0x8080941EU, "Fleet root"});
+    value.logicReferences.push_back(
+        {0, 0, 0x80830002U, 2, 4, logic_catalog::LogicReferenceDirection::read});
     return value;
 }
 
@@ -107,6 +124,31 @@ int main() {
         || !preview_sources_are_authored(graph)) {
         return 3;
     }
+    bool variable = false;
+    bool rootNode = false;
+    bool binding = false;
+    bool reference = false;
+    bool readDirection = false;
+    bool namedOwner = false;
+    for (const inspection::Node& node : graph.nodes()) {
+        variable = variable || node.kind == inspection::NodeKind::logicVariable;
+        rootNode = rootNode || (node.kind == inspection::NodeKind::logicGroup
+                                && node.tag.has_value() && *node.tag == 0x80850001U);
+        namedOwner = namedOwner || (node.classHash.has_value() && *node.classHash == 0x80809C0FU
+                                    && node.name == "preview object");
+        for (const inspection::Relation& relation : node.relations) {
+            binding = binding || relation.kind == inspection::RelationKind::authoredLink;
+            reference = reference || relation.kind == inspection::RelationKind::logicVariableRead
+                         && relation.nameHash == 0x80830002U && relation.selector == 4
+                         && relation.occurrenceCount == 2;
+            readDirection = readDirection
+                            || (relation.kind == inspection::RelationKind::logicVariableRead
+                                && relation.outgoing == false);
+        }
+    }
+    if (!variable || !rootNode || !binding || !reference || !readDirection || !namedOwner) {
+        return 5;
+    }
 
     const std::uint64_t graphRevision = graph_provider::publication_revision();
     const std::uint64_t logicRevision = logic_provider::publication_revision();
@@ -116,6 +158,23 @@ int main() {
         || graph_provider::publication_revision() == graphRevision
         || logic_provider::publication_revision() == logicRevision) {
         return 4;
+    }
+
+    inspection::Source liveActivation = preview_source();
+    liveActivation.authoredPreview = false;
+    liveActivation.activitySession = 0x1234U;
+    if (!logic_provider::activate_location(logic_value(), liveActivation)) {
+        return 5;
+    }
+    std::vector<inspection::Diagnostic> liveDiagnostics;
+    const auto sameSession = logic_provider::append(graph, liveDiagnostics, liveActivation, rootId);
+    inspection::Source differentSession = liveActivation;
+    differentSession.activitySession = 0x5678U;
+    const auto wrongSession =
+        logic_provider::append(graph, liveDiagnostics, differentSession, rootId);
+    logic_provider::deactivate_location();
+    if (!sameSession.present || !sameSession.matched || wrongSession.present) {
+        return 6;
     }
     return 0;
 }

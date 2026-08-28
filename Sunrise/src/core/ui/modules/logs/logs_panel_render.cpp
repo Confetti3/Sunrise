@@ -5,8 +5,8 @@
 #include "../../../logging/snapshot/snapshot.h"
 #include "../../components/toggle/ui_toggle_component.h"
 #include "../../scaling/dpi/ui_dpi_scaling.h"
-#include "filters/logs_filter_controls.h"
 #include "internal.h"
+#include "logs_filter_controls.h"
 
 namespace sunrise::core::ui::modules::logs::internal {
 namespace {
@@ -113,18 +113,18 @@ void draw() noexcept {
     const float availableWidth = ImGui::GetContentRegionAvail().x;
     const bool inlineSelectors = availableWidth >= scaling::dpi::pixels(kInlineSelectorRowWidth);
     const bool inlineFilters = availableWidth >= scaling::dpi::pixels(kInlineFilterRowWidth);
-    filters::draw_channel();
+    draw_channel_filter();
     if (inlineSelectors) {
         ImGui::SameLine();
     }
-    filters::draw_level();
+    draw_level_filter();
     if (inlineFilters) {
         ImGui::SameLine();
     }
-    filters::draw_text();
+    draw_text_filter();
 
     const log::snapshot::Snapshot retained = log::snapshot::take();
-    const log::view::Result visible = log::view::select(retained, filters::current());
+    const log::view::Result visible = log::view::select(retained, current_filter());
     const std::uint64_t recorded = recorded_count(visible);
     const bool logGrew = recorded != g_recordedCount;
     g_recordedCount = recorded;
@@ -157,7 +157,7 @@ void draw() noexcept {
 /** Clears local filter and copy-result state between UI lifecycles. */
 void reset() noexcept {
     cancel_pending_copy();
-    filters::reset();
+    reset_filters();
     g_autoScroll = true;
     g_recordedCount = 0;
 }

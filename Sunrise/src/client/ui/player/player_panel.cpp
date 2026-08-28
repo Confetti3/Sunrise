@@ -1,5 +1,3 @@
-/** The player module's interface. Every control saves at once, so a change survives a restart. */
-
 #include "player_panel.h"
 
 #include <algorithm>
@@ -18,16 +16,10 @@ namespace {
 namespace inactivity = client::inactivity;
 namespace toggle = core::ui::components::toggle;
 
-/** Grid width. Seven columns lays the fourteen lanes out in two rows. */
+/** Seven columns lay the fourteen inactivity lanes out in two rows. */
 constexpr int kLaneColumns = 7;
 
-/**
- * Draws one lane's field and, under it, the milliseconds the Client is holding in that lane now.
- * @param index Lane in block order.
- * @param configured Configuration updated on an edit.
- * @param status What the override reached, for the live figure.
- * @return True when this lane changed.
- */
+/** @return True when the configured lane timeout changes. */
 [[nodiscard]] bool draw_lane(std::size_t index,
                              inactivity::Settings& configured,
                              const hooks::inactivity::Status& status) noexcept {
@@ -39,8 +31,7 @@ constexpr int kLaneColumns = 7;
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
         ImGui::SetTooltip("%s", inactivity::kActivities[index].name.data());
     }
-    // The live figure is the one the Client is timing by, so it reads as active and the set value
-    // is dimmed. A lane held at its longest is timing nothing, so neither is active.
+    // Highlight the live timeout unless the lane is held at its inactive maximum.
     const std::uint32_t live = status.liveValid ? status.live[index] : 0;
     const bool liveActive = status.liveValid && live != inactivity::kMaximumTimeoutMs;
 
@@ -65,8 +56,7 @@ constexpr int kLaneColumns = 7;
         changed = true;
     }
     ImGui::EndDisabled();
-    // Outside the disabled block: the live value reads the same whether or not the field can be
-    // edited.
+    // Keep live status readable even when editing is disabled.
     if (!status.liveValid) {
         ImGui::TextDisabled("-");
     } else if (liveActive) {
@@ -78,10 +68,8 @@ constexpr int kLaneColumns = 7;
     return changed;
 }
 
-/** @param status What the override reached, for the live grace. */
 void draw_inactivity_clocks(const hooks::inactivity::Status& status) noexcept {
-    // Read from the draw rather than the hold, so the Client is only asked while this section is
-    // on screen to answer to.
+    // Poll only while this section is visible.
     const hooks::inactivity::Timers timers = hooks::inactivity::timers();
     if (timers.idleValid) {
         ImGui::Text("Idle %.1f s", static_cast<double>(timers.idleMs) / 1000.0);
@@ -109,10 +97,9 @@ void draw_inactivity_clocks(const hooks::inactivity::Status& status) noexcept {
     }
 }
 
-/** Draws the inactivity section: the main switch, the lane grid and the Client's clocks. */
 void draw_inactivity() noexcept {
     inactivity::Settings configured = inactivity::get();
-    // Taken once, so every line below and the grid all describe the same poll.
+    // Use one status snapshot for the whole section.
     const hooks::inactivity::Status status = hooks::inactivity::status();
 
     ImGui::TextUnformatted("Inactivity");
@@ -159,7 +146,6 @@ void draw_inactivity() noexcept {
 
 } // namespace
 
-/** Draws the player module inside the active Core UI frame. */
 void draw() noexcept {
     client::player::Settings settings = client::player::get();
 

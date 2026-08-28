@@ -7,7 +7,6 @@
 #include <cstring>
 #include <limits>
 #include <span>
-#include <utility>
 #include <vector>
 
 #include "../../core/filesystem/path.h"
@@ -22,7 +21,7 @@ constexpr std::array<std::byte, 8> kLogicMagic{std::byte{'S'}, std::byte{'L'}, s
 constexpr std::array<std::byte, 8> kBubbleMagic{std::byte{'S'}, std::byte{'B'}, std::byte{'B'},
                                                 std::byte{'C'}, std::byte{'T'}, std::byte{'0'},
                                                 std::byte{'0'}, std::byte{'1'}};
-constexpr std::array<std::uint32_t, 5> kLogicStrides{28, 48, 4, 44, 16};
+constexpr std::array<std::uint32_t, 10> kLogicStrides{28, 48, 4, 44, 16, 56, 12, 16, 24, 16};
 constexpr std::array<std::byte, 8> kGraphMagic{std::byte{'S'}, std::byte{'A'}, std::byte{'C'},
                                                std::byte{'A'}, std::byte{'T'}, std::byte{'0'},
                                                std::byte{'0'}, std::byte{'1'}};
@@ -33,9 +32,7 @@ void put(std::span<std::byte> output, std::size_t offset, const Value& value) no
     std::memcpy(output.data() + offset, &value, sizeof value);
 }
 
-[[nodiscard]] bool stale_schema(std::wstring_view path,
-                                std::span<const std::byte, 8> magic,
-                                std::uint32_t current) noexcept {
+[[nodiscard]] bool read_prefix(std::wstring_view path, std::span<std::byte> output) noexcept {
     const std::wstring owned(path);
     const HANDLE file = CreateFileW(owned.c_str(),
                                     GENERIC_READ,
@@ -47,22 +44,43 @@ void put(std::span<std::byte> output, std::size_t offset, const Value& value) no
     if (file == INVALID_HANDLE_VALUE) {
         return false;
     }
-    std::array<std::byte, 12> header{};
     DWORD read = 0;
     const bool complete = ReadFile(file,
-                                   header.data(),
-                                   static_cast<DWORD>(header.size()),
+                                   output.data(),
+                                   static_cast<DWORD>(output.size()),
                                    &read,
                                    nullptr)
                               != FALSE
-                          && read == header.size();
+                          && read == output.size();
     const bool closed = CloseHandle(file) != FALSE;
-    if (!complete || !closed || !std::equal(magic.begin(), magic.end(), header.begin())) {
+    return complete && closed;
+}
+
+[[nodiscard]] bool stale_schema(std::wstring_view path,
+                                std::span<const std::byte, 8> magic,
+                                std::uint32_t current) noexcept {
+    std::array<std::byte, 12> header{};
+    if (!read_prefix(path, header) || !std::equal(magic.begin(), magic.end(), header.begin())) {
         return false;
     }
     std::uint32_t schema = 0;
     std::memcpy(&schema, header.data() + 8U, sizeof schema);
     return schema != 0 && schema < current;
+}
+
+[[nodiscard]] bool stale_logic_cache(std::wstring_view path) noexcept {
+    std::array<std::byte, 64> header{};
+    if (!read_prefix(path, header)
+        || !std::equal(kLogicMagic.begin(), kLogicMagic.end(), header.begin())) {
+        return false;
+    }
+    std::uint32_t schema = 0;
+    std::uint32_t collector = 0;
+    std::memcpy(&schema, header.data() + 8U, sizeof schema);
+    std::memcpy(&collector, header.data() + 60U, sizeof collector);
+    return (schema != 0 && schema < activity_logic_catalog::kSchemaVersion)
+           || (schema == activity_logic_catalog::kSchemaVersion && collector != 0
+               && collector < activity_logic_catalog::kCollectorVersion);
 }
 
 struct StringRef final {
@@ -91,7 +109,7 @@ struct StringRef final {
     if (!activity_logic_catalog::validate(catalog, error) || catalog.activities.size() != 1) {
         return false;
     }
-    std::vector<std::uint32_t> references = catalog.activities.front().entityIndices;
+    const std::vector<std::uint32_t>& references = catalog.activities.front().entityIndices;
     std::size_t placementCount = 0;
     for (const auto& entity : catalog.entities) {
         placementCount += entity.placements.size();
@@ -121,14 +139,42 @@ struct StringRef final {
             return false;
         }
     }
+    std::vector<StringRef> stateVarNames(catalog.stateVars.size());
+    for (std::size_t index = 0; index < catalog.stateVars.size(); ++index) {
+        if (!add_string(strings, catalog.stateVars[index].name, stateVarNames[index])) {
+            return false;
+        }
+    }
+    std::vector<StringRef> rootNames(catalog.logicRoots.size());
+    for (std::size_t index = 0; index < catalog.logicRoots.size(); ++index) {
+        if (!add_string(strings, catalog.logicRoots[index].name, rootNames[index])) {
+            return false;
+        }
+    }
 
-    const std::array<std::uint32_t, 5> counts{
+    std::size_t triggerCount = 0;
+    for (const auto& stateVar : catalog.stateVars) {
+        triggerCount += stateVar.triggers.size();
+    }
+    if (triggerCount > (std::numeric_limits<std::uint32_t>::max)()
+        || catalog.stateVars.size() > (std::numeric_limits<std::uint32_t>::max)()
+        || catalog.stateVarBindings.size() > (std::numeric_limits<std::uint32_t>::max)()
+        || catalog.logicRoots.size() > (std::numeric_limits<std::uint32_t>::max)()
+        || catalog.logicReferences.size() > (std::numeric_limits<std::uint32_t>::max)()) {
+        return false;
+    }
+    const std::array<std::uint32_t, 10> counts{
         1U,
         static_cast<std::uint32_t>(catalog.entities.size()),
         static_cast<std::uint32_t>(references.size()),
         static_cast<std::uint32_t>(placementCount),
-        static_cast<std::uint32_t>(catalog.edges.size())};
-    std::array<std::uint32_t, 5> offsets{};
+        static_cast<std::uint32_t>(catalog.edges.size()),
+        static_cast<std::uint32_t>(catalog.stateVars.size()),
+        static_cast<std::uint32_t>(catalog.stateVarBindings.size()),
+        static_cast<std::uint32_t>(catalog.logicRoots.size()),
+        static_cast<std::uint32_t>(catalog.logicReferences.size()),
+        static_cast<std::uint32_t>(triggerCount)};
+    std::array<std::uint32_t, 10> offsets{};
     std::uint64_t cursor = activity_logic_catalog::kHeaderSize;
     for (std::size_t index = 0; index < offsets.size(); ++index) {
         offsets[index] = static_cast<std::uint32_t>(cursor);
@@ -156,7 +202,7 @@ struct StringRef final {
         put(bytes, 68 + index * 12U, counts[index]);
         put(bytes, 72 + index * 12U, kLogicStrides[index]);
     }
-    put(bytes, 124, catalog.provenance.contentBuild);
+    put(bytes, 184, catalog.provenance.contentBuild);
 
     const auto& activity = catalog.activities.front();
     put(bytes, offsets[0], activity.scenarioTag);
@@ -209,6 +255,60 @@ struct StringRef final {
         put(bytes, base + 4U, edge.targetEntityIndex);
         put(bytes, base + 8U, edge.nameHash);
         put(bytes, base + 12U, edge.occurrenceCount);
+    }
+    std::uint32_t firstTrigger = 0;
+    for (std::size_t index = 0; index < catalog.stateVars.size(); ++index) {
+        const auto& stateVar = catalog.stateVars[index];
+        const std::size_t base = offsets[5] + index * kLogicStrides[5];
+        put(bytes, base, stateVar.configTag);
+        put(bytes, base + 4U, stateVar.nameHash);
+        put(bytes, base + 8U, stateVar.initial);
+        put(bytes, base + 12U, stateVar.lowerClamp);
+        put(bytes, base + 16U, stateVar.upperClamp);
+        put(bytes, base + 20U, stateVar.lowerThreshold);
+        put(bytes, base + 24U, stateVar.upperThreshold);
+        const std::uint8_t flags = static_cast<std::uint8_t>(stateVar.projectionEnabled ? 1U : 0U)
+                                   | static_cast<std::uint8_t>(stateVar.nameProved ? 2U : 0U);
+        put(bytes, base + 28U, flags);
+        put(bytes, base + 32U, stateVar.projectionBytecodeCount);
+        put(bytes, base + 36U, stateVar.projectionConstantCount);
+        put(bytes, base + 40U, stateVarNames[index].offset);
+        put(bytes, base + 44U, stateVarNames[index].length);
+        put(bytes, base + 48U, firstTrigger);
+        put(bytes, base + 52U, static_cast<std::uint32_t>(stateVar.triggers.size()));
+        for (const auto& trigger : stateVar.triggers) {
+            const std::size_t triggerBase = offsets[9] + firstTrigger * kLogicStrides[9];
+            put(bytes, triggerBase, trigger.lower);
+            put(bytes, triggerBase + 4U, trigger.upper);
+            put(bytes, triggerBase + 8U, trigger.referenceTag);
+            put(bytes, triggerBase + 12U, trigger.behaviorRootTag);
+            ++firstTrigger;
+        }
+    }
+    for (std::size_t index = 0; index < catalog.stateVarBindings.size(); ++index) {
+        const auto& binding = catalog.stateVarBindings[index];
+        const std::size_t base = offsets[6] + index * kLogicStrides[6];
+        put(bytes, base, binding.ownerTag);
+        put(bytes, base + 4U, binding.configTag);
+        put(bytes, base + 8U, binding.definitionEntityIndex);
+    }
+    for (std::size_t index = 0; index < catalog.logicRoots.size(); ++index) {
+        const auto& root = catalog.logicRoots[index];
+        const std::size_t base = offsets[7] + index * kLogicStrides[7];
+        put(bytes, base, root.tag);
+        put(bytes, base + 4U, root.classId);
+        put(bytes, base + 8U, rootNames[index].offset);
+        put(bytes, base + 12U, rootNames[index].length);
+    }
+    for (std::size_t index = 0; index < catalog.logicReferences.size(); ++index) {
+        const auto& reference = catalog.logicReferences[index];
+        const std::size_t base = offsets[8] + index * kLogicStrides[8];
+        put(bytes, base, reference.rootIndex);
+        put(bytes, base + 4U, reference.stateVarIndex);
+        put(bytes, base + 8U, reference.nameHash);
+        put(bytes, base + 12U, reference.occurrenceCount);
+        put(bytes, base + 16U, reference.selector);
+        put(bytes, base + 20U, static_cast<std::uint8_t>(reference.direction));
     }
     std::copy(strings.begin(), strings.end(), output.begin() + stringOffset);
     return true;
@@ -522,10 +622,10 @@ LoadResult load_activity_logic(std::wstring_view path,
                                std::uint32_t scenarioTag,
                                std::span<const std::byte> contentFingerprint,
                                activity_logic_catalog::Catalog& output) noexcept {
-    if (stale_schema(path, kLogicMagic, activity_logic_catalog::kSchemaVersion)) {
+    if (stale_logic_cache(path)) {
         output = {};
         return {LoadState::stale,
-                "The cached Activity Logic schema is obsolete; catalogue this location again."};
+                "The cached Activity Logic collector is obsolete; catalogue this location again."};
     }
     const auto loaded = activity_logic_catalog::load_file(path, output);
     if (loaded.state == activity_logic_catalog::LoadState::missing) {

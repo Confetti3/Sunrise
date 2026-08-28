@@ -47,7 +47,6 @@
 #include "world_inspector_commands.h"
 #include "world_inspector_graph.h"
 #include "world_inspector_graph_admission.h"
-#include "world_inspector_modules.h"
 #include "world_inspector_viewport.h"
 #include "world_inspector_workspace_state.h"
 
@@ -88,6 +87,40 @@ constexpr float kTreeIndent = 14.0F;
 constexpr float kPi = 3.14159265358979323846F;
 constexpr ImU32 kGuideColor = IM_COL32(63, 55, 42, 210);
 constexpr ImVec4 kSelection{0.796F, 0.608F, 0.318F, 1.0F};
+
+struct WorkspaceViewDescriptor final {
+    CenterMode mode;
+    const char* label;
+    const char* summary;
+};
+
+struct BottomPanelDescriptor final {
+    BottomTab tab;
+    const char* label;
+};
+
+constexpr std::array kWorkspaceViews{
+    WorkspaceViewDescriptor{CenterMode::overview,
+                            "Overview",
+                            "Current-activity ownership, authored links, and relationships."},
+    WorkspaceViewDescriptor{
+        CenterMode::world, "World", "Copied spatial observations and explicitly known evidence."},
+    WorkspaceViewDescriptor{
+        CenterMode::nodeGraph, "Node Graph", "Ownership and filtered hierarchy navigation."},
+    WorkspaceViewDescriptor{CenterMode::relationships,
+                            "Relationships",
+                            "Authored Activity Logic relations; unavailable without catalog edges."},
+    WorkspaceViewDescriptor{CenterMode::activityMap,
+                            "Activity Map",
+                            "Authored catalog layout; never treated as live transforms."},
+};
+
+constexpr std::array kBottomPanels{
+    BottomPanelDescriptor{BottomTab::references, "References"},
+    BottomPanelDescriptor{BottomTab::data, "Data"},
+    BottomPanelDescriptor{BottomTab::compare, "Compare"},
+    BottomPanelDescriptor{BottomTab::diagnostics, "Diagnostics"},
+};
 constexpr ImVec4 kSpawn{0.965F, 0.886F, 0.478F, 1.0F};
 constexpr ImVec4 kWarning{0.949F, 0.549F, 0.216F, 1.0F};
 constexpr ImVec4 kFailure{0.941F, 0.349F, 0.349F, 1.0F};
@@ -426,13 +459,6 @@ WorkspaceState g_state{};
     return contains_ascii_case_insensitive(tag.data(), query);
 }
 
-[[nodiscard]] const model::ProviderReport* provider_report(model::Producer producer) noexcept {
-    const auto found = std::ranges::find_if(
-        world().providerReports,
-        [producer](const model::ProviderReport& report) { return report.producer == producer; });
-    return found == world().providerReports.end() ? nullptr : &*found;
-}
-
 template <typename Value> [[nodiscard]] const Value* root_property(std::string_view key) noexcept {
     const model::Node* root = world().graph.node(world().graph.root());
     if (root == nullptr) {
@@ -443,19 +469,9 @@ template <typename Value> [[nodiscard]] const Value* root_property(std::string_v
     return found == root->properties.end() ? nullptr : std::get_if<Value>(&found->value);
 }
 
-[[nodiscard]] bool root_bool(std::string_view key, bool fallback = false) noexcept {
-    const bool* value = root_property<bool>(key);
-    return value == nullptr ? fallback : *value;
-}
-
 [[nodiscard]] std::uint64_t root_u64(std::string_view key) noexcept {
     const std::uint64_t* value = root_property<std::uint64_t>(key);
     return value == nullptr ? 0 : *value;
-}
-
-[[nodiscard]] std::string_view root_text(std::string_view key) noexcept {
-    const std::string* value = root_property<std::string>(key);
-    return value == nullptr ? std::string_view{} : std::string_view(*value);
 }
 
 [[nodiscard]] std::uint32_t producer_epoch() noexcept {
@@ -506,6 +522,7 @@ struct InspectorCapabilities final {
     std::size_t triggerShapes{};
     std::size_t logicDefinitions{};
     std::size_t logicPlacements{};
+    std::size_t logicVariables{};
     std::size_t warnings{};
     std::size_t errors{};
 };
@@ -521,6 +538,8 @@ struct InspectorCapabilities final {
                 ++result.logicDefinitions;
             } else if (node.kind == model::NodeKind::logicPlacement) {
                 ++result.logicPlacements;
+            } else if (node.kind == model::NodeKind::logicVariable) {
+                ++result.logicVariables;
             }
             continue;
         }
@@ -899,6 +918,39 @@ void refresh_layout_scale() noexcept {
     return model::matches(node, query);
 }
 
+[[nodiscard]] bool overview_node_admitted_by_filters(const model::Node& node,
+                                                     const model::Query& query) noexcept {
+    if (!is_structural(node.kind) && !filter_enabled(filter_group(node.kind))) {
+        return false;
+    }
+    if (!g_state.showHidden && hidden(node.id)) {
+        return false;
+    }
+    if (g_state.errorsOnly && node.status != model::Status::failed) {
+        return false;
+    }
+    return model::matches(node, query);
+}
+
+[[nodiscard]] overview::ActivityScope current_activity_scope() {
+    const location_catalog::PreviewStatus preview = location_catalog::preview_status();
+    overview::ActivityScope scope{};
+    if (preview.active) {
+        scope.label = preview.displayName.empty() ? "Authored activity" : preview.displayName;
+        scope.scenarioTag = preview.scenarioTag;
+        scope.available = preview.scenarioTag != 0;
+        scope.preview = true;
+        return scope;
+    }
+    const model::WorldContext& context = world_context();
+    scope.label = context.packageName.empty() ? "Current activity" : context.packageName;
+    scope.activitySession = context.activitySession;
+    scope.scenarioTag = context.scenarioTag;
+    scope.available = context.sessionPresent && context.activitySession != 0
+                      && context.scenarioTag != 0;
+    return scope;
+}
+
 [[nodiscard]] std::string
 row_label(const model::Node& node, HierarchyMode mode, const model::InspectionDocument& snapshot) {
     if (node.id == snapshot.graph.root()
@@ -1068,15 +1120,20 @@ void rebuild_rows() {
 
     g_state.rows.clear();
     g_state.admitted.clear();
+    g_state.overviewAdmitted.clear();
     const model::Query query = model::parse_query(queryText);
     g_state.queryError = query.error;
     const bool searching = !query.terms.empty();
     g_state.admitted.reserve(snapshot.graph.nodes().size());
+    g_state.overviewAdmitted.reserve(snapshot.graph.nodes().size());
     g_state.rows.reserve(snapshot.graph.nodes().size());
 
     for (const model::Node& node : snapshot.graph.nodes()) {
         if (node_admitted_by_filters(node, query)) {
             g_state.admitted.insert(node.id.value);
+        }
+        if (overview_node_admitted_by_filters(node, query)) {
+            g_state.overviewAdmitted.insert(node.id.value);
         }
     }
     // Parents are always created before children. Walking the dense graph backwards propagates
@@ -1951,7 +2008,7 @@ void draw_activity_logic_metadata(const model::Node& node) noexcept {
         return;
     }
     if (ImGui::Button("Open serialized-reference graph")) {
-        g_state.centerMode = CenterMode::logicGraph;
+        g_state.centerMode = CenterMode::relationships;
         g_state.relationshipGraphState.fitRequested = true;
     }
     ImGui::TextUnformatted("Serialized name references (not execution flow)");
@@ -1992,6 +2049,49 @@ void draw_rendering(const model::Node& node) noexcept {
         toggle_hidden(node.id);
     }
     inspector_text("Game-render visibility is unavailable.", true);
+}
+
+void draw_state_variable_or_root(const model::Node& node) noexcept {
+    if (node.kind != model::NodeKind::logicVariable
+        && !(node.kind == model::NodeKind::logicGroup && node.classHash.has_value()
+             && *node.classHash == 0x8080941EU)) {
+        return;
+    }
+    const char* title = node.kind == model::NodeKind::logicVariable ? "State variable"
+                                                                     : "Behavior root";
+    if (!inspector_header(title, ImGuiTreeNodeFlags_DefaultOpen)
+        || !begin_properties("##authored_logic_node_properties")) {
+        return;
+    }
+    if (node.tag.has_value()) {
+        property_u64(node.kind == model::NodeKind::logicVariable ? "Config tag" : "Root tag",
+                     *node.tag,
+                     8);
+    }
+    if (node.nameHash.has_value()) {
+        property_u64("Name hash", *node.nameHash, 8);
+    }
+    if (node.classHash.has_value()) {
+        property_u64("Class", *node.classHash, 8);
+    }
+    for (const model::Property& property : node.properties) {
+        if (!property.visible) {
+            continue;
+        }
+        std::visit(
+            [&property](const auto& value) {
+                using Value = std::decay_t<decltype(value)>;
+                if constexpr (std::is_same_v<Value, bool>) {
+                    property_row(property.label.c_str(), value ? "true" : "false");
+                } else if constexpr (std::is_same_v<Value, std::string>) {
+                    property_row(property.label.c_str(), value.c_str());
+                } else if constexpr (std::is_integral_v<Value>) {
+                    property_i32(property.label.c_str(), static_cast<std::int32_t>(value));
+                }
+            },
+            property.value);
+    }
+    end_properties();
 }
 
 void draw_inspector_actions(const model::Node& node) noexcept {
@@ -2057,9 +2157,7 @@ void draw_inspector() noexcept {
         return;
     }
 
-    // Breadcrumb can be very long (package / session / scenario / placement).
-    // Wrap it instead of letting it overflow and get clipped at the right edge
-    // which reads as the top area being "cut short".
+    // Wrap long source paths within the inspector width.
     ImGui::Spacing();
     {
         const std::string breadcrumb = world().graph.breadcrumb(node->id);
@@ -2085,6 +2183,7 @@ void draw_inspector() noexcept {
     draw_source(*node);
     draw_activity_metadata(*node);
     draw_activity_logic_metadata(*node);
+    draw_state_variable_or_root(*node);
 }
 
 void graph_reference_row(const char* relation, const model::Node& node) noexcept {
@@ -2154,19 +2253,39 @@ void draw_references() noexcept {
         ImGui::TextDisabled(
             "Static catalog evidence; these links do not prove that an encounter is live.");
         if (control_button("Open relationship graph", {0.0F, control_height()}, false, true)) {
-            g_state.centerMode = CenterMode::logicGraph;
+            g_state.centerMode = CenterMode::relationships;
             g_state.relationshipGraphState.fitRequested = true;
         }
         std::size_t index = 0;
         for (const model::Relation& relationship : node->relations) {
             std::array<char, 160> label{};
             const model::Node* target = world().graph.node(relationship.target);
-            std::snprintf(label.data(),
-                          label.size(),
-                          "%s  %s  x%u",
-                          relationship.outgoing ? "outgoing ->" : "incoming <-",
-                          target == nullptr ? "target unavailable" : target->name.c_str(),
-                          relationship.occurrenceCount);
+            const char* relationKind = relationship.kind == model::RelationKind::logicVariableRead
+                                           ? "read"
+                                       : relationship.kind == model::RelationKind::logicVariableWrite
+                                           ? "write"
+                                       : relationship.kind == model::RelationKind::authoredLink
+                                           ? "owner binding"
+                                           : "relationship";
+            if (relationship.selector >= 0) {
+                std::snprintf(label.data(),
+                              label.size(),
+                              "%s %s  %s  hash 0x%08X selector %d x%u",
+                              relationKind,
+                              relationship.outgoing ? "->" : "<-",
+                              target == nullptr ? "target unavailable" : target->name.c_str(),
+                              relationship.nameHash,
+                              relationship.selector,
+                              relationship.occurrenceCount);
+            } else {
+                std::snprintf(label.data(),
+                              label.size(),
+                              "%s %s  %s  x%u",
+                              relationKind,
+                              relationship.outgoing ? "->" : "<-",
+                              target == nullptr ? "target unavailable" : target->name.c_str(),
+                              relationship.occurrenceCount);
+            }
             ImGui::PushID(static_cast<int>(index++));
             ImGui::BeginDisabled(target == nullptr);
             if (ImGui::Selectable(label.data(), false)) {
@@ -2809,7 +2928,7 @@ void draw_compare() noexcept {
 void draw_bottom_dock() noexcept {
     const float contentWidth = (std::max)(1.0F, ImGui::GetContentRegionAvail().x);
     const float spacing = ImGui::GetStyle().ItemSpacing.x;
-    const std::span panels = bottom_panels();
+    const std::span panels{kBottomPanels};
     const char* hide = "Hide";
     const float hideWidth = ImGui::CalcTextSize(hide).x + ImGui::GetStyle().FramePadding.x * 2.0F;
     const float headerGap = scaled(8.0F);
@@ -3544,17 +3663,19 @@ void draw_toolbar() noexcept {
         if (ImGui::BeginMenu("Center view")) {
             const model::Node* selected = selected_node();
             const bool relationshipsAvailable =
-                selected != nullptr && selected->activityLogicMetadata.has_value()
-                && !selected->activityLogicMetadata->relationships.empty();
-            for (const WorkspaceViewDescriptor& view : workspace_views()) {
+                selected != nullptr
+                && ((!selected->relations.empty())
+                    || (selected->activityLogicMetadata.has_value()
+                        && !selected->activityLogicMetadata->relationships.empty()));
+            for (const WorkspaceViewDescriptor& view : kWorkspaceViews) {
                 const bool available =
-                    view.mode != CenterMode::logicGraph || relationshipsAvailable;
+                    view.mode != CenterMode::relationships || relationshipsAvailable;
                 ImGui::BeginDisabled(!available);
                 if (ImGui::MenuItem(view.label, nullptr, g_state.centerMode == view.mode)) {
                     g_state.centerMode = view.mode;
                     if (view.mode == CenterMode::nodeGraph) {
-                        g_state.graphState.fitRequested = true;
-                    } else if (view.mode == CenterMode::logicGraph) {
+                        g_state.ownershipGraphState.fitRequested = true;
+                    } else if (view.mode == CenterMode::relationships) {
                         g_state.relationshipGraphState.fitRequested = true;
                     }
                 }
@@ -3567,25 +3688,34 @@ void draw_toolbar() noexcept {
                 }
             }
             ImGui::Separator();
+            ImGui::BeginDisabled(g_state.centerMode != CenterMode::overview);
+            if (ImGui::MenuItem("Fit Overview")) {
+                g_state.overviewGraphState.fitRequested = true;
+            }
+            if (ImGui::MenuItem("Center selected node##overview")) {
+                g_state.overviewGraphState.centerRequested = g_state.selection.selected();
+            }
+            ImGui::EndDisabled();
+            ImGui::Separator();
             ImGui::BeginDisabled(g_state.centerMode != CenterMode::nodeGraph);
             if (ImGui::MenuItem("Fit Node Graph")) {
-                g_state.graphState.fitRequested = true;
+                g_state.ownershipGraphState.fitRequested = true;
             }
             if (ImGui::MenuItem("Center selected node")) {
-                g_state.graphState.centerRequested = g_state.selection.selected();
+                g_state.ownershipGraphState.centerRequested = g_state.selection.selected();
             }
             ImGui::Separator();
             if (ImGui::MenuItem("Selected neighborhood",
                                 nullptr,
                                 g_state.graphScope == GraphScope::selectionNeighborhood)) {
                 g_state.graphScope = GraphScope::selectionNeighborhood;
-                g_state.graphState.fitRequested = true;
+                g_state.ownershipGraphState.fitRequested = true;
             }
             if (ImGui::MenuItem("All filtered nodes",
                                 nullptr,
                                 g_state.graphScope == GraphScope::filteredHierarchy)) {
                 g_state.graphScope = GraphScope::filteredHierarchy;
-                g_state.graphState.fitRequested = true;
+                g_state.ownershipGraphState.fitRequested = true;
             }
             ImGui::EndDisabled();
             ImGui::EndMenu();
@@ -3965,12 +4095,13 @@ void draw_status(const camera::Status& status) noexcept {
                   available.spatialNodes,
                   available.knownBounds);
     (void)disabled(segment.data());
-    if (available.logicDefinitions != 0) {
+    if (available.logicDefinitions != 0 || available.logicVariables != 0) {
         std::snprintf(segment.data(),
                       segment.size(),
-                      "| Logic %zu / %zu placed",
+                      "| Logic %zu / %zu placed / %zu variables",
                       available.logicDefinitions,
-                      available.logicPlacements);
+                      available.logicPlacements,
+                      available.logicVariables);
         (void)disabled(segment.data());
     }
     if (available.triggerCenters != 0) {
@@ -4301,7 +4432,20 @@ bool render(bool uiVisible) noexcept {
                                                        : ImGuiWindowFlags_NoBackground);
         ImGui::PopStyleVar();
         viewport::Result interaction{};
-        if (worldCenter) {
+        if (g_state.centerMode == CenterMode::overview) {
+            const graph::Result graphInteraction = graph::draw_overview(
+                world().graph,
+                g_state.overviewAdmitted,
+                g_state.admissionRevision,
+                current_activity_scope(),
+                static_cast<std::size_t>(g_state.maximumVisibleNodes),
+                g_state.selection.selected(),
+                g_state.overviewGraphState);
+            interaction.hovered = graphInteraction.hovered;
+            interaction.selected = graphInteraction.selected;
+            interaction.context = graphInteraction.context;
+            interaction.clearSelection = graphInteraction.clearSelection;
+        } else if (worldCenter) {
             draw_helper_controls();
             viewport::Options overlayOptions = viewport_options(workspace_overlay_policy());
             overlayOptions.renderStatus = debug_scene::status();
@@ -4371,12 +4515,12 @@ bool render(bool uiVisible) noexcept {
                                                                g_state.graphAdmitted,
                                                                graphRevision,
                                                                g_state.graphOmitted,
-                                                               g_state.graphState);
+                                                               g_state.ownershipGraphState);
             interaction.hovered = graphInteraction.hovered;
             interaction.selected = graphInteraction.selected;
             interaction.context = graphInteraction.context;
             interaction.clearSelection = graphInteraction.clearSelection;
-        } else if (g_state.centerMode == CenterMode::logicGraph) {
+        } else if (g_state.centerMode == CenterMode::relationships) {
             const graph::Result graphInteraction = graph::draw_activity_logic_relationships(
                 world().graph, g_state.selection.selected(), g_state.relationshipGraphState);
             interaction.hovered = graphInteraction.hovered;

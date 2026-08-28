@@ -7,11 +7,7 @@ namespace {
 
 [[nodiscard]] bool valid_material_publication(
     std::span<const material_requirements::Definition> definitions) noexcept {
-    // The package extractor has already checked every native material index against the exact
-    // dense item-table count used to publish this catalog. Re-probing the live item lookup here
-    // made publication depend on a second catalog boundary even though no stronger invariant was
-    // established. Keep this publication gate structural; the complete cache validator repeats
-    // the cross-domain bounds check before anything is persisted or restored.
+    // Extraction validates native indices; publication only requires both catalogs to be ready.
     return item_definitions_ready() && material_requirements::valid(definitions);
 }
 

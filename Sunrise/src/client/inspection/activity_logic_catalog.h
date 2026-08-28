@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <string>
 #include <string_view>
@@ -10,10 +11,10 @@
 
 namespace sunrise::client::inspection::activity_logic_catalog {
 
-inline constexpr std::uint32_t kSchemaVersion = 3;
-inline constexpr std::uint32_t kCollectorVersion = 2;
+inline constexpr std::uint32_t kSchemaVersion = 4;
+inline constexpr std::uint32_t kCollectorVersion = 4;
 inline constexpr std::size_t kDigestSize = 32;
-inline constexpr std::size_t kHeaderSize = 160;
+inline constexpr std::size_t kHeaderSize = 240;
 using Digest = std::array<std::uint8_t, kDigestSize>;
 
 enum class Role : std::uint8_t {
@@ -71,6 +72,56 @@ struct Edge final {
     std::uint32_t occurrenceCount{};
 };
 
+struct StateVarTrigger final {
+    std::int32_t lower{};
+    std::int32_t upper{};
+    std::uint32_t referenceTag{};
+    std::uint32_t behaviorRootTag{};
+};
+
+struct StateVar final {
+    std::uint32_t configTag{};
+    std::uint32_t nameHash{};
+    std::int32_t initial{};
+    std::int32_t lowerClamp{-1};
+    std::int32_t upperClamp{-1};
+    std::int32_t lowerThreshold{-1};
+    std::int32_t upperThreshold{-1};
+    bool projectionEnabled{};
+    std::uint32_t projectionBytecodeCount{};
+    std::uint32_t projectionConstantCount{};
+    std::string name;
+    bool nameProved{};
+    std::vector<StateVarTrigger> triggers;
+};
+
+struct StateVarBinding final {
+    std::uint32_t ownerTag{};
+    std::uint32_t configTag{};
+    std::uint32_t definitionEntityIndex{};
+};
+
+struct LogicRoot final {
+    std::uint32_t tag{};
+    std::uint32_t classId{};
+    std::string name;
+};
+
+enum class LogicReferenceDirection : std::uint8_t {
+    read,
+    write,
+};
+
+struct LogicReference final {
+    inline static constexpr std::uint32_t kUnjoinedStateVar = (std::numeric_limits<std::uint32_t>::max)();
+    std::uint32_t rootIndex{};
+    std::uint32_t stateVarIndex{kUnjoinedStateVar};
+    std::uint32_t nameHash{};
+    std::uint32_t occurrenceCount{};
+    std::int32_t selector{-1};
+    LogicReferenceDirection direction{LogicReferenceDirection::read};
+};
+
 struct Provenance final {
     Digest contentFingerprint{};
     std::uint32_t collectorVersion{};
@@ -82,6 +133,10 @@ struct Catalog final {
     std::vector<Activity> activities;
     std::vector<Entity> entities;
     std::vector<Edge> edges;
+    std::vector<StateVar> stateVars;
+    std::vector<StateVarBinding> stateVarBindings;
+    std::vector<LogicRoot> logicRoots;
+    std::vector<LogicReference> logicReferences;
     // Adjacency index built once during load: edge indices grouped by endpoint.
     // edgeBySourceOffsets has size entities.size()+1; edgeBySource is sorted by source entity.
     std::vector<std::uint32_t> edgeBySourceOffsets;
@@ -106,8 +161,6 @@ struct LoadResult final {
 [[nodiscard]] LoadResult load_file(std::wstring_view path, Catalog& catalog) noexcept;
 [[nodiscard]] const Activity* find_activity(const Catalog& catalog,
                                             std::uint32_t scenarioTag) noexcept;
-[[nodiscard]] const Entity* find_entity(const Catalog& catalog,
-                                        std::uint32_t definitionTag) noexcept;
 [[nodiscard]] const char* role_name(Role role) noexcept;
 [[nodiscard]] const char* confidence_name(Confidence confidence) noexcept;
 

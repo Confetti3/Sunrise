@@ -39,6 +39,8 @@ constexpr std::array kNodeKinds{
     NodeKindDescriptor{NodeKind::trigger, "trigger", "Trigger", NodeCategory::trigger},
     NodeKindDescriptor{NodeKind::audio, "audio", "Audio", NodeCategory::audio},
     NodeKindDescriptor{NodeKind::physics, "physics", "Physics", NodeCategory::physics},
+    NodeKindDescriptor{
+        NodeKind::logicVariable, "logic-variable", "Logic Variable", NodeCategory::logic},
     NodeKindDescriptor{NodeKind::unresolved, "unresolved", "Unresolved", NodeCategory::unresolved},
 };
 

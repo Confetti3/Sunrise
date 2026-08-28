@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -15,19 +16,30 @@ namespace sunrise::client::inspection::activity_logic_catalog {
 namespace {
 
 constexpr std::array<std::uint8_t, 8> kMagic{'S', 'L', 'O', 'G', 'I', 'C', '0', '1'};
-constexpr std::size_t kSectionCount = 5;
-constexpr std::array<std::uint32_t, kSectionCount> kExpectedStrides{28, 48, 4, 44, 16};
+constexpr std::size_t kSectionCount = 10;
+constexpr std::array<std::uint32_t, kSectionCount> kExpectedStrides{
+    28, 48, 4, 44, 16, 56, 12, 16, 24, 16};
 constexpr std::size_t kActivitySection = 0;
 constexpr std::size_t kEntitySection = 1;
 constexpr std::size_t kActivityRefSection = 2;
 constexpr std::size_t kPlacementSection = 3;
 constexpr std::size_t kEdgeSection = 4;
+constexpr std::size_t kStateVarSection = 5;
+constexpr std::size_t kBindingSection = 6;
+constexpr std::size_t kRootSection = 7;
+constexpr std::size_t kLogicReferenceSection = 8;
+constexpr std::size_t kTriggerSection = 9;
 constexpr std::size_t kMaximumFileSize = 128U * 1024U * 1024U;
 constexpr std::uint32_t kMaximumActivities = 4096;
 constexpr std::uint32_t kMaximumEntities = 250000;
 constexpr std::uint32_t kMaximumActivityRefs = 2000000;
 constexpr std::uint32_t kMaximumPlacements = 500000;
 constexpr std::uint32_t kMaximumEdges = 250000;
+constexpr std::uint32_t kMaximumStateVars = 250000;
+constexpr std::uint32_t kMaximumBindings = 500000;
+constexpr std::uint32_t kMaximumRoots = 250000;
+constexpr std::uint32_t kMaximumLogicReferences = 500000;
+constexpr std::uint32_t kMaximumTriggers = 500000;
 
 struct Section final {
     std::uint32_t offset{};
@@ -138,6 +150,14 @@ struct Reader final {
     return static_cast<std::uint8_t>(confidence) <= static_cast<std::uint8_t>(Confidence::strong);
 }
 
+[[nodiscard]] std::uint32_t fnv1(std::string_view text) noexcept {
+    std::uint32_t value = 0x811C9DC5U;
+    for (const unsigned char byte : text) {
+        value = value * 0x01000193U ^ byte;
+    }
+    return value;
+}
+
 /** Builds outgoing/incoming edge indexes once after parsing. */
 void build_adjacency(Catalog& catalog) {
     const std::size_t entityCount = catalog.entities.size();
@@ -190,7 +210,10 @@ bool validate(const Catalog& catalog, std::string& error) {
         return fail(error, "activity logic cache identity or contents are incomplete");
     }
     if (catalog.activities.size() > kMaximumActivities || catalog.entities.size() > kMaximumEntities
-        || catalog.edges.size() > kMaximumEdges) {
+        || catalog.edges.size() > kMaximumEdges || catalog.stateVars.size() > kMaximumStateVars
+        || catalog.stateVarBindings.size() > kMaximumBindings
+        || catalog.logicRoots.size() > kMaximumRoots
+        || catalog.logicReferences.size() > kMaximumLogicReferences) {
         return fail(error, "activity logic catalog exceeds supported count limits");
     }
 
@@ -258,6 +281,74 @@ bool validate(const Catalog& catalog, std::string& error) {
             return fail(error, "activity logic edge identity is duplicated");
         }
     }
+
+    std::unordered_set<std::uint32_t> stateVarConfigs;
+    std::unordered_set<std::uint32_t> roots;
+    stateVarConfigs.reserve(catalog.stateVars.size());
+    roots.reserve(catalog.logicRoots.size());
+    std::size_t triggerCount = 0;
+    for (const StateVar& stateVar : catalog.stateVars) {
+        std::array<char, 32> fallback{};
+        std::snprintf(fallback.data(), fallback.size(), "variable 0x%08X", stateVar.nameHash);
+        if (stateVar.configTag == 0 || stateVar.nameHash == 0 || stateVar.name.empty()
+            || !stateVarConfigs.insert(stateVar.configTag).second
+            || (stateVar.nameProved && fnv1(stateVar.name) != stateVar.nameHash)
+            || (!stateVar.nameProved && stateVar.name != fallback.data())
+            || stateVar.projectionBytecodeCount > kMaximumTriggers
+            || stateVar.projectionConstantCount > kMaximumTriggers) {
+            return fail(error, "activity logic StateVar identity is invalid");
+        }
+        triggerCount += stateVar.triggers.size();
+        if (triggerCount > kMaximumTriggers) {
+            return fail(error, "activity logic StateVar trigger count exceeds supported maximum");
+        }
+        for (const StateVarTrigger& trigger : stateVar.triggers) {
+            if (trigger.lower > trigger.upper || trigger.behaviorRootTag == 0) {
+                return fail(error, "activity logic StateVar trigger is invalid");
+            }
+        }
+    }
+    std::set<std::pair<std::uint32_t, std::uint32_t>> bindingKeys;
+    for (const StateVarBinding& binding : catalog.stateVarBindings) {
+        if (binding.ownerTag == 0 || binding.configTag == 0
+            || binding.definitionEntityIndex >= catalog.entities.size()
+            || !stateVarConfigs.contains(binding.configTag)) {
+            return fail(error, "activity logic StateVar binding is invalid");
+        }
+        if (!bindingKeys.emplace(binding.ownerTag, binding.configTag).second) {
+            return fail(error, "activity logic StateVar binding is duplicated");
+        }
+    }
+    for (const LogicRoot& root : catalog.logicRoots) {
+        if (root.tag == 0 || root.classId != 0x8080941EU || root.name.empty()
+            || !roots.insert(root.tag).second) {
+            return fail(error, "activity logic root identity is invalid");
+        }
+    }
+    std::set<std::tuple<std::uint32_t, std::uint32_t, std::uint32_t, std::int32_t, std::uint8_t>>
+        referenceKeys;
+    for (const LogicReference& reference : catalog.logicReferences) {
+        if (reference.rootIndex >= catalog.logicRoots.size() || reference.nameHash == 0
+            || reference.occurrenceCount == 0
+            || (reference.direction != LogicReferenceDirection::read
+                && reference.direction != LogicReferenceDirection::write)) {
+            return fail(error, "activity logic StateVar reference is invalid");
+        }
+        if (reference.stateVarIndex != LogicReference::kUnjoinedStateVar) {
+            if (reference.stateVarIndex >= catalog.stateVars.size()
+                || reference.nameHash != catalog.stateVars[reference.stateVarIndex].nameHash) {
+                return fail(error, "activity logic StateVar reference join is invalid");
+            }
+        }
+        if (!referenceKeys.emplace(reference.rootIndex,
+                                   reference.stateVarIndex,
+                                   reference.nameHash,
+                                   reference.selector,
+                                   static_cast<std::uint8_t>(reference.direction))
+                 .second) {
+            return fail(error, "activity logic StateVar reference is duplicated");
+        }
+    }
     return true;
 }
 
@@ -302,7 +393,7 @@ bool load(std::span<const std::byte> bytes, Catalog& catalog, std::string& error
         }
         std::uint32_t collectorVersion{};
         std::uint32_t contentBuild{};
-        if (!reader.read_u32(60, collectorVersion) || !reader.read_u32(124, contentBuild)) {
+        if (!reader.read_u32(60, collectorVersion) || !reader.read_u32(184, contentBuild)) {
             return fail(error, "activity logic provenance header is truncated");
         }
         if (collectorVersion != kCollectorVersion) {
@@ -347,7 +438,32 @@ bool load(std::span<const std::byte> bytes, Catalog& catalog, std::string& error
                            sections[kEdgeSection].offset,
                            sections[kEdgeSection].count,
                            sections[kEdgeSection].stride,
-                           kMaximumEdges)) {
+                           kMaximumEdges)
+            || !safe_range(bytes.size(),
+                           sections[kStateVarSection].offset,
+                           sections[kStateVarSection].count,
+                           sections[kStateVarSection].stride,
+                           kMaximumStateVars)
+            || !safe_range(bytes.size(),
+                           sections[kBindingSection].offset,
+                           sections[kBindingSection].count,
+                           sections[kBindingSection].stride,
+                           kMaximumBindings)
+            || !safe_range(bytes.size(),
+                           sections[kRootSection].offset,
+                           sections[kRootSection].count,
+                           sections[kRootSection].stride,
+                           kMaximumRoots)
+            || !safe_range(bytes.size(),
+                           sections[kLogicReferenceSection].offset,
+                           sections[kLogicReferenceSection].count,
+                           sections[kLogicReferenceSection].stride,
+                           kMaximumLogicReferences)
+            || !safe_range(bytes.size(),
+                           sections[kTriggerSection].offset,
+                           sections[kTriggerSection].count,
+                           sections[kTriggerSection].stride,
+                           kMaximumTriggers)) {
             return fail(error, "activity logic section range is invalid");
         }
 
@@ -513,6 +629,128 @@ bool load(std::span<const std::byte> bytes, Catalog& catalog, std::string& error
             catalog.edges.push_back(edge);
         }
 
+        const Section& stateVarSection = sections[kStateVarSection];
+        catalog.stateVars.reserve(stateVarSection.count);
+        for (std::uint32_t index = 0; index < stateVarSection.count; ++index) {
+            const std::size_t offset = stateVarSection.offset
+                                       + static_cast<std::size_t>(index) * stateVarSection.stride;
+            StateVar stateVar{};
+            std::uint32_t value{};
+            std::uint32_t nameOffset{};
+            std::uint32_t nameLength{};
+            std::uint32_t firstTrigger{};
+            std::uint32_t triggerCount{};
+            if (!reader.read_u32(offset, stateVar.configTag)
+                || !reader.read_u32(offset + 4U, stateVar.nameHash)
+                || !reader.read_u32(offset + 8U, value)) {
+                return fail(error, "activity logic StateVar record is truncated");
+            }
+            stateVar.initial = static_cast<std::int32_t>(value);
+            if (!reader.read_u32(offset + 12U, value)) {
+                return fail(error, "activity logic StateVar record is truncated");
+            }
+            stateVar.lowerClamp = static_cast<std::int32_t>(value);
+            if (!reader.read_u32(offset + 16U, value)) {
+                return fail(error, "activity logic StateVar record is truncated");
+            }
+            stateVar.upperClamp = static_cast<std::int32_t>(value);
+            if (!reader.read_u32(offset + 20U, value)) {
+                return fail(error, "activity logic StateVar record is truncated");
+            }
+            stateVar.lowerThreshold = static_cast<std::int32_t>(value);
+            if (!reader.read_u32(offset + 24U, value)) {
+                return fail(error, "activity logic StateVar record is truncated");
+            }
+            stateVar.upperThreshold = static_cast<std::int32_t>(value);
+            std::uint8_t flags{};
+            if (!reader.read_u8(offset + 28U, flags)
+                || (flags & ~std::uint8_t{3U}) != 0U
+                || !reader.read_u32(offset + 32U, stateVar.projectionBytecodeCount)
+                || !reader.read_u32(offset + 36U, stateVar.projectionConstantCount)
+                || !reader.read_u32(offset + 40U, nameOffset)
+                || !reader.read_u32(offset + 44U, nameLength)
+                || !reader.read_u32(offset + 48U, firstTrigger)
+                || !reader.read_u32(offset + 52U, triggerCount)
+                || !string_at(reader, stringOffset, stringSize, nameOffset, nameLength, stateVar.name)
+                || firstTrigger > sections[kTriggerSection].count
+                || triggerCount > sections[kTriggerSection].count - firstTrigger) {
+                return fail(error, "activity logic StateVar record is invalid");
+            }
+            stateVar.projectionEnabled = (flags & 1U) != 0;
+            stateVar.nameProved = (flags & 2U) != 0;
+            stateVar.triggers.reserve(triggerCount);
+            for (std::uint32_t trigger = 0; trigger < triggerCount; ++trigger) {
+                const std::size_t triggerOffset = sections[kTriggerSection].offset
+                                                  + static_cast<std::size_t>(firstTrigger + trigger)
+                                                        * sections[kTriggerSection].stride;
+                StateVarTrigger row{};
+                if (!reader.read_u32(triggerOffset, value)) {
+                    return fail(error, "activity logic StateVar trigger is truncated");
+                }
+                row.lower = static_cast<std::int32_t>(value);
+                if (!reader.read_u32(triggerOffset + 4U, value)
+                    || !reader.read_u32(triggerOffset + 8U, row.referenceTag)
+                    || !reader.read_u32(triggerOffset + 12U, row.behaviorRootTag)) {
+                    return fail(error, "activity logic StateVar trigger is truncated");
+                }
+                row.upper = static_cast<std::int32_t>(value);
+                stateVar.triggers.push_back(row);
+            }
+            catalog.stateVars.push_back(std::move(stateVar));
+        }
+
+        const Section& bindingSection = sections[kBindingSection];
+        catalog.stateVarBindings.reserve(bindingSection.count);
+        for (std::uint32_t index = 0; index < bindingSection.count; ++index) {
+            const std::size_t offset = bindingSection.offset
+                                       + static_cast<std::size_t>(index) * bindingSection.stride;
+            StateVarBinding binding{};
+            if (!reader.read_u32(offset, binding.ownerTag)
+                || !reader.read_u32(offset + 4U, binding.configTag)
+                || !reader.read_u32(offset + 8U, binding.definitionEntityIndex)) {
+                return fail(error, "activity logic StateVar binding is truncated");
+            }
+            catalog.stateVarBindings.push_back(binding);
+        }
+
+        const Section& rootSection = sections[kRootSection];
+        catalog.logicRoots.reserve(rootSection.count);
+        for (std::uint32_t index = 0; index < rootSection.count; ++index) {
+            const std::size_t offset = rootSection.offset
+                                       + static_cast<std::size_t>(index) * rootSection.stride;
+            LogicRoot root{};
+            std::uint32_t nameOffset{};
+            std::uint32_t nameLength{};
+            if (!reader.read_u32(offset, root.tag) || !reader.read_u32(offset + 4U, root.classId)
+                || !reader.read_u32(offset + 8U, nameOffset)
+                || !reader.read_u32(offset + 12U, nameLength)
+                || !string_at(reader, stringOffset, stringSize, nameOffset, nameLength, root.name)) {
+                return fail(error, "activity logic root record is invalid");
+            }
+            catalog.logicRoots.push_back(std::move(root));
+        }
+
+        const Section& referenceSection = sections[kLogicReferenceSection];
+        catalog.logicReferences.reserve(referenceSection.count);
+        for (std::uint32_t index = 0; index < referenceSection.count; ++index) {
+            const std::size_t offset = referenceSection.offset
+                                       + static_cast<std::size_t>(index) * referenceSection.stride;
+            LogicReference reference{};
+            std::uint32_t selectorValue{};
+            std::uint8_t direction{};
+            if (!reader.read_u32(offset, reference.rootIndex)
+                || !reader.read_u32(offset + 4U, reference.stateVarIndex)
+                || !reader.read_u32(offset + 8U, reference.nameHash)
+                || !reader.read_u32(offset + 12U, reference.occurrenceCount)
+                || !reader.read_u32(offset + 16U, selectorValue)
+                || !reader.read_u8(offset + 20U, direction)) {
+                return fail(error, "activity logic StateVar reference is truncated");
+            }
+            reference.selector = static_cast<std::int32_t>(selectorValue);
+            reference.direction = static_cast<LogicReferenceDirection>(direction);
+            catalog.logicReferences.push_back(reference);
+        }
+
         if (!validate(catalog, error)) {
             return false;
         }
@@ -582,17 +820,6 @@ const Activity* find_activity(const Catalog& catalog, std::uint32_t scenarioTag)
         [](const Activity& activity, std::uint32_t value) { return activity.scenarioTag < value; });
     return iterator != catalog.activities.end() && iterator->scenarioTag == scenarioTag ? &*iterator
                                                                                         : nullptr;
-}
-
-const Entity* find_entity(const Catalog& catalog, std::uint32_t definitionTag) noexcept {
-    const auto iterator = std::lower_bound(
-        catalog.entities.begin(),
-        catalog.entities.end(),
-        definitionTag,
-        [](const Entity& entity, std::uint32_t value) { return entity.definitionTag < value; });
-    return iterator != catalog.entities.end() && iterator->definitionTag == definitionTag
-               ? &*iterator
-               : nullptr;
 }
 
 std::span<const std::uint32_t> outgoing_edges(const Catalog& catalog,

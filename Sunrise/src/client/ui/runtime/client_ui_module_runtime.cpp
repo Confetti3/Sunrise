@@ -13,15 +13,11 @@
 namespace sunrise::client::ui::runtime {
 namespace {
 
-/** Namespaced stable IDs prevent Client modules from colliding with Server modules. */
 constexpr std::string_view kMovementStableId = "client.movement";
 constexpr std::string_view kInspectorStableId = "client.inspector";
 constexpr std::string_view kPlayerStableId = "client.player";
-/** Short menu label for the shared teleport and noclip page. */
 constexpr std::string_view kMovementDisplayName = "Movement";
-/** Short menu label for the world-inspection workspace entry. */
 constexpr std::string_view kInspectorDisplayName = "Inspector";
-/** Short menu label for the player page. */
 constexpr std::string_view kPlayerDisplayName = "Player";
 
 core::ui::modules::registry::PageRegistration g_movementPage;
@@ -30,10 +26,8 @@ core::ui::modules::registry::PageRegistration g_playerPage;
 
 } // namespace
 
-/** @return True when all Client modules own their Core UI registry slots. */
 bool initialize() noexcept {
     world_inspector::initialize();
-    // Registered after movement, which is the order the menu lists them in.
     const bool movementOwned = g_movementPage.acquire(
         core::ui::modules::Owner::client, kMovementStableId, kMovementDisplayName, &movement::draw);
     const bool inspectorOwned = g_inspectorPage.acquire(core::ui::modules::Owner::client,
@@ -49,7 +43,6 @@ bool initialize() noexcept {
     return requiredPagesOwned;
 }
 
-/** Removes the Client modules from the Core UI registry. */
 void shutdown() noexcept {
     core::ui::modules::hud::set_extension(nullptr);
     g_playerPage.release();

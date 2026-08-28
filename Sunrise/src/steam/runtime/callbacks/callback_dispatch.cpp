@@ -151,7 +151,6 @@ bool queue_callback(int callbackId,
     event = {};
     event.callbackId = callbackId;
     event.call = call;
-    event.payloadSize = payloadSize;
     if (payloadSize != 0) {
         std::memcpy(event.payload.data(), payload, payloadSize);
     }

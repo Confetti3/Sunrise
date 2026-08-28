@@ -1,10 +1,10 @@
 #include <algorithm>
 #include <array>
 
-#include "../../../encoding/byte_order.h"
-#include "../../status_fields.h"
-#include "../family5/family5_codec.h"
-#include "../opcode503.h"
+#include "../../encoding/byte_order.h"
+#include "../status_fields.h"
+#include "family5/family5_codec.h"
+#include "opcode503.h"
 
 namespace sunrise::middleware::web_service::messages::opcode503 {
 namespace {

@@ -39,22 +39,12 @@ public:
     /** @return The frame entry. It is called only while its owner panel is selected. */
     [[nodiscard]] FrameCallback frame_callback() const noexcept;
 
-    /**
-     * Builds one descriptor by value.
-     * @param stableId Lowercase id, used for registration and for saved state.
-     * @param frameCallback Static entry, valid until unregister or shutdown.
-     * @param output Receives the descriptor. Left alone when a field is rejected.
-     * @return True when every field is valid and fits the fixed storage.
-     */
 private:
     friend bool create_descriptor(Owner owner,
                                   std::string_view stableId,
                                   std::string_view displayName,
                                   FrameCallback frameCallback,
                                   Descriptor& output) noexcept;
-    /** @return True when every field is complete. */
-    friend bool is_valid(const Descriptor& descriptor) noexcept;
-
     Owner owner_{Owner::client};
     std::array<char, kStableIdCapacity> stableId_{};
     std::size_t stableIdLength_{};
@@ -63,20 +53,11 @@ private:
     FrameCallback frameCallback_{};
 };
 
-/**
- * Builds one descriptor by value.
- * @param stableId Lowercase id, used for registration and for saved state.
- * @param frameCallback Static entry, valid until unregister or shutdown.
- * @param output Receives the descriptor. Left alone when a field is rejected.
- * @return True when every field is valid and fits the fixed storage.
- */
+/** Builds a descriptor when every field is valid and fits its fixed storage. */
 [[nodiscard]] bool create_descriptor(Owner owner,
                                      std::string_view stableId,
                                      std::string_view displayName,
                                      FrameCallback frameCallback,
                                      Descriptor& output) noexcept;
-
-/** @return True when every field is complete. */
-[[nodiscard]] bool is_valid(const Descriptor& descriptor) noexcept;
 
 } // namespace sunrise::core::ui::modules

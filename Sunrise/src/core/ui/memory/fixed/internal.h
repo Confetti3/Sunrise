@@ -8,7 +8,6 @@ namespace sunrise::core::ui::memory::fixed {
 struct ArenaStats {
     std::size_t outstandingAllocations{};
     std::size_t outstandingBytes{};
-    std::size_t highWaterBytes{};
     std::size_t largestFreeBytes{};
 };
 
@@ -28,13 +27,7 @@ void clear() noexcept;
 /** @param pointer Payload previously returned by allocate, or null. */
 void release(void* pointer) noexcept;
 
-/**
- * Checks whether pointer is an allocated payload wholly owned by the arena.
- * This validates
- * the address range and block header before a release callback
- * interprets the preceding bytes as
- * arena metadata.
- */
+/** Checks the address range and physical metadata before releasing an arena payload. */
 [[nodiscard]] bool owns(const void* pointer) noexcept;
 
 /** @return Current counters and the largest merged free payload. */

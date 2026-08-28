@@ -158,7 +158,7 @@
     <ClCompile Include="src\core\ui\modules\hud\hud_module_runtime.cpp" />
     <ClCompile Include="src\core\ui\modules\hud\hud_panel_render.cpp" />
     <ClCompile Include="src\core\ui\modules\logs\logs_panel_render.cpp" />
-    <ClCompile Include="src\core\ui\modules\logs\filters\logs_filter_controls.cpp" />
+    <ClCompile Include="src\core\ui\modules\logs\logs_filter_controls.cpp" />
     <ClCompile Include="src\core\ui\runtime\ui_visibility_runtime.cpp" />
     <ClCompile Include="src\core\ui\memory\fixed\ui_fixed_allocator.cpp" />
     <ClCompile Include="src\core\ui\memory\fixed\ui_fixed_arena.cpp" />
@@ -224,11 +224,9 @@
     <ClCompile Include="src\client\ui\components\key_picker\client_key_picker.cpp" />
     <ClCompile Include="src\client\ui\hud\hud_panel.cpp" />
     <ClCompile Include="src\client\ui\movement\movement_panel.cpp" />
-    <ClCompile Include="src\client\ui\viewer\viewer_panel.cpp" />
     <ClCompile Include="src\client\ui\world_inspector\world_inspector.cpp" />
     <ClCompile Include="src\client\ui\world_inspector\world_inspector_commands.cpp" />
     <ClCompile Include="src\client\ui\world_inspector\world_inspector_host.cpp" />
-    <ClCompile Include="src\client\ui\world_inspector\world_inspector_modules.cpp" />
     <ClCompile Include="src\client\ui\world_inspector\world_inspector_teleport_target.cpp" />
     <ClCompile Include="src\client\ui\world_inspector\world_inspector_viewport.cpp" />
     <ClCompile Include="src\client\ui\world_inspector\world_inspector_label_layout.cpp" />
@@ -236,6 +234,7 @@
     <ClCompile Include="src\client\ui\world_inspector\world_debug_scene_lines.cpp" />
     <ClCompile Include="src\client\ui\world_inspector\world_inspector_graph.cpp" />
     <ClCompile Include="src\client\ui\world_inspector\world_inspector_graph_layout.cpp" />
+    <ClCompile Include="src\client\ui\world_inspector\world_inspector_overview.cpp" />
     <ClCompile Include="src\client\inspection\bubble_bounds_catalog.cpp" />
     <ClCompile Include="src\client\inspection\current_location_catalog.cpp" />
     <ClCompile Include="src\client\inspection\current_location_domain_cache.cpp" />
@@ -433,7 +432,6 @@
     <ClCompile Include="src\state\activity\defaults\activity_defaults_validation.cpp" />
     <ClCompile Include="src\state\activity\destination\activity_destination_snapshot.cpp" />
     <ClCompile Include="src\state\activity\destination\activity_destination_spawn_binding.cpp" />
-    <ClCompile Include="src\state\activity\destination\activity_destination_validation.cpp" />
     <ClCompile Include="src\state\activity\transactions\activity_session_prepare.cpp" />
     <ClCompile Include="src\state\activity\transactions\activity_session_commit.cpp" />
     <ClCompile Include="src\state\activity\transactions\activity_session_release.cpp" />
@@ -523,7 +521,7 @@
     <ClCompile Include="src\state\build_data\socket_entry_lists\socket_entry_list_catalog.cpp" />
     <ClCompile Include="src\client\content\handles\handle_resolver.cpp" />
     <ClCompile Include="src\client\content\activity\activity_logic_packages.cpp" />
-    <ClCompile Include="src\client\content\activity\activity_tag_reader.cpp" />
+    <ClCompile Include="src\client\content\activity\activity_statevars.cpp" />
     <ClCompile Include="src\client\content\bootstrap\bootstrap_token_publish.cpp" />
     <ClCompile Include="src\client\content\investment\investment_source.cpp" />
     <ClCompile Include="src\client\content\investment\investment_refresh.cpp" />
@@ -613,7 +611,6 @@
     <ClCompile Include="src\middleware\bap\activity_message\activity_authoritative_data_parser.cpp" />
     <ClCompile Include="src\middleware\bap\activity_message\activity_authoritative_opaque_skip.cpp" />
     <ClCompile Include="src\middleware\bap\activity_message\activity_client_keepalive_validator.cpp" />
-    <ClCompile Include="src\middleware\bap\activity_message\activity_high_water_validator.cpp" />
     <ClCompile Include="src\middleware\bap\activity_message\activity_join_request_parser.cpp" />
     <ClCompile Include="src\middleware\bap\activity_message\activity_client_identity_parser.cpp" />
     <ClCompile Include="src\middleware\bap\activity_message\activity_state_refresh_parser.cpp" />
@@ -692,8 +689,8 @@
     <ClCompile Include="src\middleware\web_service\web_service_envelope.cpp" />
     <ClCompile Include="src\middleware\web_service\status_fields.cpp" />
     <ClCompile Include="src\middleware\web_service\messages\family5\family5_codec.cpp" />
-    <ClCompile Include="src\middleware\web_service\messages\opcode205\opcode205_codec.cpp" />
-    <ClCompile Include="src\middleware\web_service\messages\opcode503\opcode503_codec.cpp" />
+    <ClCompile Include="src\middleware\web_service\messages\opcode205_codec.cpp" />
+    <ClCompile Include="src\middleware\web_service\messages\opcode503_codec.cpp" />
     <ClCompile Include="src\middleware\web_service\messages\opcode206_codec.cpp" />
     <ClCompile Include="src\middleware\web_service\messages\opcode501_codec.cpp" />
     <ClCompile Include="src\middleware\web_service\messages\opcode505\opcode505_codec.cpp" />
@@ -927,14 +924,12 @@
     <ClInclude Include="src\core\ui\modules\hud\hud.h" />
     <ClInclude Include="src\core\ui\modules\hud\internal.h" />
     <ClInclude Include="src\core\ui\modules\logs\internal.h" />
-    <ClInclude Include="src\core\ui\modules\logs\filters\logs_filter_controls.h" />
+    <ClInclude Include="src\core\ui\modules\logs\logs_filter_controls.h" />
     <ClInclude Include="src\core\ui\runtime\ui_visibility_runtime.h" />
     <ClInclude Include="src\core\ui\runtime\settings.h" />
     <ClInclude Include="src\core\ui\memory\allocator.h" />
     <ClInclude Include="src\core\ui\memory\fixed\internal.h" />
-    <ClInclude Include="src\core\ui\animation\animation.h" />
     <ClInclude Include="src\core\ui\animation\transition\ui_transition_animation.h" />
-    <ClInclude Include="src\core\ui\components\components.h" />
     <ClInclude Include="src\core\ui\components\card\ui_card_component.h" />
     <ClInclude Include="src\core\ui\components\drawing\drawing.h" />
     <ClInclude Include="src\core\ui\components\filter\ui_filter_component.h" />
@@ -944,10 +939,8 @@
     <ClInclude Include="src\core\ui\components\navigation\ui_navigation_component.h" />
     <ClInclude Include="src\core\ui\components\section\ui_section_component.h" />
     <ClInclude Include="src\core\ui\components\toggle\ui_toggle_component.h" />
-    <ClInclude Include="src\core\ui\fonts\fonts.h" />
     <ClInclude Include="src\core\ui\fonts\installed\ui_installed_font_reader.h" />
     <ClInclude Include="src\core\ui\fonts\runtime\ui_runtime_font_lifecycle.h" />
-    <ClInclude Include="src\core\ui\scaling\scaling.h" />
     <ClInclude Include="src\core\ui\scaling\dpi\ui_dpi_scaling.h" />
     <ClInclude Include="src\core\ui\theme\sunrise_ui_theme.h" />
     <ClInclude Include="src\core\ui\layout\layout.h" />
@@ -972,6 +965,7 @@
     <ClInclude Include="src\client\ui\world_inspector\world_inspector_graph.h" />
     <ClInclude Include="src\client\ui\world_inspector\world_inspector_graph_layout.h" />
     <ClInclude Include="src\client\ui\world_inspector\world_inspector_graph_geometry.h" />
+    <ClInclude Include="src\client\ui\world_inspector\world_inspector_overview.h" />
     <ClInclude Include="src\client\viewer\viewer_camera_settings_store.h" />
     <ClInclude Include="src\client\viewer\viewer_camera_path_store.h" />
     <ClInclude Include="src\client\viewer\viewer_input_ownership.h" />
@@ -990,7 +984,6 @@
     <ClInclude Include="src\client\inspection\providers\runtime_observation_inspection.h" />
     <ClInclude Include="src\client\ui\world_inspector\world_inspector.h" />
     <ClInclude Include="src\client\ui\world_inspector\world_inspector_commands.h" />
-    <ClInclude Include="src\client\ui\world_inspector\world_inspector_modules.h" />
     <ClInclude Include="src\client\ui\world_inspector\world_inspector_workspace_state.h" />
     <ClInclude Include="src\client\ui\world_inspector\world_inspector_teleport_target.h" />
     <ClInclude Include="src\client\ui\world_inspector\world_inspector_viewport.h" />
@@ -1018,7 +1011,6 @@
     <ClInclude Include="src\client\ui\components\key_picker\client_key_picker.h" />
     <ClInclude Include="src\client\ui\hud\hud_panel.h" />
     <ClInclude Include="src\client\ui\movement\movement_panel.h" />
-    <ClInclude Include="src\client\ui\viewer\viewer_panel.h" />
     <ClInclude Include="src\client\runtime\internal.h" />
     <ClInclude Include="src\client\runtime\host\game_host_classification.h" />
     <ClInclude Include="src\client\hooks\graphics\graphics_hook_lifecycle.h" />
@@ -1036,7 +1028,7 @@
     <ClInclude Include="src\client\content\handles\layout.h" />
     <ClInclude Include="src\client\content\handles\handle_resolver.h" />
     <ClInclude Include="src\client\content\activity\activity_logic_packages.h" />
-    <ClInclude Include="src\client\content\activity\source.h" />
+    <ClInclude Include="src\client\content\activity\activity_statevars.h" />
     <ClInclude Include="src\client\content\scenarios\scenario_build.h" />
     <ClInclude Include="src\client\content\scenarios\internal.h" />
     <ClInclude Include="src\client\content\spawn_sets\spawn_set_build.h" />
@@ -1220,7 +1212,6 @@
     <ClInclude Include="src\server\bap\encrypted\queuez\definition.h" />
     <ClInclude Include="src\server\bap\encrypted\queuez\queuez_state_validation.h" />
     <ClInclude Include="src\server\bap\encrypted\queuez\queuez_outcome_staging.h" />
-    <ClInclude Include="src\server\bap\encrypted\queuez\staging\queuez_family_staging.h" />
     <ClInclude Include="src\server\bap\encrypted\push\queuez\queuez_update_frame.h" />
     <ClInclude Include="src\server\bap\encrypted\push\activity\activity_message_push.h" />
     <ClInclude Include="src\server\bap\encrypted\push\activity\activity_roster_push.h" />
@@ -1256,7 +1247,6 @@
     <ClInclude Include="src\middleware\bap\activity_message\activity_global_state_encoder.h" />
     <ClInclude Include="src\middleware\bap\activity_message\client_authoritative_data.h" />
     <ClInclude Include="src\middleware\bap\activity_message\activity_client_keepalive_validator.h" />
-    <ClInclude Include="src\middleware\bap\activity_message\activity_high_water_validator.h" />
     <ClInclude Include="src\middleware\bap\activity_message\activity_join_request_parser.h" />
     <ClInclude Include="src\middleware\bap\activity_message\activity_client_identity_parser.h" />
     <ClInclude Include="src\middleware\bap\activity_message\activity_state_refresh_parser.h" />

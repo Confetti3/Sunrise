@@ -1,8 +1,3 @@
-/**
- * The movement module's interface. Every control saves to disk at once, so a change made here
- * survives the next launch with no settings edit.
- */
-
 #include "movement_panel.h"
 
 #include <imgui.h>
@@ -18,9 +13,16 @@ namespace {
 namespace label = core::ui::components::label;
 namespace key_picker = client::ui::components::key_picker;
 
+void begin_control_row(const char* text, float labelWidth) noexcept {
+    ImGui::Spacing();
+    ImGui::AlignTextToFramePadding();
+    label::align();
+    ImGui::TextUnformatted(text);
+    ImGui::SameLine(labelWidth);
+}
+
 } // namespace
 
-/** Draws the movement module inside the active Core UI frame. */
 void draw() noexcept {
     client::movement::Settings settings = client::movement::get();
     bool changed = false;
@@ -34,32 +36,21 @@ void draw() noexcept {
     changed =
         core::ui::components::toggle::control("Enabled##teleport", settings.enabled) || changed;
 
-    ImGui::Spacing();
     // One label column and one control column, so the slider and key buttons share both edges.
     const float labelWidth =
         label::inset() + ImGui::CalcTextSize("Toggle key").x + ImGui::GetStyle().ItemSpacing.x * 2;
     const float controlWidth = ImGui::GetContentRegionAvail().x - labelWidth;
 
-    ImGui::AlignTextToFramePadding();
-    label::align();
-    ImGui::TextUnformatted("Distance");
-    ImGui::SameLine(labelWidth);
+    begin_control_row("Distance", labelWidth);
     ImGui::SetNextItemWidth(controlWidth);
-    float distance = settings.distance;
-    if (ImGui::SliderFloat("##distance",
-                           &distance,
-                           client::movement::kMinimumDistance,
-                           client::movement::kMaximumDistance,
-                           "%.0f units")) {
-        settings.distance = distance;
-        changed = true;
-    }
+    changed = ImGui::SliderFloat("##distance",
+                                 &settings.distance,
+                                 client::movement::kMinimumDistance,
+                                 client::movement::kMaximumDistance,
+                                 "%.0f units")
+              || changed;
 
-    ImGui::Spacing();
-    ImGui::AlignTextToFramePadding();
-    label::align();
-    ImGui::TextUnformatted("Key");
-    ImGui::SameLine(labelWidth);
+    begin_control_row("Key", labelWidth);
     changed = key_picker::control("teleport_key", settings.virtualKey, controlWidth) || changed;
 
     ImGui::Spacing();
@@ -72,11 +63,7 @@ void draw() noexcept {
     changed =
         core::ui::components::toggle::control("Enabled##noclip", settings.noclipEnabled) || changed;
 
-    ImGui::Spacing();
-    ImGui::AlignTextToFramePadding();
-    label::align();
-    ImGui::TextUnformatted("Toggle key");
-    ImGui::SameLine(labelWidth);
+    begin_control_row("Toggle key", labelWidth);
     changed = key_picker::control("noclip_key", settings.noclipToggleKey, controlWidth) || changed;
 
     ImGui::Spacing();
@@ -88,28 +75,17 @@ void draw() noexcept {
 
     changed = core::ui::components::toggle::control("Enabled##fly", settings.flyEnabled) || changed;
 
-    ImGui::Spacing();
-    ImGui::AlignTextToFramePadding();
-    label::align();
-    ImGui::TextUnformatted("Toggle key");
-    ImGui::SameLine(labelWidth);
+    begin_control_row("Toggle key", labelWidth);
     changed = key_picker::control("fly_key", settings.flyToggleKey, controlWidth) || changed;
 
-    ImGui::Spacing();
-    ImGui::AlignTextToFramePadding();
-    label::align();
-    ImGui::TextUnformatted("Speed");
-    ImGui::SameLine(labelWidth);
+    begin_control_row("Speed", labelWidth);
     ImGui::SetNextItemWidth(controlWidth);
-    float flySpeed = settings.flySpeed;
-    if (ImGui::SliderFloat("##fly_speed",
-                           &flySpeed,
-                           client::movement::kMinimumFlySpeed,
-                           client::movement::kMaximumFlySpeed,
-                           "%.0f units/s")) {
-        settings.flySpeed = flySpeed;
-        changed = true;
-    }
+    changed = ImGui::SliderFloat("##fly_speed",
+                                 &settings.flySpeed,
+                                 client::movement::kMinimumFlySpeed,
+                                 client::movement::kMaximumFlySpeed,
+                                 "%.0f units/s")
+              || changed;
 
     ImGui::Spacing();
     ImGui::Spacing();

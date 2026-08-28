@@ -42,33 +42,22 @@ namespace {
 
 } // namespace
 
-/** @return The domain that owns the module. */
 Owner Descriptor::owner() const noexcept {
     return owner_;
 }
 
-/** @return The stable lowercase module ID. */
 std::string_view Descriptor::stable_id() const noexcept {
     return {stableId_.data(), stableIdLength_};
 }
 
-/** @return The user-facing module name. */
 std::string_view Descriptor::display_name() const noexcept {
     return {displayName_.data(), displayNameLength_};
 }
 
-/** @return The frame entry. It is called only while its owner panel is selected. */
 FrameCallback Descriptor::frame_callback() const noexcept {
     return frameCallback_;
 }
 
-/**
- * Builds one descriptor by value.
- * @param stableId Lowercase id, used for registration and for saved state.
- * @param frameCallback Static entry, valid until unregister or shutdown.
- * @param output Receives the descriptor. Left alone when a field is rejected.
- * @return True when every field is valid and fits the fixed storage.
- */
 bool create_descriptor(Owner owner,
                        std::string_view stableId,
                        std::string_view displayName,
@@ -88,13 +77,6 @@ bool create_descriptor(Owner owner,
     candidate.frameCallback_ = frameCallback;
     output = candidate;
     return true;
-}
-
-/** @return True when every field is complete. */
-bool is_valid(const Descriptor& descriptor) noexcept {
-    return is_valid_owner(descriptor.owner_) && is_valid_stable_id(descriptor.stable_id())
-           && is_valid_display_name(descriptor.display_name())
-           && descriptor.frameCallback_ != nullptr;
 }
 
 } // namespace sunrise::core::ui::modules

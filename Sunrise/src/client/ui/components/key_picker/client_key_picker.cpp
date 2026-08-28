@@ -10,9 +10,6 @@
 namespace sunrise::client::ui::components::key_picker {
 namespace {
 
-constexpr int kFirstVirtualKey = 1;
-constexpr int kLastVirtualKey = 254;
-constexpr int kLastMouseKey = 6;
 constexpr std::size_t kKeyNameCapacity = 64;
 
 ImGuiID g_capturing{};
@@ -48,10 +45,7 @@ void key_name(std::uint32_t virtualKey, std::array<char, kKeyNameCapacity>& outp
         picked = 0;
         return true;
     }
-    for (int key = kFirstVirtualKey; key <= kLastVirtualKey; ++key) {
-        if (key <= kLastMouseKey) {
-            continue;
-        }
+    for (int key = VK_XBUTTON2 + 1; key <= VK_OEM_CLEAR; ++key) {
         if ((GetAsyncKeyState(key) & 0x8000) != 0) {
             picked = static_cast<std::uint32_t>(key);
             return true;

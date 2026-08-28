@@ -113,6 +113,38 @@ void close_files(Scratch& scratch) noexcept {
     }
 }
 
+bool read_tag_class(const Source& source,
+                    Scratch& scratch,
+                    std::uint32_t tag,
+                    std::uint32_t& classId) noexcept {
+    classId = 0;
+    if (tag < layout::kTagBase) {
+        return false;
+    }
+    const std::uint32_t handle = tag - layout::kTagBase;
+    const auto packageId = static_cast<std::uint16_t>(handle >> layout::kTagEntryBits);
+    const std::uint32_t entryIndex = handle & layout::kTagEntryMask;
+
+    Path stem{};
+    std::uint32_t patchIndex = 0;
+    if (!find_latest(source.directory, packageId, stem, patchIndex)) {
+        return false;
+    }
+    Path path{};
+    Header header{};
+    if (!build_path(stem, patchIndex, path)
+        || !block_cache::load_header(path, packageId, patchIndex, scratch, header)
+        || entryIndex >= header.entryCount) {
+        return false;
+    }
+    layout::EntryRecord entry{};
+    if (!table_cache::entry_record(scratch, path, header, entryIndex, entry)) {
+        return false;
+    }
+    classId = entry.reference;
+    return classId != 0;
+}
+
 /** Reads one tagged entry out of the installed packages. */
 bool read_tag(const Source& source,
               Scratch& scratch,

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <map>
 #include <set>
@@ -15,6 +16,7 @@
 #include "../../../middleware/content/packages/tables/internal.h"
 #include "../../../middleware/content/packages/tables/scenario_walk.h"
 #include "../../../middleware/gameplay/peer/join_messages.h"
+#include "activity_statevars.h"
 
 namespace sunrise::client::content::activity::logic_packages {
 namespace {
@@ -32,6 +34,12 @@ constexpr std::uint32_t kEntityReferenceClass = 0x80809B14U;
 constexpr std::uint32_t kEntityDefinitionClass = 0x80809C36U;
 constexpr std::uint32_t kMapTableClass = 0x808099D6U;
 constexpr std::uint32_t kMapRowClass = 0x808099D8U;
+constexpr std::uint32_t kStateVarOwnerClass = 0x80809C0FU;
+constexpr std::uint32_t kLogicRootClass = 0x8080941EU;
+constexpr std::uint32_t kLogicReadClass = 0x8080941BU;
+constexpr std::uint32_t kLogicWriteClass = 0x80804E40U;
+constexpr std::uint32_t kDefinitionPrimaryClass = 0x80809927U;
+constexpr std::uint32_t kDefinitionSecondaryClass = 0x80809928U;
 constexpr std::size_t kPrimaryDescriptor = 0x20;
 constexpr std::size_t kPrimaryStride = 8;
 constexpr std::size_t kGroupDescriptor = 0x38;
@@ -42,14 +50,9 @@ constexpr std::size_t kMapDescriptor = 8;
 constexpr std::size_t kMapStride = 0x90;
 constexpr std::size_t kMaximumRows = 250000;
 
-struct Primary final {
-    std::uint32_t discriminator{};
-    std::uint32_t nameHash{};
-};
-
 struct Resource final {
     std::uint32_t tag{};
-    std::vector<Primary> primary;
+    std::vector<std::uint32_t> nameHashes;
     std::vector<std::uint32_t> wrappers;
 };
 
@@ -94,6 +97,45 @@ struct Build final {
         value = value * 0x01000193U ^ byte;
     }
     return value;
+}
+
+void match_authored_identifiers(std::span<const std::byte> blob,
+                                std::span<const std::uint32_t> targets,
+                                std::vector<std::string>& names) {
+    names.assign(targets.size(), {});
+    std::vector<bool> ambiguous(targets.size(), false);
+    std::size_t start = 0;
+    std::size_t length = 0;
+    for (std::size_t index = 0; index <= blob.size(); ++index) {
+        const char value = index < blob.size() ? static_cast<char>(blob[index]) : '\0';
+        const bool identifier = (value >= 'a' && value <= 'z')
+                                || (value >= '0' && value <= '9') || value == '_';
+        if (index < blob.size() && identifier) {
+            if (length == 0) {
+                start = index;
+            }
+            ++length;
+            continue;
+        }
+        if (length != 0) {
+            const std::string_view candidate(
+                reinterpret_cast<const char*>(blob.data()) + start, length);
+            const std::uint32_t hash = fnv1(candidate);
+            const auto target = std::ranges::lower_bound(targets, hash);
+            if (target != targets.end() && *target == hash
+                && ((candidate.front() >= 'a' && candidate.front() <= 'z')
+                    || candidate.front() == '_')) {
+                const std::size_t slot = static_cast<std::size_t>(target - targets.begin());
+                if (names[slot].empty() && !ambiguous[slot]) {
+                    names[slot] = candidate;
+                } else if (names[slot] != candidate) {
+                    names[slot].clear();
+                    ambiguous[slot] = true;
+                }
+            }
+        }
+        length = 0;
+    }
 }
 
 [[nodiscard]] bool array_at(std::span<const std::byte> blob,
@@ -162,17 +204,20 @@ struct Build final {
         ++build.rejected;
         return true;
     }
-    resource.primary.reserve(static_cast<std::size_t>(primary.count));
+    resource.nameHashes.reserve(static_cast<std::size_t>(primary.count));
     for (std::uint64_t index = 0; index < primary.count; ++index) {
         std::size_t offset = 0;
-        Primary row{};
+        std::uint32_t nameHash = 0;
         if (!tables::element_offset(primary.dataOffset, primary.count, kPrimaryStride, index, offset)
-            || !tables::read(placement.objectBytes, offset, row.discriminator)
-            || !tables::read(placement.objectBytes, offset + 4, row.nameHash)) {
+            || !tables::read(placement.objectBytes, offset + 4, nameHash)) {
             return false;
         }
-        resource.primary.push_back(row);
+        resource.nameHashes.push_back(nameHash);
     }
+    std::ranges::sort(resource.nameHashes);
+    resource.nameHashes.erase(
+        std::unique(resource.nameHashes.begin(), resource.nameHashes.end()),
+        resource.nameHashes.end());
     for (std::uint64_t group = 0; group < groups.count; ++group) {
         std::size_t offset = 0;
         tables::Array children{};
@@ -265,11 +310,6 @@ component_classes(std::span<const std::byte> blob) noexcept {
 [[nodiscard]] MatchedNames matched_names(std::span<const std::byte> blob,
                                          const Resource& resource) {
     MatchedNames result{};
-    std::unordered_set<std::uint32_t> hashes;
-    for (const Primary& row : resource.primary) {
-        hashes.insert(row.nameHash);
-    }
-    std::string best;
     for (std::size_t offset = 0; offset < blob.size();) {
         const unsigned char first = static_cast<unsigned char>(blob[offset]);
         if (first < 0x20 || first > 0x7E) {
@@ -292,7 +332,7 @@ component_classes(std::span<const std::byte> blob) noexcept {
             const std::string_view text(reinterpret_cast<const char*>(blob.data() + offset),
                                         end - offset);
             const std::uint32_t hash = fnv1(text);
-            if (hashes.contains(hash)) {
+            if (std::ranges::binary_search(resource.nameHashes, hash)) {
                 if (std::ranges::find(result.hashes, hash) == result.hashes.end()) {
                     result.hashes.push_back(hash);
                 }
@@ -303,6 +343,55 @@ component_classes(std::span<const std::byte> blob) noexcept {
             offset = end + 1;
         } else {
             ++offset;
+        }
+    }
+    return result;
+}
+
+[[nodiscard]] std::string authored_pattern_name(std::span<const std::byte> blob) {
+    constexpr std::string_view suffix = ".pattern.tft";
+    std::string result;
+    for (std::size_t offset = 0; offset < blob.size();) {
+        const unsigned char first = static_cast<unsigned char>(blob[offset]);
+        if (first < 0x20 || first > 0x7E) {
+            ++offset;
+            continue;
+        }
+        std::size_t end = offset;
+        while (end < blob.size() && end - offset <= 260U) {
+            const unsigned char value = static_cast<unsigned char>(blob[end]);
+            if (value == 0) {
+                break;
+            }
+            if (value < 0x20 || value > 0x7E) {
+                end = offset;
+                break;
+            }
+            ++end;
+        }
+        if (end <= offset || end >= blob.size() || blob[end] != std::byte{0}) {
+            ++offset;
+            continue;
+        }
+        const std::string_view text(reinterpret_cast<const char*>(blob.data() + offset),
+                                    end - offset);
+        offset = end + 1U;
+        if (!text.ends_with(suffix)) {
+            continue;
+        }
+        const std::size_t separator = text.find_last_of("/\\");
+        const std::size_t begin = separator == std::string_view::npos ? 0U : separator + 1U;
+        const std::string_view name = text.substr(begin, text.size() - begin - suffix.size());
+        if (name.empty() || !std::ranges::all_of(name, [](char value) {
+                return (value >= 'a' && value <= 'z') || (value >= '0' && value <= '9')
+                       || value == '_';
+            })) {
+            continue;
+        }
+        if (result.empty()) {
+            result = name;
+        } else if (result != name) {
+            return {};
         }
     }
     return result;
@@ -536,6 +625,231 @@ bool build(const reader::Source& source,
                 if (std::ranges::find(owners, index) == owners.end()) {
                     owners.push_back(index);
                 }
+            }
+        }
+
+        // Admit StateVars only through the complete typed definition -> owner -> component row
+        // chain. Hash-only candidates and package-family scans are intentionally excluded.
+        std::unordered_set<std::uint32_t> stateVarConfigs;
+        std::set<std::pair<std::uint32_t, std::uint32_t>> bindingKeys;
+        std::vector<std::uint32_t> logicRootTags;
+        std::unordered_set<std::uint32_t> logicRootTagSet;
+        std::unordered_map<std::uint32_t, std::uint32_t> logicRootResources;
+        std::unordered_set<std::uint32_t> scannedOwners;
+        std::unordered_set<std::uint32_t> scannedRootConfigs;
+        std::uint32_t definitionClass = 0;
+        for (const Membership& membership : memberships) {
+            if (stopped(build)) {
+                return false;
+            }
+            blob.clear();
+            if (!reader::read_tag(source,
+                                  scratch,
+                                  membership.definitionTag,
+                                  blob,
+                                  definitionClass)
+                || definitionClass != kEntityDefinitionClass) {
+                ++progress.rejected;
+                continue;
+            }
+            const auto classes = component_classes(blob);
+            if (classes.first != kDefinitionPrimaryClass || classes.second != kDefinitionSecondaryClass) {
+                continue;
+            }
+            std::size_t secondaryBegin = 0;
+            std::size_t secondaryEnd = 0;
+            std::uint32_t ownerTag = 0;
+            if (!secondary_span(blob, kDefinitionSecondaryClass, secondaryBegin, secondaryEnd)
+                || secondaryBegin > blob.size() || blob.size() - secondaryBegin < 0xBC
+                || !tables::read(blob, secondaryBegin + 0xB8, ownerTag)
+                || ownerTag == 0 || tables::package_of(ownerTag) == tables::kAbsentPackageId) {
+                continue;
+            }
+            if (!scannedOwners.insert(ownerTag).second) {
+                continue;
+            }
+            std::uint32_t ownerClass = 0;
+            std::vector<std::byte> ownerBlob;
+            if (!reader::read_tag(source, scratch, ownerTag, ownerBlob, ownerClass)
+                || ownerClass != kStateVarOwnerClass) {
+                continue;
+            }
+            std::vector<statevars::OwnerRow> ownerRows;
+            std::vector<std::uint32_t> canonicalConfigs;
+            std::string parserError;
+            if (!statevars::parse_owner_rows(
+                    ownerBlob, ownerClass, ownerRows, canonicalConfigs, parserError)) {
+                continue;
+            }
+            for (const std::uint32_t config : canonicalConfigs) {
+                if (!scannedRootConfigs.insert(config).second) {
+                    continue;
+                }
+                std::vector<std::byte> configBlob;
+                std::uint32_t configClass = 0;
+                if (!reader::read_tag(source, scratch, config, configBlob, configClass)
+                    || configClass != kEntityDefinitionClass) {
+                    continue;
+                }
+                for (std::size_t scan = 0;
+                     scan + sizeof(std::uint32_t) <= configBlob.size();
+                     scan += sizeof(std::uint32_t)) {
+                    std::uint32_t rootTag = 0;
+                    std::uint32_t rootClass = 0;
+                    if (!tables::read(configBlob, scan, rootTag) || rootTag == 0
+                        || tables::package_of(rootTag) == tables::kAbsentPackageId
+                        || !reader::read_tag_class(source, scratch, rootTag, rootClass)
+                        || rootClass != kLogicRootClass) {
+                        continue;
+                    }
+                    if (logicRootTagSet.insert(rootTag).second) {
+                        logicRootTags.push_back(rootTag);
+                        logicRootResources.emplace(rootTag, membership.resourceTag);
+                    }
+                }
+            }
+            for (const statevars::OwnerRow& ownerRow : ownerRows) {
+                const std::uint32_t config = ownerRow.configTag;
+                if (!bindingKeys.emplace(ownerTag, config).second) {
+                    continue;
+                }
+                blob.clear();
+                std::uint32_t configClass = 0;
+                if (!reader::read_tag(source, scratch, config, blob, configClass)
+                    || configClass != kEntityDefinitionClass) {
+                    ++progress.rejected;
+                    continue;
+                }
+                catalog::StateVar stateVar{};
+                if (!statevars::parse_config(blob, configClass, config, stateVar, parserError)) {
+                    ++progress.rejected;
+                    continue;
+                }
+                std::array<char, 32> fallback{};
+                std::snprintf(fallback.data(), fallback.size(), "variable 0x%08X", stateVar.nameHash);
+                stateVar.name = fallback.data();
+                stateVar.nameProved = false;
+                if (stateVarConfigs.insert(config).second) {
+                    output.stateVars.push_back(std::move(stateVar));
+                }
+                output.stateVarBindings.push_back({ownerTag, config, membership.entityIndex});
+            }
+        }
+
+        // Resolve each root once, preserving unjoined generic references when the hash is
+        // ambiguous or has no admitted StateVar declaration.
+        std::ranges::sort(logicRootTags);
+        std::unordered_map<std::uint32_t, std::vector<std::uint32_t>> varsByHash;
+        for (std::uint32_t index = 0; index < output.stateVars.size(); ++index) {
+            varsByHash[output.stateVars[index].nameHash].push_back(index);
+        }
+        std::vector<std::uint32_t> variableNameHashes;
+        variableNameHashes.reserve(varsByHash.size());
+        for (const auto& [hash, unused] : varsByHash) {
+            (void)unused;
+            variableNameHashes.push_back(hash);
+        }
+        std::ranges::sort(variableNameHashes);
+        std::vector<std::string> provedVariableNames(output.stateVars.size());
+        std::vector<bool> ambiguousVariableNames(output.stateVars.size(), false);
+        for (const std::uint32_t rootTag : logicRootTags) {
+            std::vector<std::byte> rootBlob;
+            std::uint32_t rootClass = 0;
+            if (!reader::read_tag(source, scratch, rootTag, rootBlob, rootClass)
+                || rootClass != kLogicRootClass) {
+                continue;
+            }
+            catalog::LogicRoot root{rootTag, kLogicRootClass, {}};
+            std::array<char, 32> fallback{};
+            std::snprintf(fallback.data(), fallback.size(), "logic root 0x%08X", rootTag);
+            root.name = fallback.data();
+            const std::string patternName = authored_pattern_name(rootBlob);
+            if (!patternName.empty()) {
+                root.name = patternName;
+            } else {
+                const auto resourceTag = logicRootResources.find(rootTag);
+                if (resourceTag != logicRootResources.end()) {
+                    const auto resource = resources.find(resourceTag->second);
+                    if (resource != resources.end()) {
+                        const MatchedNames names = matched_names(rootBlob, *resource->second);
+                        if (!names.best.empty()) {
+                            root.name = names.best;
+                        }
+                    }
+                }
+            }
+            const std::uint32_t index = static_cast<std::uint32_t>(output.logicRoots.size());
+            output.logicRoots.push_back(std::move(root));
+            std::vector<std::string> resolvedNames;
+            match_authored_identifiers(rootBlob, variableNameHashes, resolvedNames);
+            for (std::size_t offset = 0; offset + 4U <= rootBlob.size(); offset += 4U) {
+                std::uint32_t marker = 0;
+                if (!tables::read(rootBlob, offset, marker)) {
+                    continue;
+                }
+                const bool readEndpoint = marker == kLogicReadClass;
+                const bool writeEndpoint = marker == kLogicWriteClass;
+                if (!readEndpoint && !writeEndpoint) {
+                    continue;
+                }
+                const std::size_t hashOffset = offset + (readEndpoint ? 12U : 4U);
+                std::uint32_t hash = 0;
+                if (!tables::read(rootBlob, hashOffset, hash) || hash == 0) {
+                    continue;
+                }
+                std::uint32_t selectorValue = 0;
+                const std::int32_t selector =
+                    readEndpoint && tables::read(rootBlob, offset + 8U, selectorValue)
+                        ? static_cast<std::int32_t>(selectorValue)
+                        : -1;
+                const auto candidates = varsByHash.find(hash);
+                const std::uint32_t variable = candidates != varsByHash.end()
+                                                   && candidates->second.size() == 1
+                                               ? candidates->second.front()
+                                               : catalog::LogicReference::kUnjoinedStateVar;
+                std::string_view name;
+                const auto nameHash = std::ranges::lower_bound(variableNameHashes, hash);
+                if (nameHash != variableNameHashes.end() && *nameHash == hash) {
+                    const std::size_t slot = static_cast<std::size_t>(
+                        nameHash - variableNameHashes.begin());
+                    if (!resolvedNames[slot].empty()) {
+                        name = resolvedNames[slot];
+                    }
+                }
+                if (variable != catalog::LogicReference::kUnjoinedStateVar && !name.empty()) {
+                    std::string& provedName = provedVariableNames[variable];
+                    if (provedName.empty() && !ambiguousVariableNames[variable]) {
+                        provedName = name;
+                    } else if (provedName != name) {
+                        provedName.clear();
+                        ambiguousVariableNames[variable] = true;
+                    }
+                }
+                auto found = std::ranges::find_if(output.logicReferences, [&](const auto& ref) {
+                    return ref.rootIndex == index && ref.stateVarIndex == variable
+                           && ref.nameHash == hash && ref.selector == selector
+                           && ref.direction == (readEndpoint
+                                                    ? catalog::LogicReferenceDirection::read
+                                                    : catalog::LogicReferenceDirection::write);
+                });
+                if (found == output.logicReferences.end()) {
+                    output.logicReferences.push_back({index,
+                                                      variable,
+                                                      hash,
+                                                      1,
+                                                      selector,
+                                                      readEndpoint
+                                                          ? catalog::LogicReferenceDirection::read
+                                                          : catalog::LogicReferenceDirection::write});
+                } else {
+                    ++found->occurrenceCount;
+                }
+            }
+        }
+        for (std::size_t index = 0; index < output.stateVars.size(); ++index) {
+            if (!provedVariableNames[index].empty() && !ambiguousVariableNames[index]) {
+                output.stateVars[index].name = std::move(provedVariableNames[index]);
+                output.stateVars[index].nameProved = true;
             }
         }
 

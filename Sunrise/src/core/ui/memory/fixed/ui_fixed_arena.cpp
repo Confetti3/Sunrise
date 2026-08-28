@@ -33,7 +33,6 @@ alignas(std::max_align_t) std::array<std::byte, kArenaCapacityBytes> g_storage{}
 Block* g_freeHead{};
 std::size_t g_outstandingAllocations{};
 std::size_t g_outstandingBytes{};
-std::size_t g_highWaterBytes{};
 
 /** @return The byte count rounded up to the native maximum alignment. */
 [[nodiscard]] constexpr std::size_t align_up(std::size_t value) noexcept {
@@ -146,7 +145,6 @@ void reset() noexcept {
     g_freeHead->free = true;
     g_outstandingAllocations = 0;
     g_outstandingBytes = 0;
-    g_highWaterBytes = 0;
 }
 
 /** Clears inactive arena bytes and lifecycle counters. */
@@ -155,7 +153,6 @@ void clear() noexcept {
     g_freeHead = nullptr;
     g_outstandingAllocations = 0;
     g_outstandingBytes = 0;
-    g_highWaterBytes = 0;
 }
 
 /** Takes the first free span that holds one aligned request. */
@@ -180,7 +177,6 @@ void* allocate(std::size_t requestedBytes) noexcept {
     block->requestedBytes = requestedBytes;
     ++g_outstandingAllocations;
     g_outstandingBytes += requestedBytes;
-    g_highWaterBytes = (std::max)(g_highWaterBytes, g_outstandingBytes);
     return payload(block);
 }
 
@@ -241,7 +237,6 @@ bool owns(const void* pointer) noexcept {
 ArenaStats snapshot() noexcept {
     return {g_outstandingAllocations,
             g_outstandingBytes,
-            g_highWaterBytes,
             g_freeHead != nullptr ? largest_free() : 0};
 }
 

@@ -4,7 +4,9 @@
 
 namespace sunrise::state::activity::destination {
 
-/** Bounds one destination selection. @return True when the name length fits the fixed array. */
-[[nodiscard]] bool valid(const DestinationSelection& selection) noexcept;
+/** @return True when the package name length fits its fixed storage. */
+[[nodiscard]] constexpr bool valid(const DestinationSelection& selection) noexcept {
+    return selection.packageNameLength <= selection.packageName.size();
+}
 
 } // namespace sunrise::state::activity::destination

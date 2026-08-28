@@ -51,6 +51,30 @@ logic::Catalog logic_catalog(const std::array<std::byte, logic::kDigestSize>& fi
     };
     value.activities = {{0x80B3E142U, "Titan", "fleet", {0, 1}}};
     value.edges = {{0, 1, 0x1234U, 2}};
+    value.stateVars = {{0x80810001U,
+                        0x82E6ECA4U,
+                        7,
+                        -1,
+                        1,
+                        -1,
+                        -1,
+                        true,
+                        3,
+                        2,
+                        "has_spawned",
+                        true,
+                        {{10, 20, 0, 0x80820001U}}}};
+    value.stateVarBindings = {{0x80820002U, 0x80810001U, 0}};
+    value.logicRoots = {{0x80830001U, 0x8080941EU, "logic root"}};
+    value.logicReferences = {
+        {0, 0, 0x82E6ECA4U, 2, 7, logic::LogicReferenceDirection::read},
+        {0,
+         logic::LogicReference::kUnjoinedStateVar,
+         0x5678U,
+         1,
+         -1,
+         logic::LogicReferenceDirection::write},
+    };
     return value;
 }
 
@@ -157,7 +181,19 @@ int main() {
     valid = check(cache::load_activity_logic(
                       logicPath, 0x80B3E142U, fingerprint, loadedLogic).state
                       == cache::LoadState::ready
-                      && loadedLogic.entities.size() == 2 && loadedLogic.edges.size() == 1,
+                      && loadedLogic.entities.size() == 2 && loadedLogic.edges.size() == 1
+                      && loadedLogic.stateVars.size() == 1
+                      && loadedLogic.stateVars.front().initial == 7
+                      && loadedLogic.stateVars.front().triggers.size() == 1
+                      && loadedLogic.stateVars.front().triggers.front().referenceTag == 0
+                      && loadedLogic.stateVarBindings.size() == 1
+                      && loadedLogic.stateVarBindings.front().ownerTag == 0x80820002U
+                      && loadedLogic.stateVarBindings.front().configTag == 0x80810001U
+                      && loadedLogic.logicRoots.size() == 1
+                      && loadedLogic.logicReferences.size() == 2
+                      && loadedLogic.logicReferences.front().selector == 7
+                      && loadedLogic.logicReferences.back().stateVarIndex
+                             == logic::LogicReference::kUnjoinedStateVar,
                   "logic cache round trip failed")
             && valid;
     valid = check(cache::load_activity_logic(
@@ -190,11 +226,33 @@ int main() {
                       && loadedLogic.edges.size() == 1,
                   "invalid logic candidate damaged the valid file")
             && valid;
-    overwrite_u32(logicPath, 8, 2);
+    overwrite_u32(logicPath, 64 + 5 * 12, 0xFFFFFFF0U);
+    valid = check(cache::load_activity_logic(
+                      logicPath, 0x80B3E142U, fingerprint, loadedLogic).state
+                      == cache::LoadState::rejected,
+                  "malformed StateVar section range was accepted")
+            && valid;
+    diagnostic.clear();
+    valid = check(cache::store_activity_logic_atomic(
+                      logicPath, logicValue, 0x80B3E142U, fingerprint, diagnostic),
+                  "logic cache did not recover from malformed StateVar section")
+            && valid;
+    overwrite_u32(logicPath, 60, logic::kCollectorVersion - 1U);
     valid = check(cache::load_activity_logic(
                       logicPath, 0x80B3E142U, fingerprint, loadedLogic).state
                       == cache::LoadState::stale,
-                  "logic schema 2 was not reported stale")
+                  "older logic collector was not reported stale")
+            && valid;
+    diagnostic.clear();
+    valid = check(cache::store_activity_logic_atomic(
+                      logicPath, logicValue, 0x80B3E142U, fingerprint, diagnostic),
+                  "logic cache did not replace stale collector")
+            && valid;
+    overwrite_u32(logicPath, 8, 3);
+    valid = check(cache::load_activity_logic(
+                      logicPath, 0x80B3E142U, fingerprint, loadedLogic).state
+                      == cache::LoadState::stale,
+                  "logic schema 3 was not reported stale")
             && valid;
     diagnostic.clear();
     valid = check(cache::store_activity_logic_atomic(

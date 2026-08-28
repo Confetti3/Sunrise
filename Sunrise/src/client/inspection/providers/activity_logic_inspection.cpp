@@ -3,9 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdio>
-#include <limits>
 #include <unordered_map>
-#include <unordered_set>
 
 #include "../../../middleware/gameplay/peer/join_messages.h"
 
@@ -15,9 +13,13 @@ namespace {
 namespace catalog = activity_logic_catalog;
 State g_state{};
 
+[[nodiscard]] std::uint64_t scoped_key(std::uint32_t scenarioTag,
+                                       std::uint32_t discriminator) noexcept {
+    return (static_cast<std::uint64_t>(scenarioTag) << 32U) | discriminator;
+}
+
 [[nodiscard]] std::uint64_t group_key(std::uint32_t scenarioTag, catalog::Role role) noexcept {
-    return (static_cast<std::uint64_t>(scenarioTag) << 32U)
-           | (0x100U + static_cast<std::uint8_t>(role));
+    return scoped_key(scenarioTag, 0x100U + static_cast<std::uint8_t>(role));
 }
 
 [[nodiscard]] std::uint64_t placement_key(std::uint32_t definitionTag,
@@ -36,20 +38,26 @@ State g_state{};
     return value == 0 ? 1 : value;
 }
 
-[[nodiscard]] std::string definition_label(const catalog::Entity& entity) {
-    if (!entity.name.empty()) {
-        return entity.name;
-    }
-    std::array<char, 128> text{};
-    const int written =
-        std::snprintf(text.data(),
-                      text.size(),
-                      "%s 0x%08X",
-                      entity.label.empty() ? catalog::role_name(entity.role) : entity.label.c_str(),
-                      entity.definitionTag);
-    return written > 0 && static_cast<std::size_t>(written) < text.size()
-               ? std::string(text.data(), static_cast<std::size_t>(written))
-               : std::string(catalog::role_name(entity.role));
+void append_state_var_properties(Node& node, const catalog::StateVar& stateVar) {
+    node.properties.push_back({"initial", "Authored initial", static_cast<std::int64_t>(stateVar.initial),
+                               Provenance::catalog});
+    node.properties.push_back({"lower_clamp", "Authored lower clamp",
+                               static_cast<std::int64_t>(stateVar.lowerClamp), Provenance::catalog});
+    node.properties.push_back({"upper_clamp", "Authored upper clamp",
+                               static_cast<std::int64_t>(stateVar.upperClamp), Provenance::catalog});
+    node.properties.push_back({"projection_enabled", "Authored projection enabled",
+                               stateVar.projectionEnabled, Provenance::catalog});
+    node.properties.push_back({"projection_bytecode_count", "Authored projection bytecode count",
+                               static_cast<std::uint64_t>(stateVar.projectionBytecodeCount),
+                               Provenance::catalog});
+    node.properties.push_back({"projection_constant_count", "Authored projection constant count",
+                               static_cast<std::uint64_t>(stateVar.projectionConstantCount),
+                               Provenance::catalog});
+    node.properties.push_back({"name_proved", "Authored name proved", stateVar.nameProved,
+                               Provenance::catalog});
+    node.properties.push_back({"trigger_count", "Authored trigger count",
+                               static_cast<std::uint64_t>(stateVar.triggers.size()),
+                               Provenance::catalog});
 }
 
 [[nodiscard]] ActivityLogicMetadata metadata_for(const catalog::Entity& entity,
@@ -65,9 +73,7 @@ State g_state{};
     metadata.label = entity.label;
     metadata.confidenceName = catalog::confidence_name(entity.confidence);
     metadata.localizedText = entity.localizedText;
-    metadata.placementCount = static_cast<std::uint32_t>(
-        (std::min)(entity.placements.size(),
-                   static_cast<std::size_t>((std::numeric_limits<std::uint32_t>::max)())));
+    metadata.placementCount = static_cast<std::uint32_t>(entity.placements.size());
     return metadata;
 }
 
@@ -151,6 +157,187 @@ void attach_links(ActivityLogicMetadata& metadata,
     return out;
 }
 
+void append_state_var_nodes(Graph& graph,
+                            std::vector<Diagnostic>& diagnostics,
+                            const catalog::Catalog& evidence,
+                            const Source& source,
+                            NodeId parent,
+                            std::uint32_t scenarioTag) {
+    Node variablesGroup;
+    variablesGroup.name = "Variables";
+    variablesGroup.searchText = "authored activity logic state variables";
+    variablesGroup.kind = NodeKind::logicGroup;
+    variablesGroup.status = Status::known;
+    variablesGroup.producer = Producer::activityLogicCatalog;
+    variablesGroup.provenance = Provenance::catalog;
+    variablesGroup.nativeKey = scoped_key(scenarioTag, 0x200U);
+    variablesGroup.source = source;
+    variablesGroup.actions = Action::copyId;
+    const NodeId variablesGroupId = graph.add(std::move(variablesGroup), parent);
+
+    Node ownersGroup;
+    ownersGroup.name = "Owners";
+    ownersGroup.searchText = "authored activity logic state variable owners";
+    ownersGroup.kind = NodeKind::logicGroup;
+    ownersGroup.status = Status::known;
+    ownersGroup.producer = Producer::activityLogicCatalog;
+    ownersGroup.provenance = Provenance::catalog;
+    ownersGroup.nativeKey = scoped_key(scenarioTag, 0x201U);
+    ownersGroup.source = source;
+    ownersGroup.actions = Action::copyId;
+    const NodeId ownersGroupId = graph.add(std::move(ownersGroup), parent);
+
+    std::vector<NodeId> stateVarNodes(evidence.stateVars.size());
+    for (std::size_t index = 0; index < evidence.stateVars.size(); ++index) {
+        const catalog::StateVar& stateVar = evidence.stateVars[index];
+        Node variable;
+        variable.name = stateVar.name;
+        variable.searchText = "authored activity logic state variable " + variable.name;
+        variable.kind = NodeKind::logicVariable;
+        variable.status = stateVar.nameProved ? Status::known : Status::unknownSemantic;
+        variable.producer = Producer::activityLogicCatalog;
+        variable.provenance = Provenance::catalog;
+        variable.nativeKey = stateVar.configTag;
+        variable.stableDiscriminator = scoped_key(scenarioTag, stateVar.configTag);
+        variable.source = source;
+        variable.tag = stateVar.configTag;
+        variable.nameHash = stateVar.nameHash;
+        variable.actions = Action::copyId | Action::copyTag;
+        append_state_var_properties(variable, stateVar);
+        stateVarNodes[index] = graph.add(std::move(variable), variablesGroupId);
+        if (!stateVarNodes[index]) {
+            diagnostics.push_back({Diagnostic::Severity::error,
+                                   "The inspection graph reached its node-id capacity while "
+                                   "adding authored state variables."});
+            break;
+        }
+    }
+
+    std::vector<NodeId> rootNodes(evidence.logicRoots.size());
+    for (std::size_t index = 0; index < evidence.logicRoots.size(); ++index) {
+        const catalog::LogicRoot& logicRoot = evidence.logicRoots[index];
+        Node rootNode;
+        rootNode.name = logicRoot.name;
+        rootNode.searchText = "authored activity logic behavior root " + logicRoot.name;
+        rootNode.kind = NodeKind::logicGroup;
+        rootNode.status = Status::known;
+        rootNode.producer = Producer::activityLogicCatalog;
+        rootNode.provenance = Provenance::catalog;
+        rootNode.nativeKey = logicRoot.tag;
+        rootNode.stableDiscriminator = scoped_key(scenarioTag, logicRoot.tag);
+        rootNode.source = source;
+        rootNode.tag = logicRoot.tag;
+        rootNode.classHash = logicRoot.classId;
+        rootNode.actions = Action::copyId | Action::copyTag;
+        rootNodes[index] = graph.add(std::move(rootNode), parent);
+        if (!rootNodes[index]) {
+            diagnostics.push_back({Diagnostic::Severity::error,
+                                   "The inspection graph reached its node-id capacity while "
+                                   "adding authored behavior roots."});
+            break;
+        }
+    }
+
+    std::unordered_map<std::uint32_t, NodeId> ownerNodes;
+    ownerNodes.reserve(evidence.stateVarBindings.size());
+    // Materialize class-proven owner identities from the binding table. Keep both directions in
+    // the in-memory graph so selecting either endpoint can open the relationship view.
+    for (const catalog::StateVarBinding& binding : evidence.stateVarBindings) {
+        if (binding.definitionEntityIndex >= evidence.entities.size() || binding.configTag == 0) {
+            continue;
+        }
+        const auto variable = std::ranges::find_if(
+            evidence.stateVars,
+            [&binding](const catalog::StateVar& stateVar) {
+                return stateVar.configTag == binding.configTag;
+            });
+        if (variable == evidence.stateVars.end()) {
+            continue;
+        }
+        const std::size_t variableIndex =
+            static_cast<std::size_t>(variable - evidence.stateVars.begin());
+        if (variableIndex >= stateVarNodes.size() || !stateVarNodes[variableIndex]) {
+            continue;
+        }
+        NodeId ownerId{};
+        const auto ownerFound = ownerNodes.find(binding.ownerTag);
+        if (ownerFound != ownerNodes.end()) {
+            ownerId = ownerFound->second;
+        } else {
+            const catalog::Entity& definition = evidence.entities[binding.definitionEntityIndex];
+            Node ownerNode;
+            ownerNode.name = definition.name;
+            ownerNode.searchText = "authored activity logic owner " + definition.name + " "
+                                   + definition.label + " " + definition.localizedText;
+            ownerNode.kind = NodeKind::logicEntity;
+            ownerNode.status = Status::known;
+            ownerNode.producer = Producer::activityLogicCatalog;
+            ownerNode.provenance = Provenance::catalog;
+            ownerNode.nativeKey = binding.ownerTag;
+            ownerNode.stableDiscriminator = scoped_key(scenarioTag, binding.ownerTag);
+            ownerNode.source = source;
+            ownerNode.tag = binding.ownerTag;
+            ownerNode.classHash = 0x80809C0FU;
+            ownerNode.actions = Action::copyId | Action::copyTag;
+            ownerId = graph.add(std::move(ownerNode), ownersGroupId);
+            if (ownerId) {
+                ownerNodes.emplace(binding.ownerTag, ownerId);
+            }
+        }
+        Node* ownerNode = graph.node(ownerId);
+        Node* variableNode = graph.node(stateVarNodes[variableIndex]);
+        if (ownerNode == nullptr || variableNode == nullptr) {
+            continue;
+        }
+        ownerNode->relations.push_back({variableNode->key,
+                                        RelationKind::authoredLink,
+                                        Provenance::catalog,
+                                        1,
+                                        true,
+                                        0,
+                                        -1});
+        variableNode->relations.push_back({ownerNode->key,
+                                           RelationKind::authoredLink,
+                                           Provenance::catalog,
+                                           1,
+                                           false,
+                                           0,
+                                           -1});
+    }
+
+    for (const catalog::LogicReference& reference : evidence.logicReferences) {
+        if (reference.rootIndex >= rootNodes.size()
+            || reference.stateVarIndex == catalog::LogicReference::kUnjoinedStateVar
+            || reference.stateVarIndex >= stateVarNodes.size()
+            || !rootNodes[reference.rootIndex] || !stateVarNodes[reference.stateVarIndex]) {
+            continue;
+        }
+        Node* rootNode = graph.node(rootNodes[reference.rootIndex]);
+        Node* variableNode = graph.node(stateVarNodes[reference.stateVarIndex]);
+        if (rootNode == nullptr || variableNode == nullptr) {
+            continue;
+        }
+        const RelationKind kind = reference.direction == catalog::LogicReferenceDirection::read
+                                      ? RelationKind::logicVariableRead
+                                      : RelationKind::logicVariableWrite;
+        const bool rootToVariable = reference.direction == catalog::LogicReferenceDirection::write;
+        rootNode->relations.push_back({variableNode->key,
+                                       kind,
+                                       Provenance::catalog,
+                                       reference.occurrenceCount,
+                                       rootToVariable,
+                                       reference.nameHash,
+                                       reference.selector});
+        variableNode->relations.push_back({rootNode->key,
+                                           kind,
+                                           Provenance::catalog,
+                                           reference.occurrenceCount,
+                                           !rootToVariable,
+                                           reference.nameHash,
+                                           reference.selector});
+    }
+}
+
 /** Builds the current location's Activity Logic hierarchy. */
 void append_activity_nodes(Graph& graph,
                            std::vector<Diagnostic>& diagnostics,
@@ -165,15 +352,12 @@ void append_activity_nodes(Graph& graph,
                               ? source.packageName
                               : activity.name;
     result.destination = activity.destination;
-    result.definitionCount = static_cast<std::uint32_t>(
-        (std::min)(activity.entityIndices.size(),
-                   static_cast<std::size_t>((std::numeric_limits<std::uint32_t>::max)())));
+    result.definitionCount = static_cast<std::uint32_t>(activity.entityIndices.size());
 
     Node root;
-    const std::string activityLabel = result.activityName.empty() ? "Activity logic"
-                                                                   : result.activityName;
-    root.name = "Activity logic / " + activityLabel;
-    root.searchText = "authored static activity encounter logic definitions " + activityLabel;
+    root.name = "Activity logic / " + result.activityName;
+    root.searchText =
+        "authored static activity encounter logic definitions " + result.activityName;
     root.kind = NodeKind::activityLogic;
     root.status = Status::known;
     root.producer = Producer::activityLogicCatalog;
@@ -231,7 +415,7 @@ void append_activity_nodes(Graph& graph,
         const NodeId group =
             ensure_group(graph, source, result.root, result.scenarioTag, entity.role, groups);
         Node node;
-        node.name = definition_label(entity);
+        node.name = entity.name;
         node.searchText = std::string("authored activity logic ") + catalog::role_name(entity.role)
                           + " " + entity.name + " " + entity.label + " "
                           + entity.localizedText;
@@ -261,7 +445,7 @@ void append_activity_nodes(Graph& graph,
         std::size_t ordinal = 0;
         for (const catalog::Placement& placement : entity.placements) {
             Node placementNode;
-            placementNode.name = definition_label(entity);
+            placementNode.name = entity.name;
             placementNode.searchText = "authored exact worldid map placement activity logic "
                                        + entity.name + " " + entity.label;
             placementNode.kind = NodeKind::logicPlacement;
@@ -311,9 +495,14 @@ void append_activity_nodes(Graph& graph,
                                        RelationKind::logic,
                                        Provenance::catalog,
                                        relationship.occurrenceCount,
-                                       relationship.outgoing});
+                                       relationship.outgoing,
+                                       relationship.nameHash,
+                                       -1});
         }
     }
+
+    append_state_var_nodes(
+        graph, diagnostics, evidence, source, result.root, result.scenarioTag);
 
     std::array<char, 320> summary{};
     std::snprintf(
@@ -379,6 +568,8 @@ bool activate_location(catalog::Catalog location, Source source) noexcept {
     try {
         std::string error;
         if (!source.scenarioTag.has_value() || *source.scenarioTag == 0
+            || (!source.authoredPreview
+                && (!source.activitySession.has_value() || *source.activitySession == 0))
             || location.activities.size() != 1
             || location.activities.front().scenarioTag != *source.scenarioTag
             || location.provenance.contentBuild != middleware::gameplay::peer::kHostBuild
@@ -420,10 +611,14 @@ std::uint64_t publication_revision() noexcept {
 AppendResult
 append(Graph& graph, std::vector<Diagnostic>& diagnostics, const Source& source, NodeId parent) {
     AppendResult result{};
-    const bool locationMatch =
-        g_state.locationActive
-        && (g_state.activationSource.authoredPreview
-            || (source.scenarioTag.has_value() && *source.scenarioTag == g_state.locationScenarioTag));
+    const bool previewMatch = g_state.activationSource.authoredPreview;
+    const bool liveMatch =
+        !previewMatch && !source.authoredPreview && source.scenarioTag.has_value()
+        && *source.scenarioTag == g_state.locationScenarioTag
+        && g_state.activationSource.activitySession.has_value()
+        && source.activitySession.has_value()
+        && *g_state.activationSource.activitySession == *source.activitySession;
+    const bool locationMatch = g_state.locationActive && (previewMatch || liveMatch);
     result.present = locationMatch;
     result.diagnostic = locationMatch
                             ? (g_state.activationSource.authoredPreview
@@ -455,7 +650,15 @@ append(Graph& graph, std::vector<Diagnostic>& diagnostics, const Source& source,
     provenance += std::to_string(placementTotal);
     provenance += " authored placements, ";
     provenance += std::to_string(evidence.edges.size());
-    provenance += " serialized-name references. Static authored data; not execution flow or live runtime state.";
+    provenance += " serialized-name references, ";
+    provenance += std::to_string(evidence.stateVars.size());
+    provenance += " StateVars, ";
+    provenance += std::to_string(evidence.stateVarBindings.size());
+    provenance += " owner bindings, ";
+    provenance += std::to_string(evidence.logicRoots.size());
+    provenance += " behavior roots, ";
+    provenance += std::to_string(evidence.logicReferences.size());
+    provenance += " variable references. Static authored data; not execution flow or live runtime state.";
     diagnostics.push_back({Diagnostic::Severity::information, std::move(provenance)});
 
     if (!evidenceSource.scenarioTag.has_value() || *evidenceSource.scenarioTag == 0) {

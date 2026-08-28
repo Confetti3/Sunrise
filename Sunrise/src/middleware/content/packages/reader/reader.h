@@ -253,6 +253,19 @@ void release_caches() noexcept;
 void close_files(Scratch& scratch) noexcept;
 
 /**
+ * Reads only the class recorded for one package tag without decoding its payload.
+ * @param source Package directory; block keys are not used.
+ * @param scratch Reader-owned package-table storage.
+ * @param tag Tag handle naming the package entry.
+ * @param classId Receives the entry-table class.
+ * @return True when the tag and its package entry are valid.
+ */
+[[nodiscard]] bool read_tag_class(const Source& source,
+                                  Scratch& scratch,
+                                  std::uint32_t tag,
+                                  std::uint32_t& classId) noexcept;
+
+/**
  * Reads one tagged entry without reporting its class.
  * The entry declares its own size, so the destination grows to fit it.
  * @param source Package directory and borrowed block keys.

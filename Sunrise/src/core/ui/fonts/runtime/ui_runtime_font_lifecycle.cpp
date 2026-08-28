@@ -27,13 +27,10 @@ constexpr float kRasterizerDensity = 2.0F;
 /** Ownership held while the atlas borrows installed-font bytes. */
 struct State {
     bool initialized{};
-    Source source{Source::unavailable};
     ImGuiContext* context{};
     ImFontAtlas* atlas{};
     float priorBasePixelSize{};
     float priorMainScale{kAuthoredScale};
-    float basePixelSize{};
-    float scale{kAuthoredScale};
 };
 
 State g_state{};
@@ -64,7 +61,6 @@ SRWLOCK g_fontLock{SRWLOCK_INIT};
 
 } // namespace
 
-/** Adds one installed or embedded font to the current empty Dear ImGui context. */
 bool initialize(HMODULE module, float basePixelSize) noexcept {
     AcquireSRWLockExclusive(&g_fontLock);
     ImGuiContext* context = ImGui::GetCurrentContext();
@@ -91,7 +87,6 @@ bool initialize(HMODULE module, float basePixelSize) noexcept {
     io.FontDefault = nullptr;
 
     installed::DataView installedData{};
-    Source source = Source::embeddedDefault;
     ImFont* font = nullptr;
     if (installed::load(module, installedData)) {
         ImFontConfig config{};
@@ -99,14 +94,12 @@ bool initialize(HMODULE module, float basePixelSize) noexcept {
         config.RasterizerDensity = kRasterizerDensity;
         font = atlas->AddFontFromMemoryTTF(
             installedData.bytes, installedData.byteCount, basePixelSize, &config);
-        source = Source::installed;
     }
     if (font == nullptr) {
         // A failed installed source is dropped before the fallback is added.
         atlas->Clear();
         installed::clear();
         font = add_embedded_font(*atlas, basePixelSize);
-        source = Source::embeddedDefault;
     }
     if (font == nullptr) {
         atlas->Clear();
@@ -120,19 +113,11 @@ bool initialize(HMODULE module, float basePixelSize) noexcept {
     io.FontDefault = font;
     ImGui::GetStyle().FontSizeBase = basePixelSize;
     ImGui::GetStyle().FontScaleMain = kAuthoredScale;
-    g_state = {true,
-               source,
-               context,
-               atlas,
-               priorBasePixelSize,
-               priorMainScale,
-               basePixelSize,
-               kAuthoredScale};
+    g_state = {true, context, atlas, priorBasePixelSize, priorMainScale};
     ReleaseSRWLockExclusive(&g_fontLock);
     return true;
 }
 
-/** Sets one absolute UI multiplier without compounding prior frame values. */
 bool apply_scale(float scale) noexcept {
     AcquireSRWLockExclusive(&g_fontLock);
     if (!g_state.initialized || ImGui::GetCurrentContext() != g_state.context
@@ -141,14 +126,13 @@ bool apply_scale(float scale) noexcept {
         return false;
     }
 
-    g_state.scale = (std::clamp)(scale, kMinimumDpiScale, kMaximumDpiScale);
+    const float clampedScale = (std::clamp)(scale, kMinimumDpiScale, kMaximumDpiScale);
     // Assigning the authored-relative value keeps scale from compounding across frames.
-    ImGui::GetStyle().FontScaleMain = g_state.scale;
+    ImGui::GetStyle().FontScaleMain = clampedScale;
     ReleaseSRWLockExclusive(&g_fontLock);
     return true;
 }
 
-/** Clears the owned atlas, then wipes the borrowed installed-font bytes. */
 bool shutdown() noexcept {
     AcquireSRWLockExclusive(&g_fontLock);
     if (!g_state.initialized) {
@@ -170,18 +154,6 @@ bool shutdown() noexcept {
     g_state = {};
     ReleaseSRWLockExclusive(&g_fontLock);
     return true;
-}
-
-/** @return One snapshot of the font source, size, and scale, read under the lock. */
-Snapshot snapshot() noexcept {
-    AcquireSRWLockShared(&g_fontLock);
-    const Snapshot result{g_state.initialized,
-                          g_state.source,
-                          installed::byte_count(),
-                          g_state.basePixelSize,
-                          g_state.scale};
-    ReleaseSRWLockShared(&g_fontLock);
-    return result;
 }
 
 } // namespace sunrise::core::ui::fonts::runtime

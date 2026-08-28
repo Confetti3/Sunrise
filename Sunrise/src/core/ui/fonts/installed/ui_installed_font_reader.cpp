@@ -207,9 +207,4 @@ void clear() noexcept {
     clear_path_scratch();
 }
 
-/** @return Number of installed-font bytes kept for the active atlas. */
-std::size_t byte_count() noexcept {
-    return g_fontByteCount;
-}
-
 } // namespace sunrise::core::ui::fonts::installed

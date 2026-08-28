@@ -9,11 +9,8 @@ inline constexpr std::size_t kArenaCapacityBytes = 8'388'608;
 
 /** Copied allocator counters. The arena storage itself is not exposed. */
 struct Stats {
-    bool installed{};
     std::size_t capacityBytes{kArenaCapacityBytes};
-    std::size_t outstandingAllocations{};
     std::size_t outstandingBytes{};
-    std::size_t highWaterBytes{};
     std::size_t largestFreeBytes{};
     std::size_t arenaMisses{};
     std::size_t spillOutstandingAllocations{};

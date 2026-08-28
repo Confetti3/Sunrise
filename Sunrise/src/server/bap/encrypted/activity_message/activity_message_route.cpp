@@ -8,7 +8,6 @@
 #include "../../../../core/settings/settings.h"
 #include "../../../../middleware/bap/activity_message/activity_client_identity_parser.h"
 #include "../../../../middleware/bap/activity_message/activity_client_keepalive_validator.h"
-#include "../../../../middleware/bap/activity_message/activity_high_water_validator.h"
 #include "../../../../middleware/bap/activity_message/activity_join_request_parser.h"
 #include "../../../../middleware/bap/activity_message/activity_membership_acknowledgement_parser.h"
 #include "../../../../middleware/bap/activity_message/activity_message_request_parser.h"
@@ -35,7 +34,6 @@ namespace {
 namespace service = middleware::bap::activity_message;
 namespace authority = service::entity_authority;
 namespace client_keepalive = service::client_keepalive;
-namespace high_water = service::high_water;
 namespace epoch_message = service::patch_epoch;
 namespace ledger = service::peer_ledger;
 namespace telemetry = service::telemetry;
@@ -280,7 +278,7 @@ constexpr std::array<FramingRoute, 22> kFramingRoutes{{
     {telemetry::kLagSwitchType, receipts::frame_lag_switch},
     {telemetry::kConnectionQualityType, receipts::frame_connection_quality},
     {ledger::kSpeculativeMigrationType, receipts::frame_migration},
-    {high_water::kMessageType, receipts::frame_high_water},
+    {telemetry::kHighWaterType, receipts::frame_high_water},
 }};
 
 /**

@@ -253,11 +253,8 @@ bool shutdown() noexcept {
 Stats snapshot() noexcept {
     AcquireSRWLockShared(&g_allocatorLock);
     const fixed::ArenaStats arena = fixed::snapshot();
-    const Stats result{g_installed,
-                       kArenaCapacityBytes,
-                       arena.outstandingAllocations,
+    const Stats result{kArenaCapacityBytes,
                        arena.outstandingBytes,
-                       arena.highWaterBytes,
                        g_installed ? arena.largestFreeBytes : 0,
                        g_arenaMisses,
                        g_spillOutstandingAllocations,

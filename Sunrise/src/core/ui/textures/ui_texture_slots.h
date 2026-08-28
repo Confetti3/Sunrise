@@ -25,7 +25,4 @@ void publish(Slot slot, ImTextureID texture) noexcept;
 /** @param slot Image to read. @return Its identifier, or ImTextureID_Invalid while unloaded. */
 [[nodiscard]] ImTextureID get(Slot slot) noexcept;
 
-/** Empties every slot. The renderer owns the textures and frees them itself. */
-void clear() noexcept;
-
 } // namespace sunrise::core::ui::textures

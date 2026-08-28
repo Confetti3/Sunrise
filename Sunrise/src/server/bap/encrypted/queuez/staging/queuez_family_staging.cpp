@@ -1,4 +1,4 @@
-#include "queuez_family_staging.h"
+#include "../definition.h"
 
 #include <cstddef>
 #include <limits>
@@ -7,36 +7,12 @@
 
 namespace sunrise::server::bap::encrypted::queuez {
 
-/** @return True for a logical match between two resident rows. */
-bool staging::same_resident(const ResidentObject& left, const ResidentObject& right) noexcept {
+namespace {
+
+[[nodiscard]] bool same_resident(const ResidentObject& left,
+                                 const ResidentObject& right) noexcept {
     return left.objectSoid == right.objectSoid && left.definitionId == right.definitionId;
 }
-
-/**
- * Compares two canonical peer states field by field.
- * @return True when both are valid and every fixed Family-4 field matches.
- */
-bool staging::same_state(const SessionState& left, const SessionState& right) noexcept {
-    if (!valid(left) || !valid(right) || left.family4RootSoid != right.family4RootSoid
-        || left.family3RootSoid != right.family3RootSoid
-        || left.family4Version != right.family4Version
-        || left.family3Version != right.family3Version
-        || left.family0Version != right.family0Version
-        || left.family0Character != right.family0Character
-        || left.family4ResidentCount != right.family4ResidentCount
-        || left.family3Phase != right.family3Phase || left.family4Active != right.family4Active
-        || left.family3Active != right.family3Active || left.family0Active != right.family0Active) {
-        return false;
-    }
-    for (std::size_t index = 0; index < left.family4Residents.size(); ++index) {
-        if (!staging::same_resident(left.family4Residents[index], right.family4Residents[index])) {
-            return false;
-        }
-    }
-    return true;
-}
-
-namespace {
 
 /**
  * Compares one active resident manifest with a staged full snapshot.
@@ -52,8 +28,7 @@ namespace {
         return false;
     }
     for (std::size_t index = 0; index < state.family4ResidentCount; ++index) {
-        if (!staging::same_resident(state.family4Residents[index],
-                                    candidate.family4Residents[index])) {
+        if (!same_resident(state.family4Residents[index], candidate.family4Residents[index])) {
             return false;
         }
     }

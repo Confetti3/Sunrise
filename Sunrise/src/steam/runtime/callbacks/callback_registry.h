@@ -37,7 +37,6 @@ struct CallResultEntry {
 struct CallbackEvent {
     int callbackId{};
     ApiCall call{};
-    std::size_t payloadSize{};
     std::array<std::byte, kEventPayloadCapacity> payload{};
 };
 

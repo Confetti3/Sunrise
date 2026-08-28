@@ -42,6 +42,7 @@ enum class NodeKind : std::uint8_t {
     trigger,
     audio,
     physics,
+    logicVariable,
     unresolved,
 };
 
@@ -164,6 +165,8 @@ enum class RelationKind : std::uint8_t {
     logic,
     authoredLink,
     runtimeAssociation,
+    logicVariableRead,
+    logicVariableWrite,
 };
 
 struct Relation final {
@@ -172,6 +175,9 @@ struct Relation final {
     Provenance provenance{Provenance::derived};
     std::uint32_t occurrenceCount{1};
     bool outgoing{true};
+    /** Internal authored logic metadata; intentionally omitted by inspection_capture. */
+    std::uint32_t nameHash{};
+    std::int32_t selector{-1};
 };
 
 [[nodiscard]] bool bounds_valid(const Bounds& bounds) noexcept;

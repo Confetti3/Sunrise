@@ -9,12 +9,26 @@
 
 #include "../../inspection/inspection_session.h"
 #include "../../inspection/inspection_settings_store.h"
-#include "world_debug_scene_lines.h"
 #include "world_inspector_graph.h"
-#include "world_inspector_modules.h"
 #include "world_inspector_viewport.h"
 
 namespace sunrise::client::ui::world_inspector {
+
+enum class CenterMode : std::uint8_t {
+    overview,
+    world,
+    nodeGraph,
+    relationships,
+    activityMap,
+};
+
+enum class BottomTab : std::uint8_t {
+    references,
+    data,
+    events,
+    compare,
+    diagnostics,
+};
 
 enum class HierarchyMode : std::uint8_t {
     world,
@@ -62,10 +76,12 @@ struct WorkspaceState final {
     std::vector<TreeTraversal> rowTraversal;
     std::unordered_set<std::uint64_t> rowVisited;
     std::unordered_set<std::uint64_t> admitted;
+    std::unordered_set<std::uint64_t> overviewAdmitted;
     std::unordered_set<std::uint64_t> graphAdmitted;
     std::uint64_t admissionRevision{};
     std::size_t graphOmitted{};
-    graph::State graphState;
+    graph::OverviewState overviewGraphState;
+    graph::State ownershipGraphState;
     graph::State relationshipGraphState;
     std::array<char, searchCapacity> search{};
     std::array<char, searchCapacity> eventFilter{};

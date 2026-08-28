@@ -8,10 +8,11 @@ failure, so one unavailable source does not disable unrelated evidence.
 ## Workspace
 
 The Viewer page shows Runtime, Authored, and Rendering readiness beside the camera, HUD, audio, and
-camera-path controls. The World Inspector has four views:
+camera-path controls. The World Inspector opens on World and has five views:
 
 | View | Purpose |
 | --- | --- |
+| Overview | Current-activity ownership, authored graph links, and typed relationships. |
 | World | Copied spatial observations and explicitly known bounds over the captured frame. |
 | Node Graph | Ownership and filtered hierarchy navigation. |
 | Relationships | Authored Activity Logic relations for the current selection. |
@@ -97,6 +98,13 @@ graph/node identities, signed authored positions, ordered native state-enum sequ
 references, and graph links. Build 86657 has empty native node-style descriptors, so Sunrise does
 not display an invented zero style. Its modern map-node placement tables do not carry Activity Graph
 node identities and therefore are not published as location releases.
+
+Activity Logic admits authored integer variables only through the typed object-owner,
+`0x80804DE4` component, and `0x80804DE8` descriptor chain. Overview and Relationships show proved
+declarations and static read/write references; unmatched hashes remain ordinary logic references.
+Authored initial values are labelled separately and never presented as live or replicated state.
+The internal Activity Logic cache is schema 4 / collector 4; older caches are stale and rebuild from
+the same typed, scenario-scoped evidence path without changing Inspector exports or settings.
 
 Bubble bounds are built in-process from the current scenario's bubble identities and the bounded
 package-native parent, map-container, static-table, and transform chain. Misc hash64 dependencies
