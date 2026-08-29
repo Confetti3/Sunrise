@@ -302,6 +302,40 @@ bool set_selected_character(std::uint64_t characterSoid, bool& changed) noexcept
     return true;
 }
 
+/** Stores the selected character's equipped native title row. */
+bool set_selected_title(std::uint16_t recordIndex,
+                        std::uint64_t& characterSoid,
+                        bool& changed) noexcept {
+    characterSoid = 0;
+    changed = false;
+    AcquireSRWLockExclusive(&runtime::storage::g_stateLock);
+    AccountState candidate = runtime::storage::g_state.account;
+    std::size_t selectedIndex = candidate.characterCount;
+    for (std::size_t index = 0; index < candidate.characterCount; ++index) {
+        if (candidate.characters[index].selected) {
+            selectedIndex = index;
+            break;
+        }
+    }
+    if (selectedIndex == candidate.characterCount) {
+        ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
+        return false;
+    }
+    CharacterState& character = candidate.characters[selectedIndex];
+    characterSoid = character.soid;
+    changed = character.equippedTitleRecordIndex != recordIndex;
+    character.equippedTitleRecordIndex = recordIndex;
+    if (!account::valid(candidate)) {
+        characterSoid = 0;
+        changed = false;
+        ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
+        return false;
+    }
+    runtime::storage::g_state.account = candidate;
+    ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
+    return true;
+}
+
 /** Prepares one checked equip transition without changing account State. */
 bool prepare_equipment_swap(std::uint64_t requestedInstanceSoid,
                             PendingEquipmentSwap& mutation) noexcept {

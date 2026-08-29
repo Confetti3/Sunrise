@@ -39,6 +39,24 @@ constexpr std::size_t kEntrySize = 2 * sizeof(std::uint16_t);
 constexpr std::uint32_t kMaximumEntries = 8192;
 
 /**
+ * Books whose shared progress counter grants chapters directly.
+ *
+ * Unlike collectible-backed lore, these chapters never become separately claimable records. The
+ * counter is both the number of entries collected and the parent bar value.
+ */
+constexpr std::array<std::uint16_t, 4> kCounterGrantedLoreNodes{
+    823U,  // Stolen Intelligence
+    839U,  // Unveiling
+    850U,  // A Man with No Name
+    853U,  // Revelation
+};
+
+[[nodiscard]] constexpr bool counter_granted_lore(std::uint16_t nodeIndex) noexcept {
+    return std::find(kCounterGrantedLoreNodes.begin(), kCounterGrantedLoreNodes.end(), nodeIndex)
+           != kCounterGrantedLoreNodes.end();
+}
+
+/**
  * Completions that have not been claimed live in their own file, beside the claim file.
  *
  * Finding lore completes a record without claiming it, and that completion has to outlive the
@@ -49,11 +67,17 @@ constexpr std::uint32_t kMaximumEntries = 8192;
 constexpr std::wstring_view kClaimableFileSuffix = L"\\cache\\record_claimable.bin";
 /** Distinct from kMagic so neither file can ever be read as the other. */
 constexpr std::array<char, 8> kClaimableMagic{'S', 'N', 'R', 'S', 'C', 'M', 'P', '1'};
+/** Partial single-objective values live apart from completion and claim state. */
+constexpr std::wstring_view kProgressFileSuffix = L"\\cache\\record_progress.bin";
+constexpr std::array<char, 8> kProgressMagic{'S', 'N', 'R', 'S', 'P', 'R', 'G', '1'};
+constexpr std::size_t kProgressEntrySize = sizeof(std::uint16_t) + sizeof(std::int32_t);
 
 std::mutex g_lock;
 std::array<std::uint64_t, kWordCount> g_claimed{};
 /** Records complete but not yet claimed. A claim supersedes this, never the other way round. */
 std::array<std::uint64_t, kWordCount> g_claimable{};
+/** Partial progress keyed by completion-flag index; zero means no persisted partial value. */
+std::array<std::int32_t, kIndexCapacity> g_progress{};
 std::array<std::uint16_t, kIndexCapacity> g_scoreByIndex{};
 std::size_t g_count{};
 std::uint32_t g_score{};
@@ -61,6 +85,11 @@ core::path::Buffer g_path{};
 bool g_pathReady{};
 core::path::Buffer g_claimablePath{};
 bool g_claimablePathReady{};
+core::path::Buffer g_progressPath{};
+bool g_progressPathReady{};
+
+[[nodiscard]] bool claimed_locked(std::uint16_t flagIndex) noexcept;
+[[nodiscard]] bool claimable_locked(std::uint16_t flagIndex) noexcept;
 
 void report(const char* stage, const char* result, std::size_t detail) noexcept {
     std::array<char, 128> line{};
@@ -294,6 +323,109 @@ void load_claimable_locked() noexcept {
     report("load_claimable", "ok", restored);
 }
 
+/** Writes every nonzero partial objective value. The caller holds the lock. */
+void store_progress_locked() noexcept {
+    if (!g_progressPathReady) {
+        return;
+    }
+    std::vector<char> entries{};
+    std::uint32_t count = 0;
+    for (std::size_t index = 0; index < g_progress.size(); ++index) {
+        if (g_progress[index] <= 0 || claimed_locked(static_cast<std::uint16_t>(index))
+            || claimable_locked(static_cast<std::uint16_t>(index))) {
+            continue;
+        }
+        const auto packedIndex = static_cast<std::uint16_t>(index);
+        const auto* indexBytes = reinterpret_cast<const char*>(&packedIndex);
+        const auto* valueBytes = reinterpret_cast<const char*>(&g_progress[index]);
+        entries.insert(entries.end(), indexBytes, indexBytes + sizeof packedIndex);
+        entries.insert(entries.end(), valueBytes, valueBytes + sizeof g_progress[index]);
+        ++count;
+    }
+    std::vector<char> document{};
+    document.insert(document.end(), kProgressMagic.begin(), kProgressMagic.end());
+    const auto* countBytes = reinterpret_cast<const char*>(&count);
+    document.insert(document.end(), countBytes, countBytes + sizeof count);
+    document.insert(document.end(), entries.begin(), entries.end());
+
+    const HANDLE file = CreateFileW(g_progressPath.chars.data(),
+                                    GENERIC_WRITE,
+                                    0,
+                                    nullptr,
+                                    CREATE_ALWAYS,
+                                    FILE_ATTRIBUTE_NORMAL,
+                                    nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        report("store_progress", "open_fail", count);
+        return;
+    }
+    DWORD written = 0;
+    const auto size = static_cast<DWORD>(document.size());
+    bool complete =
+        WriteFile(file, document.data(), size, &written, nullptr) != FALSE && written == size;
+    complete = CloseHandle(file) != FALSE && complete;
+    report("store_progress", complete ? "ok" : "write_fail", count);
+}
+
+/** Reads persisted partial objective values. The caller holds the lock. */
+void load_progress_locked() noexcept {
+    const HANDLE file = CreateFileW(g_progressPath.chars.data(),
+                                    GENERIC_READ,
+                                    FILE_SHARE_READ,
+                                    nullptr,
+                                    OPEN_EXISTING,
+                                    FILE_ATTRIBUTE_NORMAL,
+                                    nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        report("load_progress", "absent", 0);
+        return;
+    }
+    std::array<char, sizeof(kProgressMagic) + sizeof(std::uint32_t)> header{};
+    DWORD read = 0;
+    if (ReadFile(file, header.data(), static_cast<DWORD>(header.size()), &read, nullptr) == FALSE
+        || read != header.size()
+        || std::memcmp(header.data(), kProgressMagic.data(), kProgressMagic.size()) != 0) {
+        (void)CloseHandle(file);
+        report("load_progress", "header_fail", 0);
+        return;
+    }
+    std::uint32_t entries = 0;
+    std::memcpy(&entries, header.data() + kProgressMagic.size(), sizeof entries);
+    if (entries > kMaximumEntries) {
+        (void)CloseHandle(file);
+        report("load_progress", "count_fail", entries);
+        return;
+    }
+    std::vector<char> payload(static_cast<std::size_t>(entries) * kProgressEntrySize);
+    read = 0;
+    const bool readOk =
+        payload.empty()
+        || (ReadFile(file, payload.data(), static_cast<DWORD>(payload.size()), &read, nullptr)
+                != FALSE
+            && read == payload.size());
+    (void)CloseHandle(file);
+    if (!readOk) {
+        report("load_progress", "read_fail", entries);
+        return;
+    }
+
+    std::size_t restored = 0;
+    for (std::uint32_t entry = 0; entry < entries; ++entry) {
+        const std::size_t at = static_cast<std::size_t>(entry) * kProgressEntrySize;
+        std::uint16_t index = 0;
+        std::int32_t value = 0;
+        std::memcpy(&index, payload.data() + at, sizeof index);
+        std::memcpy(&value, payload.data() + at + sizeof index, sizeof value);
+        if (static_cast<std::size_t>(index) >= kIndexCapacity || value <= 0
+            || claimed_locked(index) || claimable_locked(index)) {
+            continue;
+        }
+        g_progress[index] = value;
+        ++restored;
+    }
+    report("load_progress", "ok", restored);
+}
+
 } // namespace
 
 /** Derives the claim file path and loads any claims already held. */
@@ -318,6 +450,15 @@ bool initialize(void* module) noexcept {
     } else {
         report("initialize", "claimable_path_fail", 0);
     }
+
+    g_progressPathReady = false;
+    if (core::path::artifact_directory(module, g_progressPath)
+        && core::path::append(g_progressPath, kProgressFileSuffix)) {
+        g_progressPathReady = true;
+        load_progress_locked();
+    } else {
+        report("initialize", "progress_path_fail", 0);
+    }
     return true;
 }
 
@@ -326,6 +467,7 @@ void clear() noexcept {
     const std::lock_guard<std::mutex> guard(g_lock);
     g_claimed.fill(0);
     g_claimable.fill(0);
+    g_progress.fill(0);
     g_scoreByIndex.fill(0);
     g_count = 0;
     g_score = 0;
@@ -341,6 +483,7 @@ bool claim(std::uint16_t flagIndex, std::uint16_t scoreValue) noexcept {
     const std::lock_guard<std::mutex> guard(g_lock);
     if ((g_claimed[word] & bit) == 0) {
         g_claimed[word] |= bit;
+        g_progress[flagIndex] = 0;
         g_scoreByIndex[flagIndex] = scoreValue;
         ++g_count;
         // Only a first claim scores, so a repeated click cannot inflate the total.
@@ -351,6 +494,7 @@ bool claim(std::uint16_t flagIndex, std::uint16_t scoreValue) noexcept {
         // The claimable file lists completions still awaiting a claim, so this index has to leave
         // it now that the claim supersedes it -- otherwise it is carried in both files forever.
         store_claimable_locked();
+        store_progress_locked();
     }
     return true;
 }
@@ -383,37 +527,64 @@ std::size_t apply(std::span<std::uint8_t> accountFlags) noexcept {
     return changed;
 }
 
+/** Clears the authored completion values of every record owned by a lore book. */
+std::size_t clear_lore_objectives(std::span<std::int32_t> objectiveValues) noexcept {
+    struct ClearState {
+        std::span<std::int32_t> values;
+        std::size_t cleared{};
+    } state{objectiveValues};
+    build_data::nodes::for_each(
+        &state, [](void* context, const build_data::nodes::Definition& node) noexcept {
+            if (!build_data::nodes::lore_category(node.definitionIndex)) {
+                return;
+            }
+            auto* clear = static_cast<ClearState*>(context);
+            for (std::size_t child = 0; child < node.childCount; ++child) {
+                build_data::records::Definition record{};
+                if (!build_data::find_record_definition(node.children[child], record)
+                    || record.completionFlagIndex
+                           == build_data::records::kUnavailableFlagIndex) {
+                    continue;
+                }
+                const auto found = std::lower_bound(
+                    objective_slot_table::kRecords.begin(), objective_slot_table::kRecords.end(),
+                    record.completionFlagIndex,
+                    [](const objective_slot_table::RecordEntry& entry, std::uint16_t flag) {
+                        return entry.flagIndex < flag;
+                    });
+                if (found == objective_slot_table::kRecords.end()
+                    || found->flagIndex != record.completionFlagIndex) {
+                    continue;
+                }
+                for (std::uint8_t objective = 0; objective < found->objectiveCount; ++objective) {
+                    const std::size_t at =
+                        static_cast<std::size_t>(found->firstObjective) + objective;
+                    if (at >= objective_slot_table::kObjectives.size()) {
+                        break;
+                    }
+                    const std::size_t slot = objective_slot_table::kObjectives[at].slot;
+                    if (slot >= clear->values.size()) {
+                        continue;
+                    }
+                    clear->values[slot] = 0;
+                    ++clear->cleared;
+                }
+            }
+        });
+    static std::atomic<bool> reported{false};
+    if (!reported.exchange(true, std::memory_order_relaxed)) {
+        report("clear_lore_objectives", "ok", state.cleared);
+    }
+    return state.cleared;
+}
+
 namespace {
 
 /** Carries the bank and a tally through the node walk, which takes a plain function pointer. */
 struct NodeProgress {
     std::span<std::int32_t> values;
     std::size_t written;
-    /** One entry per value index, non-zero where a category's own bar reads. */
-    std::span<const char> categories;
 };
-
-/**
- * The objective slot run one record owns, or an empty span when the table does not name it.
- *
- * The slot space was derived and verified in game against thirteen measured points; see
- * objective_slot_table.h. A record's objectives occupy consecutive slots, so the run is found once
- * rather than a lookup per slot.
- */
-[[nodiscard]] std::span<const objective_slot_table::ObjectiveSlot> objective_slots_for(
-    std::uint16_t flagIndex) noexcept {
-    const std::span<const objective_slot_table::RecordEntry> table{objective_slot_table::kRecords};
-    const auto found = std::lower_bound(
-        table.begin(), table.end(), flagIndex,
-        [](const objective_slot_table::RecordEntry& entry, std::uint16_t key) {
-            return entry.flagIndex < key;
-        });
-    if (found == table.end() || found->flagIndex != flagIndex) {
-        return {};
-    }
-    return std::span<const objective_slot_table::ObjectiveSlot>{objective_slot_table::kObjectives}
-        .subspan(found->firstObjective, found->objectiveCount);
-}
 
 /** True when this account flag bank row is held. The caller owns the claim lock. */
 [[nodiscard]] bool claimed_locked(std::uint16_t flagIndex) noexcept {
@@ -433,6 +604,36 @@ struct NodeProgress {
     const std::size_t word = static_cast<std::size_t>(flagIndex) / kWordBits;
     const std::uint64_t bit = std::uint64_t{1} << (static_cast<std::size_t>(flagIndex) % kWordBits);
     return (g_claimable[word] & bit) != 0;
+}
+
+/**
+ * Builds the completion-flag mask for counter-granted chapters. The caller owns the claim lock.
+ *
+ * Their persisted completion bits are still the collection ledger, so relaunches retain the
+ * counter. They are masked only from ordinary objective emission: native content derives their
+ * collected state from the shared counter and never offers the chapter records for claiming.
+ */
+[[nodiscard]] std::array<std::uint64_t, kWordCount>
+counter_granted_chapter_mask_locked() noexcept {
+    std::array<std::uint64_t, kWordCount> mask{};
+    build_data::nodes::for_each(
+        &mask, [](void* context, const build_data::nodes::Definition& node) noexcept {
+            if (!counter_granted_lore(node.definitionIndex)) {
+                return;
+            }
+            auto* bits = static_cast<std::array<std::uint64_t, kWordCount>*>(context);
+            for (std::size_t child = 0; child < node.childCount; ++child) {
+                build_data::records::Definition record{};
+                if (!build_data::find_record_definition(node.children[child], record)
+                    || record.loreRow == build_data::records::kUnavailableLoreRow
+                    || static_cast<std::size_t>(record.completionFlagIndex) >= kIndexCapacity) {
+                    continue;
+                }
+                const std::size_t index = record.completionFlagIndex;
+                (*bits)[index / kWordBits] |= std::uint64_t{1} << (index % kWordBits);
+            }
+        });
+    return mask;
 }
 
 } // namespace
@@ -552,20 +753,7 @@ std::size_t apply_chapter_visibility_gates(std::span<std::int32_t> objectiveValu
 }
 
 std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcept {
-    // Every category's own index, so the walk can tell a free slot above a category from the next
-    // category along. Without it, writing the slot above drives whichever book owns that slot.
-    std::vector<char> categoryFlags(objectiveValues.size(), 0);
-    build_data::nodes::for_each(
-        &categoryFlags, [](void* context, const build_data::nodes::Definition& node) noexcept {
-            auto* flags = static_cast<std::vector<char>*>(context);
-            const std::uint16_t index = node.valueIndex;
-            if (index != build_data::nodes::kUnavailableValueIndex
-                && static_cast<std::size_t>(index) < flags->size()) {
-                (*flags)[index] = 1;
-            }
-        });
-
-    NodeProgress progress{objectiveValues, 0, std::span<const char>{categoryFlags}};
+    NodeProgress progress{objectiveValues, 0};
     // The claim lock is taken first and the node lock inside the walk. Nothing takes them the other
     // way round, so the order cannot close a cycle.
     const std::lock_guard<std::mutex> guard(g_lock);
@@ -591,8 +779,7 @@ std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcep
             // Dust reads 0 with all nine collected and every chapter still claimable -- so those
             // keep the sentinel and their bar stays honest.
             bool cumulative = false;
-            build_data::records::Definition parent{};
-            bool haveParent = false;
+            const bool counterGranted = counter_granted_lore(node.definitionIndex);
             for (std::size_t child = 0; child < node.childCount; ++child) {
                 build_data::records::Definition record{};
                 if (!build_data::find_record_definition(node.children[child], record)
@@ -601,21 +788,16 @@ std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcep
                     continue;
                 }
                 if (record.loreRow == build_data::records::kUnavailableLoreRow) {
-                    parent = record;
-                    haveParent = true;
                     continue;
                 }
-                // Claimed only. Verified against the live game: a lore book's bar moves when the
-                // chapter's triumph is claimed, not when the entry is collected. Counting
-                // collected entries as well was tried on the reasoning that a record completes on
-                // collection, and it is simply not what the bar does.
+                // Most books count chapter triumph claims. Four activity/vendor books are
+                // different: advancing their parent counter is the act that grants each entry.
                 if (claimed_locked(record.completionFlagIndex)) {
                     ++chapters;
                 }
-                // The category tile counts what has been collected, not what has been claimed.
-                // It has to: the tile's counter is also the gate that reveals the book, and a
-                // book that stayed hidden until a claim could never be opened at all, since a
-                // chapter cannot be claimed while it is invisible.
+                // The completion set is also the persistent collection ledger. For ordinary lore
+                // it means complete-but-unclaimed; for counter-granted lore it records an entry
+                // already granted by the shared counter and is never emitted as a claimable row.
                 if (claimed_locked(record.completionFlagIndex)
                     || claimable_locked(record.completionFlagIndex)) {
                     ++collected;
@@ -653,19 +835,18 @@ std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcep
                     // What prevents that is ordering, not a guard -- nodes::apply_category_gates
                     // runs after this pass and raises a zero gate back to one.
                     if (static_cast<std::size_t>(bar.valueIndex) < state->values.size()) {
-                        state->values[bar.valueIndex] = chapters;
+                        state->values[bar.valueIndex] = counterGranted ? collected : chapters;
                         parentSlot = static_cast<std::int32_t>(bar.valueIndex);
                         ++state->written;
                     }
                     break;
                 }
             }
-            // The node's own value slot is the category tile's counter, and it is a different
-            // number from the parent triumph's bar: the tile counts entries collected, the bar
-            // counts triumphs claimed. Conflating them is what made ten books look as though
-            // their gate were their bar -- writing the bar revealed them, but only because a
-            // category with progress shows itself. On a cumulative book every chapter compares
-            // against this counter too, so it has to carry the real total and not a token 1.
+            // The node's own value slot normally carries the category's collection count while
+            // the parent bar carries claims. Cumulative chapters compare against the former, so
+            // it must carry the collected total rather than a visibility token. The four
+            // counter-granted books deliberately collapse those meanings: their node value is
+            // also the parent bar, and incrementing it is what grants the next chapter.
             // Kept below the record-objective range for the same reason apply_category_gates is:
             // three books name a slot inside it that belongs to a record's objective, and writing
             // a count there redacts records wholesale.
@@ -673,71 +854,25 @@ std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcep
                 && static_cast<std::int32_t>(node.valueIndex) < objective_slot_table::kRecordObjectiveRangeStart
                 && static_cast<std::size_t>(node.valueIndex) < state->values.size()
                 ) {
-                // Collected, not claimed. This slot is the book's entries counter, and on a
-                // cumulative book every chapter compares against it -- chapter n completes at n --
-                // so a counter tracking claims leaves exactly one chapter claimable and the rest
-                // locked, which is what claiming-only produced. It is only reached when the slot
-                // is not also the book's bar: the guard above skips it when they coincide, and for
-                // those ten the slot is the bar and has to keep counting claims.
-                // This slot is the book's collected counter and it gates the chapters: chapter
-                // n is only offered once it reads n, so -1 hides every chapter and 1 offers only
-                // the first. It carries the collected total, and -1 only when nothing has been
-                // collected -- which still satisfies the category's not-zero gate, so the book
-                // opens with a blank bar rather than a false count.
-                // A cumulative book needs its collected total somewhere its chapters can read.
-                // Where the node's own slot is also the bar, putting it there would show collected
-                // as a claim count -- which is wrong, the bar counts claims. Those books have a
-                // second slot and it takes the counter instead, leaving the bar alone.
-                const bool ownSlotIsBar =
-                    parentSlot == static_cast<std::int32_t>(node.valueIndex);
-                std::uint16_t counterSlot = node.valueIndex;
-                if (ownSlotIsBar
-                    && node.parentValueIndex != build_data::nodes::kUnavailableValueIndex) {
-                    counterSlot = node.parentValueIndex;
-                }
-                // Four books are not collected from the world at all -- they are handed out by
-                // an activity or vendor counter, one entry at a time:
-                //   Stolen Intelligence  Zavala rank-up packages
-                //   A Man with No Name   Gambit Prime bounties
-                //   Unveiling            one page a week for visiting Eris Morn
-                //   Revelation           the weekly Lost Sector bounty, four times
-                // Their node value slot is that counter, not a claim count, which is why the
-                // category gates on it and why no other slot in any bank ever revealed them --
-                // the whole account value bank, the flag bank below the record range, the profile
-                // and character banks and the family5 override path were all swept looking for a
-                // separate gate that does not exist. Entries obtained and activity completions
-                // are the same number for these four, so the collected total belongs here and the
-                // parent triumph showing it is faithful rather than a compromise. Revelation sits
-                // in this group despite completing every chapter at 1: it is activity-gated, not
-                // cumulative, which is why it never behaved like the books it otherwise matches.
-                constexpr std::array<std::uint16_t, 3> kActivityAcquired{
-                    823U,  // Stolen Intelligence
-                    839U,  // Unveiling
-                    850U,  // A Man with No Name
-                };
-                // The gate that reveals these four books' entries and the bar that reports their
-                // claims are one slot, so a single image cannot carry both numbers. This publishes
-                // the entry count on the first few images -- long enough for the client to unlock
-                // the entries -- and the claim count from then on. Whether the client keeps the
-                // unlock or re-reads it every image decides if this holds.
-                // Four books -- Stolen Intelligence, A Man with No Name, Unveiling and
-                // Revelation -- render a chapter only if it is claimed, or if its index is at or
-                // below the count in this slot. That slot is also what their bar displays, so a
-                // count large enough to reveal unclaimed entries reports itself as claims. It is
-                // left carrying the claim count: the bar stays honest and claimed entries render.
-                //
-                // Every alternative was tested. Both value banks at 1 and at 100, all four flag
-                // banks, both progression banks, the parent record's "Stories gathered"
-                // objective, the second block slot, and the family5 override on both its lists --
-                // the override simply outranks the bank on the same raw slot, in both directions,
-                // so it cannot carry a second number. Nothing in the shipped data separates these
-                // four from six books of identical shape that work: manifest, node rows and all
-                // 129 chapter record rows were decoded and compared byte for byte.
-                                if (cumulative && collected > 0
-                    && static_cast<std::int32_t>(counterSlot)
-                           < objective_slot_table::kRecordObjectiveRangeStart
-                    && static_cast<std::size_t>(counterSlot) < state->values.size()) {
-                    state->values[counterSlot] = collected;
+                // Four activity/vendor books grant entries by advancing this very counter. It is
+                // therefore both their visibility source and their parent progress bar; publishing
+                // the collected total is the native behavior, not the claim count used elsewhere.
+                if (counterGranted) {
+                    state->values[node.valueIndex] = collected;
+                } else if (cumulative && collected > 0) {
+                    // A normal cumulative book needs a collection counter distinct from a shared
+                    // parent bar. Where its own slot is the bar, the extracted parent slot carries
+                    // the collection value instead so the bar can continue counting claims.
+                    std::uint16_t counterSlot = node.valueIndex;
+                    if (parentSlot == static_cast<std::int32_t>(node.valueIndex)
+                        && node.parentValueIndex != build_data::nodes::kUnavailableValueIndex) {
+                        counterSlot = node.parentValueIndex;
+                    }
+                    if (static_cast<std::int32_t>(counterSlot)
+                            < objective_slot_table::kRecordObjectiveRangeStart
+                        && static_cast<std::size_t>(counterSlot) < state->values.size()) {
+                        state->values[counterSlot] = collected;
+                    }
                 }
 
                 ++state->written;
@@ -785,12 +920,38 @@ std::size_t apply_claimable_objectives(std::span<std::int32_t> objectiveValues) 
     std::size_t written = 0;
     const std::span<const objective_slot_table::RecordEntry> table{objective_slot_table::kRecords};
     const std::lock_guard<std::mutex> guard(g_lock);
+    const auto counterGrantedChapters = counter_granted_chapter_mask_locked();
+    for (std::size_t index = 0; index < g_progress.size(); ++index) {
+        if (g_progress[index] <= 0 || claimed_locked(static_cast<std::uint16_t>(index))
+            || claimable_locked(static_cast<std::uint16_t>(index))) {
+            continue;
+        }
+        const auto flagIndex = static_cast<std::uint16_t>(index);
+        const auto found = std::lower_bound(
+            table.begin(), table.end(), flagIndex,
+            [](const objective_slot_table::RecordEntry& entry, std::uint16_t key) {
+                return entry.flagIndex < key;
+            });
+        if (found == table.end() || found->flagIndex != flagIndex
+            || found->objectiveCount != 1
+            || static_cast<std::size_t>(found->firstObjective)
+                   >= objective_slot_table::kObjectives.size()) {
+            continue;
+        }
+        const auto& objective = objective_slot_table::kObjectives[found->firstObjective];
+        if (static_cast<std::size_t>(objective.slot) >= objectiveValues.size()) {
+            continue;
+        }
+        objectiveValues[objective.slot] = std::min(g_progress[index], objective.completionValue);
+        ++written;
+    }
     for (std::size_t word = 0; word < g_claimable.size(); ++word) {
         // Only claimable-and-unclaimed records. Writing claimed ones too was tried and redacted
         // nearly every lore book: record objective slots share the 2746-5686 range with the value
         // indices some book gates read (4619, 4719, 4991 among them), so writing a value per claim
         // trampled those gates. A claim already shows through its completion flag.
-        std::uint64_t bits = g_claimable[word] & ~g_claimed[word];
+        std::uint64_t bits =
+            g_claimable[word] & ~g_claimed[word] & ~counterGrantedChapters[word];
         while (bits != 0) {
             const auto offset = static_cast<std::size_t>(std::countr_zero(bits));
             bits &= bits - 1;
@@ -826,7 +987,7 @@ std::size_t apply_claimable_objectives(std::span<std::int32_t> objectiveValues) 
 
 /** Writes each category's claimed-child count into the character value slot its bar reads. */
 std::size_t apply_character_node_progress(std::span<std::int32_t> characterValues) noexcept {
-    NodeProgress progress{characterValues, 0, {}};
+    NodeProgress progress{characterValues, 0};
     // Same lock order as the account pass: claims first, catalog inside the walk.
     const std::lock_guard<std::mutex> guard(g_lock);
     build_data::nodes::for_each(
@@ -866,12 +1027,55 @@ bool mark_claimable(std::uint16_t flagIndex) noexcept {
         return false;
     }
     const std::lock_guard<std::mutex> guard(g_lock);
+    g_progress[flagIndex] = 0;
     g_claimable[static_cast<std::size_t>(flagIndex) / kWordBits] |=
         1ULL << (static_cast<std::size_t>(flagIndex) % kWordBits);
     // Written through immediately, as mark_claimed does: a pickup is the player's progress and has
     // to survive the process, not just the session that recorded it.
     store_claimable_locked();
+    store_progress_locked();
     return true;
+}
+
+/** Advances one persisted objective and promotes it to claimable at its authored threshold. */
+ObjectiveAdvance advance_single_objective(std::uint16_t flagIndex) noexcept {
+    if (static_cast<std::size_t>(flagIndex) >= kIndexCapacity) {
+        return ObjectiveAdvance::unavailable;
+    }
+    const auto found = std::lower_bound(
+        objective_slot_table::kRecords.begin(), objective_slot_table::kRecords.end(), flagIndex,
+        [](const objective_slot_table::RecordEntry& entry, std::uint16_t key) {
+            return entry.flagIndex < key;
+        });
+    if (found == objective_slot_table::kRecords.end() || found->flagIndex != flagIndex
+        || found->objectiveCount != 1
+        || static_cast<std::size_t>(found->firstObjective)
+               >= objective_slot_table::kObjectives.size()) {
+        return ObjectiveAdvance::unavailable;
+    }
+    const std::int32_t completion =
+        objective_slot_table::kObjectives[found->firstObjective].completionValue;
+    if (completion <= 0) {
+        return ObjectiveAdvance::unavailable;
+    }
+
+    const std::lock_guard<std::mutex> guard(g_lock);
+    if (claimed_locked(flagIndex) || claimable_locked(flagIndex)) {
+        return ObjectiveAdvance::alreadyHeld;
+    }
+    const std::int32_t next =
+        g_progress[flagIndex] >= completion - 1 ? completion : g_progress[flagIndex] + 1;
+    if (next >= completion) {
+        g_progress[flagIndex] = 0;
+        g_claimable[static_cast<std::size_t>(flagIndex) / kWordBits] |=
+            std::uint64_t{1} << (static_cast<std::size_t>(flagIndex) % kWordBits);
+        store_progress_locked();
+        store_claimable_locked();
+        return ObjectiveAdvance::completed;
+    }
+    g_progress[flagIndex] = next;
+    store_progress_locked();
+    return ObjectiveAdvance::advanced;
 }
 
 /** @return True when this index is marked claimable. */

@@ -76,6 +76,7 @@ std::size_t apply_character_visibility(std::span<std::byte> characterFlags) noex
  * pass that can touch the value bank -- writing a bar count zeroes the same slot on a mis-sourced
  * table entry, and once that gate is zero the book stays hidden for the rest of the image.
  * @param objectiveValues Bank already filled by the authored policy and every value-writing pass.
+ * @param revealAll Retained for configuration compatibility; value-gated books are always opened.
  * @return Number of gates set.
  */
 std::size_t apply_category_gates(std::span<std::int32_t> objectiveValues,

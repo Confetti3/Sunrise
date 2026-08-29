@@ -825,6 +825,7 @@
     <ClCompile Include="src\client\content\items\packages\package_node_build.cpp" />
     <ClCompile Include="src\client\content\items\packages\package_record_build.cpp" />
     <ClCompile Include="src\middleware\web_service\messages\opcode1801_codec.cpp" />
+    <ClCompile Include="src\middleware\web_service\messages\opcode1821_codec.cpp" />
     <ClCompile Include="src\state\build_data\nodes\node_build_data_runtime.cpp" />
     <ClCompile Include="src\state\build_data\nodes\node_catalog.cpp" />
     <ClCompile Include="src\state\build_data\nodes\node_persistence.cpp" />
@@ -1440,6 +1441,7 @@
     <ClInclude Include="src\core\settings\settings_upgrade.h" />
     <ClInclude Include="src\middleware\content\packages\tables\unlock_expression.h" />
     <ClInclude Include="src\middleware\web_service\messages\opcode1801.h" />
+    <ClInclude Include="src\middleware\web_service\messages\opcode1821.h" />
     <ClInclude Include="src\middleware\web_service\messages\opcode1820.h" />
     <ClInclude Include="src\middleware\web_service\messages\opcode402.h" />
     <ClInclude Include="src\middleware\web_service\messages\opcode403.h" />
@@ -1452,10 +1454,13 @@
     <ClInclude Include="src\state\build_data\records\rewards\definition.h" />
     <ClInclude Include="src\state\build_data\records\rewards\reward_catalog.h" />
     <ClInclude Include="src\state\build_data\records\rewards\reward_persistence.h" />
+    <ClInclude Include="src\state\record_claims\objective_slot_table.h" />
+    <ClInclude Include="src\state\record_claims\parent_bar_table.h" />
     <ClInclude Include="src\state\record_claims\record_claims.h" />
     <ClInclude Include="src\state\activity\current_activity.h" />
     <ClInclude Include="src\state\build_data\records\record_persistence.h" />
     <ClInclude Include="src\state\build_data\sobjects\sobject_catalog.h" />
+    <ClInclude Include="src\state\lore\bubble_record_table.h" />
     <ClInclude Include="src\state\lore\lore_grant.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

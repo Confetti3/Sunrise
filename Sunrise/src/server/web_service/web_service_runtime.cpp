@@ -14,6 +14,7 @@
 #include "../../middleware/web_service/messages/opcode1901.h"
 #include "../../middleware/web_service/messages/opcode205.h"
 #include "../../middleware/web_service/messages/opcode1801.h"
+#include "../../middleware/web_service/messages/opcode1821.h"
 #include "../../middleware/web_service/messages/opcode206.h"
 #include "../../middleware/web_service/messages/opcode501_codec.h"
 #include "../../middleware/web_service/messages/opcode503.h"
@@ -292,6 +293,8 @@ bool consume(std::span<const std::byte> request,
         mutate_equipment(message, true, outcome);
     } else if (message.opcode == middleware::web_service::messages::opcode801::kOpcode) {
         mutate_subclass_selection(message, outcome);
+    } else if (message.opcode == middleware::web_service::messages::opcode1821::kOpcode) {
+        equip_title(message, outcome);
     } else if (message.opcode == middleware::web_service::messages::opcode903::kOpcode) {
         mutate_socket_plug(message, outcome);
     } else if (message.opcode == middleware::web_service::messages::opcode1901::kOpcode) {
@@ -303,7 +306,8 @@ bool consume(std::span<const std::byte> request,
     } else {
         dispatched = false;
     }
-    const bool prepared = outcome.hasSelectedCharacter || outcome.mutation.index() != kNoMutation;
+    const bool prepared = outcome.hasSelectedCharacter || outcome.hasTitleEquip
+                          || outcome.mutation.index() != kNoMutation;
 
     middleware::web_service::ResponseShape shape{};
     resolve_response_shape(message.opcode, shape);

@@ -35,7 +35,7 @@ inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', '
  *     which surfaced as claims resolving to the score value instead of the flag index. Bumped so
  *     the stale shape is rejected and rebuilt instead of misread.
  */
-inline constexpr std::uint32_t kCacheFormatVersion = 46;
+inline constexpr std::uint32_t kCacheFormatVersion = 47;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */
@@ -258,6 +258,8 @@ struct RecordDefinitionRecord {
     std::uint16_t loreRow{};
     std::uint16_t scoreValue{};
     std::uint16_t categoryValueIndex{};
+    std::uint8_t hasTitle{};
+    std::uint8_t reserved{};
 };
 
 /** Disk form of one dense socket-entry-list definition. */
@@ -484,7 +486,8 @@ static_assert(sizeof(RosterGroupRecord)
                      + scenarios::kRosterSlotCapacity * sizeof(std::uint16_t));
 static_assert(sizeof(ProgressionRecord) == sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t));
 static_assert(sizeof(RecordDefinitionRecord)
-              == sizeof(std::uint16_t) + sizeof(std::uint32_t) + 4 * sizeof(std::uint16_t));
+              == sizeof(std::uint16_t) + sizeof(std::uint32_t) + 4 * sizeof(std::uint16_t)
+                     + 2 * sizeof(std::uint8_t));
 static_assert(sizeof(AbilityBucketRecord)
               == sizeof(std::uint16_t) + 6 * sizeof(std::uint8_t)
                      + 2 * abilities::kBucketCapacity * sizeof(std::uint8_t)

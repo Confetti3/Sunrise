@@ -197,6 +197,26 @@ bool process(const ServiceRoute& route,
         if (!sunrise::server::web_service::consume(requestBody, output, written, webOutcome)) {
             return false;
         }
+        if (webOutcome.hasTitleEquip) {
+            // The title lives in both character summary records, so refresh the roster and banner
+            // after the correlated success reply. Promise the exact Family-4 revision that carries
+            // the title field, matching every other optimistic character-screen action; otherwise
+            // the open Seals widget redraws its label but retains its pre-click action binding.
+            middleware::web_service::StatusResponse status{};
+            status.value = queuezState.family4Version + 1;
+            if (!middleware::web_service::encode_response(
+                    message,
+                    middleware::web_service::ResponseShape::statusPair,
+                    status,
+                    output,
+                    written)) {
+                core::log::write(core::log::Channel::server,
+                                 core::log::Level::warn,
+                                 "ev=title_equip stage=response result=fail");
+                return false;
+            }
+            sunrise::server::bap::arm_account_resync_everywhere();
+        }
         outcome.hasSubscription = webOutcome.hasSubscription;
         outcome.hasRecordClaim = webOutcome.hasRecordClaim;
         outcome.subscription = webOutcome.subscription;

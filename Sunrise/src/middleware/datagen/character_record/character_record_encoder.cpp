@@ -60,10 +60,12 @@ constexpr std::size_t kPreviewFlagOffsets[]{8, 9};
 }
 
 /** @param light Equipment light. @return The trailing summary block both records carry. */
-[[nodiscard]] layout::Summary build_summary(std::int32_t light) noexcept {
+[[nodiscard]] layout::Summary build_summary(std::int32_t light,
+                                            std::uint16_t titleRecordIndex) noexcept {
     layout::Summary summary{};
     summary.light = light;
     summary.hashA = layout::kNoHash;
+    summary.indexD = titleRecordIndex;
     return summary;
 }
 
@@ -108,7 +110,12 @@ bool encode_family3(const state::CharacterState& character,
     }
     const auto record = output.first(kFamily3RecordSize);
     copy_record(
-        identity, block, build_summary(light), kFamily3ReservedSize, kFamily3TailSize, record);
+        identity,
+        block,
+        build_summary(light, character.equippedTitleRecordIndex),
+        kFamily3ReservedSize,
+        kFamily3TailSize,
+        record);
     // The character-select preview flags sit past the summary; their accessor returns true when
     // the context is missing, so a cleared flag asserts the opposite of the client's own fallback.
     const std::size_t tailStart = kFamily3RecordSize - kFamily3TailSize;
@@ -130,7 +137,12 @@ bool encode_family0(const state::CharacterState& character,
         return false;
     }
     const auto record = output.first(kFamily0RecordSize);
-    copy_record(identity, block, build_summary(light), 0, kFamily0TailSize, record);
+    copy_record(identity,
+                block,
+                build_summary(light, character.equippedTitleRecordIndex),
+                0,
+                kFamily0TailSize,
+                record);
     const layout::Family0Tail tail{};
     std::memcpy(record.data() + kFamily0RecordSize - kFamily0TailSize, &tail, sizeof tail);
     return true;

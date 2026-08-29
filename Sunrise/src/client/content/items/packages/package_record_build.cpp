@@ -152,6 +152,9 @@ bool build_records(const reader::Source& source,
                     sizeof definition.loreRow);
         // The shipped table tops out at 500, so anything wider is not a score and is dropped.
         definition.scoreValue = score <= 0xFFFFU ? static_cast<std::uint16_t>(score) : 0U;
+        std::uint32_t hasTitle = 0;
+        std::memcpy(&hasTitle, blob.data() + at + tables::kRecordHasTitleOffset, sizeof hasTitle);
+        definition.hasTitle = hasTitle != 0;
         std::int16_t categorySlot = 0;
         if (!valueIndexBySlot.empty()
             && tables::expression_value_slot(std::span<const std::byte>{blob},
@@ -161,50 +164,6 @@ bool build_records(const reader::Source& source,
             && addressable_slot(categorySlot)
             && static_cast<std::size_t>(categorySlot) < kSlotSpace) {
             definition.categoryValueIndex = valueIndexBySlot[static_cast<std::size_t>(categorySlot)];
-        }
-        // A book's parent triumph shows a progress bar, and the slot that bar reads has never
-        // been identified -- only the category field is parsed. Every 8-byte-aligned field of the
-        // row is reported for the lore books' parent records (loreRow 0xFFFF), with both the raw
-        // slot each names and the bank index it maps to, so the bar's source can be read off
-        // rather than guessed.
-        if (definition.loreRow == 0xFFFFU && !valueIndexBySlot.empty()) {
-            for (std::size_t field = 0; field + 16 <= tables::kRecordRowStride; field += 8) {
-                std::int16_t raw = 0;
-                const bool isValue = tables::expression_value_slot(
-                    std::span<const std::byte>{blob}, at, field, raw);
-                std::int16_t rawFlag = 0;
-                const bool isFlag = tables::expression_flag_slot(
-                    std::span<const std::byte>{blob}, at, field, rawFlag);
-                if (!isValue && !isFlag) {
-                    continue;
-                }
-                const std::int16_t named = isValue ? raw : rawFlag;
-                // Both maps, always. Twelve books name only a flag here and their bars stay dead;
-                // if the same raw number also resolves in the value map, that index is the bar's
-                // source and nobody has looked because the flag reading answered first.
-                int mapped = -1;
-                int asValue = -1;
-                if (addressable_slot(named) && static_cast<std::size_t>(named) < kSlotSpace) {
-                    mapped = isValue ? static_cast<int>(valueIndexBySlot[
-                                           static_cast<std::size_t>(named)])
-                                     : static_cast<int>(indexBySlot[
-                                           static_cast<std::size_t>(named)]);
-                    asValue = !valueIndexBySlot.empty()
-                                  ? static_cast<int>(
-                                        valueIndexBySlot[static_cast<std::size_t>(named)])
-                                  : -1;
-                }
-                std::array<char, 160> line{};
-                const int told = std::snprintf(
-                    line.data(), line.size(),
-                    "ev=records stage=parent_expr row=%llu field=%zu kind=%s raw=%d mapped=%d as_value=%d",
-                    static_cast<unsigned long long>(row), field, isValue ? "value" : "flag",
-                    static_cast<int>(named), mapped, asValue);
-                if (told > 0) {
-                    core::log::write(core::log::Channel::client, core::log::Level::info,
-                                     {line.data(), static_cast<std::size_t>(told)});
-                }
-            }
         }
         if (addressable_slot(slot) && static_cast<std::size_t>(slot) < kSlotSpace) {
             definition.completionFlagIndex = indexBySlot[static_cast<std::size_t>(slot)];

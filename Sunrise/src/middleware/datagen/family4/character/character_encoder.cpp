@@ -151,6 +151,7 @@ bool encode(const state::CharacterState& state,
     object.lastOrbitedDestination = state.lastOrbitedDestination;
     object.previewMirrors.fill(state.previewAvailable ? kNativeTrue : kNativeFalse);
     object.contentBypass = state.contentBypass ? kNativeTrue : kNativeFalse;
+    object.equippedTitleRecordIndex = state.equippedTitleRecordIndex;
     object.seenMessages.fill(kSeenMessageByte);
     for (inventory::layout::Entry& item : object.inventoryItems) {
         item.definitionIndex = kEmptyDefinitionIndex;

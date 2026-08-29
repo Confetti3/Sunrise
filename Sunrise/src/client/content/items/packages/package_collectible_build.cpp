@@ -43,6 +43,8 @@ bool build_collectibles(const reader::Source& source,
             std::vector<sobjects::Definition> rows(static_cast<std::size_t>(rowCount));
             for (std::size_t row = 0; row < rows.size(); ++row) {
                 const std::size_t at = kRowBase + row * kRowStride;
+                std::memcpy(rows[row].lanes.data(), blob.data() + at,
+                            rows[row].lanes.size() * sizeof(std::uint32_t));
                 std::memcpy(&rows[row].nameHash, blob.data() + at, sizeof(std::uint32_t));
                 std::memcpy(&rows[row].lane4, blob.data() + at + 16, sizeof(std::uint32_t));
                 std::memcpy(&rows[row].selectorGroup, blob.data() + at + 32, sizeof(std::uint16_t));

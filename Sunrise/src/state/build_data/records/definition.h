@@ -62,6 +62,8 @@ struct Definition {
      * the parent from the chapters beneath it. The parent is excluded from its own progress bar.
      */
     std::uint16_t categoryValueIndex{kUnavailableValueIndex};
+    /** True only when this record grants a character-equippable title. */
+    bool hasTitle{};
 };
 
 } // namespace sunrise::state::build_data::records

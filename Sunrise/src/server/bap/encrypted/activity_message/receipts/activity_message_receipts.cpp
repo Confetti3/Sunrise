@@ -1,13 +1,16 @@
 /**
- * Framing handlers for every activity message that changes no State. Each one reads as much of its
- * body as the recovered grammar reaches, reports what it saw, and returns how completely the body
- * was read so the caller can record one arrival receipt. None of them acts on what it read.
+ * Framing handlers for activity messages. Each reads as much of its body as the recovered grammar
+ * reaches and returns how completely it was read so the caller can record one arrival receipt.
+ * Pickup incidents also grant their resolved lore record and request a fresh account image.
  */
 
-#include "../../../../../state/activity/current_activity.h"
-#include "../../../../../state/lore/lore_grant.h"
-#include "../../../../../state/build_data/collectibles/collectible_catalog.h"
+#include "../../../../../client/player/player_position.h"
+#include "../../../../../state/activity/destination/activity_destination_snapshot.h"
+#include "../../../../../state/activity/membership/activity_membership_query.h"
+#include "../../../../../state/activity/runtime.h"
+#include "../../../../../state/build_data/runtime.h"
 #include "../../../../../state/build_data/sobjects/sobject_catalog.h"
+#include "../../../../../state/lore/lore_grant.h"
 #include "../../../../bap/internal.h"
 #include "activity_message_receipts.h"
 
@@ -16,6 +19,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <string_view>
 
 #include "../../../../../core/logging/log.h"
 #include "../../../../../middleware/bap/activity_message/activity_client_keepalive_validator.h"
@@ -80,6 +84,73 @@ void report(core::log::Level level, const char* format, ...) noexcept {
            request.messageType,
            request.payload.size());
     return Verdict::malformed;
+}
+
+struct EggResolution {
+    state::lore::GrantOutcome outcome{state::lore::GrantOutcome::recordNotFound};
+    std::uint16_t record{};
+    bool resolved{};
+};
+
+/** Reports and resolves the live world context for an incident whose packet has no egg id. */
+[[nodiscard]] EggResolution resolve_egg_context() noexcept {
+    namespace activity = state::activity;
+    const client::player::position::Snapshot player = client::player::position::snapshot();
+    const std::uint64_t sessionId =
+        activity::membership::live_region_session(activity::kAbsentSessionId);
+    activity::destination::DestinationSelection selection{};
+    state::build_data::scenarios::Definition layout{};
+    const bool hasDestination = sessionId != activity::kAbsentSessionId
+                                && activity::destination::snapshot(sessionId, selection);
+    const std::string_view packageName{
+        reinterpret_cast<const char*>(selection.packageName.data()), selection.packageNameLength};
+    const bool hasLayout = hasDestination
+                           && state::build_data::find_scenario_layout(packageName, layout);
+    const std::string_view stem{layout.spawnStem.data(), layout.spawnStemLength};
+    state::build_data::spawn_sets::Point point{};
+    float distance = 0.0F;
+    const bool hasSpawn = player.present && hasLayout
+                          && state::build_data::find_nearest_spawn_point(
+                              stem, player.position, point, distance);
+    state::build_data::hash_names::Name name{};
+    const bool hasName = hasSpawn && state::build_data::find_hash_name(point.nameHash, name);
+    const std::string_view spawnName{name.name.data(), name.nameLength};
+    const std::int32_t region = sessionId == activity::kAbsentSessionId
+                                    ? -1
+                                    : activity::membership::reported_region(sessionId);
+    report(core::log::Level::info,
+           "ev=activity stage=lore_egg_context position=%s x=%.3f y=%.3f z=%.3f "
+           "session=0x%016llX region=%d package=%.*s stem=%.*s spawn=%s hash=0x%08X "
+           "name=%.*s distance=%.3f",
+           player.present ? "present" : "absent",
+           static_cast<double>(player.position[0]),
+           static_cast<double>(player.position[1]),
+           static_cast<double>(player.position[2]),
+           static_cast<unsigned long long>(sessionId),
+           region,
+           static_cast<int>(packageName.size()),
+           packageName.data(),
+           static_cast<int>(stem.size()),
+           stem.data(),
+           hasSpawn ? "found" : "absent",
+           hasSpawn ? point.nameHash : 0U,
+           static_cast<int>(hasName ? spawnName.size() : 0U),
+           hasName ? spawnName.data() : "",
+           static_cast<double>(hasSpawn ? distance : 0.0F));
+
+    // The community checklist groups its Egg #1 under Gardens of Esila / Imponent II while naming
+    // the physical location "Divalian Mists - Next to spawn". The reported region changes across
+    // loads at the same coordinates, so the stable nearest-spawn identity resolves that egg.
+    constexpr std::string_view kDreamingCityFreeroam = "dreaming_city_freeroam";
+    constexpr std::uint32_t kDivalianSpawnHash = 0xE3D5F2D5U;
+    constexpr float kDivalianSpawnRadius = 16.0F;
+    constexpr std::uint16_t kImponentTwoRecord = 40;
+    if (player.present && packageName == kDreamingCityFreeroam
+        && hasSpawn && point.nameHash == kDivalianSpawnHash
+        && distance <= kDivalianSpawnRadius) {
+        return {state::lore::advance_record(kImponentTwoRecord), kImponentTwoRecord, true};
+    }
+    return {};
 }
 
 } // namespace
@@ -301,230 +372,279 @@ Framed frame_incident(const message::Request& request) noexcept {
            static_cast<unsigned>(parsed.hasOptionalBlock),
            parsed.payloadLength,
            parsed.headerBits);
-    // Resolve the target against the definition table it indexes, so an incident says what it is
-    // rather than carrying a bare number. Nothing acts on it yet; this is what acting on it needs.
+    // Resolve only the authored identity the incident names. A bubble cannot distinguish the
+    // collectible families that coexist in the Dreaming City, so unknown identities grant nothing.
     if (accepted) {
-        state::build_data::sobjects::Definition definition{};
-        const bool sobjectFound = state::build_data::sobjects::find(
-            static_cast<std::uint16_t>(parsed.primaryTarget), definition);
-        if (sobjectFound) {
-            report(core::log::Level::info,
-                   "ev=activity stage=sobject target=%u hash=0x%08X type=%d group=%u ordinal=%u "
-                   "lane4=0x%08X",
-                   parsed.primaryTarget,
-                   definition.nameHash,
-                   definition.typeCode,
-                   static_cast<unsigned>(definition.selectorGroup),
-                   static_cast<unsigned>(definition.nodeOrdinal),
-                   definition.lane4);
-        } else {
-            report(core::log::Level::warn,
-                   "ev=activity stage=sobject target=%u result=unresolved rows=%zu",
-                   parsed.primaryTarget,
-                   state::build_data::sobjects::count());
-        }
-
-        // The decoded world position, only present for the one validated message shape.
-        if (parsed.hasPosition) {
-            report(core::log::Level::info,
-                   "ev=activity stage=incident_pos x=%.4f y=%.4f z=%.4f",
-                   static_cast<double>(parsed.x),
-                   static_cast<double>(parsed.y),
-                   static_cast<double>(parsed.z));
-        }
-
-        // The extra targets, which have never been looked at. They are sobject indices too -- the
-        // parser range-checks them the same way -- and the primary target has turned out to name
-        // only the kind of object, not the instance: one pickup in the Menagerie and another on the
-        // Tangled Shore both reported target 3539. So if anything in the incident distinguishes one
-        // vase from another, this is where it can still be. Logged rather than acted on, because a
-        // guess about which extra means what is exactly the mistake this project keeps paying for.
-        for (std::uint32_t extra = 0; extra < parsed.extraTargetCount; ++extra) {
-            const std::uint32_t target = parsed.extraTargets[extra];
-            state::build_data::sobjects::Definition row{};
-            if (state::build_data::sobjects::find(static_cast<std::uint16_t>(target), row)) {
-                report(core::log::Level::info,
-                       "ev=activity stage=sobject_extra slot=%u target=%u hash=0x%08X type=%d "
-                       "lane4=0x%08X",
-                       extra,
-                       target,
-                       row.nameHash,
-                       row.typeCode,
-                       row.lane4);
-            } else {
-                report(core::log::Level::info,
-                       "ev=activity stage=sobject_extra slot=%u target=%u result=unresolved",
-                       extra,
-                       target);
-            }
-        }
-
-        // The type payload, which is what the schema describes. The parser separates it from
-        // the envelope; reading the whole message body instead puts every field at an offset the
-        // schema does not predict.
+        // Preserve the common-header size gate before acting on the incident.
         const std::span<const std::byte> body{parsed.payload.data(), parsed.payloadLength};
-
-        // The common header every type payload starts with: definition 0x80809512. A u32 sequence,
-        // then a three bit discriminator carrying a bias of one, then a 64 bit identity read only
-        // when that discriminator selects the player branch. Decoding it is the cheapest check that
-        // the payload is being read from the right place: the identity should be a SOID.
         if (body.size() >= 13) {
-            std::uint64_t cursor = 0;
-            const auto take = [&body, &cursor](std::size_t width) noexcept -> std::uint64_t {
-                std::uint64_t value = 0;
-                for (std::size_t step = 0; step < width; ++step) {
-                    const std::size_t at = cursor + step;
-                    const auto byte = static_cast<std::uint8_t>(body[at / 8]);
-                    value = (value << 1U) | ((byte >> (7 - (at % 8))) & 1U);
-                }
-                cursor += width;
-                return value;
+            struct Resolution {
+                state::lore::GrantOutcome outcome{state::lore::GrantOutcome::recordNotFound};
+                bool resolved{};
             };
-            const std::uint64_t sequence = take(32);
-            const std::uint64_t kindRaw = take(3);
-            const std::uint64_t identity = take(64);
-            // Which reward. Lane 4 of the target's sobject row names it exactly when the type code
-            // resolves one -- a type-10 row's low half is the record itself, no guessing needed --
-            // so that is tried first. Only when it does not resolve does the bubble heuristic below
-            // run: the payload does not name the chapter it granted -- its only per-object content
-            // is a position -- and the bubble at least says which activity the pickup happened in,
-            // which is a far smaller association (one book per activity) than one entry per object.
-            //
-            // The bubble sits at bit 126, the first of three consecutive u32 fields of the nested
-            // block. That position is measured: the same hash appears at 126, 158 and 190, and the
-            // character SOID lands at bit 35 exactly where the header schema puts it.
-            //
-            // Only type 2 carries this layout. Another type read against it yields a plausible
-            // number that means nothing, which is how a counter was once mistaken for an identity.
-            // A vase reports type 2 and a dead ghost type 10. Each type has its own schema, so
-            // the bubble sits somewhere different in each payload, and more types will turn up.
-            // The activity selection already named the bubble once, so it is read from there and
-            // the payload is not decoded at all.
-            constexpr std::array<std::int32_t, 2> kPickupTypeCodes{2, 10};
-            bool pickupType = false;
-            if (sobjectFound) {
-                for (const std::int32_t code : kPickupTypeCodes) {
-                    pickupType = pickupType || definition.typeCode == code;
+            constexpr std::uint32_t kCorruptedEggTarget = 693U;
+            constexpr std::uint32_t kCorruptedEggNameHash = 0x179A5E15U;
+            constexpr std::uint32_t kCorruptedEggLane4 = 0x0A06FFFFU;
+            const auto resolve = [](std::uint32_t target) noexcept -> Resolution {
+                state::build_data::sobjects::Definition definition{};
+                if (!state::build_data::sobjects::find(static_cast<std::uint16_t>(target), definition)) {
+                    return {};
                 }
-            }
-            if (pickupType) {
-                bool resolvedExactly = false;
                 if (definition.typeCode == 10) {
-                    // typeCode 10's lane-4 low half is a DestinyRecordDefinition row. 360 of 807
-                    // type-10 rows carry one that resolves; the rest fall through to the fallback
-                    // below exactly as they did before this path existed.
-                    const std::uint16_t recordRow = definition.recordRow();
-                    const state::lore::GrantOutcome outcome = state::lore::grant_record(recordRow);
-                    // A row whose lane 4 does not name a chapter is not an exact resolution at
-                    // all, only a number that fell inside the record table, so it falls back.
-                    resolvedExactly = outcome != state::lore::GrantOutcome::recordNotFound
-                                      && outcome != state::lore::GrantOutcome::notAChapter;
-                    if (resolvedExactly && outcome == state::lore::GrantOutcome::granted) {
-                        // Nothing else will stage an account image for this peer: a pickup is not a
-                        // web service transaction and has no response to carry the change back. Arm
-                        // every peer, the origin included, so the record appears without a relaunch.
-                        bap::arm_account_resync_everywhere();
-                    }
-                    if (resolvedExactly) {
-                        report(outcome == state::lore::GrantOutcome::granted
-                                   ? core::log::Level::info
-                                   : core::log::Level::warn,
-                               "ev=activity stage=lore path=exact type=10 target=%u lane4=0x%08X "
-                               "record=%u result=%s",
-                               parsed.primaryTarget,
-                               definition.lane4,
-                               static_cast<unsigned>(recordRow),
-                               state::lore::grant_outcome_name(outcome));
-                    }
-                } else if (definition.typeCode == 2) {
-                    // typeCode 2's lane-4 high half is a DestinyCollectibleDefinition row and
-                    // resolves 709 of 713 times, but nothing in this file's scope owns the
-                    // account-side collections write: record_claims only knows how to claim a
-                    // record's completion flag, and inventing a second mechanism here is exactly
-                    // what this pass was told not to do.
-                    // TODO(lore): grant the item behind collectibleRow once a collections claim
-                    // path exists. Until then this always falls back to the bubble table below.
-                    const std::uint16_t collectibleRow = definition.collectibleRow();
-                    state::build_data::collectibles::Definition collectible{};
-                    const bool collectibleResolves = state::build_data::collectibles::find(
-                        collectibleRow, collectible);
-                    report(core::log::Level::warn,
-                           "ev=activity stage=lore path=exact type=2 target=%u lane4=0x%08X "
-                           "collectible=%u resolves=%d result=not_implemented",
-                           parsed.primaryTarget,
-                           definition.lane4,
-                           static_cast<unsigned>(collectibleRow),
-                           collectibleResolves ? 1 : 0);
+                    const auto outcome = state::lore::grant_record(definition.recordRow());
+                    return {outcome, outcome != state::lore::GrantOutcome::recordNotFound
+                                          && outcome != state::lore::GrantOutcome::notAChapter};
                 }
-                if (!resolvedExactly) {
-                    const std::uint32_t bubble = state::activity::current_bubble();
-                    state::lore::GrantOutcome outcome;
-                    const char* path;
-                    std::size_t bucketSize = 0;
-                    std::uint16_t node = state::lore::kNoBook;
-
-                    if (bubble == state::lore::kBubbleUnsetSentinel) {
-                        // caluseum_experience is instanced and so carries no real bubble at all --
-                        // every one of its pickups reports the FNV-1a offset basis here. That makes
-                        // this Confessions by construction, not a bubble_record_table lookup, so the
-                        // sentinel is recognised directly rather than ever being handed to the table.
-                        node = state::lore::kConfessionsNode;
-                        outcome = state::lore::grant_next_chapter(node);
-                        path = "instanced";
+                if (definition.typeCode == 2) {
+                    constexpr std::uint16_t kDroneFirstOrdinal = 2455U;
+                    constexpr std::uint16_t kDroneLastOrdinal = 2470U;
+                    // Four Forsaken Prince chapters are campaign rewards rather than Fallen
+                    // device collectibles, so the collectible records are not contiguous.
+                    constexpr std::array<std::uint16_t, 16> kDroneRecords{
+                        740U, 741U, 742U, 744U, 746U, 747U, 748U, 749U,
+                        750U, 751U, 752U, 753U, 754U, 755U, 756U, 757U,
+                    };
+                    constexpr std::uint16_t kGhostFirstOrdinal = 2471U;
+                    constexpr std::uint16_t kGhostLastOrdinal = 2493U;
+                    constexpr std::uint16_t kGhostFirstRecord = 802U;
+                    constexpr std::uint16_t kCrystalFirstOrdinal = 2494U;
+                    constexpr std::uint16_t kCrystalLastOrdinal = 2516U;
+                    constexpr std::uint16_t kCrystalFirstRecord = 778U;
+                    constexpr std::uint16_t kBoneFirstOrdinal = 2517U;
+                    constexpr std::uint16_t kBoneLastOrdinal = 2532U;
+                    constexpr std::uint16_t kBoneFirstRecord = 759U;
+                    const std::uint16_t ordinal = definition.loreObjectOrdinal();
+                    std::uint16_t record = 0;
+                    if (ordinal >= kDroneFirstOrdinal && ordinal <= kDroneLastOrdinal) {
+                        record = kDroneRecords[ordinal - kDroneFirstOrdinal];
+                    } else if (ordinal >= kGhostFirstOrdinal && ordinal <= kGhostLastOrdinal) {
+                        record = static_cast<std::uint16_t>(
+                            kGhostFirstRecord + ordinal - kGhostFirstOrdinal);
+                    } else if (ordinal >= kCrystalFirstOrdinal && ordinal <= kCrystalLastOrdinal) {
+                        record = static_cast<std::uint16_t>(
+                            kCrystalFirstRecord + ordinal - kCrystalFirstOrdinal);
+                    } else if (ordinal >= kBoneFirstOrdinal && ordinal <= kBoneLastOrdinal) {
+                        record = static_cast<std::uint16_t>(
+                            kBoneFirstRecord + ordinal - kBoneFirstOrdinal);
                     } else {
-                        outcome = state::lore::grant_from_bubble_table(bubble, bucketSize);
-                        path = "bubble_table";
-                        if (outcome == state::lore::GrantOutcome::bubbleTableExhausted) {
-                            // Every candidate this bubble's bucket names is already held. Logged
-                            // distinctly here so an exhausted bucket reads differently in the logs
-                            // from a bubble the table never covered, then fall through below rather
-                            // than granting nothing silently.
-                            report(core::log::Level::warn,
-                                   "ev=activity stage=lore path=bubble_table bubble=0x%08X "
-                                   "bucket=%zu result=%s",
-                                   bubble, bucketSize, state::lore::grant_outcome_name(outcome));
-                        }
-                        if (outcome != state::lore::GrantOutcome::granted
-                            && outcome != state::lore::GrantOutcome::refused) {
-                            // Not in the table, or the table's own candidates are exhausted: fall
-                            // through to the same book path this always used. The generated table is
-                            // built from public map data that never recorded every bubble hosting a
-                            // pickup, so a bubble missing from it is a gap in that data rather than a
-                            // place nothing is collectable -- walk whatever book is known for it and
-                            // grant an arbitrary chapter rather than granting nothing.
-                            node = state::lore::legacy_book_for_bubble(bubble);
-                            outcome = state::lore::grant_next_chapter(node);
-                            path = "fallback";
-                        }
+                        return {};
                     }
+                    const auto outcome = state::lore::grant_record(record);
+                    return {outcome, true};
+                }
+                return {};
+            };
 
-                    if (outcome == state::lore::GrantOutcome::granted) {
-                        // Nothing else will stage an account image for this peer: a pickup is not a web
-                        // service transaction and has no response to carry the change back. Arm every
-                        // peer, the origin included, so the chapter appears without a relaunch and a
-                        // second pickup in the same run sees the first one already held.
-                        bap::arm_account_resync_everywhere();
+            Resolution resolution = resolve(parsed.primaryTarget);
+            std::uint32_t resolvedTarget = parsed.primaryTarget;
+            if (!resolution.resolved) {
+                for (std::uint32_t index = 0; index < parsed.extraTargetCount; ++index) {
+                    resolution = resolve(parsed.extraTargets[index]);
+                    if (resolution.resolved) {
+                        resolvedTarget = parsed.extraTargets[index];
+                        break;
                     }
-                    report(outcome == state::lore::GrantOutcome::granted ? core::log::Level::info
-                                                                         : core::log::Level::warn,
-                           "ev=activity stage=lore path=%s bubble=0x%08X node=%u bucket=%zu "
-                           "result=%s record=%u item=%d",
-                           path, bubble, static_cast<unsigned>(node), bucketSize,
-                           state::lore::grant_outcome_name(outcome),
-                           static_cast<unsigned>(outcome == state::lore::GrantOutcome::granted
-                                                     ? state::lore::last_granted_record()
-                                                     : 0),
-                           state::lore::last_item_granted() ? 1 : 0);
                 }
             }
 
-            report(core::log::Level::info,
-                   "ev=activity stage=header target=%u sequence=%llu kind_raw=%llu "
-                   "identity=0x%016llX",
-                   parsed.primaryTarget,
-                   static_cast<unsigned long long>(sequence),
-                   static_cast<unsigned long long>(kindRaw),
-                   static_cast<unsigned long long>(identity));
+            state::build_data::sobjects::Definition primary{};
+            const bool primaryFound = state::build_data::sobjects::find(
+                static_cast<std::uint16_t>(parsed.primaryTarget), primary);
+            const bool isCorruptedEgg = parsed.primaryTarget == kCorruptedEggTarget && primaryFound
+                                        && primary.typeCode == 3
+                                        && primary.nameHash == kCorruptedEggNameHash
+                                        && primary.lane4 == kCorruptedEggLane4;
+            if (resolution.outcome == state::lore::GrantOutcome::granted
+                || resolution.outcome == state::lore::GrantOutcome::progressed) {
+                bap::arm_account_resync_everywhere();
+            }
+            if (resolution.resolved) {
+                state::build_data::sobjects::Definition exact{};
+                const bool exactFound = state::build_data::sobjects::find(
+                    static_cast<std::uint16_t>(resolvedTarget), exact);
+                report(resolution.outcome == state::lore::GrantOutcome::granted
+                           ? core::log::Level::info
+                           : core::log::Level::debug,
+                       "ev=activity stage=lore path=exact target=%u result=%s record=%u "
+                       "type=%d hash=0x%08X lanes=%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X",
+                       resolvedTarget, state::lore::grant_outcome_name(resolution.outcome),
+                       static_cast<unsigned>(
+                           resolution.outcome == state::lore::GrantOutcome::granted
+                                   || resolution.outcome == state::lore::GrantOutcome::progressed
+                               ? state::lore::last_granted_record()
+                               : 0),
+                       exactFound ? exact.typeCode : 0,
+                       exactFound ? exact.nameHash : 0U,
+                       exactFound ? exact.lanes[0] : 0U,
+                       exactFound ? exact.lanes[1] : 0U,
+                       exactFound ? exact.lanes[2] : 0U,
+                       exactFound ? exact.lanes[3] : 0U,
+                       exactFound ? exact.lanes[4] : 0U,
+                       exactFound ? exact.lanes[5] : 0U,
+                       exactFound ? exact.lanes[6] : 0U,
+                       exactFound ? exact.lanes[7] : 0U);
+            } else if (isCorruptedEgg) {
+                const EggResolution egg = resolve_egg_context();
+                if (egg.resolved
+                    && (egg.outcome == state::lore::GrantOutcome::granted
+                        || egg.outcome == state::lore::GrantOutcome::progressed)) {
+                    bap::arm_account_resync_everywhere();
+                }
+                report(core::log::Level::info,
+                       "ev=activity stage=lore path=egg result=%s target=%u type=%d "
+                       "lane4=0x%08X record=%u",
+                       egg.resolved ? state::lore::grant_outcome_name(egg.outcome) : "unresolved",
+                       parsed.primaryTarget,
+                       primary.typeCode,
+                       primary.lane4,
+                       static_cast<unsigned>(egg.resolved ? egg.record : 0));
+                if (core::log::accepts(core::log::Channel::server, core::log::Level::info)) {
+                    std::array<char, core::log::kLineCapacity> line{};
+                    const int prefix = std::snprintf(line.data(), line.size(),
+                                                     "ev=activity stage=lore_egg payload_bytes=%u "
+                                                     "payload_hex=",
+                                                     parsed.payloadLength);
+                    if (prefix > 0 && static_cast<std::size_t>(prefix) < line.size()) {
+                        std::size_t length = static_cast<std::size_t>(prefix);
+                        (void)core::log::append_hex(line, length, body);
+                        const int requestPrefix = std::snprintf(
+                            line.data() + length, line.size() - length,
+                            " request_bytes=%zu request_hex=", request.payload.size());
+                        if (requestPrefix > 0
+                            && static_cast<std::size_t>(requestPrefix) < line.size() - length) {
+                            length += static_cast<std::size_t>(requestPrefix);
+                            (void)core::log::append_hex(line, length, request.payload);
+                        }
+                        core::log::write(core::log::Channel::server, core::log::Level::info,
+                                         {line.data(), length});
+                    }
+                }
+            } else {
+                bool contextResolved = false;
+                if (parsed.primaryTarget == 3539U) {
+                    namespace activity = state::activity;
+                    const auto player = client::player::position::snapshot();
+                    const std::uint64_t sessionId = activity::membership::live_region_session(
+                        activity::kAbsentSessionId);
+                    activity::destination::DestinationSelection selection{};
+                    (void)activity::destination::snapshot(sessionId, selection);
+                    const std::string_view packageName{
+                        reinterpret_cast<const char*>(selection.packageName.data()),
+                        selection.packageNameLength};
+                    report(core::log::Level::info,
+                           "ev=activity stage=lore_generic_context target=%u type=%d "
+                           "hash=0x%08X lane4=0x%08X position=%s "
+                           "x=%.3f y=%.3f z=%.3f region=%d package=%.*s extras=%u",
+                           parsed.primaryTarget,
+                           primaryFound ? primary.typeCode : 0,
+                           primaryFound ? primary.nameHash : 0U,
+                           primaryFound ? primary.lane4 : 0U,
+                           player.present ? "present" : "absent",
+                           static_cast<double>(player.position[0]),
+                           static_cast<double>(player.position[1]),
+                           static_cast<double>(player.position[2]),
+                           sessionId == activity::kAbsentSessionId
+                               ? -1
+                               : activity::membership::reported_region(sessionId),
+                           static_cast<int>(packageName.size()),
+                           packageName.data(),
+                           parsed.extraTargetCount);
+                    for (std::uint32_t index = 0; index < parsed.extraTargetCount; ++index) {
+                        state::build_data::sobjects::Definition extra{};
+                        const bool found = state::build_data::sobjects::find(
+                            static_cast<std::uint16_t>(parsed.extraTargets[index]), extra);
+                        report(core::log::Level::info,
+                               "ev=activity stage=lore_generic_extra slot=%u target=%u found=%u "
+                               "type=%d hash=0x%08X lanes=%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X",
+                               index,
+                               parsed.extraTargets[index],
+                               found ? 1U : 0U,
+                               found ? extra.typeCode : 0,
+                               found ? extra.nameHash : 0U,
+                               found ? extra.lanes[0] : 0U,
+                               found ? extra.lanes[1] : 0U,
+                               found ? extra.lanes[2] : 0U,
+                               found ? extra.lanes[3] : 0U,
+                               found ? extra.lanes[4] : 0U,
+                               found ? extra.lanes[5] : 0U,
+                               found ? extra.lanes[6] : 0U,
+                               found ? extra.lanes[7] : 0U);
+                    }
+
+                    // Confessions vases have no per-object target. Their interaction positions are
+                    // stable across captures, so each measured centre resolves its authored entry.
+                    struct ConfessionsVase {
+                        std::array<float, 3> position;
+                        std::uint16_t record;
+                    };
+                    constexpr std::string_view kMenageriePackage = "caluseum_experience";
+                    constexpr std::array<ConfessionsVase, 8> kConfessionsVases{{
+                        {{30.559F, 31.233F, -2.185F}, 1708U},   // Entry I, Lamplighting
+                        {{57.683F, 8.844F, -43.121F}, 1709U},  // Entry II, The Hunted
+                        {{61.939F, 220.947F, 2.439F}, 1710U},  // Entry III, Royal Theatre
+                        {{143.082F, -23.093F, 11.629F}, 1711U}, // Entry IV, War Beast statue
+                        {{109.207F, 211.327F, -144.309F}, 1712U}, // Entry V, Gauntlet
+                        {{403.643F, -5.111F, 6.669F}, 1713U},  // Entry VI, Crown of Sorrow
+                        {{947.203F, 2.456F, 131.591F}, 1714U},  // Entry VII, Crown of Sorrow
+                        {{1138.881F, 89.454F, 94.136F}, 1715U}, // Entry VIII, Crown of Sorrow
+                    }};
+                    constexpr float kConfessionsVaseRadiusSquared = 36.0F;
+                    constexpr std::string_view kTributeHallPackage = "trophy_hall_freeroam";
+                    constexpr std::array<float, 3> kConfessionsEntryNinePosition{
+                        25.642F, 0.012F, 5.922F};
+                    if (player.present && packageName == kTributeHallPackage) {
+                        const float dx = player.position[0] - kConfessionsEntryNinePosition[0];
+                        const float dy = player.position[1] - kConfessionsEntryNinePosition[1];
+                        const float dz = player.position[2] - kConfessionsEntryNinePosition[2];
+                        if (dx * dx + dy * dy + dz * dz <= kConfessionsVaseRadiusSquared) {
+                            constexpr std::uint16_t kConfessionsEntryNineRecord = 1716U;
+                            const auto outcome =
+                                state::lore::grant_record(kConfessionsEntryNineRecord);
+                            contextResolved = outcome != state::lore::GrantOutcome::recordNotFound
+                                              && outcome != state::lore::GrantOutcome::notAChapter;
+                            if (outcome == state::lore::GrantOutcome::granted) {
+                                bap::arm_account_resync_everywhere();
+                            }
+                            report(core::log::Level::info,
+                                   "ev=activity stage=lore path=position target=%u package=%.*s "
+                                   "record=%u result=%s",
+                                   parsed.primaryTarget,
+                                   static_cast<int>(packageName.size()), packageName.data(),
+                                   static_cast<unsigned>(kConfessionsEntryNineRecord),
+                                   state::lore::grant_outcome_name(outcome));
+                        }
+                    } else if (player.present && packageName == kMenageriePackage) {
+                        for (const ConfessionsVase& vase : kConfessionsVases) {
+                            const float dx = player.position[0] - vase.position[0];
+                            const float dy = player.position[1] - vase.position[1];
+                            const float dz = player.position[2] - vase.position[2];
+                            if (dx * dx + dy * dy + dz * dz > kConfessionsVaseRadiusSquared) {
+                                continue;
+                            }
+                            const auto outcome = state::lore::grant_record(vase.record);
+                            contextResolved = outcome != state::lore::GrantOutcome::recordNotFound
+                                              && outcome != state::lore::GrantOutcome::notAChapter;
+                            if (outcome == state::lore::GrantOutcome::granted) {
+                                bap::arm_account_resync_everywhere();
+                            }
+                            report(core::log::Level::info,
+                                   "ev=activity stage=lore path=position target=%u package=%.*s "
+                                   "record=%u result=%s",
+                                   parsed.primaryTarget,
+                                   static_cast<int>(packageName.size()),
+                                   packageName.data(),
+                                   static_cast<unsigned>(vase.record),
+                                   state::lore::grant_outcome_name(outcome));
+                            break;
+                        }
+                    }
+                }
+                if (!contextResolved) {
+                    report(core::log::Level::debug,
+                           "ev=activity stage=lore path=unresolved target=%u extra=%u",
+                           parsed.primaryTarget, parsed.extraTargetCount);
+                }
+            }
         }
     }
 

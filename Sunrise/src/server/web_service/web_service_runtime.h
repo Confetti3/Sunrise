@@ -16,6 +16,8 @@ struct Outcome {
     middleware::queuez::Subscription subscription{};
     /** A claim changed the account flag bank, so a fresh account image has to follow. */
     bool hasRecordClaim{};
+    /** An earned title changed on the selected character; roster and banner must be republished. */
+    bool hasTitleEquip{};
     /** An opcode-504 pick moved the selection and its Family-4 object still has to follow. */
     bool hasSelectedCharacter{};
     std::uint64_t selectedCharacterSoid{};

@@ -169,60 +169,6 @@ bool build_nodes(const reader::Source& source,
         const bool named =
             tables::expression_value_slot(table, at, tables::kNodeExpressionFieldPrimary, slot)
             || tables::expression_value_slot(table, at, tables::kNodeExpressionFieldAlternate, slot);
-        // A lore book whose expression parses as neither a value read nor a flag test is
-        // indistinguishable from one whose slot simply is not addressable, so the raw instruction
-        // stream is reported for the lore range rather than inferred. Sixteen books resolve no
-        // slot at all and their bars can never move until that is understood.
-        if (domain::lore_category(static_cast<std::uint16_t>(row))) {
-            // Every 8-byte-aligned field in the row is tried, not just the two the resolver
-            // knows: sixteen books carry a flag test where the others carry a value read, so the
-            // value expression that drives their bar must sit in a field nobody has looked at.
-            for (std::size_t field = 0; field + 16 <= tables::kNodeRowStride; field += 8) {
-                std::int16_t probe = 0;
-                if (!tables::expression_value_slot(table, at, field, probe)) {
-                    continue;
-                }
-                std::int64_t count = 0;
-                std::int64_t relative = 0;
-                if (at + field + 16 > table.size()) {
-                    continue;
-                }
-                std::memcpy(&count, table.data() + at + field, sizeof count);
-                std::memcpy(&relative, table.data() + at + field + 8, sizeof relative);
-                std::array<char, 200> head{};
-                int used = std::snprintf(head.data(), head.size(),
-                                         "ev=nodes stage=expr node=%llu field=%zu count=%lld ops=",
-                                         static_cast<unsigned long long>(row), field,
-                                         static_cast<long long>(count));
-                const std::size_t pointerAt = at + field + 8;
-                const std::int64_t target = static_cast<std::int64_t>(pointerAt) + relative
-                                            + static_cast<std::int64_t>(tables::kHeaderSkip);
-                if (count >= 1 && count <= tables::kNodeExpressionCapacity && target >= 0
-                    && static_cast<std::size_t>(target)
-                               + static_cast<std::size_t>(count) * tables::kUnlockInstructionStride
-                           <= table.size()) {
-                    const auto base = static_cast<std::size_t>(target);
-                    for (std::int64_t index = 0; index < count && index < 6; ++index) {
-                        std::uint32_t instruction = 0;
-                        std::uint32_t operand = 0;
-                        const std::size_t insAt =
-                            base + static_cast<std::size_t>(index) * tables::kUnlockInstructionStride;
-                        std::memcpy(&instruction, table.data() + insAt, sizeof instruction);
-                        std::memcpy(&operand, table.data() + insAt + 4, sizeof operand);
-                        used += std::snprintf(head.data() + used,
-                                              head.size() - static_cast<std::size_t>(used),
-                                              "%u:%u ", instruction, operand);
-                    }
-                } else {
-                    used += std::snprintf(head.data() + used,
-                                          head.size() - static_cast<std::size_t>(used), "unparsed");
-                }
-                if (used > 0) {
-                    core::log::write(core::log::Channel::client, core::log::Level::info,
-                                     {head.data(), static_cast<std::size_t>(used)});
-                }
-            }
-        }
         if (named) {
             definition.valueSlot = slot;
             const auto found = indexBySlot.find(slot);
@@ -231,21 +177,10 @@ bool build_nodes(const reader::Source& source,
             }
             // The same expression may resolve in the character scope: one lore book's bar reads a
             // slot only the character table carries, and its parent has to be fed there too.
-            std::int16_t characterSlot = 0;
-            if (tables::expression_value_slot(table,
-                                              at,
-                                              tables::kNodeExpressionFieldPrimary,
-                                              characterSlot)
-                || tables::expression_value_slot(table,
-                                                 at,
-                                                 tables::kNodeExpressionFieldAlternate,
-                                                 characterSlot)) {
-                definition.characterValueSlot = characterSlot;
-                const auto characterResolved =
-                    characterValueIndexBySlot.find(characterSlot);
-                if (characterResolved != characterValueIndexBySlot.end()) {
-                    definition.characterValueIndex = characterResolved->second;
-                }
+            definition.characterValueSlot = slot;
+            const auto character_resolved = characterValueIndexBySlot.find(slot);
+            if (character_resolved != characterValueIndexBySlot.end()) {
+                definition.characterValueIndex = character_resolved->second;
             }
         }
 

@@ -62,6 +62,8 @@ inline constexpr std::size_t kLoreHashOffset = 8;
 inline constexpr std::size_t kRecordScoreOffset = 92;
 /** A record names its category's value slot here. The record's own bar reads the next slot up. */
 inline constexpr std::size_t kRecordCategoryExpressionField = 120;
+/** Nonzero when the record's completion grants a character-equippable title. */
+inline constexpr std::size_t kRecordHasTitleOffset = 0xB8;
 /** Investment root slot of the four unlock value mapping tables. */
 inline constexpr std::size_t kUnlockValueMapTableSlot = 113;
 /** Array descriptor of the account object's value mapping table. */

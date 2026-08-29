@@ -6,6 +6,18 @@
 
 namespace sunrise::state::record_claims {
 
+/** Result of advancing a record that has one authored objective. */
+enum class ObjectiveAdvance : std::uint8_t {
+    /** No single objective mapping exists for the supplied completion flag. */
+    unavailable,
+    /** The record was already complete or claimed. */
+    alreadyHeld,
+    /** Progress advanced but remains below the authored completion value. */
+    advanced,
+    /** Progress reached the authored completion value and the record became claimable. */
+    completed,
+};
+
 /**
  * Records claimed through Web Service opcode 1801, as account flag bank indices.
  *
@@ -47,6 +59,12 @@ void clear() noexcept;
  */
 [[nodiscard]] bool mark_claimable(std::uint16_t flagIndex) noexcept;
 
+/**
+ * Advances a record's sole objective by one and persists the partial value.
+ * At the authored completion value the partial row is replaced by claimable state.
+ */
+[[nodiscard]] ObjectiveAdvance advance_single_objective(std::uint16_t flagIndex) noexcept;
+
 /** @return True when this index is marked claimable, whether or not it is also claimed. */
 [[nodiscard]] bool claimable(std::uint16_t flagIndex) noexcept;
 
@@ -56,6 +74,9 @@ void clear() noexcept;
  * @return Number of bytes this changed, so a caller can tell a no-op from real work.
  */
 std::size_t apply(std::span<std::uint8_t> accountFlags) noexcept;
+
+/** Clears authored objective values for every child and parent record owned by a lore node. */
+std::size_t clear_lore_objectives(std::span<std::int32_t> objectiveValues) noexcept;
 
 /**
  * Writes each presentation node's claimed-child count into the value slot its bar reads.
@@ -68,11 +89,9 @@ std::size_t apply(std::span<std::uint8_t> accountFlags) noexcept;
 std::size_t apply_node_progress(std::span<std::int32_t> objectiveValues) noexcept;
 
 /**
- * Writes each claimable-and-unclaimed record's authored objective value(s) into the objective
- * value bank, so its triumph reads at completionValue while its completion flag stays clear --
- * the two conditions the client requires before it will offer a claim. The flag itself is never
- * touched here: writing it can only mean claimed or nothing, never claimable, so claimable is
- * carried by the objective bank alone.
+ * Writes persisted partial single-objective progress, then each claimable-and-unclaimed record's
+ * authored completion value(s), into the objective bank. The completion flag remains clear until
+ * the player claims the record.
  * @param objectiveValues Account value bank, already filled from the authored policy.
  * @return Number of values this wrote.
  */

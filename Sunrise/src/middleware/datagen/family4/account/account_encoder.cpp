@@ -124,6 +124,9 @@ bool encode(const state::AccountState& state, std::span<std::byte> output) noexc
         }
     }
 
+    // Settings predate collectible persistence and author many lore objectives at completion.
+    // Clear every lore-owned record first; claims and collected progress are overlaid below.
+    (void)state::record_claims::clear_lore_objectives(object.objectiveValues);
     // Claims are laid over the authored bank on the way out, so a claimed record reads Acquired on
     // the next image. The authored policy itself is immutable and is never edited.
     (void)state::record_claims::apply(object.acquiredFlags);
@@ -143,18 +146,12 @@ bool encode(const state::AccountState& state, std::span<std::byte> output) noexc
     // A record reads claimable when its objective equals completionValue and its flag is clear --
     // the flag alone can never carry that state, so its objective value(s) are written here instead.
     (void)state::record_claims::apply_claimable_objectives(object.objectiveValues);
-    // Eighteen lore books gate on a value slot instead of a flag, and this must run last of the
-    // three value-bank passes above: apply_node_progress writes a claimed-chapter count into every
-    // parent bar slot, and on fourteen books that slot is mis-sourced to equal the book's own gate,
-    // so writing the count there zeros the gate right back out. Running the gate pass after both
-    // value-writing passes is what makes it stick -- reordering this call ahead of either one would
-    // silently reintroduce the exact bug this fixes.
+    // Eighteen lore books gate on a value slot instead of a flag. Run this after every other value
+    // pass so an empty shared gate/bar receives its sentinel without overwriting a real count.
     (void)state::build_data::nodes::apply_category_gates(object.objectiveValues,
                                                         unlocks.revealAllLoreBooks);
-    // The Year 1 chapters carry a visibility gate of their own, one slot per record row just above
-    // the parent bars. Without it a chapter completes -- its book's parent triumph even goes
-    // claimable off the back of it -- while the entry itself stays redacted and unclaimable.
-    (void)state::record_claims::apply_chapter_visibility_gates(object.objectiveValues);
+    // Undiscovered chapters keep their authored visibility state. A former blanket gate fill made
+    // whole books look claimable on a clean account, which bypassed collectible progression.
 
     for (layout::CharacterUnlockBlock& block : object.characterUnlocks) {
         block.flags = unlocks.characterFlags;

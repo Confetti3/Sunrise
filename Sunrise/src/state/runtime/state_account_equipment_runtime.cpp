@@ -350,6 +350,7 @@ void report_item_state(std::string_view stage,
         || left.appearanceValue != right.appearanceValue
         || left.lastOrbitedDestination != right.lastOrbitedDestination
         || left.contentBypass != right.contentBypass
+        || left.equippedTitleRecordIndex != right.equippedTitleRecordIndex
         || left.nextInventorySerial != right.nextInventorySerial
         || left.inventory.count != right.inventory.count) {
         return false;

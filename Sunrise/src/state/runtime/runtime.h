@@ -299,6 +299,11 @@ void shutdown() noexcept;
  */
 [[nodiscard]] bool set_selected_character(std::uint64_t characterSoid, bool& changed) noexcept;
 
+/** Equips one validated title record on the currently selected character. */
+[[nodiscard]] bool set_selected_title(std::uint16_t recordIndex,
+                                      std::uint64_t& characterSoid,
+                                      bool& changed) noexcept;
+
 /**
  * Prepares an equip operation for one unequipped instance on the selected character.
  * An occupied slot is swapped; an empty semantic slot receives the requested item directly.

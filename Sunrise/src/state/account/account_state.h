@@ -15,6 +15,8 @@ inline constexpr std::size_t kCharacterCapacity = 3;
 inline constexpr std::size_t kDismantleRewardPolicyCapacity = 32;
 /** A server-authored record-reward policy: one row per rewarded Triumph. */
 inline constexpr std::size_t kRecordRewardPolicyCapacity = 256;
+/** Native sentinel used when a character has no title equipped. */
+inline constexpr std::uint16_t kUnequippedTitleRecordIndex = 0xFFFFU;
 
 /** Gear classes a dismantle payout row can be limited to. */
 enum class DismantleGearClass : std::uint8_t {
@@ -168,6 +170,8 @@ struct CharacterState {
     std::uint32_t lastOrbitedDestination{};
     /** Server policy that arms content checks only with the matching family-5 flag. */
     bool contentBypass{};
+    /** Native DestinyRecordDefinition row of the equipped earned title. */
+    std::uint16_t equippedTitleRecordIndex{kUnequippedTitleRecordIndex};
     /**
      * Runtime-only socket entries the player has selected at least once. Selected entries still
      * publish active; this mask keeps a later inactive entry acquired instead of new. Unverified:

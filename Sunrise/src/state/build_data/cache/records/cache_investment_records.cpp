@@ -88,6 +88,8 @@ bool encode(const build_data::records::Definition& value,
         value.loreRow,
         value.scoreValue,
         value.categoryValueIndex,
+        static_cast<std::uint8_t>(value.hasTitle),
+        0,
     };
     return true;
 }
@@ -104,6 +106,10 @@ bool decode(const RecordDefinitionRecord& record,
     value.loreRow = record.loreRow;
     value.scoreValue = record.scoreValue;
     value.categoryValueIndex = record.categoryValueIndex;
+    if (record.hasTitle > 1 || record.reserved != 0) {
+        return false;
+    }
+    value.hasTitle = record.hasTitle != 0;
     return true;
 }
 

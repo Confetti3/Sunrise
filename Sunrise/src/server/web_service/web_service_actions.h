@@ -33,4 +33,7 @@ void acquire_item(const middleware::web_service::Message& message, Outcome& outc
  */
 void claim_record(const middleware::web_service::Message& message, Outcome& outcome) noexcept;
 
+/** Decodes and applies one opcode-1821 earned-title selection. */
+void equip_title(const middleware::web_service::Message& message, Outcome& outcome) noexcept;
+
 } // namespace sunrise::server::web_service

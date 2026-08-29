@@ -8,6 +8,7 @@
 
 #include "../../core/logging/log.h"
 #include "../../middleware/web_service/messages/opcode1801.h"
+#include "../../middleware/web_service/messages/opcode1821.h"
 #include "../../state/record_claims/record_claims.h"
 #include "../../middleware/web_service/messages/opcode1820.h"
 #include "../../middleware/web_service/messages/opcode1901.h"
@@ -1034,6 +1035,67 @@ void claim_record(const middleware::web_service::Message& message, Outcome& outc
     // Attached only after the claim above has already landed: a reward that fails to resolve or
     // fit must never turn this already-successful claim into a failure.
     grant_record_reward(message, request.recordIndex, definition.definitionHash, outcome);
+}
+
+/** Equips an earned title record on the selected character. */
+void equip_title(const middleware::web_service::Message& message, Outcome& outcome) noexcept {
+    namespace records = state::build_data::records;
+    middleware::web_service::messages::opcode1821::Request request{};
+    records::Definition definition{};
+    std::uint64_t characterSoid = 0;
+    bool changed = false;
+    const char* result = "fail";
+    const char* reason = "payload_bits";
+    if (middleware::web_service::messages::opcode1821::parse_request(message, request)) {
+        if (request.recordIndex
+            == middleware::web_service::messages::opcode1821::kUnequippedRecordIndex) {
+            reason = "selected_character";
+            if (state::set_selected_title(
+                    state::kUnequippedTitleRecordIndex, characterSoid, changed)) {
+                outcome.hasTitleEquip = true;
+                result = "ok";
+                reason = "unequipped";
+            }
+        } else {
+            reason = "record_definition";
+            if (state::build_data::find_record_definition(request.recordIndex, definition)) {
+                reason = "not_title";
+                if (definition.hasTitle) {
+                    reason = "not_claimed";
+                    if (definition.completionFlagIndex != records::kUnavailableFlagIndex
+                        && state::record_claims::claimed(definition.completionFlagIndex)) {
+                        reason = "selected_character";
+                        if (state::set_selected_title(
+                                request.recordIndex, characterSoid, changed)) {
+                            outcome.hasTitleEquip = true;
+                            result = "ok";
+                            reason = changed ? "equipped" : "already_equipped";
+                        }
+                    }
+                }
+            }
+        }
+    }
+    std::array<char, core::log::kLineCapacity> line{};
+    const int count = std::snprintf(
+        line.data(),
+        line.size(),
+        "ev=title_equip result=%s reason=%s opcode=%u transaction=%u record=%u "
+        "definition_hash=0x%08X completion_flag=%u character=0x%llX changed=%u",
+        result,
+        reason,
+        static_cast<unsigned>(message.opcode),
+        static_cast<unsigned>(message.transactionId),
+        static_cast<unsigned>(request.recordIndex),
+        definition.definitionHash,
+        static_cast<unsigned>(definition.completionFlagIndex),
+        static_cast<unsigned long long>(characterSoid),
+        changed ? 1U : 0U);
+    if (count > 0) {
+        core::log::write(core::log::Channel::server,
+                         outcome.hasTitleEquip ? core::log::Level::debug : core::log::Level::warn,
+                         {line.data(), static_cast<std::size_t>(count)});
+    }
 }
 
 } // namespace sunrise::server::web_service
