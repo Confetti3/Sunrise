@@ -5,6 +5,7 @@
 #include <cstdio>
 
 #include "../../../../core/logging/log.h"
+#include "../../../../middleware/secure_channel/runtime.h"
 #include "../../../../state/account/account_state.h"
 #include "../../../../state/runtime/runtime.h"
 #include "../internal.h"
@@ -31,6 +32,61 @@ void report_repush(const char* stage, std::size_t bytes) noexcept {
                          core::log::Level::info,
                          {line.data(), static_cast<std::size_t>(count)});
     }
+}
+
+/** Publishes and commits one world reward through the ordinary acquisition notification path. */
+[[nodiscard]] bool consume_world_item_acquisition(Session& session,
+                                                  Scratch& scratch,
+                                                  std::span<std::byte> response,
+                                                  std::size_t& written,
+                                                  bool& touchesScratch) noexcept {
+    if (!session.worldItemAcquisitionArmed) {
+        return false;
+    }
+    touchesScratch = true;
+    queuez::ItemAcquisition acquisition{};
+    const state::PendingItemAcquisition pending = session.pendingWorldItemAcquisition;
+    if (!queuez::stage_item_acquisition(session.queuez,
+                                        pending.accountSoid,
+                                        pending.characterSoid,
+                                        pending.acquiredInstanceSoid,
+                                        pending.profileChanged,
+                                        acquisition)) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::warn,
+                         "ev=queuez stage=world_acquisition result=fail reason=stage");
+        return false;
+    }
+    auto nextSendNonce = session.sendNonce;
+    std::size_t framedSize = 0;
+    if (!push::append_item_acquisition_notification(scratch,
+                                                    acquisition,
+                                                    pending,
+                                                    state::bap().sessionKey,
+                                                    nextSendNonce,
+                                                    scratch.framed,
+                                                    framedSize)
+        || framedSize == 0 || framedSize > response.size()) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::warn,
+                         "ev=queuez stage=world_acquisition result=fail reason=encode");
+        return false;
+    }
+    if (!state::commit_item_acquisition(session.pendingWorldItemAcquisition)) {
+        session.worldItemAcquisitionArmed = false;
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::warn,
+                         "ev=queuez stage=world_acquisition result=fail reason=commit");
+        return false;
+    }
+    std::copy_n(scratch.framed.begin(), framedSize, response.begin());
+    written = framedSize;
+    middleware::secure_channel::advance_nonce(nextSendNonce);
+    session.sendNonce = nextSendNonce;
+    session.queuez = acquisition.after;
+    session.worldItemAcquisitionArmed = false;
+    report_repush("world_acquisition", framedSize);
+    return true;
 }
 
 /** Publishes the current account graph to a peer invalidated by another connection. */
@@ -262,6 +318,12 @@ bool consume_deferred(Session& session,
                       bool& touchesScratch) noexcept {
     written = 0;
     if (!session.authenticated) {
+        return false;
+    }
+    if (consume_world_item_acquisition(session, scratch, response, written, touchesScratch)) {
+        return true;
+    }
+    if (session.worldItemAcquisitionArmed) {
         return false;
     }
     if (consume_account_resync(session, scratch, response, written, touchesScratch)) {

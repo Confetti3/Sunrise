@@ -209,6 +209,22 @@ void arm_account_resync_everywhere() noexcept {
     }
 }
 
+bool arm_world_item_acquisition(state::PendingItemAcquisition acquisition) noexcept {
+    if (!acquisition.prepared) {
+        return false;
+    }
+    for (auto& peer : g_sessions) {
+        if (peer.id == 0 || !peer.authenticated || !peer.queuez.family4Active
+            || peer.worldItemAcquisitionArmed) {
+            continue;
+        }
+        peer.pendingWorldItemAcquisition = acquisition;
+        peer.worldItemAcquisitionArmed = true;
+        return true;
+    }
+    return false;
+}
+
 
 /** Applies one serialized BAP connection lifecycle event. */
 bool consume(const client::network::BapRequest& request,

@@ -11,6 +11,7 @@
 #include "../../../../../state/build_data/runtime.h"
 #include "../../../../../state/build_data/sobjects/sobject_catalog.h"
 #include "../../../../../state/lore/lore_grant.h"
+#include "../../../../../state/runtime/runtime.h"
 #include "../../../../bap/internal.h"
 #include "activity_message_receipts.h"
 
@@ -29,6 +30,7 @@
 #include "../../../../../middleware/bap/activity_message/sense_update.h"
 #include "../../../../../middleware/bap/activity_message/start_activity.h"
 #include "../../../../../middleware/bap/activity_message/telemetry.h"
+#include "../../../../../middleware/crypto/random_bytes.h"
 #include "../../../../../middleware/encoding/byte_order.h"
 
 namespace sunrise::server::bap::encrypted::activity_message::receipts {
@@ -91,6 +93,86 @@ struct EggResolution {
     std::uint16_t record{};
     bool resolved{};
 };
+
+struct EggLootResolution {
+    std::uint32_t definitionHash{};
+    std::uint16_t definitionIndex{};
+    bool granted{};
+};
+
+/** Grants one installed Dreaming City weapon or active-class Reverie Dawn armour piece. */
+[[nodiscard]] EggLootResolution grant_random_egg_loot() noexcept {
+    constexpr std::array<std::uint32_t, 7> kWeapons{
+        640114618U, 334171687U, 346136302U, 3242168339U,
+        3297863558U, 3740842661U, 1644162710U,
+    };
+    constexpr std::array<std::uint32_t, 5> kTitanArmour{
+        1472713738U, 1478378067U, 2561756285U, 4257800469U, 4023744176U,
+    };
+    constexpr std::array<std::uint32_t, 5> kHunterArmour{
+        2804026582U, 4008120231U, 2467635521U, 3185383401U, 844097260U,
+    };
+    constexpr std::array<std::uint32_t, 5> kWarlockArmour{
+        1076538039U, 150052158U, 757360370U, 569434520U, 1394177923U,
+    };
+
+    std::array<std::uint32_t, kWeapons.size() + kTitanArmour.size()> hashes{};
+    std::size_t hashCount = 0;
+    for (const std::uint32_t hash : kWeapons) {
+        hashes[hashCount++] = hash;
+    }
+    const state::AccountState account = state::account_snapshot();
+    const std::array<std::uint32_t, 5>* armour = nullptr;
+    for (std::size_t index = 0; index < account.characterCount; ++index) {
+        if (!account.characters[index].selected) {
+            continue;
+        }
+        switch (account.characters[index].characterClass) {
+        case state::CharacterClass::hunter:
+            armour = &kHunterArmour;
+            break;
+        case state::CharacterClass::warlock:
+            armour = &kWarlockArmour;
+            break;
+        case state::CharacterClass::titan:
+        default:
+            armour = &kTitanArmour;
+            break;
+        }
+        break;
+    }
+    if (armour != nullptr) {
+        for (const std::uint32_t hash : *armour) {
+            hashes[hashCount++] = hash;
+        }
+    }
+
+    std::array<std::byte, sizeof(std::uint32_t)> randomBytes{};
+    if (!middleware::crypto::random::fill(randomBytes)) {
+        return {};
+    }
+    std::uint32_t randomValue = 0;
+    for (std::size_t index = 0; index < randomBytes.size(); ++index) {
+        randomValue |= std::to_integer<std::uint32_t>(randomBytes[index]) << (index * 8U);
+    }
+    const std::size_t first = randomValue % hashCount;
+    for (std::size_t offset = 0; offset < hashCount; ++offset) {
+        const std::uint32_t hash = hashes[(first + offset) % hashCount];
+        state::build_data::items::Definition definition{};
+        if (!state::build_data::find_item_definition_hash(hash, definition)) {
+            continue;
+        }
+        state::PendingItemAcquisition acquisition{};
+        if (!state::prepare_item_acquisition_for_item(definition.definitionIndex, acquisition)) {
+            continue;
+        }
+        if (!bap::arm_world_item_acquisition(acquisition)) {
+            return {hash, definition.definitionIndex, false};
+        }
+        return {hash, definition.definitionIndex, true};
+    }
+    return {};
+}
 
 /** Reports and resolves the live world context for an incident whose packet has no egg id. */
 [[nodiscard]] EggResolution resolve_egg_context() noexcept {
@@ -485,6 +567,7 @@ Framed frame_incident(const message::Request& request) noexcept {
                        exactFound ? exact.lanes[7] : 0U);
             } else if (isCorruptedEgg) {
                 const EggResolution egg = resolve_egg_context();
+                const EggLootResolution loot = grant_random_egg_loot();
                 if (egg.resolved
                     && (egg.outcome == state::lore::GrantOutcome::granted
                         || egg.outcome == state::lore::GrantOutcome::progressed)) {
@@ -492,12 +575,15 @@ Framed frame_incident(const message::Request& request) noexcept {
                 }
                 report(core::log::Level::info,
                        "ev=activity stage=lore path=egg result=%s target=%u type=%d "
-                       "lane4=0x%08X record=%u",
+                       "lane4=0x%08X record=%u loot=%s item_hash=0x%08X item_index=%u",
                        egg.resolved ? state::lore::grant_outcome_name(egg.outcome) : "unresolved",
                        parsed.primaryTarget,
                        primary.typeCode,
                        primary.lane4,
-                       static_cast<unsigned>(egg.resolved ? egg.record : 0));
+                       static_cast<unsigned>(egg.resolved ? egg.record : 0),
+                       loot.granted ? "queued" : "failed",
+                       loot.definitionHash,
+                       loot.definitionIndex);
                 if (core::log::accepts(core::log::Channel::server, core::log::Level::info)) {
                     std::array<char, core::log::kLineCapacity> line{};
                     const int prefix = std::snprintf(line.data(), line.size(),
@@ -569,6 +655,50 @@ Framed frame_incident(const message::Request& request) noexcept {
                                found ? extra.lanes[5] : 0U,
                                found ? extra.lanes[6] : 0U,
                                found ? extra.lanes[7] : 0U);
+                    }
+
+                    // Dust scans share one target identity. The physical scan position selects
+                    // the exact lore entry across the Derelict and Reckoning spaces.
+                    struct DustScan {
+                        std::array<float, 3> position;
+                        std::uint16_t record;
+                    };
+                    constexpr std::string_view kDerelictPackage = "pandora_freeroam";
+                    constexpr std::array<DustScan, 9> kDustScans{{
+                        {{{-40.861F, 147.410F, -2312.313F}}, 1571U}, // The Bone, Derelict
+                        {{{-681.393F, -859.831F, -8.590F}}, 1575U}, // The Declaration, first arena
+                        {{{2.871F, 236.277F, -2306.442F}}, 1569U},  // The Red Box, Derelict
+                        {{{7.362F, 237.020F, -2306.704F}}, 1572U},   // The Kell, Derelict
+                        {{{9.792F, 149.124F, -2319.657F}}, 1570U},   // The Stacks, Reckoning
+                        {{{-205.802F, -80.132F, -11.900F}}, 1574U}, // The Gate, Reckoning
+                        {{{-249.759F, 6.664F, -17.853F}}, 1573U},   // The Leviathan, Reckoning
+                        {{{-876.144F, -874.570F, 11.781F}}, 1576U}, // The Nine, Reckoning
+                        {{{-1323.416F, -534.063F, -298.928F}}, 1577U}, // The Witch, Reckoning
+                    }};
+                    constexpr float kDustScanRadiusSquared = 36.0F;
+                    if (player.present && packageName == kDerelictPackage) {
+                        for (const DustScan& scan : kDustScans) {
+                            const float dx = player.position[0] - scan.position[0];
+                            const float dy = player.position[1] - scan.position[1];
+                            const float dz = player.position[2] - scan.position[2];
+                            if (dx * dx + dy * dy + dz * dz > kDustScanRadiusSquared) {
+                                continue;
+                            }
+                            const auto outcome = state::lore::grant_record(scan.record);
+                            contextResolved = outcome != state::lore::GrantOutcome::recordNotFound
+                                              && outcome != state::lore::GrantOutcome::notAChapter;
+                            if (outcome == state::lore::GrantOutcome::granted) {
+                                bap::arm_account_resync_everywhere();
+                            }
+                            report(core::log::Level::info,
+                                   "ev=activity stage=lore path=position target=%u package=%.*s "
+                                   "record=%u result=%s",
+                                   parsed.primaryTarget,
+                                   static_cast<int>(packageName.size()), packageName.data(),
+                                   static_cast<unsigned>(scan.record),
+                                   state::lore::grant_outcome_name(outcome));
+                            break;
+                        }
                     }
 
                     // Confessions vases have no per-object target. Their interaction positions are

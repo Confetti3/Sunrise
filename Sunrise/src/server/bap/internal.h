@@ -12,7 +12,7 @@
 #include "../../state/activity/bubble_authority/definition.h"
 #include "../../state/activity/definition.h"
 #include "../../state/build_data/scenarios/definition.h"
-#include "../../state/runtime/state.h"
+#include "../../state/runtime/runtime.h"
 #include "encrypted/queuez/definition.h"
 
 namespace sunrise::server::bap {
@@ -172,6 +172,9 @@ struct Session {
     bool accountMutationPublished{};
     /** True while another peer's account mutation still needs a full local refresh. */
     bool accountResyncArmed{};
+    /** Direct world reward waiting for its ordinary item-acquisition notification and commit. */
+    state::PendingItemAcquisition pendingWorldItemAcquisition{};
+    bool worldItemAcquisitionArmed{};
     /**
      * Tick count after which the owed ability-icon refresh may go out. A subclass selection
      * invalidates the published ability buckets and the rebuild runs off the Client
@@ -191,6 +194,10 @@ struct Session {
  * unrelated action happened to stage an image. Picking up a collectible is such a change.
  */
 void arm_account_resync_everywhere() noexcept;
+
+/** Queues one prepared world reward on an active Family-4 peer for normal acquisition feedback. */
+[[nodiscard]] bool
+arm_world_item_acquisition(state::PendingItemAcquisition acquisition) noexcept;
 
 namespace plaintext {
 
