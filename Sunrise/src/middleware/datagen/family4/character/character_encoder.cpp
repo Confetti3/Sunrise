@@ -12,6 +12,7 @@
 #include <limits>
 #include <optional>
 
+#include "../../../../state/build_data/runtime.h"
 #include "../../../../state/unlocks/unlocks_runtime.h"
 #include "../instance/layout.h"
 #include "../progression/progression_bank_keys.h"
@@ -30,6 +31,18 @@ constexpr std::byte kSeenMessageByte{0xFF};
 constexpr std::uint8_t kNativeTrue = 1;
 /** Native 1-byte booleans encode false as 0. */
 constexpr std::uint8_t kNativeFalse = 0;
+/** Stackable quest items needed by the collectible interactions currently supported. */
+struct CollectibleQuest {
+    std::uint32_t definitionHash{};
+    /** Lore completion flag which consumes this quest, or zero for a permanent test item. */
+    std::uint16_t completionFlag{};
+};
+constexpr std::array<CollectibleQuest, 4> kCollectibleQuests{{
+    {0x57C4540AU, 0U},     // A Small Gift
+    {0x85CC476EU, 10762U}, // Adonna's Quest -> Gimble-4's Ghost
+    {0xB099029AU, 10766U}, // A Futile Search -> Lonesome Ghost
+    {0xC3535D63U, 10769U}, // A Loyal Friend -> Vell Tarlowe's Ghost
+}};
 
 /**
  * Validates the authored fields consumed by the selected-character encoder.
@@ -51,6 +64,63 @@ constexpr std::size_t kBitsPerFlagByte = 8;
  * does not share that constant.
  */
 constexpr std::int32_t kOccupiedRowWatermark = 1;
+
+/**
+ * Publishes collectible prerequisites in their installed character-inventory quest bucket.
+ * Stackable quest rows have no instance SOID and therefore need no Family-4 item residents.
+ */
+[[nodiscard]] bool place_collectible_quest_items(layout::Object& object) noexcept {
+    std::optional<std::uint8_t> questBucketId;
+    std::size_t nextRow = 0;
+    std::size_t rowLimit = 0;
+    for (const CollectibleQuest& quest : kCollectibleQuests) {
+        if (quest.completionFlag != 0
+            && (state::record_claims::claimed(quest.completionFlag)
+                || state::record_claims::claimable(quest.completionFlag))) {
+            continue;
+        }
+        state::build_data::items::Definition item{};
+        state::build_data::items::details::Definition detail{};
+        state::build_data::inventory::buckets::Descriptor bucket{};
+        if (!state::build_data::find_item_definition_hash(quest.definitionHash, item)
+            || !state::build_data::find_configured_item_detail(item.definitionIndex, detail)
+            || detail.definitionIndex != item.definitionIndex
+            || detail.definitionHash != item.definitionHash || detail.bucketId != item.bucketId
+            || detail.instancedDefinitionState
+                   != state::build_data::items::details::InstancedDefinitionState::stackable
+            || detail.maxStackSize < 1 || detail.equipmentSlot.has_value()
+            || !state::build_data::find_inventory_bucket_descriptor(item.bucketId, bucket)
+            || bucket.arraySelector
+                   != state::build_data::inventory::buckets::ArraySelector::character
+            || bucket.slotCount == 0 || bucket.firstSlot >= object.inventoryItems.size()
+            || bucket.slotCount > object.inventoryItems.size() - bucket.firstSlot) {
+            return false;
+        }
+        if (!questBucketId.has_value()) {
+            questBucketId = item.bucketId;
+            nextRow = bucket.firstSlot;
+            rowLimit = bucket.firstSlot + bucket.slotCount;
+        } else if (*questBucketId != item.bucketId || nextRow >= rowLimit) {
+            return false;
+        }
+        while (nextRow < rowLimit
+               && object.inventoryItems[nextRow].definitionIndex != kEmptyDefinitionIndex) {
+            ++nextRow;
+        }
+        if (nextRow >= rowLimit) {
+            return false;
+        }
+
+        inventory::layout::Entry& row = object.inventoryItems[nextRow];
+        row.definitionIndex = item.definitionIndex;
+        row.quantity = 1;
+        object.newItemFlags[nextRow / kBitsPerFlagByte] |=
+            std::byte{1U} << (nextRow % kBitsPerFlagByte);
+        object.instanceProgressWatermarks[nextRow] = kOccupiedRowWatermark;
+        ++nextRow;
+    }
+    return true;
+}
 
 /**
  * Validates every inventory and equipment field consumed by the character object.
@@ -211,6 +281,9 @@ bool encode(const state::CharacterState& state,
         if (item.equipped) {
             object.equippedInstanceSoids[item.equipmentSlot] = item.instance.instanceSoid;
         }
+    }
+    if (!place_collectible_quest_items(object)) {
+        return false;
     }
 
     // Commit only after validation so callers never receive a partially initialized object.

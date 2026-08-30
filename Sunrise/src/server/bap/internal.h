@@ -175,6 +175,9 @@ struct Session {
     /** Direct world reward waiting for its ordinary item-acquisition notification and commit. */
     state::PendingItemAcquisition pendingWorldItemAcquisition{};
     bool worldItemAcquisitionArmed{};
+    /** Direct world material reward waiting for its profile-acquisition notification and commit. */
+    state::PendingProfileItemAcquisition pendingWorldProfileItemAcquisition{};
+    bool worldProfileItemAcquisitionArmed{};
     /**
      * Tick count after which the owed ability-icon refresh may go out. A subclass selection
      * invalidates the published ability buckets and the rebuild runs off the Client
@@ -198,6 +201,10 @@ void arm_account_resync_everywhere() noexcept;
 /** Queues one prepared world reward on an active Family-4 peer for normal acquisition feedback. */
 [[nodiscard]] bool
 arm_world_item_acquisition(state::PendingItemAcquisition acquisition) noexcept;
+
+/** Queues one prepared profile material reward with ordinary acquisition feedback. */
+[[nodiscard]] bool arm_world_profile_item_acquisition(
+    state::PendingProfileItemAcquisition acquisition) noexcept;
 
 namespace plaintext {
 

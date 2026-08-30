@@ -6,7 +6,7 @@
 
 namespace sunrise::state::record_claims {
 
-/** Result of advancing a record that has one authored objective. */
+/** Result of advancing a record that has one authored or mapped reserved objective. */
 enum class ObjectiveAdvance : std::uint8_t {
     /** No single objective mapping exists for the supplied completion flag. */
     unavailable,
@@ -60,7 +60,8 @@ void clear() noexcept;
 [[nodiscard]] bool mark_claimable(std::uint16_t flagIndex) noexcept;
 
 /**
- * Advances a record's sole objective by one and persists the partial value.
+ * Advances a record's sole objective by one and persists the partial value. Records whose native
+ * definitions reserve value slots without exposing objective rows use their measured slot map.
  * At the authored completion value the partial row is replaced by claimable state.
  */
 [[nodiscard]] ObjectiveAdvance advance_single_objective(std::uint16_t flagIndex) noexcept;

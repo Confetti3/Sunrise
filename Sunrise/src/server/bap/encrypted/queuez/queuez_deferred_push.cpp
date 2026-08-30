@@ -89,6 +89,62 @@ void report_repush(const char* stage, std::size_t bytes) noexcept {
     return true;
 }
 
+/** Publishes and commits one profile material reward through its acquisition notification. */
+[[nodiscard]] bool consume_world_profile_item_acquisition(Session& session,
+                                                          Scratch& scratch,
+                                                          std::span<std::byte> response,
+                                                          std::size_t& written,
+                                                          bool& touchesScratch) noexcept {
+    if (!session.worldProfileItemAcquisitionArmed) {
+        return false;
+    }
+    touchesScratch = true;
+    queuez::ProfileItemAcquisition acquisition{};
+    const state::PendingProfileItemAcquisition pending =
+        session.pendingWorldProfileItemAcquisition;
+    if (!queuez::stage_profile_item_acquisition(session.queuez,
+                                                pending.accountSoid,
+                                                pending.acquiredInstanceSoid,
+                                                pending.actionSource,
+                                                pending.appended,
+                                                acquisition)) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::warn,
+                         "ev=queuez stage=world_profile_acquisition result=fail reason=stage");
+        return false;
+    }
+    auto nextSendNonce = session.sendNonce;
+    std::size_t framedSize = 0;
+    if (!push::append_profile_item_acquisition_notification(scratch,
+                                                            acquisition,
+                                                            pending,
+                                                            state::bap().sessionKey,
+                                                            nextSendNonce,
+                                                            scratch.framed,
+                                                            framedSize)
+        || framedSize == 0 || framedSize > response.size()) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::warn,
+                         "ev=queuez stage=world_profile_acquisition result=fail reason=encode");
+        return false;
+    }
+    if (!state::commit_profile_item_acquisition(session.pendingWorldProfileItemAcquisition)) {
+        session.worldProfileItemAcquisitionArmed = false;
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::warn,
+                         "ev=queuez stage=world_profile_acquisition result=fail reason=commit");
+        return false;
+    }
+    std::copy_n(scratch.framed.begin(), framedSize, response.begin());
+    written = framedSize;
+    middleware::secure_channel::advance_nonce(nextSendNonce);
+    session.sendNonce = nextSendNonce;
+    session.queuez = acquisition.after;
+    session.worldProfileItemAcquisitionArmed = false;
+    report_repush("world_profile_acquisition", framedSize);
+    return true;
+}
+
 /** Publishes the current account graph to a peer invalidated by another connection. */
 [[nodiscard]] bool consume_account_resync(Session& session,
                                           Scratch& scratch,
@@ -324,6 +380,12 @@ bool consume_deferred(Session& session,
         return true;
     }
     if (session.worldItemAcquisitionArmed) {
+        return false;
+    }
+    if (consume_world_profile_item_acquisition(session, scratch, response, written, touchesScratch)) {
+        return true;
+    }
+    if (session.worldProfileItemAcquisitionArmed) {
         return false;
     }
     if (consume_account_resync(session, scratch, response, written, touchesScratch)) {

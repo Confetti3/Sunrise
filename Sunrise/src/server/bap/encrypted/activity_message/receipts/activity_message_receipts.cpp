@@ -11,6 +11,8 @@
 #include "../../../../../state/build_data/runtime.h"
 #include "../../../../../state/build_data/sobjects/sobject_catalog.h"
 #include "../../../../../state/lore/lore_grant.h"
+#include "../../../../../state/progression/seasonal_experience.h"
+#include "../../../../../state/record_claims/record_claims.h"
 #include "../../../../../state/runtime/runtime.h"
 #include "../../../../bap/internal.h"
 #include "activity_message_receipts.h"
@@ -20,6 +22,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <span>
 #include <string_view>
 
 #include "../../../../../core/logging/log.h"
@@ -94,55 +97,72 @@ struct EggResolution {
     bool resolved{};
 };
 
-struct EggLootResolution {
+struct WorldLootResolution {
     std::uint32_t definitionHash{};
     std::uint16_t definitionIndex{};
     bool granted{};
 };
 
-/** Grants one installed Dreaming City weapon or active-class Reverie Dawn armour piece. */
-[[nodiscard]] EggLootResolution grant_random_egg_loot() noexcept {
-    constexpr std::array<std::uint32_t, 7> kWeapons{
-        640114618U, 334171687U, 346136302U, 3242168339U,
-        3297863558U, 3740842661U, 1644162710U,
-    };
-    constexpr std::array<std::uint32_t, 5> kTitanArmour{
-        1472713738U, 1478378067U, 2561756285U, 4257800469U, 4023744176U,
-    };
-    constexpr std::array<std::uint32_t, 5> kHunterArmour{
-        2804026582U, 4008120231U, 2467635521U, 3185383401U, 844097260U,
-    };
-    constexpr std::array<std::uint32_t, 5> kWarlockArmour{
-        1076538039U, 150052158U, 757360370U, 569434520U, 1394177923U,
-    };
+/** Grants the nine Phantasmal Fragments paid by one completed Lost Ghost search. */
+[[nodiscard]] bool grant_lost_ghost_reward() noexcept {
+    constexpr std::uint32_t kPhantasmalFragmentHash = 443031982U;
+    constexpr std::int32_t kRewardQuantity = 9;
+    state::build_data::items::Definition definition{};
+    state::PendingProfileItemAcquisition acquisition{};
+    const bool prepared =
+        state::build_data::find_item_definition_hash(kPhantasmalFragmentHash, definition)
+        && state::prepare_profile_item_acquisition_for_item(
+            definition.definitionIndex, kRewardQuantity, acquisition);
+    const bool armed = prepared && bap::arm_world_profile_item_acquisition(acquisition);
+    report(armed ? core::log::Level::info : core::log::Level::warn,
+           "ev=activity stage=lost_ghost_reward result=%s hash=0x%08X quantity=%d",
+           armed ? "armed" : "fail",
+           kPhantasmalFragmentHash,
+           kRewardQuantity);
+    return armed;
+}
 
-    std::array<std::uint32_t, kWeapons.size() + kTitanArmour.size()> hashes{};
+/** Grants one installed world weapon or active-class armour piece from the supplied pool. */
+[[nodiscard]] WorldLootResolution grant_random_world_loot(
+    std::span<const std::uint32_t> weapons,
+    std::span<const std::uint32_t> titanArmour,
+    std::span<const std::uint32_t> hunterArmour,
+    std::span<const std::uint32_t> warlockArmour) noexcept {
+    constexpr std::size_t kMaximumWeaponCount = 9;
+    constexpr std::size_t kMaximumArmourCount = 5;
+    if (weapons.empty() || weapons.size() > kMaximumWeaponCount
+        || titanArmour.size() != kMaximumArmourCount
+        || hunterArmour.size() != kMaximumArmourCount
+        || warlockArmour.size() != kMaximumArmourCount) {
+        return {};
+    }
+    std::array<std::uint32_t, kMaximumWeaponCount + kMaximumArmourCount> hashes{};
     std::size_t hashCount = 0;
-    for (const std::uint32_t hash : kWeapons) {
+    for (const std::uint32_t hash : weapons) {
         hashes[hashCount++] = hash;
     }
     const state::AccountState account = state::account_snapshot();
-    const std::array<std::uint32_t, 5>* armour = nullptr;
+    std::span<const std::uint32_t> armour;
     for (std::size_t index = 0; index < account.characterCount; ++index) {
         if (!account.characters[index].selected) {
             continue;
         }
         switch (account.characters[index].characterClass) {
         case state::CharacterClass::hunter:
-            armour = &kHunterArmour;
+            armour = hunterArmour;
             break;
         case state::CharacterClass::warlock:
-            armour = &kWarlockArmour;
+            armour = warlockArmour;
             break;
         case state::CharacterClass::titan:
         default:
-            armour = &kTitanArmour;
+            armour = titanArmour;
             break;
         }
         break;
     }
-    if (armour != nullptr) {
-        for (const std::uint32_t hash : *armour) {
+    if (!armour.empty()) {
+        for (const std::uint32_t hash : armour) {
             hashes[hashCount++] = hash;
         }
     }
@@ -172,6 +192,122 @@ struct EggLootResolution {
         return {hash, definition.definitionIndex, true};
     }
     return {};
+}
+
+/** Grants one installed Dreaming City weapon or active-class Reverie Dawn armour piece. */
+[[nodiscard]] WorldLootResolution grant_random_dreaming_city_loot() noexcept {
+    constexpr std::array<std::uint32_t, 7> kWeapons{
+        640114618U, 334171687U, 346136302U, 3242168339U,
+        3297863558U, 3740842661U, 1644162710U,
+    };
+    constexpr std::array<std::uint32_t, 5> kTitanArmour{
+        1472713738U, 1478378067U, 2561756285U, 4257800469U, 4023744176U,
+    };
+    constexpr std::array<std::uint32_t, 5> kHunterArmour{
+        2804026582U, 4008120231U, 2467635521U, 3185383401U, 844097260U,
+    };
+    constexpr std::array<std::uint32_t, 5> kWarlockArmour{
+        1076538039U, 150052158U, 757360370U, 569434520U, 1394177923U,
+    };
+    return grant_random_world_loot(kWeapons, kTitanArmour, kHunterArmour, kWarlockArmour);
+}
+
+/** Grants one installed Moon weapon or active-class Dreambane armour piece. */
+[[nodiscard]] WorldLootResolution grant_random_moon_loot() noexcept {
+    constexpr std::array<std::uint32_t, 9> kWeapons{
+        2723909519U, 2931957300U, 3924212056U, 1016668089U, 1645386487U,
+        3325778512U, 4277547616U, 3870811754U, 3690523502U,
+    };
+    constexpr std::array<std::uint32_t, 5> kTitanArmour{
+        925079356U, 2568538788U, 3312368889U, 272413517U, 310888006U,
+    };
+    constexpr std::array<std::uint32_t, 5> kHunterArmour{
+        3571441640U, 883769696U, 193805725U, 659922705U, 377813570U,
+    };
+    constexpr std::array<std::uint32_t, 5> kWarlockArmour{
+        682780965U, 3692187003U, 2048903186U, 1528483180U, 1030110631U,
+    };
+    return grant_random_world_loot(kWeapons, kTitanArmour, kHunterArmour, kWarlockArmour);
+}
+
+/** Identifies the shared generic target as a Dreaming City cat-statue interaction. */
+[[nodiscard]] bool is_dreaming_city_cat(
+    std::uint32_t target,
+    bool definitionFound,
+    const state::build_data::sobjects::Definition& definition) noexcept {
+    constexpr std::uint32_t kGenericInteractionTarget = 3539U;
+    constexpr std::uint32_t kCatNameHash = 0x7A0FD954U;
+    constexpr std::uint32_t kCatLane4 = 0x0011FFFFU;
+    constexpr std::string_view kDreamingCityFreeroam = "dreaming_city_freeroam";
+    if (target != kGenericInteractionTarget || !definitionFound || definition.typeCode != 2
+        || definition.nameHash != kCatNameHash || definition.lane4 != kCatLane4) {
+        return false;
+    }
+
+    namespace activity = state::activity;
+    const std::uint64_t sessionId =
+        activity::membership::live_region_session(activity::kAbsentSessionId);
+    activity::destination::DestinationSelection selection{};
+    if (sessionId == activity::kAbsentSessionId
+        || !activity::destination::snapshot(sessionId, selection)) {
+        return false;
+    }
+    const std::string_view packageName{
+        reinterpret_cast<const char*>(selection.packageName.data()), selection.packageNameLength};
+    return packageName == kDreamingCityFreeroam;
+}
+
+/** Identifies a Jade Rabbit interaction by its generic target, statue ordinal, and Moon package. */
+[[nodiscard]] bool is_moon_rabbit(
+    const message::incident::Incident& incident,
+    bool primaryFound,
+    const state::build_data::sobjects::Definition& primary) noexcept {
+    constexpr std::uint32_t kGenericInteractionTarget = 3539U;
+    constexpr std::uint32_t kGenericNameHash = 0x7A0FD954U;
+    constexpr std::uint32_t kGenericLane4 = 0x0011FFFFU;
+    // The nine statues have different target indices and name hashes, but their type-code-2 world
+    // object ordinals form one dense run immediately before Luna's Lost ghosts.
+    constexpr std::uint16_t kFirstRabbitOrdinal = 3297U;
+    constexpr std::uint16_t kLastRabbitOrdinal = 3305U;
+    constexpr std::string_view kMoonFreeroam = "luna_freeroam";
+    if (incident.primaryTarget != kGenericInteractionTarget || !primaryFound
+        || primary.typeCode != 2 || primary.nameHash != kGenericNameHash
+        || primary.lane4 != kGenericLane4) {
+        return false;
+    }
+
+    bool hasRabbitTarget = false;
+    for (std::uint32_t index = 0; index < incident.extraTargetCount; ++index) {
+        const std::uint32_t target = incident.extraTargets[index];
+        if (target > (std::numeric_limits<std::uint16_t>::max)()) {
+            continue;
+        }
+        state::build_data::sobjects::Definition rabbit{};
+        if (!state::build_data::sobjects::find(static_cast<std::uint16_t>(target), rabbit)
+            || rabbit.typeCode != 2 || rabbit.recordRow() != 0xFFFFU) {
+            continue;
+        }
+        const std::uint16_t ordinal = rabbit.loreObjectOrdinal();
+        hasRabbitTarget = ordinal >= kFirstRabbitOrdinal && ordinal <= kLastRabbitOrdinal;
+        if (hasRabbitTarget) {
+            break;
+        }
+    }
+    if (!hasRabbitTarget) {
+        return false;
+    }
+
+    namespace activity = state::activity;
+    const std::uint64_t sessionId =
+        activity::membership::live_region_session(activity::kAbsentSessionId);
+    activity::destination::DestinationSelection selection{};
+    if (sessionId == activity::kAbsentSessionId
+        || !activity::destination::snapshot(sessionId, selection)) {
+        return false;
+    }
+    const std::string_view packageName{
+        reinterpret_cast<const char*>(selection.packageName.data()), selection.packageNameLength};
+    return packageName == kMoonFreeroam;
 }
 
 /** Reports and resolves the live world context for an incident whose packet has no egg id. */
@@ -495,6 +631,14 @@ Framed frame_incident(const message::Request& request) noexcept {
                     constexpr std::uint16_t kBoneFirstOrdinal = 2517U;
                     constexpr std::uint16_t kBoneLastOrdinal = 2532U;
                     constexpr std::uint16_t kBoneFirstRecord = 759U;
+                    // The ten Luna's Lost ghosts are ordered exactly like their lore records.
+                    // The first nine advance the destination triumph; Vell Tarlowe is the later
+                    // Pit of Heresy ghost and does not belong to that 9-step objective.
+                    constexpr std::uint16_t kMoonGhostFirstOrdinal = 3310U;
+                    constexpr std::uint16_t kMoonGhostLastOrdinal = 3319U;
+                    constexpr std::uint16_t kMoonGhostFirstRecord = 1841U;
+                    constexpr std::uint16_t kMoonDestinationLastOrdinal = 3318U;
+                    constexpr std::uint16_t kLunasLostAreFoundFlag = 10698U;
                     const std::uint16_t ordinal = definition.loreObjectOrdinal();
                     std::uint16_t record = 0;
                     if (ordinal >= kDroneFirstOrdinal && ordinal <= kDroneLastOrdinal) {
@@ -508,10 +652,32 @@ Framed frame_incident(const message::Request& request) noexcept {
                     } else if (ordinal >= kBoneFirstOrdinal && ordinal <= kBoneLastOrdinal) {
                         record = static_cast<std::uint16_t>(
                             kBoneFirstRecord + ordinal - kBoneFirstOrdinal);
+                    } else if (ordinal >= kMoonGhostFirstOrdinal
+                               && ordinal <= kMoonGhostLastOrdinal) {
+                        record = static_cast<std::uint16_t>(
+                            kMoonGhostFirstRecord + ordinal - kMoonGhostFirstOrdinal);
                     } else {
                         return {};
                     }
                     const auto outcome = state::lore::grant_record(record);
+                    if (outcome == state::lore::GrantOutcome::granted
+                        && ordinal >= kMoonGhostFirstOrdinal
+                        && ordinal <= kMoonGhostLastOrdinal) {
+                        if (ordinal <= kMoonDestinationLastOrdinal) {
+                            (void)state::record_claims::advance_single_objective(
+                                kLunasLostAreFoundFlag);
+                        }
+                        (void)grant_lost_ghost_reward();
+                        constexpr std::int32_t kBaseExperienceReward = 2500;
+                        const bool experienceGranted =
+                            state::progression::seasonal_experience::grant(
+                                kBaseExperienceReward);
+                        report(experienceGranted ? core::log::Level::info
+                                                 : core::log::Level::warn,
+                               "ev=activity stage=lost_ghost_xp result=%s amount=%d",
+                               experienceGranted ? "granted" : "fail",
+                               kBaseExperienceReward);
+                    }
                     return {outcome, true};
                 }
                 return {};
@@ -536,6 +702,9 @@ Framed frame_incident(const message::Request& request) noexcept {
                                         && primary.typeCode == 3
                                         && primary.nameHash == kCorruptedEggNameHash
                                         && primary.lane4 == kCorruptedEggLane4;
+            const bool isDreamingCityCat =
+                is_dreaming_city_cat(parsed.primaryTarget, primaryFound, primary);
+            const bool isMoonRabbit = is_moon_rabbit(parsed, primaryFound, primary);
             if (resolution.outcome == state::lore::GrantOutcome::granted
                 || resolution.outcome == state::lore::GrantOutcome::progressed) {
                 bap::arm_account_resync_everywhere();
@@ -567,7 +736,7 @@ Framed frame_incident(const message::Request& request) noexcept {
                        exactFound ? exact.lanes[7] : 0U);
             } else if (isCorruptedEgg) {
                 const EggResolution egg = resolve_egg_context();
-                const EggLootResolution loot = grant_random_egg_loot();
+                const WorldLootResolution loot = grant_random_dreaming_city_loot();
                 if (egg.resolved
                     && (egg.outcome == state::lore::GrantOutcome::granted
                         || egg.outcome == state::lore::GrantOutcome::progressed)) {
@@ -605,6 +774,40 @@ Framed frame_incident(const message::Request& request) noexcept {
                                          {line.data(), length});
                     }
                 }
+            } else if (isDreamingCityCat) {
+                const WorldLootResolution loot = grant_random_dreaming_city_loot();
+                constexpr std::uint16_t kRememberYourMannersFlag = 9448U;
+                const state::record_claims::ObjectiveAdvance progress =
+                    state::record_claims::advance_single_objective(kRememberYourMannersFlag);
+                if (progress == state::record_claims::ObjectiveAdvance::advanced
+                    || progress == state::record_claims::ObjectiveAdvance::completed) {
+                    bap::arm_account_resync_everywhere();
+                }
+                report(core::log::Level::info,
+                       "ev=activity stage=loot path=cat target=%u result=%s "
+                       "item_hash=0x%08X item_index=%u progress=%u",
+                       parsed.primaryTarget,
+                       loot.granted ? "queued" : "failed",
+                       loot.definitionHash,
+                       loot.definitionIndex,
+                       static_cast<unsigned>(progress));
+            } else if (isMoonRabbit) {
+                const WorldLootResolution loot = grant_random_moon_loot();
+                constexpr std::uint16_t kLetThemEatRiceCakesFlag = 10696U;
+                const state::record_claims::ObjectiveAdvance progress =
+                    state::record_claims::advance_single_objective(kLetThemEatRiceCakesFlag);
+                if (progress == state::record_claims::ObjectiveAdvance::advanced
+                    || progress == state::record_claims::ObjectiveAdvance::completed) {
+                    bap::arm_account_resync_everywhere();
+                }
+                report(core::log::Level::info,
+                       "ev=activity stage=loot path=rabbit target=%u result=%s "
+                       "item_hash=0x%08X item_index=%u progress=%u",
+                       parsed.primaryTarget,
+                       loot.granted ? "queued" : "failed",
+                       loot.definitionHash,
+                       loot.definitionIndex,
+                       static_cast<unsigned>(progress));
             } else {
                 bool contextResolved = false;
                 if (parsed.primaryTarget == 3539U) {

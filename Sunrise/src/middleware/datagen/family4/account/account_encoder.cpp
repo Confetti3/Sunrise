@@ -17,6 +17,7 @@
 #include <limits>
 
 #include "../../../../state/build_data/runtime.h"
+#include "../../../../state/progression/seasonal_experience.h"
 #include "../../../../state/unlocks/unlocks_runtime.h"
 #include "../progression/progression_bank_keys.h"
 #include "layout.h"
@@ -170,6 +171,34 @@ bool encode(const state::AccountState& state, std::span<std::byte> output) noexc
     if (!progression::key_bank(state::build_data::progressions::Scope::account,
                                object.progressions)) {
         return false;
+    }
+    // Account progression 40 is the Season of Arrivals XP progression. Lane zero is cumulative
+    // progression progress, so publish the persisted seasonal XP without synthesizing a rank.
+    constexpr std::uint16_t kSeasonalExperienceDefinitionIndex = 40U;
+    const std::int32_t earnedExperience = state::progression::seasonal_experience::earned();
+    for (std::size_t slot = 0; slot < object.progressions.size(); ++slot) {
+        progression::layout::Entry& entry = object.progressions[slot];
+        if (entry.definitionIndex != kSeasonalExperienceDefinitionIndex) {
+            continue;
+        }
+        entry.values[0] = (std::max)(entry.values[0], earnedExperience);
+        static std::atomic<bool> reported{false};
+        if (!reported.exchange(true, std::memory_order_relaxed)) {
+            std::array<char, 160> line{};
+            const int written = std::snprintf(line.data(),
+                                              line.size(),
+                                              "ev=season_xp stage=encode definition=40 slot=%zu "
+                                              "progress=%d",
+                                              slot,
+                                              entry.values[0]);
+            if (written > 0) {
+                core::log::write(core::log::Channel::middleware,
+                                 core::log::Level::info,
+                                 {line.data(),
+                                  (std::min)(static_cast<std::size_t>(written), line.size() - 1)});
+            }
+        }
+        break;
     }
     // Profile rows are sentinelled above, so placement only has to claim its own slots.
     std::array<std::uint16_t, kBucketIdentityCapacity> takenSlots{};

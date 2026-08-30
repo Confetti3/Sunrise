@@ -2,6 +2,7 @@
 #include "../build_data/records/rewards/reward_persistence.h"
 #include "../build_data/nodes/node_persistence.h"
 #include "../record_claims/record_claims.h"
+#include "../progression/seasonal_experience.h"
 #include <Windows.h>
 
 #include <algorithm>
@@ -39,6 +40,31 @@ constexpr std::uint32_t kDefaultTokenLifetimeSeconds = 3600;
 /** Family 5 uses the largest signed 64-bit value as its process-global object key. */
 constexpr std::uint64_t kGlobalFamily5Soid =
     static_cast<std::uint64_t>((std::numeric_limits<std::int64_t>::max)());
+/** Global unlock-value slot named by the installed build's season constants. */
+constexpr std::uint16_t kActiveSeasonValueSlot = 607;
+/** One-based season number carried by the Season of Arrivals definition. */
+constexpr std::int32_t kSeasonOfArrivalsNumber = 11;
+
+/**
+ * Makes one process-owned global value authoritative without disturbing authored overrides.
+ * @return False only when a new row is needed and the bounded family-5 list is full.
+ */
+[[nodiscard]] bool upsert_family5_value(Family5State& family,
+                                        std::uint16_t slot,
+                                        std::int32_t value) noexcept {
+    for (std::size_t index = 0; index < family.valueCount; ++index) {
+        if (family.values[index].slot == slot) {
+            family.values[index].value = value;
+            return true;
+        }
+    }
+    if (family.valueCount >= family.values.size()) {
+        return false;
+    }
+    family.values[family.valueCount++] = UnlockValueOverride{slot, value};
+    return true;
+}
+
 /**
  * Fills fixed secret storage with Windows system randomness.
  * @tparam Size Required secret byte count.
@@ -217,6 +243,7 @@ bool initialize(void* module,
     // same as the claim-index and lore-node tables above.
     (void)build_data::records::rewards::initialize(module);
     (void)record_claims::initialize(module);
+    (void)progression::seasonal_experience::initialize(module);
     // A cache hit already has the complete plug relation, so publish canonical profile identities
     // in the first State image.  On a first cache build, snapshot preparation repeats this step
     // after package extraction has published the relation.
@@ -262,6 +289,15 @@ bool initialize(void* module,
     initialized.investment.family5.flagCount = authored.flagCount;
     initialized.investment.family5.values = authored.values;
     initialized.investment.family5.valueCount = authored.valueCount;
+    // Family 5 addresses the Client's global unlock-value space directly. Slot 607 selects the
+    // season definition; account objective rows use a separate mapped index space and cannot.
+    if (!upsert_family5_value(initialized.investment.family5,
+                              kActiveSeasonValueSlot,
+                              kSeasonOfArrivalsNumber)) {
+        SecureZeroMemory(&initialized, sizeof initialized);
+        build_data::shutdown();
+        return false;
+    }
     // The arm is account-wide and rides the first ws-503, which goes out before any pick. Nothing
     // is selected at boot, so it is armed when any authored character carries the bypass. The
     // per-character objB byte is the other half, and it still decides which character it opens.
@@ -285,6 +321,7 @@ void shutdown() noexcept {
     AcquireSRWLockExclusive(&runtime::storage::g_stateLock);
     SecureZeroMemory(&runtime::storage::g_state, sizeof runtime::storage::g_state);
     ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
+    progression::seasonal_experience::shutdown();
     build_data::shutdown();
 }
 

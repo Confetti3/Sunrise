@@ -88,6 +88,27 @@ bool g_claimablePathReady{};
 core::path::Buffer g_progressPath{};
 bool g_progressPathReady{};
 
+/** Objective storage reserved by records whose installed definition exposes no objective rows. */
+struct ReservedObjective {
+    std::uint16_t flagIndex;
+    std::uint16_t firstSlot;
+    std::uint8_t slotCount;
+    std::int32_t completionValue;
+};
+
+constexpr std::array<ReservedObjective, 1> kReservedObjectives{{
+    {9448U, 3432U, 2U, 9}, // Remember Your Manners
+}};
+
+[[nodiscard]] const ReservedObjective*
+find_reserved_objective(std::uint16_t flagIndex) noexcept {
+    const auto found = std::find_if(
+        kReservedObjectives.begin(),
+        kReservedObjectives.end(),
+        [flagIndex](const ReservedObjective& objective) { return objective.flagIndex == flagIndex; });
+    return found != kReservedObjectives.end() ? &*found : nullptr;
+}
+
 [[nodiscard]] bool claimed_locked(std::uint16_t flagIndex) noexcept;
 [[nodiscard]] bool claimable_locked(std::uint16_t flagIndex) noexcept;
 
@@ -924,6 +945,19 @@ std::size_t apply_claimable_objectives(std::span<std::int32_t> objectiveValues) 
             || found->objectiveCount != 1
             || static_cast<std::size_t>(found->firstObjective)
                    >= objective_slot_table::kObjectives.size()) {
+            const ReservedObjective* reserved = find_reserved_objective(flagIndex);
+            if (reserved == nullptr) {
+                continue;
+            }
+            for (std::uint8_t slot = 0; slot < reserved->slotCount; ++slot) {
+                const std::size_t valueSlot =
+                    static_cast<std::size_t>(reserved->firstSlot) + slot;
+                if (valueSlot < objectiveValues.size()) {
+                    objectiveValues[valueSlot] =
+                        std::min(g_progress[index], reserved->completionValue);
+                    ++written;
+                }
+            }
             continue;
         }
         const auto& objective = objective_slot_table::kObjectives[found->firstObjective];
@@ -950,7 +984,17 @@ std::size_t apply_claimable_objectives(std::span<std::int32_t> objectiveValues) 
                     return entry.flagIndex < key;
                 });
             if (found == table.end() || found->flagIndex != flagIndex) {
-                // No objective slot for this record -- nothing this pass can write for it.
+                const ReservedObjective* reserved = find_reserved_objective(flagIndex);
+                if (reserved != nullptr) {
+                    for (std::uint8_t slot = 0; slot < reserved->slotCount; ++slot) {
+                        const std::size_t valueSlot =
+                            static_cast<std::size_t>(reserved->firstSlot) + slot;
+                        if (valueSlot < objectiveValues.size()) {
+                            objectiveValues[valueSlot] = reserved->completionValue;
+                            ++written;
+                        }
+                    }
+                }
                 continue;
             }
             for (std::uint8_t slot = 0; slot < found->objectiveCount; ++slot) {
@@ -1035,14 +1079,19 @@ ObjectiveAdvance advance_single_objective(std::uint16_t flagIndex) noexcept {
         [](const objective_slot_table::RecordEntry& entry, std::uint16_t key) {
             return entry.flagIndex < key;
         });
-    if (found == objective_slot_table::kRecords.end() || found->flagIndex != flagIndex
-        || found->objectiveCount != 1
-        || static_cast<std::size_t>(found->firstObjective)
-               >= objective_slot_table::kObjectives.size()) {
-        return ObjectiveAdvance::unavailable;
+    std::int32_t completion = 0;
+    if (found != objective_slot_table::kRecords.end() && found->flagIndex == flagIndex
+        && found->objectiveCount == 1
+        && static_cast<std::size_t>(found->firstObjective)
+               < objective_slot_table::kObjectives.size()) {
+        completion = objective_slot_table::kObjectives[found->firstObjective].completionValue;
+    } else {
+        const ReservedObjective* reserved = find_reserved_objective(flagIndex);
+        if (reserved == nullptr) {
+            return ObjectiveAdvance::unavailable;
+        }
+        completion = reserved->completionValue;
     }
-    const std::int32_t completion =
-        objective_slot_table::kObjectives[found->firstObjective].completionValue;
     if (completion <= 0) {
         return ObjectiveAdvance::unavailable;
     }
