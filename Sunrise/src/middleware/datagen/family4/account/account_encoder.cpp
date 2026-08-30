@@ -172,16 +172,21 @@ bool encode(const state::AccountState& state, std::span<std::byte> output) noexc
                                object.progressions)) {
         return false;
     }
-    // Account progression 40 is the Season of Arrivals XP progression. Lane zero is cumulative
-    // progression progress, so publish the persisted seasonal XP without synthesizing a rank.
+    // Arrivals uses progression 40 for its finite reward track and repeating progression 41 for
+    // the gameplay XP bar. Both consume the same cumulative XP through lane zero.
     constexpr std::uint16_t kSeasonalExperienceDefinitionIndex = 40U;
+    constexpr std::uint16_t kSeasonalPrestigeDefinitionIndex = 41U;
     const std::int32_t earnedExperience = state::progression::seasonal_experience::earned();
     for (std::size_t slot = 0; slot < object.progressions.size(); ++slot) {
         progression::layout::Entry& entry = object.progressions[slot];
-        if (entry.definitionIndex != kSeasonalExperienceDefinitionIndex) {
+        if (entry.definitionIndex != kSeasonalExperienceDefinitionIndex
+            && entry.definitionIndex != kSeasonalPrestigeDefinitionIndex) {
             continue;
         }
         entry.values[0] = (std::max)(entry.values[0], earnedExperience);
+        if (entry.definitionIndex != kSeasonalExperienceDefinitionIndex) {
+            continue;
+        }
         static std::atomic<bool> reported{false};
         if (!reported.exchange(true, std::memory_order_relaxed)) {
             std::array<char, 160> line{};
@@ -198,7 +203,6 @@ bool encode(const state::AccountState& state, std::span<std::byte> output) noexc
                                   (std::min)(static_cast<std::size_t>(written), line.size() - 1)});
             }
         }
-        break;
     }
     // Profile rows are sentinelled above, so placement only has to claim its own slots.
     std::array<std::uint16_t, kBucketIdentityCapacity> takenSlots{};
