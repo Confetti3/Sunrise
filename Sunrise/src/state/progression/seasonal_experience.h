@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <span>
 
 namespace sunrise::state::progression::seasonal_experience {
 
@@ -15,5 +16,17 @@ void shutdown() noexcept;
 
 /** Returns runtime-earned seasonal XP. */
 [[nodiscard]] std::int32_t earned() noexcept;
+
+/** Returns the one-based Season of Arrivals rank earned by the persisted XP total. */
+[[nodiscard]] std::uint16_t rank() noexcept;
+
+/** Returns whether one native Season of Arrivals reward row was already claimed. */
+[[nodiscard]] bool reward_claimed(std::uint16_t rewardIndex) noexcept;
+
+/** Persistently claims one native reward row exactly once. */
+[[nodiscard]] bool claim_reward(std::uint16_t rewardIndex) noexcept;
+
+/** Publishes persisted Season Pass claims into their mapped account acquired-flag bytes. */
+[[nodiscard]] bool apply_reward_claims(std::span<std::uint8_t> acquiredFlags) noexcept;
 
 } // namespace sunrise::state::progression::seasonal_experience

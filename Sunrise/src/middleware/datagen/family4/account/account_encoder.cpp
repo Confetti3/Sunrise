@@ -131,6 +131,11 @@ bool encode(const state::AccountState& state, std::span<std::byte> output) noexc
     // Claims are laid over the authored bank on the way out, so a claimed record reads Acquired on
     // the next image. The authored policy itself is immutable and is never edited.
     (void)state::record_claims::apply(object.acquiredFlags);
+    // Season Pass reward rows carry their own claimed-unlock keys. Publish the persisted claim into
+    // the exact mapped account byte so the tile becomes disabled and reports "Already claimed".
+    if (!state::progression::seasonal_experience::apply_reward_claims(object.acquiredFlags)) {
+        return false;
+    }
     // A lore book's category is gated: some read a flag, some test their own progress value. A book
     // gated on progress cannot open by being played, since with no title shown there is nothing
     // inside to collect. Satisfying the gate is what makes the book readable at all.
