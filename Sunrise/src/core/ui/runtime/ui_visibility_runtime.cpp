@@ -24,7 +24,8 @@ SRWLOCK g_visibilityLock{SRWLOCK_INIT};
 
 /** Starts visibility from Core settings, after checking them. */
 bool initialize(const Settings& settings) noexcept {
-    if (!is_valid_virtual_key(settings.toggleVirtualKey)) {
+    if (!is_valid_virtual_key(settings.toggleVirtualKey)
+        || !is_valid_virtual_key(settings.consoleToggleVirtualKey)) {
         return false;
     }
     AcquireSRWLockExclusive(&g_visibilityLock);
@@ -32,6 +33,8 @@ bool initialize(const Settings& settings) noexcept {
     g_state.enabled = settings.enabled;
     g_state.visible = kInitialVisibility;
     g_state.toggleVirtualKey = settings.toggleVirtualKey;
+    g_state.consoleVisible = kInitialVisibility;
+    g_state.consoleToggleVirtualKey = settings.consoleToggleVirtualKey;
     ReleaseSRWLockExclusive(&g_visibilityLock);
     return true;
 }
@@ -54,13 +57,19 @@ VisibilitySnapshot snapshot() noexcept {
 /** Applies one key press to the visibility state. */
 bool toggle_for_key(UINT virtualKey) noexcept {
     AcquireSRWLockExclusive(&g_visibilityLock);
-    const bool handled =
-        g_state.initialized && g_state.enabled && virtualKey == g_state.toggleVirtualKey;
-    if (handled) {
+    const bool active = g_state.initialized && g_state.enabled;
+    const bool menuBinding = active && virtualKey == g_state.toggleVirtualKey;
+    // The menu is tested first, so a key bound to both surfaces stays the menu's. That binding
+    // predates the console and is the one a reader configured deliberately.
+    const bool consoleBinding =
+        active && !menuBinding && virtualKey == g_state.consoleToggleVirtualKey;
+    if (menuBinding) {
         g_state.visible = !g_state.visible;
+    } else if (consoleBinding) {
+        g_state.consoleVisible = !g_state.consoleVisible;
     }
     ReleaseSRWLockExclusive(&g_visibilityLock);
-    return handled;
+    return menuBinding || consoleBinding;
 }
 
 } // namespace sunrise::core::ui::runtime

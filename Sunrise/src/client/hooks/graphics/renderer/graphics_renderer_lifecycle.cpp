@@ -419,7 +419,8 @@ void present(IDXGISwapChain* swapChain) noexcept {
         inactivity::poll();
     }
     // The cursor policy calls Win32, so it runs only after the renderer lock is gone.
-    const bool visible = core::ui::runtime::snapshot().visible;
+    const bool visible =
+        core::ui::runtime::interface_open(core::ui::runtime::snapshot());
     cursor::apply_visibility(visible);
     polled_input::apply_visibility(visible);
     // The game makes its raw-mouse window during startup, so the first tries find nothing.

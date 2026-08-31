@@ -22,7 +22,8 @@
   "client": {
     "ui": {
       "enabled": true,
-      "toggle_key": "insert"
+      "toggle_key": "insert",
+      "console_toggle_key": "f10"
     },
     "external_server": {
       "enabled": false,

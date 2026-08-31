@@ -6,6 +6,7 @@
 #include <imgui_impl_dx11.h>
 #include <imgui_impl_win32.h>
 
+#include "../../../../core/console/overlay/console_overlay.h"
 #include "../../../../core/logging/log.h"
 #include "../../../../core/ui/busy/busy.h"
 #include "../../../../core/ui/fonts/runtime/ui_runtime_font_lifecycle.h"
@@ -338,7 +339,7 @@ void render_frame_locked() noexcept {
         draw_scene_helpers_locked(
             cameraStatus, frame_capture::view(g_resources.frameCapture), exactView);
     }
-    transition_input_visibility_locked(visibility.visible);
+    transition_input_visibility_locked(core::ui::runtime::interface_open(visibility));
     ImGui_ImplDX11_NewFrame();
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
@@ -351,9 +352,10 @@ void render_frame_locked() noexcept {
     const bool surfaceDrawn = inspectorSelected
                                   ? client::inspection::workspace_host::render(visibility.visible)
                                   : core::ui::layout::render(visibility.visible);
+    const bool consoleDrawn = core::console::overlay::render(visibility.consoleVisible);
     const bool busyDrawn = core::ui::busy::draw();
     const bool noticeDrawn = core::ui::notice::draw();
-    if (!hudDrawn && !surfaceDrawn && !busyDrawn && !noticeDrawn) {
+    if (!hudDrawn && !surfaceDrawn && !consoleDrawn && !busyDrawn && !noticeDrawn) {
         // A frame nobody claimed still drains backend state, and sends no draw data.
         ImGui::EndFrame();
         return;
@@ -375,8 +377,8 @@ bool handle_window_message(HWND window, UINT message, WPARAM word, LPARAM value)
     }
 
     const core::ui::runtime::VisibilitySnapshot visibility = core::ui::runtime::snapshot();
-    transition_input_visibility_locked(visibility.visible);
-    if (!visibility.visible) {
+    transition_input_visibility_locked(core::ui::runtime::interface_open(visibility));
+    if (!core::ui::runtime::interface_open(visibility)) {
         // Hidden input stays with the game and never enters Dear ImGui's event queue.
         ReleaseSRWLockExclusive(&g_rendererLock);
         return false;

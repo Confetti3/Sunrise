@@ -16,7 +16,12 @@
 #include "../../state/entitlements/entitlement_runtime.h"
 #include "../../state/runtime/runtime.h"
 #include "../../state/unlocks/unlocks_runtime.h"
+#include "../console/output/console_output.h"
+#include "../console/overlay/console_overlay.h"
+#include "../console/queue/console_queue.h"
+#include "../console/registry/console_registry.h"
 #include "../filesystem/path.h"
+#include "../logging/console/log_console.h"
 #include "../logging/log.h"
 #include "../settings/settings.h"
 #include "../ui/modules/hud/hud.h"
@@ -112,6 +117,10 @@ bool initialize(void* module) noexcept {
             stage = "ui_hud";
         } else if (!ui::modules::logs::initialize()) {
             stage = "ui_logs";
+        } else if (!log::console::initialize()) {
+            stage = "log_console";
+        } else if (!console::overlay::initialize()) {
+            stage = "console";
         } else if (!state::entitlements::publish(settings::get().server.entitlements)) {
             stage = "entitlements";
         } else if (!state::initialize(module,
@@ -141,6 +150,11 @@ bool initialize(void* module) noexcept {
         state::content_manifest::shutdown();
         state::shutdown();
         state::entitlements::clear();
+        console::queue::shutdown();
+        console::overlay::shutdown();
+        log::console::shutdown();
+        console::registry::shutdown();
+        console::output::shutdown();
         ui::modules::logs::shutdown();
         ui::modules::hud::shutdown();
         ui::modules::registry::shutdown();
@@ -183,6 +197,11 @@ bool shutdown() noexcept {
     state::content_manifest::shutdown();
     state::shutdown();
     state::entitlements::clear();
+    console::queue::shutdown();
+    console::overlay::shutdown();
+    log::console::shutdown();
+    console::registry::shutdown();
+    console::output::shutdown();
     log::write(log::Channel::core, log::Level::debug, "ev=shutdown stage=state result=ok");
     log::write(log::Channel::core, log::Level::debug, "ev=shutdown stage=core_ui phase=begin");
     ui::modules::logs::shutdown();

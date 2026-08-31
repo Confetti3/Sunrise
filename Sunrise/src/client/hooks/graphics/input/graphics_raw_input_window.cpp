@@ -82,7 +82,9 @@ LRESULT CALLBACK raw_window_procedure(HWND window,
     if (viewerCaptured) {
         publish_viewer_mouse(value);
     }
-    const bool captured = rawInput && (core::ui::runtime::snapshot().visible || viewerCaptured);
+    const bool captured =
+        rawInput
+        && (core::ui::runtime::interface_open(core::ui::runtime::snapshot()) || viewerCaptured);
     const bool forward = !captured && original != nullptr;
     const LRESULT result = forward ? CallWindowProcW(original, window, message, word, value)
                                    : DefWindowProcW(window, message, word, value);

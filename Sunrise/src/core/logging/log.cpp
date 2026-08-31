@@ -200,6 +200,68 @@ bool accepts(Channel channel, Level level) noexcept {
     return admitted;
 }
 
+/** Names one channel as its configuration spells it. */
+std::string_view channel_name(Channel channel) noexcept {
+    const auto index = static_cast<std::size_t>(channel);
+    return index < kChannelNames.size() ? kChannelNames[index] : std::string_view{};
+}
+
+/**
+ * Names one level as its configuration spells it.
+ *
+ * `off` is named here and not in the table above, because that table names the level an emitted
+ * event carries and nothing is ever emitted at `off`.
+ */
+std::string_view level_name(Level level) noexcept {
+    switch (level) {
+    case Level::error:
+        return "error";
+    case Level::warn:
+        return "warn";
+    case Level::info:
+        return "info";
+    case Level::debug:
+        return "debug";
+    case Level::off:
+        return "off";
+    }
+    return {};
+}
+
+/** Reads a level from its configuration name. */
+bool level_from_name(std::string_view name, Level& output) noexcept {
+    constexpr std::array kLevels{Level::error, Level::warn, Level::info, Level::debug, Level::off};
+    for (const Level candidate : kLevels) {
+        if (level_name(candidate) == name) {
+            output = candidate;
+            return true;
+        }
+    }
+    return false;
+}
+
+/** Reads one channel's current threshold. */
+bool level_of(Channel channel, Level& output) noexcept {
+    const auto index = static_cast<std::size_t>(channel);
+    if (index >= g_log.levels.size()) {
+        return false;
+    }
+    output = g_log.levels[index].load(std::memory_order_relaxed);
+    return true;
+}
+
+/** Changes one channel's threshold while the process runs. */
+bool set_level(Channel channel, Level level) noexcept {
+    const auto index = static_cast<std::size_t>(channel);
+    if (index >= g_log.levels.size()) {
+        return false;
+    }
+    // The thresholds are already atomic because every writer reads them, so a change needs no
+    // lock and cannot interrupt a write in progress.
+    g_log.levels[index].store(level, std::memory_order_relaxed);
+    return true;
+}
+
 /** Formats and emits one bounded structured event. */
 void write(Channel channel, Level level, std::string_view event) noexcept {
     const auto channelIndex = static_cast<std::size_t>(channel);

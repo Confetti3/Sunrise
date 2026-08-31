@@ -48,6 +48,40 @@ void shutdown() noexcept;
 /** @return True while the channel threshold admits this severity. */
 [[nodiscard]] bool accepts(Channel channel, Level level) noexcept;
 
+/** @param channel Channel to name. @return Its configuration name, or empty when undefined. */
+[[nodiscard]] std::string_view channel_name(Channel channel) noexcept;
+
+/** @param level Level to name. @return Its configuration name, `off` included. */
+[[nodiscard]] std::string_view level_name(Level level) noexcept;
+
+/**
+ * Reads a level from its configuration name.
+ * @param name Configuration name, matched exactly.
+ * @param output Filled only on a match.
+ * @return True on a match.
+ */
+[[nodiscard]] bool level_from_name(std::string_view name, Level& output) noexcept;
+
+/**
+ * Reads one channel's current threshold.
+ * @param channel Channel to read.
+ * @param output Filled only for a valid channel.
+ * @return True for a valid channel.
+ */
+[[nodiscard]] bool level_of(Channel channel, Level& output) noexcept;
+
+/**
+ * Changes one channel's threshold while the process runs.
+ *
+ * Thresholds are the one logging setting worth changing without a restart: the events that
+ * explain a problem are usually below the level that was configured before it appeared.
+ *
+ * @param channel Channel to change.
+ * @param level New threshold.
+ * @return True for a valid channel.
+ */
+[[nodiscard]] bool set_level(Channel channel, Level level) noexcept;
+
 /** Emits one structured event when allowed by the channel threshold. */
 void write(Channel channel, Level level, std::string_view event) noexcept;
 

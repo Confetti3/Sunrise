@@ -18,6 +18,17 @@ Destiny 2 Offline Exploration Mod
 - Basic Inventory Management
 - Detached Viewer camera and World Inspector
 
+## Runtime Console
+
+Press **F10** to open the bounded in-game console. The shipped binding avoids the default gameplay
+keys and can be changed with `client.ui.console_toggle_key`. The menu and console keep separate
+visibility, but either surface captures input while open.
+
+Use `console.find <text>` to search registered names, `console.help <name>` for one entry's typed
+usage, and `console.clear` to clear scrollback. Commands and variables are registered by the module
+that owns their state. Calls run through a bounded single-consumer queue, and queued work is canceled
+when its registration or console lifetime ends.
+
 ## World Browser
 
 The **Worlds** page searches destinations extracted from the user's installed packages. Selecting a

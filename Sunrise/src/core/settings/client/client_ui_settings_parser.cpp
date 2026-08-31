@@ -15,6 +15,9 @@ struct KeyName {
 
 /** Keys offered as safe menu toggles without inventing a private input-code domain. */
 constexpr std::array kToggleKeys{
+    // Grave remains available as an explicit override, although shipped defaults use F10 to avoid
+    // colliding with the game's backtick weapon binding.
+    KeyName{"grave", VK_OEM_3},
     KeyName{"insert", VK_INSERT},
     KeyName{"home", VK_HOME},
     KeyName{"end", VK_END},
@@ -54,6 +57,7 @@ bool Parser::client_ui_settings(ui::runtime::Settings& output) noexcept {
     ui::runtime::Settings candidate = output;
     bool hasEnabled = false;
     bool hasToggleKey = false;
+    bool hasConsoleToggleKey = false;
     if (consume('}')) {
         return true;
     }
@@ -74,6 +78,13 @@ bool Parser::client_ui_settings(ui::runtime::Settings& output) noexcept {
                 return false;
             }
             hasToggleKey = true;
+        } else if (key == "console_toggle_key") {
+            std::string_view name;
+            if (hasConsoleToggleKey || !string(name)
+                || !ui_toggle_key_value(name, candidate.consoleToggleVirtualKey)) {
+                return false;
+            }
+            hasConsoleToggleKey = true;
         } else if (!skip_value(0)) {
             return false;
         }
