@@ -35,7 +35,7 @@
     <TargetName>steam_api64</TargetName>
     <OutDir>$(ProjectDir)..\build\$(Platform)\$(Configuration)\</OutDir>
     <IntDir>$(ProjectDir)..\build\obj\$(Platform)\$(Configuration)\</IntDir>
-    <ExternalIncludePath>$(ExternalIncludePath);$(ProjectDir)vendor\detours;$(ProjectDir)vendor\imgui;$(ProjectDir)vendor\imgui\backends</ExternalIncludePath>
+    <ExternalIncludePath>$(ExternalIncludePath);$(ProjectDir)vendor\detours;$(ProjectDir)vendor\imgui;$(ProjectDir)vendor\imgui\backends;$(ProjectDir)vendor\lua-5.4.9\src</ExternalIncludePath>
     <VcpkgApplocalDeps>false</VcpkgApplocalDeps>
     <!-- clang rejects the UCRT offsetof macro in a constant expression, so point it at the
          builtin. MSVC refuses the same define as a reserved name, so it stays on this pass. -->
@@ -49,7 +49,7 @@
       <ConformanceMode>true</ConformanceMode>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(ProjectDir)src;$(ProjectDir)vendor\detours;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)src;$(ProjectDir)vendor\detours;$(ProjectDir)vendor\lua-5.4.9\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <TreatAngleIncludeAsExternal>true</TreatAngleIncludeAsExternal>
       <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
       <PreprocessorDefinitions>WIN32;_WINDOWS;_USRDLL;WIN32_LEAN_AND_MEAN;NOMINMAX;IMGUI_USER_CONFIG=&quot;core/ui/imgui_user_config.h&quot;;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -415,6 +415,13 @@
     <ClCompile Include="vendor\imgui\backends\imgui_impl_dx11.cpp">
       <WarningLevel>Level3</WarningLevel>
       <TreatWarningAsError>false</TreatWarningAsError>
+      <ExcludedFromBuild Condition="'$(SunriseRunClangTidy)'=='true'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="vendor\lua-5.4.9\src\lapi.c;vendor\lua-5.4.9\src\lauxlib.c;vendor\lua-5.4.9\src\lcode.c;vendor\lua-5.4.9\src\lctype.c;vendor\lua-5.4.9\src\ldebug.c;vendor\lua-5.4.9\src\ldo.c;vendor\lua-5.4.9\src\ldump.c;vendor\lua-5.4.9\src\lfunc.c;vendor\lua-5.4.9\src\lgc.c;vendor\lua-5.4.9\src\llex.c;vendor\lua-5.4.9\src\lmem.c;vendor\lua-5.4.9\src\lobject.c;vendor\lua-5.4.9\src\lopcodes.c;vendor\lua-5.4.9\src\lparser.c;vendor\lua-5.4.9\src\lstate.c;vendor\lua-5.4.9\src\lstring.c;vendor\lua-5.4.9\src\ltable.c;vendor\lua-5.4.9\src\ltm.c;vendor\lua-5.4.9\src\lundump.c;vendor\lua-5.4.9\src\lvm.c;vendor\lua-5.4.9\src\lzio.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <WarningLevel>Level3</WarningLevel>
+      <TreatWarningAsError>false</TreatWarningAsError>
+      <DisableSpecificWarnings>4244;4267;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <ExcludedFromBuild Condition="'$(SunriseRunClangTidy)'=='true'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="src\steam\runtime\callbacks\callback_dispatch.cpp" />
@@ -810,6 +817,7 @@
     <ClCompile Include="src\server\gameplay\physics\host\bubble_host_trigger_setup.cpp" />
     <ClCompile Include="src\server\gameplay\physics\host\bubble_host_triggers.cpp" />
     <ClCompile Include="src\server\gameplay\physics\host\fallback_policy.cpp" />
+    <ClCompile Include="src\server\gameplay\physics\host\mission_signal_queue.cpp" />
     <ClCompile Include="src\server\gameplay\physics\host\physics_session.cpp" />
     <ClCompile Include="src\server\gameplay\physics\host\runtime.cpp" />
     <ClCompile Include="src\server\gameplay\physics\interest\interest_manager.cpp" />
@@ -844,6 +852,10 @@
     <ClCompile Include="src\server\gameplay\physics\replication\world_coordinator_peers.cpp" />
     <ClCompile Include="src\server\gameplay\physics\replication\world_projection.cpp" />
     <ClCompile Include="src\server\gameplay\physics\world\activity_policy.cpp" />
+    <ClCompile Include="src\server\gameplay\mission\compiled_mission_policy.cpp" />
+    <ClCompile Include="src\server\gameplay\mission\enemy_wave_queue.cpp" />
+    <ClCompile Include="src\server\gameplay\mission\content_step_queue.cpp" />
+    <ClCompile Include="src\server\gameplay\mission\mission_compiler.cpp" />
     <ClCompile Include="src\server\gameplay\physics\world\actor_store.cpp" />
     <ClCompile Include="src\server\gameplay\physics\world\actor_store_pose.cpp" />
     <ClCompile Include="src\server\gameplay\physics\world\actor_store_restore.cpp" />
@@ -902,6 +914,7 @@
     <ClCompile Remove="vendor\imgui\imgui_widgets.cpp" />
     <ClCompile Remove="vendor\imgui\backends\imgui_impl_win32.cpp" />
     <ClCompile Remove="vendor\imgui\backends\imgui_impl_dx11.cpp" />
+    <ClCompile Remove="vendor\lua-5.4.9\src\lapi.c;vendor\lua-5.4.9\src\lauxlib.c;vendor\lua-5.4.9\src\lcode.c;vendor\lua-5.4.9\src\lctype.c;vendor\lua-5.4.9\src\ldebug.c;vendor\lua-5.4.9\src\ldo.c;vendor\lua-5.4.9\src\ldump.c;vendor\lua-5.4.9\src\lfunc.c;vendor\lua-5.4.9\src\lgc.c;vendor\lua-5.4.9\src\llex.c;vendor\lua-5.4.9\src\lmem.c;vendor\lua-5.4.9\src\lobject.c;vendor\lua-5.4.9\src\lopcodes.c;vendor\lua-5.4.9\src\lparser.c;vendor\lua-5.4.9\src\lstate.c;vendor\lua-5.4.9\src\lstring.c;vendor\lua-5.4.9\src\ltable.c;vendor\lua-5.4.9\src\ltm.c;vendor\lua-5.4.9\src\lundump.c;vendor\lua-5.4.9\src\lvm.c;vendor\lua-5.4.9\src\lzio.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="resources\resource.h" />
@@ -1496,6 +1509,7 @@
     <ClInclude Include="src\server\gameplay\physics\host\command_validation_state.h" />
     <ClInclude Include="src\server\gameplay\physics\host\fallback_policy.h" />
     <ClInclude Include="src\server\gameplay\physics\host\internal.h" />
+    <ClInclude Include="src\server\gameplay\physics\host\mission_signal_queue.h" />
     <ClInclude Include="src\server\gameplay\physics\host\physics_session.h" />
     <ClInclude Include="src\server\gameplay\physics\host\runtime.h" />
     <ClInclude Include="src\server\gameplay\physics\host\tick_runtime.h" />
@@ -1523,6 +1537,11 @@
     <ClInclude Include="src\server\gameplay\physics\replication\world_coordinator_internal.h" />
     <ClInclude Include="src\server\gameplay\physics\replication\world_projection.h" />
     <ClInclude Include="src\server\gameplay\physics\world\activity_policy.h" />
+    <ClInclude Include="src\server\gameplay\mission\compiled_mission_policy.h" />
+    <ClInclude Include="src\server\gameplay\mission\enemy_wave_queue.h" />
+    <ClInclude Include="src\server\gameplay\mission\content_step_queue.h" />
+    <ClInclude Include="src\server\gameplay\mission\mission_compiler.h" />
+    <ClInclude Include="src\server\gameplay\mission\mission_program.h" />
     <ClInclude Include="src\server\gameplay\physics\world\actor_store.h" />
     <ClInclude Include="src\server\gameplay\physics\world\authority_manager.h" />
     <ClInclude Include="src\server\gameplay\physics\world\command_queue.h" />

@@ -50,6 +50,12 @@ It does not modify game rendering when nodes are hidden or isolated.
 See [INSPECTOR.md](INSPECTOR.md) for architecture, safety limits, supported-build constraints,
 optional catalog generation, export interfaces, and the manual verification checklist.
 
+## Bounded mission programs
+
+The current research build includes a fixed-budget, load-time Lua mission compiler. See
+[MISSIONS.md](MISSIONS.md) for its exact scope, fail-closed rules, packaging requirement, and tests.
+It does not make missions generally supported.
+
 ## WIP
 
 This mod is a work in progress. Things might break or work in unexpected ways. There is also currently

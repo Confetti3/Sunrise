@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.31)
-project(Sunrise CXX)
+project(Sunrise C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -16,6 +16,29 @@ file(GLOB_RECURSE VENDOR_SOURCES CONFIGURE_DEPENDS
     "Sunrise/vendor/imgui/*.cpp"
     "Sunrise/vendor/imgui/*.h"
 )
+set(LUA_SOURCES
+    Sunrise/vendor/lua-5.4.9/src/lapi.c
+    Sunrise/vendor/lua-5.4.9/src/lauxlib.c
+    Sunrise/vendor/lua-5.4.9/src/lcode.c
+    Sunrise/vendor/lua-5.4.9/src/lctype.c
+    Sunrise/vendor/lua-5.4.9/src/ldebug.c
+    Sunrise/vendor/lua-5.4.9/src/ldo.c
+    Sunrise/vendor/lua-5.4.9/src/ldump.c
+    Sunrise/vendor/lua-5.4.9/src/lfunc.c
+    Sunrise/vendor/lua-5.4.9/src/lgc.c
+    Sunrise/vendor/lua-5.4.9/src/llex.c
+    Sunrise/vendor/lua-5.4.9/src/lmem.c
+    Sunrise/vendor/lua-5.4.9/src/lobject.c
+    Sunrise/vendor/lua-5.4.9/src/lopcodes.c
+    Sunrise/vendor/lua-5.4.9/src/lparser.c
+    Sunrise/vendor/lua-5.4.9/src/lstate.c
+    Sunrise/vendor/lua-5.4.9/src/lstring.c
+    Sunrise/vendor/lua-5.4.9/src/ltable.c
+    Sunrise/vendor/lua-5.4.9/src/ltm.c
+    Sunrise/vendor/lua-5.4.9/src/lundump.c
+    Sunrise/vendor/lua-5.4.9/src/lvm.c
+    Sunrise/vendor/lua-5.4.9/src/lzio.c
+)
 file(GLOB_RECURSE RESOURCE_FILES CONFIGURE_DEPENDS
     "Sunrise/resources/*.rc"
     "Sunrise/resources/*.h"
@@ -26,6 +49,7 @@ file(GLOB_RECURSE RESOURCE_FILES CONFIGURE_DEPENDS
 add_library(steam_api64 SHARED
     ${SUNRISE_SOURCES}
     ${VENDOR_SOURCES}
+    ${LUA_SOURCES}
     ${RESOURCE_FILES}
 )
 
@@ -51,6 +75,7 @@ target_include_directories(steam_api64 SYSTEM PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/Sunrise/vendor/detours"
     "${CMAKE_CURRENT_SOURCE_DIR}/Sunrise/vendor/imgui"
     "${CMAKE_CURRENT_SOURCE_DIR}/Sunrise/vendor/imgui/backends"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Sunrise/vendor/lua-5.4.9/src"
 )
 
 if(DEFINED XWIN_DIR)
@@ -91,6 +116,10 @@ endif()
 if(MSVC OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     set_source_files_properties(${VENDOR_SOURCES} PROPERTIES
         COMPILE_OPTIONS "/W3"
+    )
+    set_source_files_properties(${LUA_SOURCES} PROPERTIES
+        COMPILE_OPTIONS "/W3;/wd4244;/wd4267"
+        LANGUAGE C
     )
 endif()
 

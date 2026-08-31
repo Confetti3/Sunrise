@@ -1,0 +1,88 @@
+local function transition(event, source, state, actions)
+    return { event=event, source=source, from_state=state, actions=actions }
+end
+
+return mission {
+    id="event_glimmer_refinery_1", version=5, destination="edz_freeroam",
+    budgets={triggers=1,objectives=1,waves=0,content_steps=10,
+             content_signals=13,timers=12,transitions=32},
+    objectives={{id="complete_three_extractions",initial="active"}},
+    interactions={{id="trostland_event_volume",bubble=51,
+        position={x=410.129822,y=69.019836,z=126.794968},
+        extents={x=100.0,y=100.0,z=50.0}}},
+    waves={},
+    content_steps={
+        {id="glimmer_intro"},{id="glimmer_site_1_ship_spawn"},
+        {id="glimmer_site_1_enter"},{id="glimmer_site_1_exit"},
+        {id="glimmer_site_2_ship_spawn"},{id="glimmer_site_2_enter"},
+        {id="glimmer_site_2_exit"},{id="glimmer_site_3_ship_spawn"},
+        {id="glimmer_site_3_enter"},{id="glimmer_site_3_exit"},
+    },
+    content_signals={
+        {id="site_1_ship_spawned"},{id="site_1_enter_published"},{id="site_1_crew_cleared"},{id="site_1_ship_exited"},
+        {id="site_2_ship_spawned"},{id="site_2_enter_published"},{id="site_2_crew_cleared"},{id="site_2_ship_exited"},
+        {id="site_3_ship_spawned"},{id="site_3_enter_published"},{id="site_3_crew_cleared"},{id="site_3_ship_exited"},
+        {id="event_completed"},
+    },
+    timers={
+        {id="site_1_spawn_watchdog",delay=30},{id="site_1_enter_watchdog",delay=30},{id="site_1_exit_watchdog",delay=30},
+        {id="site_2_spawn_watchdog",delay=30},{id="site_2_enter_watchdog",delay=30},{id="site_2_exit_watchdog",delay=30},
+        {id="site_3_spawn_watchdog",delay=30},{id="site_3_enter_watchdog",delay=30},{id="site_3_exit_watchdog",delay=30},
+        {id="completion_watchdog",delay=30},{id="active_limit",delay=300},{id="cooldown",delay=300},
+    },
+    transitions={
+        transition("trigger_enter","trostland_event_volume",0,{
+            {type="activate_content_step",target="glimmer_site_1_ship_spawn"},
+            {type="schedule_timer",target="site_1_spawn_watchdog"},
+            {type="schedule_timer",target="active_limit"},{type="change_mission_state",value=1}}),
+        transition("content_signal","site_1_ship_spawned",1,{
+            {type="activate_content_step",target="glimmer_intro"},
+            {type="activate_content_step",target="glimmer_site_1_enter"},
+            {type="schedule_timer",target="site_1_enter_watchdog"},{type="change_mission_state",value=2}}),
+        transition("content_signal","site_1_enter_published",2,{{type="change_mission_state",value=3}}),
+        transition("content_signal","site_1_crew_cleared",3,{
+            {type="activate_content_step",target="glimmer_site_1_exit"},
+            {type="schedule_timer",target="site_1_exit_watchdog"},{type="change_mission_state",value=4}}),
+        transition("content_signal","site_1_ship_exited",4,{
+            {type="activate_content_step",target="glimmer_site_2_ship_spawn"},
+            {type="schedule_timer",target="site_2_spawn_watchdog"},{type="change_mission_state",value=5}}),
+        transition("content_signal","site_2_ship_spawned",5,{
+            {type="activate_content_step",target="glimmer_site_2_enter"},
+            {type="schedule_timer",target="site_2_enter_watchdog"},{type="change_mission_state",value=6}}),
+        transition("content_signal","site_2_enter_published",6,{{type="change_mission_state",value=7}}),
+        transition("content_signal","site_2_crew_cleared",7,{
+            {type="activate_content_step",target="glimmer_site_2_exit"},
+            {type="schedule_timer",target="site_2_exit_watchdog"},{type="change_mission_state",value=8}}),
+        transition("content_signal","site_2_ship_exited",8,{
+            {type="activate_content_step",target="glimmer_site_3_ship_spawn"},
+            {type="schedule_timer",target="site_3_spawn_watchdog"},{type="change_mission_state",value=9}}),
+        transition("content_signal","site_3_ship_spawned",9,{
+            {type="activate_content_step",target="glimmer_site_3_enter"},
+            {type="schedule_timer",target="site_3_enter_watchdog"},{type="change_mission_state",value=10}}),
+        transition("content_signal","site_3_enter_published",10,{{type="change_mission_state",value=11}}),
+        transition("content_signal","site_3_crew_cleared",11,{
+            {type="activate_content_step",target="glimmer_site_3_exit"},
+            {type="schedule_timer",target="site_3_exit_watchdog"},{type="change_mission_state",value=12}}),
+        transition("content_signal","site_3_ship_exited",12,{
+            {type="change_objective",target="complete_three_extractions",value=2},
+            {type="schedule_timer",target="completion_watchdog"},{type="change_mission_state",value=13}}),
+        transition("content_signal","event_completed",13,{
+            {type="schedule_timer",target="cooldown"},{type="change_mission_state",value=14}}),
+
+        transition("timer_fired","site_1_spawn_watchdog",1,{{type="activate_content_step",target="glimmer_site_1_exit"},{type="schedule_timer",target="cooldown"},{type="change_mission_state",value=14}}),
+        transition("timer_fired","site_1_enter_watchdog",2,{{type="activate_content_step",target="glimmer_site_1_exit"},{type="schedule_timer",target="cooldown"},{type="change_mission_state",value=14}}),
+        transition("timer_fired","site_1_exit_watchdog",4,{{type="activate_content_step",target="glimmer_site_1_exit"},{type="schedule_timer",target="cooldown"},{type="change_mission_state",value=14}}),
+        transition("timer_fired","site_2_spawn_watchdog",5,{{type="activate_content_step",target="glimmer_site_2_exit"},{type="schedule_timer",target="cooldown"},{type="change_mission_state",value=14}}),
+        transition("timer_fired","site_2_enter_watchdog",6,{{type="activate_content_step",target="glimmer_site_2_exit"},{type="schedule_timer",target="cooldown"},{type="change_mission_state",value=14}}),
+        transition("timer_fired","site_2_exit_watchdog",8,{{type="activate_content_step",target="glimmer_site_2_exit"},{type="schedule_timer",target="cooldown"},{type="change_mission_state",value=14}}),
+        transition("timer_fired","site_3_spawn_watchdog",9,{{type="activate_content_step",target="glimmer_site_3_exit"},{type="schedule_timer",target="cooldown"},{type="change_mission_state",value=14}}),
+        transition("timer_fired","site_3_enter_watchdog",10,{{type="activate_content_step",target="glimmer_site_3_exit"},{type="schedule_timer",target="cooldown"},{type="change_mission_state",value=14}}),
+        transition("timer_fired","site_3_exit_watchdog",12,{{type="activate_content_step",target="glimmer_site_3_exit"},{type="schedule_timer",target="cooldown"},{type="change_mission_state",value=14}}),
+        transition("timer_fired","completion_watchdog",13,{{type="schedule_timer",target="cooldown"},{type="change_mission_state",value=14}}),
+        transition("timer_fired","active_limit",3,{{type="activate_content_step",target="glimmer_site_1_exit"},{type="schedule_timer",target="cooldown"},{type="change_mission_state",value=14}}),
+        transition("timer_fired","active_limit",7,{{type="activate_content_step",target="glimmer_site_2_exit"},{type="schedule_timer",target="cooldown"},{type="change_mission_state",value=14}}),
+        transition("timer_fired","active_limit",11,{{type="activate_content_step",target="glimmer_site_3_exit"},{type="schedule_timer",target="cooldown"},{type="change_mission_state",value=14}}),
+        transition("timer_fired","cooldown",14,{
+            {type="change_objective",target="complete_three_extractions",value=1},{type="change_mission_state",value=0}}),
+    },
+}
