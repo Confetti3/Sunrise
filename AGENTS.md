@@ -23,12 +23,15 @@ cross-build evidence separate. Every RVA or native layout must name its exact cl
 
 ## Windows-native search execution
 
-This repository is on Windows `G:` and reaches WSL through 9P/DrvFS. For broad recursive searches,
-invoke Windows-native `rg.exe` with `G:\sunrise\Sunrise\...` paths. Use PowerShell/.NET only when
-`rg.exe` cannot express the query. Do not use Python `Path.rglob`, `os.walk`, Linux `find`, or Linux
-`rg` across the whole repository or mounted-drive corpus. Those are allowed for known files and
-small bounded directories. Exclude `build/`, `out/`, `tests/build/`, vendored code, old worktrees,
-and external corpora by default. Feed bounded results back to IPython for analysis.
+This repository is on Windows `G:` and reaches WSL through 9P/DrvFS. Use the Everything 1.5 index
+first for broad filename/path discovery via `/mnt/c/Users/Kate/Tools/EverythingCLI/es.exe` (Windows
+path `C:\Users\Kate\Tools\EverythingCLI\es.exe`). Then use Windows-native `rg.exe` with
+`G:\sunrise\Sunrise\...` paths for content search over the narrowed scope. Use PowerShell/.NET
+only when neither tool can express the query. Do not assume Everything content indexing is enabled.
+Do not use Python `Path.rglob`, `os.walk`, Linux `find`, or Linux `rg` across the whole repository or
+mounted-drive corpus. Those are allowed for known files and small bounded directories. Exclude
+`build/`, `out/`, `tests/build/`, vendored code, old worktrees, and external corpora by default. Feed
+bounded results back to IPython for analysis.
 
 ## Change safety
 
