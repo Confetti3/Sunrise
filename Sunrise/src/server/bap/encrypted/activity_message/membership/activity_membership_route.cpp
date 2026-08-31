@@ -10,8 +10,10 @@ activity_membership_acknowledgement_parser.h"
 #include "../../../../../middleware/bap/activity_message/activity_state_refresh_parser.h"
 #include "../../../../../middleware/bap/activity_message/client_authoritative_data.h"
 #include "../../../../../middleware/bap/activity_message/start_activity.h"
+#include "../../../../../state/account/account_state.h"
 #include "../../../../../state/activity/destination/definition.h"
 #include "../../../../../state/activity/membership/activity_membership_query.h"
+#include "../../../../../state/runtime/runtime.h"
 
 namespace sunrise::server::bap::encrypted::activity_message::membership {
 namespace {
@@ -37,6 +39,15 @@ make_identity(const service::client_identity::ClientIdentity& parsed) noexcept {
     identity.accountSoid = parsed.accountSoid;
     identity.opaqueSoid = parsed.field5;
     identity.secondaryOpaque = parsed.field6;
+    // A public citizen session is initially published with an identity-only player row. The
+    // client consequently reports both profile SOIDs as zero in type 23 even though the signed-in
+    // account and character are already known to this process. Do not let that sparse echo erase
+    // the valid seed identity and strand the membership watcher without a player.
+    if (identity.accountSoid == 0 && identity.opaqueSoid == 0) {
+        const state::AccountState account = state::account_snapshot();
+        identity.accountSoid = account.primarySoid;
+        identity.opaqueSoid = state::account::selected_character_soid(account);
+    }
     return identity;
 }
 

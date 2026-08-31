@@ -160,8 +160,10 @@ bool consume_activity_keepalive(Session& session,
             //
             // Read, never committed. `prepare_refresh` captures without changing State, and this
             // link must not move the private session's membership revision.
-            const std::uint64_t privateSessionId =
-                state::activity::membership::live_region_session(state::activity::kAbsentSessionId);
+            // The public binding retains the exact private source generation. Using the newest
+            // session with a reported region deadlocks the initial load: no region is reported
+            // until after this membership body binds the public world container.
+            const std::uint64_t privateSessionId = session.activity.source.sessionId;
             // Zero until the client publishes its identity. Before that the private table still
             // holds the seed's placeholder, which is not what the client matches on either.
             const bool identityPublished =
