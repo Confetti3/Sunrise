@@ -3,6 +3,7 @@
 #include "../../client/network/consumer.h"
 #include "../../core/logging/log.h"
 #include "../bap/runtime.h"
+#include "../character/character_console.h"
 #include "../gameplay/gameplay_runtime.h"
 #include "../http/server_http.h"
 #include "../transport/bap_listener.h"
@@ -12,7 +13,11 @@ namespace sunrise::server {
 
 /** Registers Server consumers with the Client networking boundary. */
 bool initialize() noexcept {
+    if (!character::console::initialize()) {
+        return false;
+    }
     if (!client::network::register_http_consumer(&http::consume)) {
+        character::console::shutdown();
         return false;
     }
     if (client::network::register_bap_consumer(&bap::consume)) {
@@ -37,6 +42,7 @@ bool initialize() noexcept {
     }
     // BAP registration failure rolls back the earlier HTTP registration.
     client::network::unregister_http_consumer(&http::consume);
+    character::console::shutdown();
     return false;
 }
 
@@ -54,6 +60,7 @@ void shutdown() noexcept {
     client::network::unregister_bap_consumer(&bap::consume);
     client::network::unregister_http_consumer(&http::consume);
     bap::shutdown();
+    character::console::shutdown();
 }
 
 } // namespace sunrise::server

@@ -26,7 +26,9 @@
 #include "../inspection/inspection_capture.h"
 #include "../inspection/current_location_catalog.h"
 #include "../inspection/inspection_settings_store.h"
+#include "../movement/movement_console.h"
 #include "../movement/movement_settings_store.h"
+#include "../player/player_console.h"
 #include "../player/player_settings_store.h"
 #include "../targets/game.h"
 #include "../targets/steam_targets.h"
@@ -43,6 +45,17 @@ bool initialize(void* module) noexcept {
     // Loaded before the pages register, so each page draws saved values on its first frame.
     movement::initialize(module);
     player::initialize(module);
+    if (!movement::console::initialize()) {
+        player::shutdown();
+        movement::shutdown();
+        return false;
+    }
+    if (!player::console::initialize()) {
+        movement::console::shutdown();
+        player::shutdown();
+        movement::shutdown();
+        return false;
+    }
     inactivity::initialize(module);
     viewer::initialize(module);
     viewer::paths::initialize(module);
@@ -230,6 +243,8 @@ bool shutdown() noexcept {
     viewer::paths::shutdown();
     viewer::shutdown();
     inactivity::shutdown();
+    player::console::shutdown();
+    movement::console::shutdown();
     player::shutdown();
     movement::shutdown();
     core::log::write(core::log::Channel::client, core::log::Level::info, "ev=shutdown result=ok");

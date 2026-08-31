@@ -191,6 +191,8 @@
     <ClCompile Include="src\core\console\overlay\console_builtins.cpp" />
     <ClCompile Include="src\core\console\overlay\console_overlay_render.cpp" />
     <ClCompile Include="src\core\logging\console\log_console.cpp" />
+    <ClCompile Include="src\client\movement\movement_console.cpp" />
+    <ClCompile Include="src\client\player\player_console.cpp" />
     <ClCompile Include="src\client\runtime\client_hook_activation.cpp" />
     <ClCompile Include="src\client\runtime\client_platform_hook_activation.cpp" />
     <ClCompile Include="src\client\runtime\host\game_host_classification.cpp" />
@@ -565,6 +567,7 @@
     <ClCompile Include="src\middleware\datagen\family4\loadout\loadout_resolver.cpp" />
     <ClCompile Include="src\middleware\datagen\family4\account\selection_patch\account_selection_patch_encoder.cpp" />
     <ClCompile Include="src\server\runtime\server_runtime.cpp" />
+    <ClCompile Include="src\server\character\character_console.cpp" />
     <ClCompile Include="src\server\ui\runtime\server_ui_module_runtime.cpp" />
     <ClCompile Include="src\server\ui\activity_override\activity_override_panel.cpp" />
     <ClCompile Include="src\server\ui\activity_override\activity_override_lists.cpp" />
@@ -993,6 +996,8 @@
     <ClInclude Include="src\core\console\overlay\console_builtins.h" />
     <ClInclude Include="src\core\console\overlay\console_overlay.h" />
     <ClInclude Include="src\core\logging\console\log_console.h" />
+    <ClInclude Include="src\client\movement\movement_console.h" />
+    <ClInclude Include="src\client\player\player_console.h" />
     <ClInclude Include="src\client\runtime\runtime.h" />
     <ClInclude Include="src\client\movement\movement_settings_store.h" />
     <ClInclude Include="src\client\inspection\activity_graph_catalog.h" />
@@ -1245,6 +1250,7 @@
     <ClInclude Include="src\state\build_data\runtime\build_data_catalog_runtime.h" />
     <ClInclude Include="src\state\build_data\runtime\domain_markers.h" />
     <ClInclude Include="src\server\transport\bap_listener.h" />
+    <ClInclude Include="src\server\character\character_console.h" />
     <ClInclude Include="src\server\runtime\server_runtime.h" />
     <ClInclude Include="src\server\ui\runtime\server_ui_module_runtime.h" />
     <ClInclude Include="src\server\ui\activity_override\activity_override_panel.h" />
