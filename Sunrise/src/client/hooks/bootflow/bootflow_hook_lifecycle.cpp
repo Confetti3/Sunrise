@@ -2,6 +2,7 @@
 
 #include <atomic>
 
+#include "../../../core/settings/settings.h"
 #include "internal.h"
 
 namespace sunrise::client::hooks::bootflow {
@@ -17,7 +18,13 @@ std::atomic_bool g_installed{false};
  * @return True when every fix attached.
  */
 bool install() noexcept {
-    const bool hold = install_character_select_hold();
+    // The hook runs once per boot, so the choice is made here rather than exposed as a command:
+    // detaching it later would be too late to matter. holdAttached feeds the OR below, so a
+    // deliberate skip still reads as "not installed" there. holdOk feeds the AND: the skip must
+    // not sink it, because turning a fix off on purpose is not a failure.
+    const bool holdWanted = core::settings::get().client.holdCharacterSelect;
+    const bool holdAttached = holdWanted && install_character_select_hold();
+    const bool holdOk = !holdWanted || holdAttached;
     const bool sliceSet = install_orbit_slice_set();
     const bool skip = install_profile_setup_skip();
     const bool composition = install_composition_check();
@@ -28,10 +35,10 @@ bool install() noexcept {
     const bool worldStep = install_world_step();
     const bool spawn = install_spawn_hold();
     const bool fade = install_fade_release();
-    const bool anyFix = hold || sliceSet || skip || composition || handoff || joinReady || ownerSlot
-                        || regionPrivate || worldStep || spawn || fade;
+    const bool anyFix = holdAttached || sliceSet || skip || composition || handoff || joinReady
+                        || ownerSlot || regionPrivate || worldStep || spawn || fade;
     g_installed.store(anyFix, std::memory_order_release);
-    return hold && sliceSet && skip && composition && handoff && joinReady && ownerSlot
+    return holdOk && sliceSet && skip && composition && handoff && joinReady && ownerSlot
            && regionPrivate && worldStep && spawn && fade;
 }
 

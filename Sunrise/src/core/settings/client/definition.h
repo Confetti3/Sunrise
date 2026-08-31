@@ -42,6 +42,13 @@ struct Settings {
      */
     bool pinReplicatedRecord{true};
     /**
+     * Whether the character-select screen waits for a choice.
+     *
+     * The hook runs once per boot, so this is read at startup rather than toggled later. Off lets
+     * the sign-in step select on its own, which is what a caller with no hands needs.
+     */
+    bool holdCharacterSelect{true};
+    /**
      * Runs the player spawn after the world-transition fade is armed.
      * A spawn before the arm releases nothing, so the screen stays black. Settable because it is
      * the only thing that can turn an allowed spawn into a refusal.

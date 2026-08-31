@@ -14,6 +14,7 @@ bool Parser::client_settings(client::Settings& output) noexcept {
     bool hasForceJoinRequestReady = false;
     bool hasRegionPrivate = false;
     bool hasPinReplicatedRecord = false;
+    bool hasHoldCharacterSelect = false;
     bool hasHoldSpawn = false;
     bool hasSpawnHoldMs = false;
     if (consume('}')) {
@@ -54,6 +55,11 @@ bool Parser::client_settings(client::Settings& output) noexcept {
                 return false;
             }
             hasPinReplicatedRecord = true;
+        } else if (key == "hold_character_select") {
+            if (hasHoldCharacterSelect || !boolean(candidate.holdCharacterSelect)) {
+                return false;
+            }
+            hasHoldCharacterSelect = true;
         } else if (key == "hold_spawn") {
             if (hasHoldSpawn || !boolean(candidate.holdSpawn)) {
                 return false;
