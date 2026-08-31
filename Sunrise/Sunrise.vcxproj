@@ -568,6 +568,9 @@
     <ClCompile Include="src\middleware\datagen\family4\account\selection_patch\account_selection_patch_encoder.cpp" />
     <ClCompile Include="src\server\runtime\server_runtime.cpp" />
     <ClCompile Include="src\server\character\character_console.cpp" />
+    <ClCompile Include="src\server\console_endpoint\console_endpoint.cpp" />
+    <ClCompile Include="src\server\console_endpoint\protocol\console_protocol.cpp" />
+    <ClCompile Include="src\server\console_endpoint\replies\console_reply_table.cpp" />
     <ClCompile Include="src\server\ui\runtime\server_ui_module_runtime.cpp" />
     <ClCompile Include="src\server\ui\activity_override\activity_override_panel.cpp" />
     <ClCompile Include="src\server\ui\activity_override\activity_override_lists.cpp" />
@@ -1251,6 +1254,10 @@
     <ClInclude Include="src\state\build_data\runtime\domain_markers.h" />
     <ClInclude Include="src\server\transport\bap_listener.h" />
     <ClInclude Include="src\server\character\character_console.h" />
+    <ClInclude Include="src\server\console_endpoint\console_endpoint.h" />
+    <ClInclude Include="src\server\console_endpoint\definition.h" />
+    <ClInclude Include="src\server\console_endpoint\protocol\console_protocol.h" />
+    <ClInclude Include="src\server\console_endpoint\replies\console_reply_table.h" />
     <ClInclude Include="src\server\runtime\server_runtime.h" />
     <ClInclude Include="src\server\ui\runtime\server_ui_module_runtime.h" />
     <ClInclude Include="src\server\ui\activity_override\activity_override_panel.h" />

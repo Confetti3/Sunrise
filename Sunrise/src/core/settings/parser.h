@@ -67,6 +67,8 @@ private:
      * @return True when the topology, addresses, port, and slot reserve agree.
      */
     [[nodiscard]] bool gameplay_settings(server::gameplay::Settings& output) noexcept;
+    /** Parses the local loopback console endpoint policy. */
+    [[nodiscard]] bool console_endpoint_settings(server::ConsoleEndpointSettings& output) noexcept;
     /**
      * Parses the authored entitlement array. Array order is the handle order the Client finds
      * definitions by, so entries are kept exactly as configured.

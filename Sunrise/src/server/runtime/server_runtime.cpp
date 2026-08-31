@@ -4,6 +4,7 @@
 #include "../../core/logging/log.h"
 #include "../bap/runtime.h"
 #include "../character/character_console.h"
+#include "../console_endpoint/console_endpoint.h"
 #include "../gameplay/gameplay_runtime.h"
 #include "../http/server_http.h"
 #include "../transport/bap_listener.h"
@@ -33,9 +34,17 @@ bool initialize() noexcept {
                              core::log::Level::warn,
                              "ev=gameplay stage=init result=fail");
         }
+        // Disabled is a successful no-op. A configured bind failure is reported but does not
+        // disable the offline server's unrelated services.
+        if (!console_endpoint::initialize()) {
+            core::log::write(core::log::Channel::server,
+                             core::log::Level::warn,
+                             "ev=console_endpoint stage=listen result=fail");
+        }
         if (ui::runtime::initialize()) {
             return true;
         }
+        console_endpoint::shutdown();
         gameplay::shutdown();
         transport::shutdown();
         client::network::unregister_bap_consumer(&bap::consume);
@@ -50,11 +59,13 @@ bool initialize() noexcept {
 void service(std::uint64_t now) noexcept {
     transport::service(now);
     gameplay::service(now);
+    console_endpoint::service(now);
 }
 
 /** Unregisters Server consumers in reverse registration order. */
 void shutdown() noexcept {
     ui::runtime::shutdown();
+    console_endpoint::shutdown();
     gameplay::shutdown();
     transport::shutdown();
     client::network::unregister_bap_consumer(&bap::consume);

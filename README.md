@@ -29,6 +29,11 @@ usage, and `console.clear` to clear scrollback. Commands and variables are regis
 that owns their state. Calls run through a bounded single-consumer queue, and queued work is canceled
 when its registration or console lifetime ends.
 
+The optional TCP console endpoint is disabled by default. When enabled, it binds only loopback with
+exclusive port ownership and trusts local processes: it is a debug/automation surface, not an
+authentication boundary. Connections have bounded request sizes and an idle timeout. A request ID
+must be nonzero, first in its JSON object, and unique while a result is pending.
+
 ## World Browser
 
 The **Worlds** page searches destinations extracted from the user's installed packages. Selecting a
