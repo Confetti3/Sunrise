@@ -517,6 +517,12 @@ selected_character(const state::AccountState& account) noexcept {
     session.sendNonce = nextSendNonce;
     session.queuez = update.after;
     ++session.artifactResetRefreshCursor;
+    if (session.artifactResetRefreshCursor >= session.artifactResetRefresh.instanceCount) {
+        // Equipped sockets feed Family 0/3's derived perk banks. Refresh them once every changed
+        // item resident has landed so reset cannot leave the previous champion effect cached.
+        session.abilityRefreshDueTick = GetTickCount64();
+        session.abilityRefreshArmed = true;
+    }
     return true;
 }
 
