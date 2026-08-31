@@ -876,6 +876,7 @@
     <ClCompile Include="src\server\bap\encrypted\queuez\queuez_deferred_push.cpp" />
     <ClCompile Include="src\server\bap\encrypted\queuez\queuez_outcome_staging.cpp" />
     <ClCompile Include="src\server\bap\encrypted\push\queuez\queuez_update_frame.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\push\queuez\queuez_account_preflight.cpp" />
     <ClCompile Include="src\server\bap\encrypted\push\queuez\queuez_subscription.cpp" />
     <ClCompile Include="src\server\bap\encrypted\push\queuez\queuez_change_character.cpp" />
     <ClCompile Include="src\server\bap\encrypted\push\queuez\queuez_select_character.cpp" />
