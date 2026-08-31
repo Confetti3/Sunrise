@@ -20,6 +20,7 @@ file(GLOB_RECURSE RESOURCE_FILES CONFIGURE_DEPENDS
     "Sunrise/resources/*.rc"
     "Sunrise/resources/*.h"
     "Sunrise/resources/*.json"
+    "Sunrise/resources/*.sql"
 )
 
 add_library(steam_api64 SHARED
@@ -107,7 +108,7 @@ endif()
 target_link_libraries(steam_api64 PRIVATE
     kernel32 bcrypt user32 gdi32 dwmapi
     d3dcompiler shell32 ws2_32 synchronization
-    windowscodecs
+    windowscodecs winsqlite3
 )
 
 set_target_properties(steam_api64 PROPERTIES

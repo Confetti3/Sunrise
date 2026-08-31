@@ -6,6 +6,9 @@ IDR_DEFAULT_SETTINGS RCDATA "default_settings.json"
 IDR_IMGUI_LICENSE RCDATA "../vendor/imgui/LICENSE.txt"
 IDR_DETOURS_LICENSE RCDATA "../vendor/detours/LICENSE.md"
 IDR_LOGO_SHEET RCDATA "logo_sheet.png"
+IDR_STATE_SCHEMA_V1 RCDATA "state_schema_v1.sql"
+IDR_STATE_MIGRATION_V1_TO_V2 RCDATA "state_migration_v1_to_v2.sql"
+IDR_DEFAULT_STATE_SEED RCDATA "default_state_seed.sql"
 IDR_INSPECTOR_ICON RCDATA "inspector_icon.png"
 
 VS_VERSION_INFO VERSIONINFO

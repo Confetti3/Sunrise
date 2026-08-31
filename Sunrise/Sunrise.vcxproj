@@ -56,7 +56,7 @@
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
-      <AdditionalDependencies>kernel32.lib;bcrypt.lib;user32.lib;gdi32.lib;dwmapi.lib;d3dcompiler.lib;shell32.lib;ws2_32.lib;synchronization.lib;ole32.lib;windowscodecs.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>kernel32.lib;bcrypt.lib;user32.lib;gdi32.lib;dwmapi.lib;d3dcompiler.lib;shell32.lib;ws2_32.lib;synchronization.lib;ole32.lib;windowscodecs.lib;winsqlite3.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
@@ -89,6 +89,9 @@
   <ItemGroup>
     <None Include="resources\default_settings.json" />
     <None Include="resources\logo_sheet.png" />
+    <None Include="resources\state_schema_v1.sql" />
+    <None Include="resources\state_migration_v1_to_v2.sql" />
+    <None Include="resources\default_state_seed.sql" />
     <None Include="vendor\detours\LICENSE.md" />
     <None Include="vendor\imgui\LICENSE.txt" />
   </ItemGroup>
@@ -452,6 +455,12 @@
     <ClCompile Include="src\state\account\account_state.cpp" />
     <ClCompile Include="src\state\account\inventory\inventory_state.cpp" />
     <ClCompile Include="src\state\account\settings\settings_state.cpp" />
+    <ClCompile Include="src\state\persistence\sqlite\database.cpp" />
+    <ClCompile Include="src\state\persistence\sqlite\schema.cpp" />
+    <ClCompile Include="src\state\persistence\sqlite\bootstrap_snapshot.cpp" />
+    <ClCompile Include="src\state\persistence\sqlite\account_settings_codec.cpp" />
+    <ClCompile Include="src\state\persistence\sqlite\account_snapshot.cpp" />
+    <ClCompile Include="src\state\persistence\sqlite\state_store.cpp" />
     <ClCompile Include="src\state\equipment\light\calculation\equipment_light_calculation.cpp" />
     <ClCompile Include="src\state\equipment\light\resolution\configured_equipment_light_resolver.cpp" />
     <ClCompile Include="src\state\content\content_catalog.cpp" />
@@ -1137,6 +1146,12 @@
     <ClInclude Include="src\state\account\account_state.h" />
     <ClInclude Include="src\state\account\inventory\inventory_state.h" />
     <ClInclude Include="src\state\account\settings\settings_state.h" />
+    <ClInclude Include="src\state\persistence\sqlite\database.h" />
+    <ClInclude Include="src\state\persistence\sqlite\schema.h" />
+    <ClInclude Include="src\state\persistence\sqlite\bootstrap_snapshot.h" />
+    <ClInclude Include="src\state\persistence\sqlite\account_settings_codec.h" />
+    <ClInclude Include="src\state\persistence\sqlite\account_snapshot.h" />
+    <ClInclude Include="src\state\persistence\sqlite\state_store.h" />
     <ClInclude Include="src\state\account\settings\key_bindings.h" />
     <ClInclude Include="src\state\equipment\light\definition.h" />
     <ClInclude Include="src\state\equipment\light\calculation\equipment_light_calculation.h" />
