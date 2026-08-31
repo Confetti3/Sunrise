@@ -699,6 +699,12 @@ bool request_position(const Vector& position,
             core::log::Level::info,
             {line.data(), (std::min)(static_cast<std::size_t>(written), line.size() - 1U)});
     }
+    // A stationary player has no physics sync to collect the request. Wake the body through the
+    // authored movement scan so the next sync can resolve its component and apply the destination.
+    // The normal expiry remains in force if the input hook or sync is unavailable.
+    if (local_player_available()) {
+        begin_press();
+    }
     return true;
 }
 
