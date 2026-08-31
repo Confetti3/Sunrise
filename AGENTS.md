@@ -21,6 +21,15 @@ Do not search build output, vendored code, old worktrees, or the external analys
 canonical document identifies a specific need. Keep static, build, deployment, runtime, and
 cross-build evidence separate. Every RVA or native layout must name its exact client build.
 
+## Windows-native search execution
+
+This repository is on Windows `G:` and reaches WSL through 9P/DrvFS. For broad recursive searches,
+invoke Windows-native `rg.exe` with `G:\sunrise\Sunrise\...` paths. Use PowerShell/.NET only when
+`rg.exe` cannot express the query. Do not use Python `Path.rglob`, `os.walk`, Linux `find`, or Linux
+`rg` across the whole repository or mounted-drive corpus. Those are allowed for known files and
+small bounded directories. Exclude `build/`, `out/`, `tests/build/`, vendored code, old worktrees,
+and external corpora by default. Feed bounded results back to IPython for analysis.
+
 ## Change safety
 
 - Keep product behavior, dormant infrastructure, and temporary research probes visibly distinct.
