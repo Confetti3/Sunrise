@@ -104,7 +104,7 @@ void report_fail(const char* stage, const char* reason) noexcept {
 append_roster_appearance_frame(Scratch& scratch,
                                const queuez::RosterAppearanceRefresh& refresh,
                                snapshot::Prepared& prepared,
-                               const char* stage,
+                               [[maybe_unused]] const char* stage,
                                std::span<const std::byte, state::kAesKeySize> key,
                                std::array<std::byte, state::kBapNonceSize>& nonce,
                                std::span<std::byte> response,

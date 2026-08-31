@@ -104,11 +104,12 @@ void load_locked() noexcept {
         != FALSE;
     (void)CloseHandle(file);
     std::int32_t restored = 0;
-    const bool current = sized && fileSize.QuadPart == document.size() && readable
-                         && read == document.size()
+    const bool current = sized && fileSize.QuadPart == static_cast<std::int64_t>(document.size())
+                         && readable && read == document.size()
                          && std::memcmp(document.data(), kMagic.data(), kMagic.size()) == 0;
     const bool legacy =
-        sized && fileSize.QuadPart == kLegacyDocumentSize && readable && read == kLegacyDocumentSize
+        sized && fileSize.QuadPart == static_cast<std::int64_t>(kLegacyDocumentSize) && readable
+        && read == kLegacyDocumentSize
         && std::memcmp(document.data(), kLegacyMagic.data(), kLegacyMagic.size()) == 0;
     if (!current && !legacy) {
         return;

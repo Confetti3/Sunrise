@@ -268,7 +268,7 @@ bool stage_service_outcome(Scratch& scratch,
                              core::log::Level::warn,
                              "ev=queuez stage=equip_presentation result=fail");
         }
-        const auto presentationRows =
+        const auto equipmentPresentationRows =
             hasPresentation ? std::span(mergedPresentationRows).first(mergedPresentationRowCount)
                             : std::span<const AcquisitionPresentationRow>{};
         if (!valid(swap.after) || swap.characterSoid != pending.characterSoid
@@ -276,7 +276,7 @@ bool stage_service_outcome(Scratch& scratch,
             || before.family4Version == (std::numeric_limits<std::int32_t>::max)()
             || swap.after.family4Version != before.family4Version + 1
             || !push::append_equipment_swap_notification(
-                scratch, swap, pending, presentationRows, key, nonce, response, written)) {
+                scratch, swap, pending, equipmentPresentationRows, key, nonce, response, written)) {
             core::log::write(core::log::Channel::server,
                              core::log::Level::warn,
                              "ev=queuez stage=equip result=fail");
