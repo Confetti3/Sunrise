@@ -153,6 +153,12 @@ struct Session {
     bool bannerRepushArmed{};
     bool accountMutationPublished{};
     bool accountResyncArmed{};
+    /** Publishes changed artifact overrides after its Web Service reply has left this call. */
+    bool artifactRefreshArmed{};
+    bool artifactFamily4RefreshArmed{};
+    std::uint64_t artifactFamily4RefreshDueTick{};
+    state::ArtifactResetResult artifactResetRefresh{};
+    std::size_t artifactResetRefreshCursor{};
     std::uint8_t acquisitionPresentationRowCount{};
     bool abilityRefreshArmed{};
     std::array<std::byte, state::kBapNonceSize> sendNonce{};

@@ -8,7 +8,7 @@
 
 namespace sunrise::state::account::inventory {
 
-/** Authored equipment exposes the 16 named slots the first State supports. */
+/** Authored equipment exposes every named slot currently represented by State. */
 enum class EquipmentSlot : std::uint8_t {
     kinetic,
     energy,
@@ -26,6 +26,7 @@ enum class EquipmentSlot : std::uint8_t {
     emblem,
     emote,
     finisher,
+    artifact,
     count,
 };
 

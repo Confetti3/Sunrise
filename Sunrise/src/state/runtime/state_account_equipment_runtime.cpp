@@ -56,7 +56,7 @@ namespace family4_loadout = middleware::datagen::family4::loadout;
     return true;
 }
 
-/** Maps the 16 proven native equipment positions onto their stable authored State slots. */
+/** Maps supported native equipment positions onto stable authored State slots. */
 [[nodiscard]] bool semantic_equipment_slot(std::uint8_t nativeSlot,
                                            std::size_t& semanticIndex) noexcept {
     using EquipmentSlot = authored_inventory::EquipmentSlot;
@@ -109,6 +109,9 @@ namespace family4_loadout = middleware::datagen::family4::loadout;
         break;
     case 17:
         semanticSlot = EquipmentSlot::finisher;
+        break;
+    case 18:
+        semanticSlot = EquipmentSlot::artifact;
         break;
     default:
         return false;

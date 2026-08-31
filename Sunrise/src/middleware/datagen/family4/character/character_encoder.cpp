@@ -9,6 +9,7 @@
 
 #include "../../../../state/build_data/nodes/node_catalog.h"
 #include "../../../../state/build_data/runtime.h"
+#include "../../../../state/progression/seasonal_experience.h"
 #include "../../../../state/record_claims/record_claims.h"
 #include "../../../../state/unlocks/unlocks_runtime.h"
 #include "../instance/layout.h"
@@ -262,7 +263,10 @@ bool encode(const state::CharacterState& state,
         object.objectiveValues[index] =
             index < unlocks.characterObjectValues.size() ? unlocks.characterObjectValues[index] : 0;
     }
-
+    if (!state::progression::seasonal_experience::apply_artifact_character_state(
+            object.acquiredFlags, object.objectiveValues)) {
+        return false;
+    }
     // One lore book counts in the character bank rather than the account one.
     (void)state::record_claims::apply_character_node_progress(object.objectiveValues, pendingClaim);
 

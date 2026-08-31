@@ -3,12 +3,16 @@
 
 #include "../../../../core/logging/log.h"
 #include "../../../../state/build_data/runtime.h"
+#include "../../../../state/progression/seasonal_experience.h"
 #include "internal.h"
 
 namespace sunrise::middleware::datagen::character_record::appearance {
 namespace {
 
 namespace constants = state::build_data::constants;
+
+/** Season 11's visible artifact; its sole declared stat is the conditional Power bonus. */
+constexpr std::uint32_t kSeedOfSilverWingsHash = 0x613A3DA6U;
 
 /**
  * Sums one definition's declared contribution to a single stat row.
@@ -148,6 +152,20 @@ bool apply_stats(const family4::loadout::ResolvedInstances& instances,
 
     std::size_t written = 0;
     append(named.lightStatRow, light, appearance.characterStats, written);
+    for (std::size_t index = 0; index < instances.itemCount; ++index) {
+        details::Definition detail{};
+        Equipped equipped{};
+        if (!resolve_equipped(instances.items[index], detail, equipped)
+            || detail.definitionHash != kSeedOfSilverWingsHash || detail.statCount == 0
+            || detail.stats.front().row == details::kEmptyStatRow) {
+            continue;
+        }
+        append(detail.stats.front().row,
+               state::progression::seasonal_experience::artifact_power_bonus(),
+               appearance.characterStats,
+               written);
+        break;
+    }
     for (const std::uint8_t row : rows) {
         std::int32_t total = 0;
         for (std::size_t index = 0; index < instances.itemCount; ++index) {

@@ -206,6 +206,8 @@ bool process(const ServiceRoute& route,
         }
         outcome.hasSubscription = webOutcome.hasSubscription;
         outcome.hasRecordClaim = webOutcome.hasRecordClaim;
+        outcome.hasArtifactReset = webOutcome.hasArtifactReset;
+        outcome.artifactReset = webOutcome.artifactReset;
         outcome.subscription = webOutcome.subscription;
         const auto* equipmentSwap =
             web_service::mutation_if<state::PendingEquipmentSwap>(webOutcome);
@@ -213,6 +215,8 @@ bool process(const ServiceRoute& route,
             web_service::mutation_if<state::PendingSubclassSelection>(webOutcome);
         const auto* socketPlug = web_service::mutation_if<state::PendingSocketPlug>(webOutcome);
         const auto* itemState = web_service::mutation_if<state::PendingItemState>(webOutcome);
+        const auto* artifactPurchase =
+            web_service::mutation_if<state::PendingArtifactPurchase>(webOutcome);
         const auto* itemAcquisition =
             web_service::mutation_if<state::PendingItemAcquisition>(webOutcome);
         const auto* profileItemAcquisition =
@@ -223,6 +227,48 @@ bool process(const ServiceRoute& route,
             web_service::mutation_if<state::PendingRecordRewardGrant>(webOutcome);
         auto* seasonPassReward =
             web_service::mutation_if<state::PendingSeasonPassReward>(webOutcome);
+        if (webOutcome.hasArtifactReset) {
+            if (queuezState.family4Version
+                == (std::numeric_limits<std::int32_t>::max)()) {
+                return refuse_web_action(message, output, written);
+            }
+            middleware::web_service::StatusResponse status{};
+            status.value = queuezState.family4Version + 1;
+            if (!middleware::web_service::encode_response(
+                    message,
+                    middleware::web_service::ResponseShape::statusPairWithBool,
+                    status,
+                    output,
+                    written)) {
+                return false;
+            }
+        }
+        if (artifactPurchase != nullptr) {
+            auto* transaction = emplace_transaction<ArtifactPurchaseTransaction>(outcome);
+            if (transaction == nullptr
+                || !queuez::stage_equipment_swap(
+                    queuezState, artifactPurchase->characterSoid, transaction->update)) {
+                core::log::write(core::log::Channel::server,
+                                 core::log::Level::warn,
+                                 "ev=ws901 stage=queuez_preflight result=fail");
+                clear_transaction(outcome);
+                return refuse_web_action(message, output, written);
+            }
+            middleware::web_service::StatusResponse status{};
+            status.value = transaction->update.after.family4Version;
+            status.trailingBool = true;
+            if (!middleware::web_service::encode_response(
+                    message,
+                    middleware::web_service::ResponseShape::statusPairWithBool,
+                    status,
+                    output,
+                    written)) {
+                clear_transaction(outcome);
+                return refuse_web_action(message, output, written);
+            }
+            transaction->pending =
+                web_service::take_mutation<state::PendingArtifactPurchase>(webOutcome);
+        }
         if (equipmentSwap != nullptr) {
             // Promise the Family-4 revision carrying this optimistic equip.
             auto* transaction = emplace_transaction<EquipmentSwapTransaction>(outcome);

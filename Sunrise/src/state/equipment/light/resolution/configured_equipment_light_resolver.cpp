@@ -8,6 +8,7 @@
 #include <span>
 
 #include "../../../build_data/runtime.h"
+#include "../../../progression/seasonal_experience.h"
 #include "../calculation/equipment_light_calculation.h"
 
 namespace sunrise::state::equipment::light::resolution {
@@ -174,7 +175,7 @@ bool character_light(const AccountState& account,
     if (!calculation::evaluate(scores, SlotScores{}, std::span<const SlotScores>{}, evaluation)) {
         return false;
     }
-    light = evaluation.average;
+    light = evaluation.average + progression::seasonal_experience::artifact_power_bonus();
     return true;
 }
 

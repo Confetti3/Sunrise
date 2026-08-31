@@ -461,6 +461,7 @@ resolve_egg_context(const client::player::position::Snapshot& player,
         const bool queued = bap::arm_seasonal_experience_presentation(kBaseExperienceReward);
         if (!queued) {
             (void)state::progression::seasonal_experience::grant(kBaseExperienceReward);
+            (void)state::refresh_artifact_progression();
         }
     }
     return outcome;

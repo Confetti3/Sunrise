@@ -132,6 +132,25 @@ prepare_item_state(Scratch& scratch,
                    std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
                    Prepared& prepared) noexcept;
 
+/** Builds the selected-character upsert for one uncommitted artifact purchase. */
+[[nodiscard]] bool prepare_artifact_purchase(
+    Scratch& scratch,
+    const queuez::EquipmentSwap& update,
+    const state::PendingArtifactPurchase& mutation,
+    std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
+    Prepared& prepared) noexcept;
+
+/** Builds only the current account and selected-character objects after an artifact reset. */
+[[nodiscard]] bool prepare_artifact_reset(Scratch& scratch,
+                                          const queuez::EquipmentSwap& update,
+                                          Prepared& prepared) noexcept;
+
+/** Builds one current item-resident upsert after an artifact reset cleared its socket. */
+[[nodiscard]] bool prepare_artifact_item_refresh(Scratch& scratch,
+                                                 const queuez::EquipmentSwap& update,
+                                                 std::uint64_t instanceSoid,
+                                                 Prepared& prepared) noexcept;
+
 /**
  * Builds the Family-4 item-instance upsert for one prepared ordinary-socket selection.
  * The character object is unchanged because item identity, placement and mutation generation are

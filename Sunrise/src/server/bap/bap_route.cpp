@@ -4,6 +4,7 @@
 #include <array>
 #include <limits>
 
+#include "../../client/hooks/network/investment/investment_derived_rebuild.h"
 #include "../../core/logging/log.h"
 #include "../../state/matchmaking/matchmaking_state.h"
 #include "../../state/progression/seasonal_experience.h"
@@ -202,9 +203,19 @@ void clear_session(Session& session) noexcept {
                                 client::network::BapResponse& response,
                                 bool& touchesScratch) noexcept {
     auto* session = session_for(request.connectionId);
-    return session != nullptr
-           && encrypted::consume_deferred(
-               *session, g_scratch, request.response, response.size, touchesScratch);
+    if (session == nullptr) {
+        return false;
+    }
+    // The purchase response carries the Family-4 ownership rows. Refresh Family 5 only after the
+    // client has consumed that response, so derived artifact state never mixes adjacent purchases.
+    if (session->artifactRefreshArmed) {
+        const state::Family5State family = state::investment_snapshot().family5;
+        if (client::hooks::network::investment::publish_live_family5(family)) {
+            session->artifactRefreshArmed = false;
+        }
+    }
+    return encrypted::consume_deferred(
+        *session, g_scratch, request.response, response.size, touchesScratch);
 }
 
 } // namespace
@@ -294,6 +305,7 @@ bool arm_seasonal_experience_presentation(std::int32_t amount) noexcept {
         if (!state::progression::seasonal_experience::grant(amount)) {
             return false;
         }
+        (void)state::refresh_artifact_progression();
         peer.pendingSeasonalExperienceAmount += amount;
         peer.pendingSeasonalExperienceFailures = 0;
         return true;

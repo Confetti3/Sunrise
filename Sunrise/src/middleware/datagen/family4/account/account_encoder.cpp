@@ -128,14 +128,27 @@ bool encode(const state::AccountState& state,
         return false;
     }
     const std::int32_t earnedExperience = state::progression::seasonal_experience::earned();
+    constexpr std::int32_t experiencePerRank = 100'000;
+    constexpr std::int32_t maximumPassExperience = 9'900'000;
     for (std::size_t slot = 0; slot < object.progressions.size(); ++slot) {
         progression::layout::Entry& entry = object.progressions[slot];
-        if (entry.definitionIndex != state::progression::season_pass::kProgressionDefinitionIndex
-            && entry.definitionIndex
-                   != state::progression::season_pass::kHudProgressionDefinitionIndex) {
+        std::int32_t projectedExperience = earnedExperience;
+        if (entry.definitionIndex == state::progression::season_pass::kProgressionDefinitionIndex) {
+            projectedExperience = (std::min)(earnedExperience, maximumPassExperience);
+        } else if (entry.definitionIndex
+                   == state::progression::season_pass::kHudProgressionDefinitionIndex) {
+            projectedExperience = earnedExperience < maximumPassExperience
+                                      ? earnedExperience % experiencePerRank
+                                      : earnedExperience - maximumPassExperience;
+        } else if (entry.definitionIndex
+                       != state::progression::seasonal_experience::
+                           kArtifactPowerProgressionDefinitionIndex
+                   && entry.definitionIndex
+                          != state::progression::seasonal_experience::
+                              kArtifactUnlockProgressionDefinitionIndex) {
             continue;
         }
-        entry.values[0] = (std::max)(entry.values[0], earnedExperience);
+        entry.values[0] = (std::max)(entry.values[0], projectedExperience);
     }
     // Profile rows are sentinelled above, so placement only has to claim its own slots.
     std::array<std::uint16_t, kBucketIdentityCapacity> takenSlots{};

@@ -209,6 +209,7 @@ bool stage_service_outcome(Scratch& scratch,
     const auto* equipment = transaction_if<EquipmentSwapTransaction>(outcome);
     const auto* subclassSelection = transaction_if<SubclassSelectionTransaction>(outcome);
     const auto* itemState = transaction_if<ItemStateTransaction>(outcome);
+    const auto* artifactPurchase = transaction_if<ArtifactPurchaseTransaction>(outcome);
     const auto* socket = transaction_if<SocketPlugTransaction>(outcome);
     const auto* itemAcquisition = transaction_if<ItemAcquisitionTransaction>(outcome);
     const auto* profileAcquisition = transaction_if<ProfileItemAcquisitionTransaction>(outcome);
@@ -331,6 +332,34 @@ bool stage_service_outcome(Scratch& scratch,
             }
             after = refresh.after;
         }
+    } else if (artifactPurchase != nullptr) {
+        if (artifactPurchase->pending == nullptr) {
+            return false;
+        }
+        const auto& pending = *artifactPurchase->pending;
+        const EquipmentSwap& update = artifactPurchase->update;
+        bool preservedManifest = update.after.family4ResidentCount == before.family4ResidentCount;
+        for (std::size_t index = 0; preservedManifest && index < before.family4ResidentCount;
+             ++index) {
+            preservedManifest = update.after.family4Residents[index].objectSoid
+                                    == before.family4Residents[index].objectSoid
+                                && update.after.family4Residents[index].definitionId
+                                       == before.family4Residents[index].definitionId;
+        }
+        if (!valid(update.after) || !preservedManifest
+            || update.characterSoid != pending.characterSoid
+            || update.after.family4RootSoid != before.family4RootSoid
+            || before.family4Version == (std::numeric_limits<std::int32_t>::max)()
+            || update.after.family4Version != before.family4Version + 1
+            || !push::append_artifact_purchase_notification(
+                scratch, update, pending, presentationRows, key, nonce, response, written)) {
+            core::log::write(core::log::Channel::server,
+                             core::log::Level::warn,
+                             "ev=queuez stage=artifact result=fail");
+            return false;
+        }
+        middleware::secure_channel::advance_nonce(nonce);
+        after = update.after;
     } else if (itemState != nullptr) {
         // Item-state bits live in the selected-character inventory row. Publish only that
         // resident character body; item-instance, appearance, roster and manifest are unchanged.
@@ -616,6 +645,26 @@ bool stage_service_outcome(Scratch& scratch,
                              "ev=ws2400 stage=queuez_reward result=fail");
             return false;
         }
+    } else if (outcome.hasArtifactReset) {
+        const state::AccountState account = state::account_snapshot();
+        std::uint64_t selectedCharacter = 0;
+        for (std::size_t index = 0; index < account.characterCount; ++index) {
+            if (account.characters[index].selected) {
+                selectedCharacter = account.characters[index].soid;
+                break;
+            }
+        }
+        EquipmentSwap reset{};
+        if (selectedCharacter == 0 || !stage_equipment_swap(before, selectedCharacter, reset)
+            || !push::append_artifact_reset_notification(
+                scratch, reset, key, nonce, response, written)) {
+            core::log::write(core::log::Channel::server,
+                             core::log::Level::warn,
+                             "ev=ws901 stage=artifact_reset_resync result=fail");
+            return true;
+        }
+        middleware::secure_channel::advance_nonce(nonce);
+        after = reset.after;
     } else if (outcome.hasRecordClaim) {
         // A claim rewrites one byte of the account flag bank and leaves the manifest alone, so a
         // full account snapshot at the next version carries it with no other staging.

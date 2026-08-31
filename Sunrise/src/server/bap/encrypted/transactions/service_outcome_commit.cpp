@@ -243,6 +243,13 @@ bool commit(ServiceOutcome& outcome, Publication& publication) noexcept {
         return report_commit(state::commit_item_state(*transaction->pending),
                              "ev=item_state stage=transaction_commit result=fail");
     }
+    if (auto* transaction = transaction_if<ArtifactPurchaseTransaction>(outcome)) {
+        if (transaction->pending == nullptr) {
+            return false;
+        }
+        return report_commit(state::commit_artifact_mod_unlock(*transaction->pending),
+                             "ev=ws901 stage=transaction_commit result=fail");
+    }
     if (auto* transaction = transaction_if<ProfileItemAcquisitionTransaction>(outcome)) {
         if (transaction->pending == nullptr) {
             return false;

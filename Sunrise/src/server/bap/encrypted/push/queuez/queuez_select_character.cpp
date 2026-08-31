@@ -92,6 +92,88 @@ bool append_item_state_notification(
     return true;
 }
 
+/** Appends one opcode-901 selected-character artifact ownership upsert. */
+bool append_artifact_purchase_notification(
+    Scratch& scratch,
+    const queuez::EquipmentSwap& update,
+    const state::PendingArtifactPurchase& mutation,
+    std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
+    std::span<const std::byte, state::kAesKeySize> key,
+    std::span<const std::byte, state::kBapNonceSize> nonce,
+    std::span<std::byte> response,
+    std::size_t& written) noexcept {
+    snapshot::Prepared prepared{};
+    if (!snapshot::prepare_artifact_purchase(
+            scratch, update, mutation, acquisitionPresentationRows, prepared)) {
+        return false;
+    }
+    return prepared.family.objects.size() == 1
+           && prepared.family.objects.front().id == update.characterDefinitionId
+           && prepared.family.objects.front().version == update.characterSoid
+           && prepared.family.objects.front().encoding == middleware::queuez::Encoding::oodle
+           && !prepared.family.objects.front().payload.empty()
+           && queuez_frame::append(scratch,
+                                   prepared.family,
+                                   prepared.rawClearSize,
+                                   prepared.compressedClearSize,
+                                   key,
+                                   nonce,
+                                   response,
+                                   written);
+}
+
+/** Appends a reset increment without the full-snapshot acquisition semantics. */
+bool append_artifact_reset_notification(
+    Scratch& scratch,
+    const queuez::EquipmentSwap& update,
+    std::span<const std::byte, state::kAesKeySize> key,
+    std::span<const std::byte, state::kBapNonceSize> nonce,
+    std::span<std::byte> response,
+    std::size_t& written) noexcept {
+    snapshot::Prepared prepared{};
+    if (!snapshot::prepare_artifact_reset(scratch, update, prepared)) {
+        return false;
+    }
+    return prepared.family.objects.size() == 2
+           && prepared.family.objects[1].id == update.characterDefinitionId
+           && prepared.family.objects[1].version == update.characterSoid
+           && queuez_frame::append(scratch,
+                                   prepared.family,
+                                   prepared.rawClearSize,
+                                   prepared.compressedClearSize,
+                                   key,
+                                   nonce,
+                                   response,
+                                   written);
+}
+
+/** Appends one exact resident upsert after artifact reset. */
+bool append_artifact_item_refresh_notification(
+    Scratch& scratch,
+    const queuez::EquipmentSwap& update,
+    std::uint64_t instanceSoid,
+    std::span<const std::byte, state::kAesKeySize> key,
+    std::span<const std::byte, state::kBapNonceSize> nonce,
+    std::span<std::byte> response,
+    std::size_t& written) noexcept {
+    snapshot::Prepared prepared{};
+    if (!snapshot::prepare_artifact_item_refresh(scratch, update, instanceSoid, prepared)) {
+        return false;
+    }
+    return prepared.family.objects.size() == 1
+           && prepared.family.objects.front().version == instanceSoid
+           && prepared.family.objects.front().encoding == middleware::queuez::Encoding::oodle
+           && !prepared.family.objects.front().payload.empty()
+           && queuez_frame::append(scratch,
+                                   prepared.family,
+                                   prepared.rawClearSize,
+                                   prepared.compressedClearSize,
+                                   key,
+                                   nonce,
+                                   response,
+                                   written);
+}
+
 /** Appends one socket item upsert and its charged account balances when required. */
 bool append_socket_plug_notification(Scratch& scratch,
                                      const queuez::SocketPlug& socketPlug,

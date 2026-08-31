@@ -5,6 +5,7 @@
 #include "../../../../core/logging/log.h"
 #include "../../../../middleware/secure_channel/runtime.h"
 #include "../../../../state/account/account_state.h"
+#include "../../../../state/progression/seasonal_experience.h"
 #include "../../../../state/runtime/runtime.h"
 #include "../internal.h"
 #include "../push/activity/activity_keepalive_push.h"
@@ -409,6 +410,116 @@ void fail_seasonal_experience_presentation(Session& session) noexcept {
     return true;
 }
 
+/** Re-publishes only the selected character after an artifact purchase. */
+[[nodiscard]] bool consume_artifact_family4_refresh(Session& session,
+                                                    Scratch& scratch,
+                                                    std::span<std::byte> response,
+                                                    std::size_t& written,
+                                                    bool& touchesScratch) noexcept {
+    if (!session.artifactFamily4RefreshArmed
+        || GetTickCount64() < session.artifactFamily4RefreshDueTick) {
+        return false;
+    }
+    const state::AccountState account = state::account_snapshot();
+    std::size_t selected = account.characterCount;
+    for (std::size_t index = 0; index < account.characterCount; ++index) {
+        if (account.characters[index].selected) {
+            selected = index;
+            break;
+        }
+    }
+    if (!state::account::valid(account) || selected >= account.characterCount) {
+        return false;
+    }
+    state::PendingArtifactPurchase refresh{};
+    refresh.accountSoid = account.primarySoid;
+    refresh.characterSoid = account.characters[selected].soid;
+    refresh.characterIndex = selected;
+    refresh.beforeMask = state::progression::seasonal_experience::artifact_mod_mask();
+    refresh.afterMask = refresh.beforeMask;
+    refresh.prepared = true;
+
+    queuez::EquipmentSwap update{};
+    auto nextSendNonce = session.sendNonce;
+    std::size_t framedSize = 0;
+    touchesScratch = true;
+    if (!queuez::stage_equipment_swap(session.queuez, refresh.characterSoid, update)
+        || !push::append_artifact_purchase_notification(scratch,
+                                                        update,
+                                                        refresh,
+                                                        active_acquisition_presentation_rows(session),
+                                                        state::bap().sessionKey,
+                                                        nextSendNonce,
+                                                        scratch.framed,
+                                                        framedSize)
+        || framedSize == 0 || framedSize > response.size()) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::warn,
+                         "ev=queuez stage=artifact_refresh result=fail");
+        return false;
+    }
+    std::copy_n(scratch.framed.begin(), framedSize, response.begin());
+    written = framedSize;
+    middleware::secure_channel::advance_nonce(nextSendNonce);
+    session.sendNonce = nextSendNonce;
+    session.queuez = update.after;
+    session.artifactFamily4RefreshArmed = false;
+    session.artifactFamily4RefreshDueTick = 0;
+    return true;
+}
+
+/** Publishes one reset-affected item resident per poll using the proven socket-update shape. */
+[[nodiscard]] bool consume_artifact_item_refresh(Session& session,
+                                                 Scratch& scratch,
+                                                 std::span<std::byte> response,
+                                                 std::size_t& written,
+                                                 bool& touchesScratch) noexcept {
+    if (session.artifactResetRefreshCursor >= session.artifactResetRefresh.instanceCount) {
+        session.artifactResetRefresh = {};
+        session.artifactResetRefreshCursor = 0;
+        return false;
+    }
+    const state::AccountState account = state::account_snapshot();
+    std::size_t selected = account.characterCount;
+    for (std::size_t index = 0; index < account.characterCount; ++index) {
+        if (account.characters[index].selected) {
+            selected = index;
+            break;
+        }
+    }
+    if (!state::account::valid(account) || selected >= account.characterCount) {
+        return false;
+    }
+    const std::uint64_t instanceSoid =
+        session.artifactResetRefresh.instanceSoids[session.artifactResetRefreshCursor];
+    queuez::EquipmentSwap update{};
+    auto nextSendNonce = session.sendNonce;
+    std::size_t framedSize = 0;
+    touchesScratch = true;
+    if (!queuez::stage_equipment_swap(
+            session.queuez, account.characters[selected].soid, update)
+        || !push::append_artifact_item_refresh_notification(scratch,
+                                                            update,
+                                                            instanceSoid,
+                                                            state::bap().sessionKey,
+                                                            nextSendNonce,
+                                                            scratch.framed,
+                                                            framedSize)
+        || framedSize == 0 || framedSize > response.size()) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::warn,
+                         "ev=queuez stage=artifact_item_refresh result=fail");
+        return false;
+    }
+    std::copy_n(scratch.framed.begin(), framedSize, response.begin());
+    written = framedSize;
+    middleware::secure_channel::advance_nonce(nextSendNonce);
+    session.sendNonce = nextSendNonce;
+    session.queuez = update.after;
+    ++session.artifactResetRefreshCursor;
+    return true;
+}
+
 } // namespace
 
 /** Publishes the next due reward, refresh, retry, or keepalive. */
@@ -420,6 +531,12 @@ bool consume_deferred(Session& session,
     written = 0;
     if (!session.authenticated) {
         return false;
+    }
+    if (consume_artifact_family4_refresh(session, scratch, response, written, touchesScratch)) {
+        return true;
+    }
+    if (consume_artifact_item_refresh(session, scratch, response, written, touchesScratch)) {
+        return true;
     }
     if (consume_account_resync(session, scratch, response, written, touchesScratch)) {
         return true;

@@ -31,6 +31,7 @@ constexpr std::array<SlotName, kEquipmentSlotCount> kSlotNames{{
     {"emblem", EquipmentSlot::emblem},
     {"emote", EquipmentSlot::emote},
     {"finisher", EquipmentSlot::finisher},
+    {"artifact", EquipmentSlot::artifact},
 }};
 
 } // namespace

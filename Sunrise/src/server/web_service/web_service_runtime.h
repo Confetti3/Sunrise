@@ -26,6 +26,9 @@ struct Outcome {
     bool hasSelectedCharacter{};
     bool selectedCharacterChanged{};
     std::uint64_t selectedCharacterSoid{};
+    /** Reset is precommitted because it changes persistence and account currency together. */
+    bool hasArtifactReset{};
+    state::ArtifactResetResult artifactReset{};
     /** A request prepares at most one State mutation and allocates only that exact payload. */
     using Mutation = std::variant<std::monostate,
                                   std::unique_ptr<state::PendingEquipmentSwap>,
@@ -35,6 +38,7 @@ struct Outcome {
                                   std::unique_ptr<state::PendingItemDismantle>,
                                   std::unique_ptr<state::PendingSocketPlug>,
                                   std::unique_ptr<state::PendingItemState>,
+                                  std::unique_ptr<state::PendingArtifactPurchase>,
                                   std::unique_ptr<state::PendingRecordRewardGrant>,
                                   std::unique_ptr<state::PendingSeasonPassReward>>;
     Mutation mutation{};

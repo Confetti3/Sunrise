@@ -310,6 +310,26 @@ struct PendingItemState {
     bool prepared{};
 };
 
+/** Prepared artifact ownership transition for the selected character. */
+struct PendingArtifactPurchase {
+    std::uint64_t accountSoid{};
+    std::uint64_t characterSoid{};
+    std::size_t characterIndex{};
+    std::uint32_t beforeMask{};
+    std::uint32_t afterMask{};
+    std::uint16_t saleIndex{};
+    bool prepared{};
+};
+
+/** Item residents whose authored artifact sockets were cleared by one reset. */
+struct ArtifactResetResult {
+    std::array<std::uint64_t,
+               account::inventory::kEquipmentSlotCount
+                   + account::inventory::kCharacterItemCapacity>
+        instanceSoids{};
+    std::size_t instanceCount{};
+};
+
 /**
  * Loads cached build data and generates secrets with Sunrise's authored activity defaults.
  * @param module Loaded Sunrise module, or null to disable disk persistence.
@@ -575,5 +595,19 @@ commit_profile_item_acquisition(PendingProfileItemAcquisition& mutation) noexcep
 
 /** @return A copy of the evaluated content state, read under the lock. */
 [[nodiscard]] InvestmentState investment_snapshot() noexcept;
+
+/** Refreshes artifact XP-derived global values after seasonal XP changes. */
+[[nodiscard]] bool refresh_artifact_progression() noexcept;
+
+/** Prepares one artifact purchase without changing persistent state. */
+[[nodiscard]] bool prepare_artifact_mod_unlock(std::uint16_t saleIndex,
+                                               PendingArtifactPurchase& mutation) noexcept;
+
+/** Commits one prepared artifact purchase if its character and mask remain current. */
+[[nodiscard]] bool commit_artifact_mod_unlock(PendingArtifactPurchase& mutation) noexcept;
+
+/** Charges Glimmer, removes artifact mods, and refunds every spent unlock point. */
+[[nodiscard]] bool reset_artifact(std::int32_t glimmerCost,
+                                  ArtifactResetResult& result) noexcept;
 
 } // namespace sunrise::state

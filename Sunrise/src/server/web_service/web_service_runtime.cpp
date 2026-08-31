@@ -55,6 +55,10 @@ constexpr std::size_t kEchoLineCapacity = 64;
  * Any non-zero value refuses. Zero is the success code, so it must not be used here.
  */
 constexpr std::int32_t kPurchaseRefusedCode = 1;
+/** Season of Arrivals artifact vendor row in the installed build's vendor index. */
+constexpr std::int16_t kArtifactVendorIndex = 430;
+constexpr std::uint16_t kArtifactSaleCount = 26;
+constexpr std::int32_t kArtifactResetGlimmerCost = 20'000;
 
 /**
  * Reads the server's own clock for the purchase clock rule.
@@ -111,6 +115,72 @@ constexpr std::int32_t kPurchaseRefusedCode = 1;
         status,
         response,
         written);
+}
+
+/** Accepts one affordable, unlocked-tier artifact mod and reports the local purchase effect. */
+[[nodiscard]] bool purchase_artifact_mod(const middleware::web_service::Message& message,
+                                         std::span<std::byte> response,
+                                         std::size_t& written,
+                                         Outcome& outcome) noexcept {
+    namespace purchase_codec = middleware::web_service::messages::opcode901;
+    purchase_codec::Request purchase{};
+    if (!purchase_codec::parse_request(message, purchase)
+        || purchase.vendorIndex != kArtifactVendorIndex || purchase.saleIndex < 0
+        || purchase.saleIndex >= static_cast<std::int16_t>(kArtifactSaleCount)) {
+        return false;
+    }
+    const auto saleIndex = static_cast<std::uint16_t>(purchase.saleIndex);
+    if (saleIndex == 5) {
+        state::ArtifactResetResult reset{};
+        if (!state::reset_artifact(kArtifactResetGlimmerCost, reset)) {
+            return false;
+        }
+        middleware::web_service::StatusResponse status{};
+        status.trailingBool = true;
+        const bool encoded = middleware::web_service::encode_response(
+            message,
+            middleware::web_service::ResponseShape::statusPairWithBool,
+            status,
+            response,
+            written);
+        outcome.hasArtifactReset = encoded;
+        if (encoded) {
+            outcome.artifactReset = reset;
+        }
+        return encoded;
+    }
+    auto* mutation = emplace_mutation<state::PendingArtifactPurchase>(outcome);
+    if (mutation == nullptr || !state::prepare_artifact_mod_unlock(saleIndex, *mutation)) {
+        clear_mutation(outcome);
+        return false;
+    }
+    std::array<char, kPurchaseLineCapacity> line{};
+    const int length =
+        std::snprintf(line.data(),
+                      line.size(),
+                      "ev=ws901 stage=artifact result=ok vendor=%d sale=%d policy=%s",
+                      static_cast<int>(purchase.vendorIndex),
+                      static_cast<int>(purchase.saleIndex),
+                      purchase_codec::clock_policy_name(
+                          purchase_codec::check_clock(purchase, server_clock_seconds())));
+    if (length > 0) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::info,
+                         {line.data(), static_cast<std::size_t>(length)});
+    }
+    middleware::web_service::StatusResponse status{};
+    status.trailingBool = true;
+    const bool encoded = middleware::web_service::encode_response(
+        message,
+        middleware::web_service::ResponseShape::statusPairWithBool,
+        status,
+        response,
+        written);
+    if (!encoded) {
+        clear_mutation(outcome);
+        return false;
+    }
+    return true;
 }
 
 /**
@@ -221,7 +291,8 @@ bool consume(std::span<const std::byte> request,
 
     // Runs before the shared response-shape path, which would answer the success status.
     if (message.opcode == middleware::web_service::messages::opcode901::kOpcode) {
-        return refuse_purchase(message, response, written)
+        return purchase_artifact_mod(message, response, written, outcome)
+               || refuse_purchase(message, response, written)
                || encode_echo(message, response, written);
     }
 

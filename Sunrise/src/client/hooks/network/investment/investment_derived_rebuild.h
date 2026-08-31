@@ -1,6 +1,13 @@
 #pragma once
 
+namespace sunrise::state {
+struct Family5State;
+}
+
 namespace sunrise::client::hooks::network::investment {
+
+/** Replaces the live Family-5 override lists and invalidates their derived evaluation. */
+[[nodiscard]] bool publish_live_family5(const state::Family5State& family) noexcept;
 
 /** @return True when freshness and both real-arrival rebuild arms are attached. */
 [[nodiscard]] bool install() noexcept;

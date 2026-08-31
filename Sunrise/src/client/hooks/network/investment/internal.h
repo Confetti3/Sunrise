@@ -22,9 +22,7 @@ using patterns::signature_length;
 [[nodiscard]] bool family5_rearm_is_installed() noexcept;
 
 /**
- * Arms one derived-state rebuild, used up by the next freshness verdict. Armed twice: when the
- * family-four lookup first returns a real object, and after each family-five commit, which is the
- * first point the account's unlock overrides can be read back.
+ * Arms one derived-state rebuild after replicated investment state changes.
  */
 void arm_derived_rebuild() noexcept;
 

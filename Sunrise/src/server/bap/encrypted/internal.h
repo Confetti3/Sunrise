@@ -63,6 +63,12 @@ struct ItemStateTransaction {
     queuez::EquipmentSwap update{};
 };
 
+/** Artifact purchase and the exact selected-character after-image promised by opcode 901. */
+struct ArtifactPurchaseTransaction {
+    std::unique_ptr<state::PendingArtifactPurchase> pending{};
+    queuez::EquipmentSwap update{};
+};
+
 /** Character acquisition and its exact QueueZ after-image. */
 struct ItemAcquisitionTransaction {
     std::unique_ptr<state::PendingItemAcquisition> pending{};
@@ -98,6 +104,8 @@ struct ServiceOutcome {
     bool hasSubscription{};
     /** A Triumph claim changed the account flag bank and its image has to follow. */
     bool hasRecordClaim{};
+    bool hasArtifactReset{};
+    state::ArtifactResetResult artifactReset{};
     middleware::queuez::Subscription subscription{};
     bool hasUnsubscription{};
     middleware::bap::family_unsubscription::Request unsubscription{};
@@ -114,6 +122,7 @@ struct ServiceOutcome {
                                      std::unique_ptr<SubclassSelectionTransaction>,
                                      std::unique_ptr<SocketPlugTransaction>,
                                      std::unique_ptr<ItemStateTransaction>,
+                                     std::unique_ptr<ArtifactPurchaseTransaction>,
                                      std::unique_ptr<ItemAcquisitionTransaction>,
                                      std::unique_ptr<ProfileItemAcquisitionTransaction>,
                                      std::unique_ptr<ItemDismantleTransaction>,
@@ -402,6 +411,36 @@ append_select_character_notification(Scratch& scratch,
     const queuez::EquipmentSwap& update,
     const state::PendingItemState& mutation,
     std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
+    std::span<const std::byte, state::kAesKeySize> key,
+    std::span<const std::byte, state::kBapNonceSize> nonce,
+    std::span<std::byte> response,
+    std::size_t& written) noexcept;
+
+/** Appends the selected-character upsert carrying one artifact ownership transition. */
+[[nodiscard]] bool append_artifact_purchase_notification(
+    Scratch& scratch,
+    const queuez::EquipmentSwap& update,
+    const state::PendingArtifactPurchase& mutation,
+    std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
+    std::span<const std::byte, state::kAesKeySize> key,
+    std::span<const std::byte, state::kBapNonceSize> nonce,
+    std::span<std::byte> response,
+    std::size_t& written) noexcept;
+
+/** Appends the account and selected-character state changed by an artifact reset. */
+[[nodiscard]] bool append_artifact_reset_notification(
+    Scratch& scratch,
+    const queuez::EquipmentSwap& update,
+    std::span<const std::byte, state::kAesKeySize> key,
+    std::span<const std::byte, state::kBapNonceSize> nonce,
+    std::span<std::byte> response,
+    std::size_t& written) noexcept;
+
+/** Appends one current item resident after artifact reset cleared an authored socket. */
+[[nodiscard]] bool append_artifact_item_refresh_notification(
+    Scratch& scratch,
+    const queuez::EquipmentSwap& update,
+    std::uint64_t instanceSoid,
     std::span<const std::byte, state::kAesKeySize> key,
     std::span<const std::byte, state::kBapNonceSize> nonce,
     std::span<std::byte> response,

@@ -241,12 +241,14 @@ bool consume(Session& session,
             diagnostics::report_failure(frame.messageId, "notify");
         }
     }
+    const bool artifactPurchase = transaction_if<ArtifactPurchaseTransaction>(outcome) != nullptr;
     const bool mutatesAccount =
-        outcome.hasSelectCharacter || outcome.hasRecordClaim
+        outcome.hasSelectCharacter || outcome.hasRecordClaim || outcome.hasArtifactReset
         || transaction_if<EquipmentSwapTransaction>(outcome) != nullptr
         || transaction_if<SubclassSelectionTransaction>(outcome) != nullptr
         || transaction_if<SocketPlugTransaction>(outcome) != nullptr
         || transaction_if<ItemStateTransaction>(outcome) != nullptr
+        || artifactPurchase
         || transaction_if<ItemAcquisitionTransaction>(outcome) != nullptr
         || transaction_if<ProfileItemAcquisitionTransaction>(outcome) != nullptr
         || transaction_if<ItemDismantleTransaction>(outcome) != nullptr
@@ -258,9 +260,10 @@ bool consume(Session& session,
         || transaction_if<RecordRewardGrantTransaction>(outcome) != nullptr
         || transaction_if<SeasonPassRewardTransaction>(outcome) != nullptr;
     const bool invalidatesAcquisitionPresentation =
-        outcome.hasChangeCharacter || outcome.hasSelectCharacter
+        outcome.hasChangeCharacter || outcome.hasSelectCharacter || outcome.hasArtifactReset
         || transaction_if<ItemDismantleTransaction>(outcome) != nullptr;
-    const bool hasPrecommittedAccountAction = outcome.hasRecordClaim || outcome.hasSelectCharacter;
+    const bool hasPrecommittedAccountAction =
+        outcome.hasRecordClaim || outcome.hasSelectCharacter || outcome.hasArtifactReset;
     // Commit consumes pending payloads, so retain the connection fields first.
     const ConnectionFields connection = connection_fields(outcome);
     if (handled && processesBody) {
@@ -306,6 +309,17 @@ bool consume(Session& session,
                 hasPrecommittedAccountAction && !queuezPublication.hasState;
             if (resyncsCommittedAccount) {
                 bap::arm_account_resync_everywhere();
+            }
+            if (artifactPurchase || outcome.hasArtifactReset) {
+                session.artifactRefreshArmed = true;
+            }
+            if (artifactPurchase || outcome.hasArtifactReset) {
+                session.artifactFamily4RefreshDueTick = GetTickCount64() + 100;
+                session.artifactFamily4RefreshArmed = true;
+            }
+            if (outcome.hasArtifactReset) {
+                session.artifactResetRefresh = outcome.artifactReset;
+                session.artifactResetRefreshCursor = 0;
             }
             session.accountMutationPublished = mutatesAccount && !resyncsCommittedAccount;
         }
