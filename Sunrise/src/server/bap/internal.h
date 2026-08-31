@@ -97,114 +97,98 @@ struct AdvertisementPublication {
     bool staged{};
 };
 
-/** Mutable transport state owned by one BAP connection. */
-struct Session {
-    std::uint32_t id{};
-    bool authenticated{};
-    std::array<std::byte, state::kBapNonceSize> sendNonce{};
-    std::array<std::byte, state::kBapNonceSize> receiveNonce{};
-    /** Opaque State handle taken only after the server hello authenticates. */
-    state::matchmaking::ContextHandle matchmakingContext{};
-    /** Exact private or public ActivityClient generation owned by this connection. */
-    ActivityClientBinding activity{};
-    /** Tick count after which the activity link owes its next keepalive write. */
-    std::uint64_t activityKeepaliveDueTick{};
-    /** Client member key from the join request. It seeds the membership id. */
-    std::uint64_t activityMemberKey{};
-    /**
-     * Character the join request named, or zero when it carried none.
-     * The roster's participation key must be the character the client signed in on. The client
-     * binds its player by matching that value.
-     */
-    std::uint64_t activityCharacterSoid{};
-    /** Tick count after which the activity link owes its next roster update. */
-    std::uint64_t activityRosterDueTick{};
-    /**
-     * Binding generation whose membership body this link has already delivered.
-     * The client sets its membership flag once and never clears it, and never acknowledges a body
-     * on a public-target link, so this is a one-shot per binding. Latched on delivery, not encode.
-     */
-    std::uint64_t activityMembershipSentGeneration{};
-    /**
-     * Tick count until which the client is loading, so the roster runs at its faster cadence.
-     * A join and a transition-token change are the only two things that open it.
-     */
-    std::uint64_t activityTransitionUntilTick{};
-    /** The client's own patch epoch, scoped to the binding that received message 52. */
-    BoundPatchEpoch activityPatchEpoch{};
-    /** Group set the last roster update published, folded into one comparable value. */
-    std::uint32_t activityRosterGroups{};
-    /** Roster updates sent on this connection, capped once the warm-up bumps are spent. */
-    std::uint8_t activityRosterSends{};
-    /** Per-entry state byte the last roster update carried. */
-    std::uint8_t activityRosterState{};
-    /** Host row retained by the last delivered citizen advertisement. */
-    std::uint64_t activityAdvertisementHostGeneration{};
-    /** Host row retained by a staged membership body until publication is known. */
-    AdvertisementPublication activityAdvertisementStaged{};
-    /**
-     * Reason code of the last logged roster outcome.
-     * The push runs every second, so a refusal is logged only when the reason changes. One flag
-     * for every reason hides the second failure behind the first.
-     */
-    std::uint8_t activityRosterReason{};
-    /** What one staged roster body owes, and what to put back if it never reaches the caller. */
-    RosterPublication activityRosterStaged{};
-    /** Queuez versions and residents published only through this authenticated peer. */
-    encrypted::queuez::SessionState queuez{};
-    /** Tick count after which the owed Family-4 re-push may go out. */
-    std::uint64_t family4RepushDueTick{};
-    /** Root the owed re-push must use. */
-    std::uint64_t family4RepushRoot{};
-    /** True while one Family-4 re-push is still owed to this peer. */
-    bool family4RepushArmed{};
-    /** Tick count after which the owed banner re-push may go out. */
-    std::uint64_t bannerRepushDueTick{};
-    /** Root the owed banner re-push must use. */
-    std::uint64_t bannerRepushRoot{};
-    /** True while one banner re-push is still owed to this peer. */
-    bool bannerRepushArmed{};
-    /** Latest shared-account generation this peer has received. */
-    std::uint64_t accountGeneration{};
-    /** Newest shared-account generation owed as a full cross-peer refresh. */
-    std::uint64_t accountResyncGeneration{};
-    /** Set by encrypted processing only after one account mutation commits and is copied out. */
-    bool accountMutationPublished{};
-    /** True while another peer's account mutation still needs a full local refresh. */
-    bool accountResyncArmed{};
-    /** Direct world reward waiting for its ordinary item-acquisition notification and commit. */
-    state::PendingItemAcquisition pendingWorldItemAcquisition{};
-    bool worldItemAcquisitionArmed{};
-    /** Direct world material reward waiting for its profile-acquisition notification and commit. */
-    state::PendingProfileItemAcquisition pendingWorldProfileItemAcquisition{};
-    bool worldProfileItemAcquisitionArmed{};
-    /**
-     * Tick count after which the owed ability-icon refresh may go out. A subclass selection
-     * invalidates the published ability buckets and the rebuild runs off the Client
-     * content-extraction pump, so the inline refresh can carry empty ones; this one re-derives.
-     */
-    std::uint64_t abilityRefreshDueTick{};
-    /** True while one ability-icon refresh is still owed to this peer. */
-    bool abilityRefreshArmed{};
+/** Compact world reward retained until an active Family-4 peer can publish it. */
+enum class WorldRewardKind : std::uint8_t {
+    item,
+    profileItem,
 };
 
-/**
- * Arms every active peer to re-read the account, including the one that caused the change.
- *
- * `publish_account_mutation` deliberately skips the origin, because a web service transaction
- * carries the new account back in its own response. A change made outside such a transaction has no
- * response to carry, so the peer that caused it would otherwise keep showing stale state until some
- * unrelated action happened to stage an image. Picking up a collectible is such a change.
- */
+struct WorldRewardRequest {
+    std::int32_t quantity{};
+    std::uint16_t itemDefinitionIndex{};
+    WorldRewardKind kind{};
+    std::uint8_t failures{};
+};
+static_assert(sizeof(WorldRewardRequest) == 8);
+
+inline constexpr std::size_t kWorldRewardQueueCapacity = 64;
+
+/** Mutable transport state owned by one BAP connection. */
+struct Session {
+    // Eight-byte scalars first avoid padding in every connection slot.
+    std::uint64_t activityKeepaliveDueTick{};
+    std::uint64_t activityMemberKey{};
+    std::uint64_t activityCharacterSoid{};
+    std::uint64_t activityRosterDueTick{};
+    std::uint64_t activityMembershipSentGeneration{};
+    std::uint64_t activityTransitionUntilTick{};
+    std::uint64_t activityAdvertisementHostGeneration{};
+    std::uint64_t family4RepushDueTick{};
+    std::uint64_t family4RepushRoot{};
+    std::uint64_t bannerRepushDueTick{};
+    std::uint64_t bannerRepushRoot{};
+    std::uint64_t acquisitionPresentationUntilTick{};
+    std::uint64_t abilityRefreshDueTick{};
+
+    state::matchmaking::ContextHandle matchmakingContext{};
+    AdvertisementPublication activityAdvertisementStaged{};
+    BoundPatchEpoch activityPatchEpoch{};
+    std::array<encrypted::queuez::AcquisitionPresentationRow,
+               encrypted::queuez::kAcquisitionPresentationRowCapacity>
+        acquisitionPresentationRows{};
+    ActivityClientBinding activity{};
+    encrypted::queuez::SessionState queuez{};
+
+    std::uint32_t id{};
+    std::uint32_t activityRosterGroups{};
+    std::int32_t pendingSeasonalExperienceAmount{};
+    std::uint32_t pendingSeasonalExperienceMutationSerial{};
+    std::uint8_t pendingSeasonalExperienceFailures{};
+
+    bool authenticated{};
+    std::uint8_t activityRosterSends{};
+    std::uint8_t activityRosterState{};
+    std::uint8_t activityRosterReason{};
+    bool family4RepushArmed{};
+    bool bannerRepushArmed{};
+    bool accountMutationPublished{};
+    bool accountResyncArmed{};
+    std::uint8_t acquisitionPresentationRowCount{};
+    bool abilityRefreshArmed{};
+    std::array<std::byte, state::kBapNonceSize> sendNonce{};
+    std::array<std::byte, state::kBapNonceSize> receiveNonce{};
+
+    /** What one staged roster body owes if publication succeeds or fails. */
+    RosterPublication activityRosterStaged{};
+};
+
+/** Arms every other Family-4 peer after the origin publishes a complete account mutation. */
+void arm_account_resync_elsewhere(Session& origin) noexcept;
+
+/** Arms every Family-4 peer, including the origin, for a full account resync. */
 void arm_account_resync_everywhere() noexcept;
 
-/** Queues one prepared world reward on an active Family-4 peer for normal acquisition feedback. */
-[[nodiscard]] bool
-arm_world_item_acquisition(state::PendingItemAcquisition acquisition) noexcept;
+/** Holds this peer's full Family-4 refreshes until its acquisition flyout has finished. */
+void arm_acquisition_presentation_hold(Session& session) noexcept;
 
-/** Queues one prepared profile material reward with ordinary acquisition feedback. */
-[[nodiscard]] bool arm_world_profile_item_acquisition(
-    state::PendingProfileItemAcquisition acquisition) noexcept;
+/** Queues one character item for normal acquisition feedback. */
+[[nodiscard]] bool arm_world_item_acquisition(std::uint16_t itemDefinitionIndex) noexcept;
+
+/** Queues one profile material for normal acquisition feedback. */
+[[nodiscard]] bool arm_world_profile_item_acquisition(std::uint16_t itemDefinitionIndex,
+                                                      std::int32_t quantity) noexcept;
+
+/** Reads the oldest queued world reward without removing it. */
+[[nodiscard]] bool current_world_reward(WorldRewardRequest& request) noexcept;
+
+/** Removes the world reward returned by current_world_reward. */
+void complete_world_reward() noexcept;
+
+/** Records one failed publication and settles a repeatedly failing reward. */
+void fail_world_reward_attempt() noexcept;
+
+/** Queues one transient XP item update so the native HUD presents a seasonal XP gain. */
+[[nodiscard]] bool arm_seasonal_experience_presentation(std::int32_t amount) noexcept;
 
 namespace plaintext {
 

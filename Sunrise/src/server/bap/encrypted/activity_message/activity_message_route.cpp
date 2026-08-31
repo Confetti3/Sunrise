@@ -50,27 +50,6 @@ constexpr std::uint32_t kJoinRequestMessageType = 3;
 constexpr std::uint32_t kLocalActivityHostMessageType = 8;
 
 /**
- * Reports one inbound activity message, whatever the route goes on to do with it.
- * Without this line a type the client never sends reads the same as one handled in silence.
- * Nothing else says whether the client ever asks for or returns an entity slot.
- * @param request Parsed envelope.
- */
-void report_arrival(const service::Request& request) noexcept {
-    std::array<char, core::log::kLineCapacity> line{};
-    const int written = std::snprintf(line.data(),
-                                      line.size(),
-                                      "ev=activity stage=inbound type=%u handle=0x%llX bytes=%zu",
-                                      request.messageType,
-                                      static_cast<unsigned long long>(request.accountHandle),
-                                      request.payload.size());
-    if (written > 0) {
-        core::log::write(core::log::Channel::server,
-                         core::log::Level::debug,
-                         {line.data(), static_cast<std::size_t>(written)});
-    }
-}
-
-/**
  * Reports one activity message the route did not stage, naming its type.
  * Every inbound activity message is one-way, so nothing here can jam the client's reply ring. An
  * unnamed drop is invisible, and membership waits on the identity message.
@@ -315,7 +294,6 @@ bool process(const ActivityClientBinding& binding,
         report_message(0, 0, "parse");
         return false;
     }
-    report_arrival(request);
     // Join acquires or preserves an exact binding. Every other message, including type 52 and the
     // receipt-only types, must name the exact session already owned by this link before it can
     // mutate State or the receipt registry.

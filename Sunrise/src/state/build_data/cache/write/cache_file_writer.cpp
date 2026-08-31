@@ -29,9 +29,13 @@ namespace {
            && domains.socketEntryTables.size() <= kMaximumCount
            && domains.abilityBuckets.size() <= kMaximumCount
            && domains.progressions.size() <= kMaximumCount
-           && domains.records.size() <= kMaximumCount
-           && domains.scenarios.size() <= kMaximumCount
+           && domains.records.size() <= kMaximumCount && domains.nodes.size() <= kMaximumCount
+           && domains.sobjects.size() <= kMaximumCount && domains.scenarios.size() <= kMaximumCount
            && domains.rosterGroups.size() <= kMaximumCount
+           && domains.spawnStems.size() <= kMaximumCount
+           && domains.spawnNameHashes.size() <= kMaximumCount
+           && domains.spawnPoints.size() <= kMaximumCount
+           && domains.hashNames.size() <= kMaximumCount
            && domains.vendorIndex.size() <= kMaximumCount
            && domains.vendorDefinitions.size() <= kMaximumCount
            && domains.vendorSaleRows.size() <= kMaximumCount

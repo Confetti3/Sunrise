@@ -6,6 +6,8 @@
 #include <span>
 #include <variant>
 
+#include "../build_data/records/rewards/definition.h"
+#include "../record_claims/record_claims.h"
 #include "state.h"
 
 namespace sunrise::state {
@@ -98,7 +100,6 @@ struct PendingItemAcquisition {
     std::uint64_t acquiredInstanceSoid{};
     std::uint32_t acquiredDefinitionHash{};
     std::uint32_t materialRequirementSetHash{};
-    std::uint32_t expectedNextInventorySerial{};
     std::size_t characterIndex{};
     std::size_t expectedInventoryCount{};
     std::size_t expectedProfileItemCount{};
@@ -109,8 +110,8 @@ struct PendingItemAcquisition {
     std::uint8_t equipmentSlot{};
     std::uint8_t materialRequirementCount{};
     bool profileChanged{};
-    /** True when the item was granted directly, with no Collections row and no material cost. */
-    bool freeGrant{};
+    /** Skips Collections revalidation for direct rewards. */
+    bool directGrant{};
     bool prepared{};
 };
 
@@ -140,19 +141,78 @@ struct PendingProfileItemAcquisition {
     /** True only for installed profile mod/shader rows materialized as Family-4 residents. */
     bool actionSource{};
     bool appended{};
-    /** True when the stack was granted directly, with no Collections row and no material cost. */
-    bool freeGrant{};
+    /** Skips Collections revalidation for direct rewards. */
+    bool directGrant{};
     bool prepared{};
 };
 
-/**
- * Record-claim reward grant prepared for staging.
- * A record reward names an item directly rather than a Collections row, so the installed item's
- * own inventory bucket decides which acquisition kind actually lands it; exactly one alternative
- * of this pair is ever prepared.
- */
+/** Prepared fixed package expansion kept private until every object and response byte fits. */
+struct PendingDirectItemBundle {
+    CharacterState beforeCharacter{};
+    CharacterState afterCharacter{};
+    std::uint64_t accountSoid{};
+    std::uint64_t characterSoid{};
+    std::uint64_t firstInstanceSoid{};
+    std::uint32_t sourceDefinitionHash{};
+    std::size_t characterIndex{};
+    std::size_t expectedInventoryCount{};
+    std::size_t itemCount{};
+    bool prepared{};
+};
+
+/** One uncommitted Season reward and the exact native row it will claim. */
+struct PendingSeasonPassReward {
+    std::variant<PendingItemAcquisition, PendingProfileItemAcquisition, PendingDirectItemBundle>
+        grant{};
+    std::uint16_t rewardIndex{};
+    bool prepared{};
+};
+
+inline constexpr std::size_t kRecordRewardGrantCapacity =
+    build_data::records::rewards::kRewardPerRecordCapacity;
+
+/** One direct item requested by a record reward policy. */
+struct DirectRecordReward {
+    std::uint16_t itemDefinitionIndex{};
+    std::int32_t quantity{};
+};
+
+enum class RecordRewardKind : std::uint8_t {
+    characterInstance,
+    characterStack,
+    profileStack,
+};
+
+/** Native row identity of one item inside a prepared record-reward batch. */
+struct PreparedRecordReward {
+    std::uint64_t instanceSoid{};
+    std::uint32_t definitionHash{};
+    std::size_t stateIndex{};
+    std::int32_t quantity{};
+    std::int32_t afterQuantity{};
+    std::int32_t mutationSerial{};
+    std::uint16_t inventoryRow{};
+    RecordRewardKind kind{};
+    bool appendedProfileResident{};
+};
+
+/** Record claim and all of its item rows committed as one transaction. */
 struct PendingRecordRewardGrant {
-    std::variant<PendingItemAcquisition, PendingProfileItemAcquisition> grant{};
+    CharacterState beforeCharacter{};
+    CharacterState afterCharacter{};
+    std::array<account::inventory::ProfileItem, account::inventory::kProfileItemCapacity>
+        beforeProfileItems{};
+    std::array<account::inventory::ProfileItem, account::inventory::kProfileItemCapacity>
+        afterProfileItems{};
+    std::array<PreparedRecordReward, kRecordRewardGrantCapacity> rewards{};
+    record_claims::PendingClaim claim{};
+    std::uint64_t accountSoid{};
+    std::uint64_t characterSoid{};
+    std::size_t characterIndex{};
+    std::size_t beforeProfileItemCount{};
+    std::size_t afterProfileItemCount{};
+    std::size_t rewardCount{};
+    bool prepared{};
 };
 
 /** One profile material actually credited by a prepared dismantle. */
@@ -299,10 +359,9 @@ void shutdown() noexcept;
  */
 [[nodiscard]] bool set_selected_character(std::uint64_t characterSoid, bool& changed) noexcept;
 
-/** Equips one validated title record on the currently selected character. */
-[[nodiscard]] bool set_selected_title(std::uint16_t recordIndex,
-                                      std::uint64_t& characterSoid,
-                                      bool& changed) noexcept;
+/** Equips a validated title on the selected character. */
+[[nodiscard]] bool
+set_selected_title(std::uint16_t recordIndex, std::uint64_t& characterSoid, bool& changed) noexcept;
 
 /**
  * Prepares an equip operation for one unequipped instance on the selected character.
@@ -350,19 +409,37 @@ void shutdown() noexcept;
                                             std::uint32_t definitionHash,
                                             PendingItemAcquisition& mutation) noexcept;
 
-/**
- * Prepares one installed equippable definition as a new selected-character inventory instance,
- * granted directly rather than pulled through a Collections row.
- *
- * Used by record-claim reward grants: no material requirement set is charged, and the mutation
- * carries no collectible to re-verify at commit.
- *
- * @param itemDefinitionIndex Native item-definition row the reward names.
- * @param mutation Gets a checked after-image without changing account State.
- * @return True when the item and every existing loadout row resolve with one free native row.
- */
+/** Prepares a direct character-item grant without a Collections charge. */
 [[nodiscard]] bool prepare_item_acquisition_for_item(std::uint16_t itemDefinitionIndex,
                                                      PendingItemAcquisition& mutation) noexcept;
+
+/** Prepares one fixed wrapper expansion without changing account State. */
+[[nodiscard]] bool prepare_direct_item_bundle(std::uint32_t sourceDefinitionHash,
+                                              std::span<const std::uint16_t> itemDefinitionIndices,
+                                              PendingDirectItemBundle& mutation) noexcept;
+
+/** Builds the full account after-image while a prepared bundle remains current. */
+[[nodiscard]] bool preview_direct_item_bundle(const PendingDirectItemBundle& mutation,
+                                              AccountState& after) noexcept;
+
+/** Atomically commits one prepared reward grant and its durable Season claim. */
+[[nodiscard]] bool commit_season_pass_reward(PendingSeasonPassReward& mutation) noexcept;
+
+/** Atomically commits one prepared Triumph reward and its durable record claim. */
+[[nodiscard]] bool commit_record_reward(PendingRecordRewardGrant& mutation) noexcept;
+
+/** Prepares all direct reward rows over one shared account after-image. */
+[[nodiscard]] bool prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
+                                               const record_claims::PendingClaim& claim,
+                                               PendingRecordRewardGrant& mutation) noexcept;
+
+/** Builds the full account after-image while a record reward remains current. */
+[[nodiscard]] bool preview_record_reward_grant(const PendingRecordRewardGrant& mutation,
+                                               AccountState& after) noexcept;
+
+/** Reserves the selected character's next mutation serial for a transient inventory update. */
+[[nodiscard]] bool
+reserve_selected_character_inventory_serial(std::int32_t& mutationSerial) noexcept;
 
 /** Builds the exact full-account after-image while a prepared item pull remains current. */
 [[nodiscard]] bool preview_item_acquisition(const PendingItemAcquisition& mutation,
@@ -393,18 +470,7 @@ prepare_profile_item_acquisition(std::uint16_t collectibleIndex,
                                  std::uint32_t definitionHash,
                                  PendingProfileItemAcquisition& mutation) noexcept;
 
-/**
- * Prepares one installed profile-owned stackable definition for a direct grant, with no Collections
- * row and no material cost.
- *
- * Used by record-claim reward grants. An existing non-full stack is incremented by `quantity`;
- * otherwise a new dense State entry is appended, still capped at the definition's max stack size.
- *
- * @param itemDefinitionIndex Native item-definition row the reward names.
- * @param quantity Units to grant. Must be positive and must fit the definition's max stack size.
- * @param mutation Gets the checked profile before/after images without changing account State.
- * @return True when the definition belongs to the main profile array and the units fit.
- */
+/** Prepares a direct profile-stack grant without a Collections charge. */
 [[nodiscard]] bool
 prepare_profile_item_acquisition_for_item(std::uint16_t itemDefinitionIndex,
                                           std::int32_t quantity,

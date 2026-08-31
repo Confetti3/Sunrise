@@ -1,7 +1,7 @@
 #include "node_catalog.h"
 
 #include "../../record_claims/objective_slot_table.h"
-
+#include "../../record_claims/record_claims.h"
 #include "../../unlocks/definition.h"
 #include "../table.h"
 
@@ -15,8 +15,11 @@ Table<Definition, kDefinitionCapacity> g_definitions;
 
 /** Clears every generated node definition under the catalog lock. */
 void clear() noexcept {
-    const Lock::Exclusive guard(g_lock);
-    g_definitions.clear();
+    {
+        const Lock::Exclusive guard(g_lock);
+        g_definitions.clear();
+    }
+    record_claims::invalidate_build_data_cache();
 }
 
 /** Checks that the definitions are dense and in native index order. */
@@ -38,22 +41,15 @@ bool replace(std::span<const Definition> definitions) noexcept {
     if (!valid(definitions)) {
         return false;
     }
-    const Lock::Exclusive guard(g_lock);
-    return g_definitions.replace(definitions);
-}
-
-/** Runs one callable over every node that drives a value slot. */
-void for_each_driving(void* context,
-                      void (*visit)(void* context, const Definition& definition)) noexcept {
-    if (visit == nullptr) {
-        return;
+    bool replaced = false;
+    {
+        const Lock::Exclusive guard(g_lock);
+        replaced = g_definitions.replace(definitions);
     }
-    const Lock::Shared guard(g_lock);
-    for (const Definition& definition : g_definitions.rows()) {
-        if (definition.childCount != 0 && definition.valueIndex != kUnavailableValueIndex) {
-            visit(context, definition);
-        }
+    if (replaced) {
+        record_claims::invalidate_build_data_cache();
     }
+    return replaced;
 }
 
 /** Copies every row in native node order. */
@@ -92,17 +88,15 @@ std::size_t apply_visibility(std::span<std::uint8_t> accountFlags) noexcept {
     return set;
 }
 
-/** Sets the value-gate of every lore book category that has no flag gate at all. */
-std::size_t apply_category_gates(std::span<std::int32_t> objectiveValues, bool revealAll) noexcept {
-    static_cast<void>(revealAll);
+/** Opens lore categories whose gates read an otherwise-empty value slot. */
+std::size_t apply_category_gates(std::span<std::int32_t> objectiveValues) noexcept {
     const Lock::Shared guard(g_lock);
     std::size_t set = 0;
     for (const Definition& node : g_definitions.rows()) {
         if (node.definitionIndex < kLoreNodeFirst || node.definitionIndex > kLoreNodeLast) {
             continue;
         }
-        // apply_visibility already owns the flag-gated books; a node with a flag gate is not one of
-        // this pass's eighteen and must be left alone.
+        // Flag-gated books are handled by apply_visibility.
         if (node.visibilityFlagIndex != kUnavailableFlagIndex
             || node.visibilityCharacterFlagIndex != kUnavailableFlagIndex) {
             continue;
@@ -111,20 +105,12 @@ std::size_t apply_category_gates(std::span<std::int32_t> objectiveValues, bool r
             || static_cast<std::size_t>(node.valueIndex) >= objectiveValues.size()) {
             continue;
         }
-        // Three lore nodes name a valueIndex inside the record-objective range and must never be
-        // written here: that slot belongs to a record's objective, not this node's own gate, and
-        // stamping it has previously redacted large numbers of records in one pass.
-        if (static_cast<std::int32_t>(node.valueIndex) >= record_claims::objective_slot_table::kRecordObjectiveRangeStart) {
+        // Some node indices alias record objectives and must remain untouched.
+        if (static_cast<std::int32_t>(node.valueIndex)
+            >= record_claims::objective_slot_table::kRecordObjectiveRangeStart) {
             continue;
         }
-        // Every value-gated category carries the same READ_VALUE-based not-zero condition. Publish
-        // an acquisition sentinel for an empty gate, whether or not that slot also drives a bar.
-        // Never lower a value already written -- a non-zero slot is either already open or holds a
-        // count from elsewhere, and this pass only ever needs to prove the gate, never reset it.
-        // Where the gate index is also the bar index, a 1 shows as a false claim on the book's
-        // parent triumph. A negative value satisfies a not-zero test while clamping out of the
-        // bar's display range, so it is tried there instead -- the shipped data uses -1 as a
-        // sentinel elsewhere (node 896 carries one, as does the character bank).
+        // -1 satisfies NOT_ZERO without appearing as one collected chapter on shared bars.
         if (objectiveValues[node.valueIndex] == 0) {
             objectiveValues[node.valueIndex] = -1;
             ++set;

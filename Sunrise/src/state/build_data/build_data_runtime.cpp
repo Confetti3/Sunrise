@@ -15,6 +15,7 @@
 #include "items/details/item_detail_catalog.h"
 #include "items/socket_plugs/socket_plug_catalog.h"
 #include "material_requirements/material_requirement_catalog.h"
+#include "nodes/node_catalog.h"
 #include "progressions/progression_catalog.h"
 #include "records/record_catalog.h"
 #include "runtime.h"
@@ -22,6 +23,7 @@
 #include "runtime/domain_markers.h"
 #include "runtime/persistence/build_data_persistence.h"
 #include "scenarios/scenario_catalog.h"
+#include "sobjects/sobject_catalog.h"
 #include "socket_entry_lists/socket_entry_list_catalog.h"
 #include "spawn_sets/spawn_set_catalog.h"
 #include "vendors/vendor_catalog.h"
@@ -108,8 +110,9 @@ bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
         || !items::socket_plugs::replace(
             domains.socketPlugRules, domains.socketPlugPools, domains.socketPlugMembers)
         || !abilities::replace(domains.abilityBuckets)
-        || !progressions::replace(domains.progressions)
-        || !records::replace(domains.records)
+        || !progressions::replace(domains.progressions) || !records::replace(domains.records)
+        || !nodes::replace(domains.nodes)
+        || !sobjects::replace(domains.sobjects)
         // The layouts are what activity message 1 reads. Without them a cache hit makes the
         // other domains ready, the package build skips itself, and every destination falls back.
         || !scenarios::replace(domains.scenarios, domains.rosterGroups)

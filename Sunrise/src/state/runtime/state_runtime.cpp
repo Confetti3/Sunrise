@@ -1,8 +1,3 @@
-#include "../build_data/records/record_persistence.h"
-#include "../build_data/records/rewards/reward_persistence.h"
-#include "../build_data/nodes/node_persistence.h"
-#include "../record_claims/record_claims.h"
-#include "../progression/seasonal_experience.h"
 #include <Windows.h>
 
 #include <algorithm>
@@ -10,17 +5,19 @@
 #include <bcrypt.h>
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
 #include <limits>
 #include <span>
 
-#include "../../core/logging/log.h"
 #include "../../core/settings/settings.h"
 #include "../activity/defaults/activity_defaults_validation.h"
+#include "../build_data/records/rewards/reward_persistence.h"
 #include "../build_data/runtime.h"
+#include "../progression/seasonal_experience.h"
+#include "../record_claims/record_claims.h"
 #include "equipment/configured_equipment_identity.h"
 #include "runtime.h"
 #include "state.h"
+#include "state_account_transaction_helpers.h"
 #include "storage/internal.h"
 
 namespace sunrise::state {
@@ -49,9 +46,8 @@ constexpr std::int32_t kSeasonOfArrivalsNumber = 11;
  * Makes one process-owned global value authoritative without disturbing authored overrides.
  * @return False only when a new row is needed and the bounded family-5 list is full.
  */
-[[nodiscard]] bool upsert_family5_value(Family5State& family,
-                                        std::uint16_t slot,
-                                        std::int32_t value) noexcept {
+[[nodiscard]] bool
+upsert_family5_value(Family5State& family, std::uint16_t slot, std::int32_t value) noexcept {
     for (std::size_t index = 0; index < family.valueCount; ++index) {
         if (family.values[index].slot == slot) {
             family.values[index].value = value;
@@ -80,37 +76,6 @@ template <std::size_t Size>
            >= 0;
 }
 
-/** @return True when any authored or already-seeded account identity owns one SOID. */
-[[nodiscard]] bool identity_uses_soid(const AccountState& accountState,
-                                      std::uint64_t soid) noexcept {
-    if (soid == 0 || accountState.primarySoid == soid) {
-        return true;
-    }
-    for (std::size_t index = 0; index < accountState.profileItemCount; ++index) {
-        if (accountState.profileItems[index].instanceSoid == soid) {
-            return true;
-        }
-    }
-    for (std::size_t characterIndex = 0; characterIndex < accountState.characterCount;
-         ++characterIndex) {
-        const CharacterState& character = accountState.characters[characterIndex];
-        if (character.soid == soid) {
-            return true;
-        }
-        for (const std::optional<account::inventory::Item>& item : character.equipment.slots) {
-            if (item.has_value() && item->instanceSoid == soid) {
-                return true;
-            }
-        }
-        for (std::size_t index = 0; index < character.inventory.count; ++index) {
-            if (character.inventory.values[index].instanceSoid == soid) {
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
 /** Seeds canonical character row generations before installed build data is needed. */
 [[nodiscard]] bool seed_inventory_runtime_fields(AccountState& accountState) noexcept {
     if (!account::valid_authored(accountState)) {
@@ -127,6 +92,9 @@ template <std::size_t Size>
         }
         for (std::size_t index = 0; index < character.inventory.count; ++index) {
             character.inventory.values[index].mutationSerial = static_cast<std::int32_t>(next++);
+        }
+        for (std::size_t index = 0; index < character.stacks.count; ++index) {
+            character.stacks.values[index].mutationSerial = static_cast<std::int32_t>(next++);
         }
         character.nextInventorySerial = next;
     }
@@ -191,7 +159,7 @@ template <std::size_t Size>
         if (!actionSources[index] || item.instanceSoid != 0) {
             continue;
         }
-        while (identity_uses_soid(accountState, nextProfileSoid)) {
+        while (runtime::detail::account_owns_soid(accountState, nextProfileSoid)) {
             if (nextProfileSoid == (std::numeric_limits<std::uint64_t>::max)()) {
                 return false;
             }
@@ -235,13 +203,9 @@ bool initialize(void* module,
     if (!build_data::initialize(module, runtime::equipment::configured_hash(runtimeAccount))) {
         return false;
     }
-    // Claims are held beside the build data cache, so a restart keeps what the client already shows
-    // as Acquired. A missing file is a first run, not a failure.
-    (void)build_data::nodes::initialize(module);
-    (void)build_data::records::initialize(module);
-    // Only resolves the shipped reward file's path; the file itself loads lazily at first use, the
-    // same as the claim-index and lore-node tables above.
-    (void)build_data::records::rewards::initialize(module);
+    if (build_data::records::rewards::initialize(module)) {
+        (void)build_data::records::rewards::load_and_publish();
+    }
     (void)record_claims::initialize(module);
     (void)progression::seasonal_experience::initialize(module);
     // A cache hit already has the complete plug relation, so publish canonical profile identities
@@ -251,21 +215,6 @@ bool initialize(void* module,
         && !canonicalize_profile_item_identities(runtimeAccount)) {
         build_data::shutdown();
         return false;
-    }
-    {
-        // The account key is authored, and a truncated one is consistent enough to go unnoticed.
-        std::array<char, 96> line{};
-        const int written =
-            std::snprintf(line.data(),
-                          line.size(),
-                          "ev=account stage=identity primary=0x%016llX characters=%zu",
-                          static_cast<unsigned long long>(runtimeAccount.primarySoid),
-                          runtimeAccount.characterCount);
-        if (written > 0) {
-            core::log::write(core::log::Channel::state,
-                             core::log::Level::info,
-                             {line.data(), static_cast<std::size_t>(written)});
-        }
     }
     State initialized{};
     if (!randomize(initialized.signOn.encryptionKey)
@@ -291,9 +240,8 @@ bool initialize(void* module,
     initialized.investment.family5.valueCount = authored.valueCount;
     // Family 5 addresses the Client's global unlock-value space directly. Slot 607 selects the
     // season definition; account objective rows use a separate mapped index space and cannot.
-    if (!upsert_family5_value(initialized.investment.family5,
-                              kActiveSeasonValueSlot,
-                              kSeasonOfArrivalsNumber)) {
+    if (!upsert_family5_value(
+            initialized.investment.family5, kActiveSeasonValueSlot, kSeasonOfArrivalsNumber)) {
         SecureZeroMemory(&initialized, sizeof initialized);
         build_data::shutdown();
         return false;

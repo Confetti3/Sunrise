@@ -10,12 +10,6 @@ Table<RewardRow, kRewardCapacity> g_rows;
 
 } // namespace
 
-/** Clears every generated record-reward row under the catalog lock. */
-void clear() noexcept {
-    const Lock::Exclusive guard(g_lock);
-    g_rows.clear();
-}
-
 /** Checks that the rows fit fixed storage. Zero rows is valid. */
 bool valid(std::span<const RewardRow> rows) noexcept {
     return rows.size() <= kRewardCapacity;
@@ -41,12 +35,6 @@ void visit_for_record(std::uint32_t recordHash, RowVisitor visitor, void* contex
             return;
         }
     }
-}
-
-/** @return Number of generated reward rows, read under the lock. */
-std::size_t count() noexcept {
-    const Lock::Shared guard(g_lock);
-    return g_rows.count();
 }
 
 } // namespace sunrise::state::build_data::records::rewards

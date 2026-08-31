@@ -1,6 +1,5 @@
 ﻿#include "activity_transaction_notifications.h"
 
-#include "../../../../core/logging/log.h"
 #include "../../../gameplay/gameplay_advertisement.h"
 #include "../push/activity/activity_arrival.h"
 #include "../push/activity/activity_global_state_push.h"
@@ -32,9 +31,6 @@ namespace {
     if (state != server::gameplay::AdvertisementState::pending) {
         return false;
     }
-    core::log::write(core::log::Channel::server,
-                     core::log::Level::debug,
-                     "ev=gameplay stage=membership result=held reason=no_host_session");
     return true;
 }
 

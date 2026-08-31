@@ -56,8 +56,7 @@ inline constexpr std::size_t kContainerCandidates = 16;
 struct Storage {
     reader::Scratch scratch{};
     /** Node rows held until the value slot and owned records are resolved. */
-    std::array<state::build_data::nodes::Definition,
-               state::build_data::nodes::kDefinitionCapacity>
+    std::array<state::build_data::nodes::Definition, state::build_data::nodes::kDefinitionCapacity>
         nodeRows{};
     /** Record rows held until the completion flag mapping is resolved. */
     std::array<state::build_data::records::Definition,
@@ -92,7 +91,8 @@ struct Storage {
         entryBucketRows{};
     std::array<state::build_data::progressions::Definition,
                state::build_data::progressions::kDefinitionCapacity>
-        progressionRows{};    std::array<state::build_data::collectibles::Definition,
+        progressionRows{};
+    std::array<state::build_data::collectibles::Definition,
                state::build_data::collectibles::kDefinitionCapacity>
         collectibleRows{};
     std::array<state::build_data::material_requirements::Definition,
@@ -124,12 +124,7 @@ struct Storage {
 /** Publishes parsed inventory buckets after applying the extracted item-slot relation. */
 [[nodiscard]] bool publish_buckets(Storage& storage) noexcept;
 
-/**
- * Adds one definition index to the deduplicated requested set.
- * @param definitionIndex Native
- * item index.
- * @param requested Requested-set storage.
- */
+/** Adds one native definition index to the deduplicated request set. */
 void request(std::uint16_t definitionIndex, DetailRequests& requested) noexcept;
 
 /**
@@ -243,38 +238,7 @@ read_investment_constants(const reader::Source& source,
     std::array<std::uint8_t, state::build_data::socket_entry_lists::kEntryCapacity>&
         output) noexcept;
 
-/**
- * Reads the progression definition table and the object array each definition routes to.
- * The table is inline rows, not index rows. The scope byte in a row picks the replicated object
- * holding that progression, and the row's place among rows of that scope is its slot there.
- * @param source Package source.
- * @param scratch Reader scratch.
- * @param root Investment root bytes.
- * @param blob Scratch storage for the table.
- * @param output Row storage in native definition order.
- * @param count Receives the number of rows read.
- * @return True when the table reads and every row fits.
- */
-/**
- * Reads the records table and resolves each record's completion flag to a bank index.
- * @param source Package source.
- * @param scratch Reader scratch.
- * @param root Investment root bytes.
- * @param blob Scratch storage for the tables.
- * @param output Row storage in native record order.
- * @param count Receives the number of rows read.
- * @return True when both tables read and every row fits.
- */
-/**
- * Reads the presentation node table and resolves each node's value slot and owned records.
- * @param source Package source.
- * @param scratch Reader scratch.
- * @param root Investment root bytes.
- * @param blob Scratch storage for the tables.
- * @param output Row storage in native node order.
- * @param count Receives the number of rows read.
- * @return True when both tables read and every row fits.
- */
+/** Reads nodes and resolves their value slots and owned records. */
 [[nodiscard]] bool build_nodes(const reader::Source& source,
                                reader::Scratch& scratch,
                                std::span<const std::byte> root,
@@ -282,6 +246,7 @@ read_investment_constants(const reader::Source& source,
                                std::span<state::build_data::nodes::Definition> output,
                                std::size_t& count) noexcept;
 
+/** Reads records and resolves their completion-flag indices. */
 [[nodiscard]] bool build_records(const reader::Source& source,
                                  reader::Scratch& scratch,
                                  std::span<const std::byte> root,
@@ -289,6 +254,7 @@ read_investment_constants(const reader::Source& source,
                                  std::span<state::build_data::records::Definition> output,
                                  std::size_t& count) noexcept;
 
+/** Reads progression definitions and resolves their replicated-object slots. */
 [[nodiscard]] bool build_progressions(const reader::Source& source,
                                       reader::Scratch& scratch,
                                       std::span<const std::byte> root,
@@ -386,24 +352,7 @@ void report(std::size_t published, const char* reason) noexcept;
                                             Storage& storage,
                                             std::span<const std::byte> root) noexcept;
 
-/**
- * Reads and publishes the root's dense collectible-to-item mapping table.
- * @param source Package source.
- * @param storage Pass storage, including scratch bytes and bounded row storage.
- * @param root Investment root bytes.
- * @param itemDefinitionCount Number of rows in the installed item index table.
- * @return True when every tag, class, bound, and item link validates and publishes.
- */
-/**
- * Reads the records table and resolves each record's completion flag to a bank index.
- * @param source Package source.
- * @param scratch Reader scratch.
- * @param root Investment root bytes.
- * @param blob Scratch storage for the tables.
- * @param output Row storage in native record order.
- * @param count Receives the number of rows read.
- * @return True when both tables read and every row fits.
- */
+/** Reads and publishes the dense collectible-to-item mapping. */
 [[nodiscard]] bool build_collectibles(const reader::Source& source,
                                       Storage& storage,
                                       std::span<const std::byte> root,

@@ -35,14 +35,8 @@ constexpr std::uint8_t kDismantleClassMaskBits =
     if (state.dismantleRewardCount > state.dismantleRewards.size()) {
         return false;
     }
-    for (std::size_t index = 0; index < state.dismantleRewards.size(); ++index) {
+    for (std::size_t index = 0; index < state.dismantleRewardCount; ++index) {
         const DismantleRewardPolicy& reward = state.dismantleRewards[index];
-        if (index >= state.dismantleRewardCount) {
-            if (!empty_dismantle_reward(reward)) {
-                return false;
-            }
-            continue;
-        }
         if (reward.definitionHash == inventory::kNoDefinitionHash || reward.quantity <= 0
             || (reward.tierMask & ~kDismantleTierMaskBits) != 0
             || (reward.classMask & ~kDismantleClassMaskBits) != 0
@@ -55,27 +49,21 @@ constexpr std::uint8_t kDismantleClassMaskBits =
             }
         }
     }
-    return true;
+    const auto tail =
+        state.dismantleRewards.cbegin() + static_cast<std::ptrdiff_t>(state.dismantleRewardCount);
+    return std::all_of(tail, state.dismantleRewards.cend(), empty_dismantle_reward);
 }
 
-/** @return True when one unused record-reward policy row is canonical zero. */
 [[nodiscard]] bool empty_record_reward(const RecordRewardPolicy& reward) noexcept {
     return reward.recordIndex == 0 && reward.itemIndex == 0 && reward.quantity == 0;
 }
 
-/** Checks filled record-reward rows, uniqueness by record, and the zero tail. */
 [[nodiscard]] bool valid_record_rewards(const AccountState& state) noexcept {
     if (state.recordRewardCount > state.recordRewards.size()) {
         return false;
     }
-    for (std::size_t index = 0; index < state.recordRewards.size(); ++index) {
+    for (std::size_t index = 0; index < state.recordRewardCount; ++index) {
         const RecordRewardPolicy& reward = state.recordRewards[index];
-        if (index >= state.recordRewardCount) {
-            if (!empty_record_reward(reward)) {
-                return false;
-            }
-            continue;
-        }
         if (reward.quantity <= 0) {
             return false;
         }
@@ -85,18 +73,16 @@ constexpr std::uint8_t kDismantleClassMaskBits =
             }
         }
     }
-    return true;
+    const auto tail =
+        state.recordRewards.cbegin() + static_cast<std::ptrdiff_t>(state.recordRewardCount);
+    return std::all_of(tail, state.recordRewards.cend(), empty_record_reward);
 }
 
-/** Adds one nonzero globally unique key to a bounded identity set. */
+/** Adds one nonzero key to the bounded identity buffer. */
 [[nodiscard]] bool append_identity(std::array<std::uint64_t, kIdentityCapacity>& identities,
                                    std::size_t& count,
                                    std::uint64_t soid) noexcept {
     if (soid == 0 || count >= identities.size()) {
-        return false;
-    }
-    const auto end = identities.cbegin() + static_cast<std::ptrdiff_t>(count);
-    if (std::find(identities.cbegin(), end, soid) != end) {
         return false;
     }
     identities[count++] = soid;
@@ -133,20 +119,19 @@ constexpr std::uint8_t kDismantleClassMaskBits =
     if (!append_identity(identities, identityCount, state.primarySoid)) {
         return false;
     }
-    for (std::size_t index = 0; index < state.profileItems.size(); ++index) {
+    for (std::size_t index = 0; index < state.profileItemCount; ++index) {
         const inventory::ProfileItem& item = state.profileItems[index];
-        if (index >= state.profileItemCount) {
-            if (!empty_profile_item(item)) {
-                return false;
-            }
-            continue;
-        }
         if (item.definitionHash == inventory::kNoDefinitionHash || item.quantity <= 0
             || item.mutationSerial < 0
             || (item.instanceSoid != 0
                 && !append_identity(identities, identityCount, item.instanceSoid))) {
             return false;
         }
+    }
+    const auto profileTail =
+        state.profileItems.cbegin() + static_cast<std::ptrdiff_t>(state.profileItemCount);
+    if (!std::all_of(profileTail, state.profileItems.cend(), empty_profile_item)) {
+        return false;
     }
 
     bool selected = false;
@@ -157,7 +142,7 @@ constexpr std::uint8_t kDismantleClassMaskBits =
             || character.gender > CharacterGender::female
             || character.characterClass > CharacterClass::warlock
             || !std::isfinite(character.appearanceValue) || !inventory::valid(character.equipment)
-            || !inventory::valid(character.inventory)) {
+            || !inventory::valid(character.inventory) || !inventory::valid(character.stacks)) {
             return false;
         }
         selected = selected || character.selected;
@@ -175,7 +160,9 @@ constexpr std::uint8_t kDismantleClassMaskBits =
             }
         }
     }
-    return true;
+    auto end = identities.begin() + static_cast<std::ptrdiff_t>(identityCount);
+    std::sort(identities.begin(), end);
+    return std::adjacent_find(identities.begin(), end) == end;
 }
 
 } // namespace
@@ -223,13 +210,6 @@ std::uint64_t banner_character_soid(const AccountState& state) noexcept {
     return state.characterCount == 0 ? 0 : state.characters[0].soid;
 }
 
-/**
- * Finds the configured reward for one claimed record, if any.
- * @param state Account snapshot carrying the authored reward table.
- * @param recordIndex Native record row the claim named.
- * @param reward Receives the matching row only on success.
- * @return True when the table carries a row for this record.
- */
 bool find_record_reward(const AccountState& state,
                         std::uint16_t recordIndex,
                         RecordRewardPolicy& reward) noexcept {

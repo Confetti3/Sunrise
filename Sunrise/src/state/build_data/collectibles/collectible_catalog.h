@@ -14,8 +14,6 @@ inline constexpr std::uint16_t kUnavailableItemDefinitionIndex = 0xFFFFU;
 /** A collectible with no acquisition charge carries this native requirement-set sentinel. */
 inline constexpr std::uint16_t kUnavailableMaterialRequirementSetIndex = 0xFFFFU;
 
-/** A collectible that unlocks no lore carries this instead of a row. */
-inline constexpr std::uint16_t kUnavailableLoreRow = 0xFFFFU;
 /** Installed requirement sets contain at most six material rows. */
 inline constexpr std::size_t kMaterialRequirementCapacity = 6;
 
@@ -34,13 +32,6 @@ struct Definition {
     std::uint16_t collectibleIndex{};
     std::uint16_t itemDefinitionIndex{kUnavailableItemDefinitionIndex};
     std::uint16_t materialRequirementSetIndex{kUnavailableMaterialRequirementSetIndex};
-    /**
-     * Lore row this collectible unlocks, or kUnavailableLoreRow when it unlocks none.
-     *
-     * The record that displays the same row is the chapter this collectible completes, so the pair
-     * joins on the row rather than on any hash.
-     */
-    std::uint16_t loreRow{kUnavailableLoreRow};
     std::uint8_t materialRequirementCount{};
     std::array<MaterialRequirement, kMaterialRequirementCapacity> materialRequirements{};
 };
@@ -69,17 +60,5 @@ void clear() noexcept;
 
 /** @return Number of installed-build collectible mappings. */
 [[nodiscard]] std::size_t count() noexcept;
-
-/**
- * Finds the collectible that unlocks one lore row.
- *
- * The reverse of the record join: a chapter record and the collectible that grants it name the same
- * lore row, so this reaches the collectible whose item the account has to own for the lore itself to
- * be readable rather than obscured.
- * @param loreRow Lore table row.
- * @param definition Receives the collectible.
- * @return True when a collectible names that row.
- */
-[[nodiscard]] bool find_by_lore_row(std::uint16_t loreRow, Definition& definition) noexcept;
 
 } // namespace sunrise::state::build_data::collectibles

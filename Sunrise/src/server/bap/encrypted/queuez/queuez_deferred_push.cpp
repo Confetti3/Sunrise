@@ -1,8 +1,6 @@
 ﻿#include <Windows.h>
 
 #include <algorithm>
-#include <array>
-#include <cstdio>
 
 #include "../../../../core/logging/log.h"
 #include "../../../../middleware/secure_channel/runtime.h"
@@ -15,37 +13,49 @@
 namespace sunrise::server::bap::encrypted {
 namespace {
 
-/** Widest re-push report, sized for the fields below. */
-constexpr std::size_t kRepushReportLimit = 96;
+constexpr std::uint8_t kSeasonalExperiencePresentationFailureLimit = 8;
 
-/**
- * Logs one delayed re-push with its framed size, so it can be compared to the first copy.
- * @param stage Point in the deferred push the line reports.
- * @param bytes Framed size of the published notification.
- */
-void report_repush(const char* stage, std::size_t bytes) noexcept {
-    std::array<char, kRepushReportLimit> line{};
-    const int count = std::snprintf(
-        line.data(), line.size(), "ev=queuez stage=%s result=ok bytes=%zu", stage, bytes);
-    if (count > 0) {
-        core::log::write(core::log::Channel::server,
-                         core::log::Level::info,
-                         {line.data(), static_cast<std::size_t>(count)});
+[[nodiscard]] std::span<const queuez::AcquisitionPresentationRow>
+active_acquisition_presentation_rows(const Session& session) noexcept {
+    if (GetTickCount64() >= session.acquisitionPresentationUntilTick
+        || session.acquisitionPresentationRowCount > session.acquisitionPresentationRows.size()) {
+        return {};
     }
+    return std::span(session.acquisitionPresentationRows)
+        .first(session.acquisitionPresentationRowCount);
 }
 
-/** Publishes and commits one world reward through the ordinary acquisition notification path. */
-[[nodiscard]] bool consume_world_item_acquisition(Session& session,
+/** Drops only the visual XP notification after repeated failures; the XP is already durable. */
+void fail_seasonal_experience_presentation(Session& session) noexcept {
+    if (++session.pendingSeasonalExperienceFailures < kSeasonalExperiencePresentationFailureLimit) {
+        return;
+    }
+    session.pendingSeasonalExperienceAmount = 0;
+    session.pendingSeasonalExperienceMutationSerial = 0;
+    session.pendingSeasonalExperienceFailures = 0;
+    bap::arm_account_resync_everywhere();
+    core::log::write(core::log::Channel::server,
+                     core::log::Level::warn,
+                     "ev=season_xp stage=deferred_presentation result=drop reason=retry_limit");
+}
+
+/** Publishes and commits one character-inventory world reward. */
+[[nodiscard]] bool consume_world_item_acquisition(const WorldRewardRequest& request,
+                                                  Session& session,
                                                   Scratch& scratch,
                                                   std::span<std::byte> response,
                                                   std::size_t& written,
                                                   bool& touchesScratch) noexcept {
-    if (!session.worldItemAcquisitionArmed) {
+    state::PendingItemAcquisition pending{};
+    if (!state::prepare_item_acquisition_for_item(request.itemDefinitionIndex, pending)) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::warn,
+                         "ev=queuez stage=world_acquisition result=fail reason=prepare");
+        bap::fail_world_reward_attempt();
         return false;
     }
     touchesScratch = true;
     queuez::ItemAcquisition acquisition{};
-    const state::PendingItemAcquisition pending = session.pendingWorldItemAcquisition;
     if (!queuez::stage_item_acquisition(session.queuez,
                                         pending.accountSoid,
                                         pending.characterSoid,
@@ -55,6 +65,7 @@ void report_repush(const char* stage, std::size_t bytes) noexcept {
         core::log::write(core::log::Channel::server,
                          core::log::Level::warn,
                          "ev=queuez stage=world_acquisition result=fail reason=stage");
+        bap::fail_world_reward_attempt();
         return false;
     }
     auto nextSendNonce = session.sendNonce;
@@ -62,6 +73,8 @@ void report_repush(const char* stage, std::size_t bytes) noexcept {
     if (!push::append_item_acquisition_notification(scratch,
                                                     acquisition,
                                                     pending,
+                                                    std::nullopt,
+                                                    active_acquisition_presentation_rows(session),
                                                     state::bap().sessionKey,
                                                     nextSendNonce,
                                                     scratch.framed,
@@ -70,13 +83,14 @@ void report_repush(const char* stage, std::size_t bytes) noexcept {
         core::log::write(core::log::Channel::server,
                          core::log::Level::warn,
                          "ev=queuez stage=world_acquisition result=fail reason=encode");
+        bap::fail_world_reward_attempt();
         return false;
     }
-    if (!state::commit_item_acquisition(session.pendingWorldItemAcquisition)) {
-        session.worldItemAcquisitionArmed = false;
+    if (!state::commit_item_acquisition(pending)) {
         core::log::write(core::log::Channel::server,
                          core::log::Level::warn,
                          "ev=queuez stage=world_acquisition result=fail reason=commit");
+        bap::fail_world_reward_attempt();
         return false;
     }
     std::copy_n(scratch.framed.begin(), framedSize, response.begin());
@@ -84,24 +98,30 @@ void report_repush(const char* stage, std::size_t bytes) noexcept {
     middleware::secure_channel::advance_nonce(nextSendNonce);
     session.sendNonce = nextSendNonce;
     session.queuez = acquisition.after;
-    session.worldItemAcquisitionArmed = false;
-    report_repush("world_acquisition", framedSize);
+    bap::complete_world_reward();
+    bap::arm_account_resync_elsewhere(session);
+    bap::arm_acquisition_presentation_hold(session);
     return true;
 }
 
-/** Publishes and commits one profile material reward through its acquisition notification. */
-[[nodiscard]] bool consume_world_profile_item_acquisition(Session& session,
+/** Publishes and commits one profile-inventory world reward. */
+[[nodiscard]] bool consume_world_profile_item_acquisition(const WorldRewardRequest& request,
+                                                          Session& session,
                                                           Scratch& scratch,
                                                           std::span<std::byte> response,
                                                           std::size_t& written,
                                                           bool& touchesScratch) noexcept {
-    if (!session.worldProfileItemAcquisitionArmed) {
+    state::PendingProfileItemAcquisition pending{};
+    if (!state::prepare_profile_item_acquisition_for_item(
+            request.itemDefinitionIndex, request.quantity, pending)) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::warn,
+                         "ev=queuez stage=world_profile_acquisition result=fail reason=prepare");
+        bap::fail_world_reward_attempt();
         return false;
     }
     touchesScratch = true;
     queuez::ProfileItemAcquisition acquisition{};
-    const state::PendingProfileItemAcquisition pending =
-        session.pendingWorldProfileItemAcquisition;
     if (!queuez::stage_profile_item_acquisition(session.queuez,
                                                 pending.accountSoid,
                                                 pending.acquiredInstanceSoid,
@@ -111,6 +131,7 @@ void report_repush(const char* stage, std::size_t bytes) noexcept {
         core::log::write(core::log::Channel::server,
                          core::log::Level::warn,
                          "ev=queuez stage=world_profile_acquisition result=fail reason=stage");
+        bap::fail_world_reward_attempt();
         return false;
     }
     auto nextSendNonce = session.sendNonce;
@@ -118,6 +139,7 @@ void report_repush(const char* stage, std::size_t bytes) noexcept {
     if (!push::append_profile_item_acquisition_notification(scratch,
                                                             acquisition,
                                                             pending,
+                                                            std::nullopt,
                                                             state::bap().sessionKey,
                                                             nextSendNonce,
                                                             scratch.framed,
@@ -126,13 +148,14 @@ void report_repush(const char* stage, std::size_t bytes) noexcept {
         core::log::write(core::log::Channel::server,
                          core::log::Level::warn,
                          "ev=queuez stage=world_profile_acquisition result=fail reason=encode");
+        bap::fail_world_reward_attempt();
         return false;
     }
-    if (!state::commit_profile_item_acquisition(session.pendingWorldProfileItemAcquisition)) {
-        session.worldProfileItemAcquisitionArmed = false;
+    if (!state::commit_profile_item_acquisition(pending)) {
         core::log::write(core::log::Channel::server,
                          core::log::Level::warn,
                          "ev=queuez stage=world_profile_acquisition result=fail reason=commit");
+        bap::fail_world_reward_attempt();
         return false;
     }
     std::copy_n(scratch.framed.begin(), framedSize, response.begin());
@@ -140,8 +163,64 @@ void report_repush(const char* stage, std::size_t bytes) noexcept {
     middleware::secure_channel::advance_nonce(nextSendNonce);
     session.sendNonce = nextSendNonce;
     session.queuez = acquisition.after;
-    session.worldProfileItemAcquisitionArmed = false;
-    report_repush("world_profile_acquisition", framedSize);
+    bap::complete_world_reward();
+    bap::arm_account_resync_elsewhere(session);
+    bap::arm_acquisition_presentation_hold(session);
+    return true;
+}
+
+/** Publishes one non-persistent XP reward row so the native seasonal XP HUD animates. */
+[[nodiscard]] bool consume_seasonal_experience_presentation(Session& session,
+                                                            Scratch& scratch,
+                                                            std::span<std::byte> response,
+                                                            std::size_t& written,
+                                                            bool& touchesScratch) noexcept {
+    if (session.pendingSeasonalExperienceAmount <= 0) {
+        return false;
+    }
+    touchesScratch = true;
+    if (session.pendingSeasonalExperienceMutationSerial == 0) {
+        std::int32_t mutationSerial = 0;
+        if (!state::reserve_selected_character_inventory_serial(mutationSerial)) {
+            core::log::write(core::log::Channel::server,
+                             core::log::Level::warn,
+                             "ev=season_xp stage=deferred_presentation result=fail reason=serial");
+            fail_seasonal_experience_presentation(session);
+            return false;
+        }
+        session.pendingSeasonalExperienceMutationSerial =
+            static_cast<std::uint32_t>(mutationSerial) + 1U;
+    }
+    auto nextSendNonce = session.sendNonce;
+    std::size_t framedSize = 0;
+    queuez::SessionState after{};
+    if (!push::append_seasonal_experience_notification(
+            scratch,
+            session.queuez,
+            session.pendingSeasonalExperienceAmount,
+            static_cast<std::int32_t>(session.pendingSeasonalExperienceMutationSerial - 1U),
+            active_acquisition_presentation_rows(session),
+            state::bap().sessionKey,
+            nextSendNonce,
+            scratch.framed,
+            framedSize,
+            after)
+        || framedSize == 0 || framedSize > response.size()) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::warn,
+                         "ev=season_xp stage=deferred_presentation result=fail");
+        fail_seasonal_experience_presentation(session);
+        return false;
+    }
+    std::copy_n(scratch.framed.begin(), framedSize, response.begin());
+    written = framedSize;
+    middleware::secure_channel::advance_nonce(nextSendNonce);
+    session.sendNonce = nextSendNonce;
+    session.queuez = after;
+    session.pendingSeasonalExperienceAmount = 0;
+    session.pendingSeasonalExperienceMutationSerial = 0;
+    session.pendingSeasonalExperienceFailures = 0;
+    bap::arm_account_resync_elsewhere(session);
     return true;
 }
 
@@ -151,7 +230,7 @@ void report_repush(const char* stage, std::size_t bytes) noexcept {
                                           std::span<std::byte> response,
                                           std::size_t& written,
                                           bool& touchesScratch) noexcept {
-    if (!session.accountResyncArmed || session.accountResyncGeneration == 0) {
+    if (!session.accountResyncArmed) {
         return false;
     }
     touchesScratch = true;
@@ -160,6 +239,7 @@ void report_repush(const char* stage, std::size_t bytes) noexcept {
     queuez::SessionState currentQueuez{};
     if (!push::append_account_resync_notification(scratch,
                                                   session.queuez,
+                                                  active_acquisition_presentation_rows(session),
                                                   state::bap().sessionKey,
                                                   nextSendNonce,
                                                   scratch.framed,
@@ -212,22 +292,11 @@ void report_repush(const char* stage, std::size_t bytes) noexcept {
     written = framedSize;
     session.sendNonce = nextSendNonce;
     session.queuez = currentQueuez;
-    session.accountGeneration = session.accountResyncGeneration;
     session.accountResyncArmed = false;
-    report_repush("peer_resync", framedSize);
     return true;
 }
 
-/**
- * Sends the owed banner re-push once its delay has passed.
- * The banner has no subscribe of its own, so the timer is its only second chance.
- * @param session Auth, nonce and queuez state owned by the connection.
- * @param scratch Transform buffers owned by the lock.
- * @param response Whole-frame storage owned by the caller.
- * @param written Gets the encoded notification size in bytes.
- * @param touchesScratch Set before any scratch buffer is used.
- * @return True when a whole banner notification is published.
- */
+/** Sends the owed banner retry after its delay. */
 [[nodiscard]] bool consume_banner_repush(Session& session,
                                          Scratch& scratch,
                                          std::span<std::byte> response,
@@ -237,15 +306,13 @@ void report_repush(const char* stage, std::size_t bytes) noexcept {
         || GetTickCount64() < session.bannerRepushDueTick) {
         return false;
     }
-    // Nothing is owed while the account owns no character to name. The arm stays set, because it
-    // is the banner's only second chance.
+    // Retain the arm until the account has a character to name.
     if (state::account::banner_character_soid(state::account_snapshot()) == 0) {
         return false;
     }
     touchesScratch = true;
 
-    // The same body the subscribe answer builds, so the version and this host's mirror stay in
-    // step. `append_banner_notification` fixes the version at zero and a pick has moved past it.
+    // Reuse the subscription path so its version and the host mirror stay aligned.
     middleware::queuez::Subscription subscription{};
     subscription.familyType = queuez::kBannerFamilyType;
     subscription.familyRootSoid = session.bannerRepushRoot;
@@ -279,21 +346,10 @@ void report_repush(const char* stage, std::size_t bytes) noexcept {
         session.queuez = bannerAfter;
     }
     session.bannerRepushArmed = false;
-    report_repush("banner_repush", framedSize);
     return true;
 }
 
-/**
- * Re-derives the selected character's appearance and roster once the ability-bucket rebuild owed
- * by a subclass selection has landed. The refresh sent inline with the opcode-801 response can
- * still carry empty buckets, because that rebuild runs off the Client content-extraction pump.
- * @param session Auth, nonce and queuez state owned by the connection.
- * @param scratch Transform buffers owned by the lock.
- * @param response Whole-frame storage owned by the caller.
- * @param written Gets the encoded notification size in bytes.
- * @param touchesScratch Set before any scratch buffer is used.
- * @return True when at least one owed record refreshes.
- */
+/** Refreshes appearance and roster after an asynchronous ability-bucket rebuild. */
 [[nodiscard]] bool consume_ability_refresh(Session& session,
                                            Scratch& scratch,
                                            std::span<std::byte> response,
@@ -302,8 +358,7 @@ void report_repush(const char* stage, std::size_t bytes) noexcept {
     if (!session.abilityRefreshArmed || GetTickCount64() < session.abilityRefreshDueTick) {
         return false;
     }
-    // Nothing is owed until a family that reads abilities is subscribed. The arm stays set, the
-    // same way the banner re-push below keeps its own.
+    // Retain the arm until a family that reads abilities is active.
     if (!session.queuez.family0Active && !session.queuez.family3Active) {
         return false;
     }
@@ -349,24 +404,14 @@ void report_repush(const char* stage, std::size_t bytes) noexcept {
     written = framedSize;
     session.sendNonce = nextSendNonce;
     session.queuez = current;
-    // The frame is committed here, so the arm is committed with it. Disarming any earlier drops
-    // the owed refresh on a transient encode failure.
+    // Clear the arm only after publication.
     session.abilityRefreshArmed = false;
-    report_repush("ability_refresh", framedSize);
     return true;
 }
 
 } // namespace
 
-/**
- * Sends the owed Family-4 re-push once its delay has passed.
- * @param session Auth, nonce and queuez state owned by the connection.
- * @param scratch Transform buffers owned by the lock.
- * @param response Whole-frame storage owned by the caller.
- * @param written Gets the encoded notification size in bytes.
- * @param touchesScratch Set before any scratch buffer is used.
- * @return True when a whole Family-4 notification is published.
- */
+/** Publishes the next due reward, refresh, retry, or keepalive. */
 bool consume_deferred(Session& session,
                       Scratch& scratch,
                       std::span<std::byte> response,
@@ -376,30 +421,40 @@ bool consume_deferred(Session& session,
     if (!session.authenticated) {
         return false;
     }
-    if (consume_world_item_acquisition(session, scratch, response, written, touchesScratch)) {
-        return true;
-    }
-    if (session.worldItemAcquisitionArmed) {
-        return false;
-    }
-    if (consume_world_profile_item_acquisition(session, scratch, response, written, touchesScratch)) {
-        return true;
-    }
-    if (session.worldProfileItemAcquisitionArmed) {
-        return false;
-    }
     if (consume_account_resync(session, scratch, response, written, touchesScratch)) {
         return true;
     }
-    // A failed resync remains armed and blocks unrelated deferred output until it can be retried.
+    // A failed resync blocks every incremental that could depend on its missing objects.
     if (session.accountResyncArmed) {
         return false;
+    }
+    WorldRewardRequest reward{};
+    if (session.queuez.family4Active && bap::current_world_reward(reward)) {
+        bool published = false;
+        switch (reward.kind) {
+        case WorldRewardKind::item:
+            published = consume_world_item_acquisition(
+                reward, session, scratch, response, written, touchesScratch);
+            break;
+        case WorldRewardKind::profileItem:
+            published = consume_world_profile_item_acquisition(
+                reward, session, scratch, response, written, touchesScratch);
+            break;
+        }
+        if (published) {
+            return true;
+        }
+    }
+    if (consume_seasonal_experience_presentation(
+            session, scratch, response, written, touchesScratch)) {
+        return true;
     }
     if (consume_ability_refresh(session, scratch, response, written, touchesScratch)) {
         return true;
     }
     if (!session.family4RepushArmed || session.family4RepushRoot == 0
-        || GetTickCount64() < session.family4RepushDueTick) {
+        || GetTickCount64() < session.family4RepushDueTick
+        || GetTickCount64() < session.acquisitionPresentationUntilTick) {
         return consume_banner_repush(session, scratch, response, written, touchesScratch)
                || push::activity::consume_activity_keepalive(
                    session, scratch, response, written, touchesScratch);
@@ -443,7 +498,6 @@ bool consume_deferred(Session& session,
         session.queuez = after;
     }
     session.family4RepushArmed = false;
-    report_repush("repush", framedSize);
     return true;
 }
 

@@ -120,6 +120,8 @@ enum class WriteStatus {
         static_cast<std::uint32_t>(domains.abilityBuckets.size()),
         static_cast<std::uint32_t>(domains.progressions.size()),
         static_cast<std::uint32_t>(domains.records.size()),
+        static_cast<std::uint32_t>(domains.nodes.size()),
+        static_cast<std::uint32_t>(domains.sobjects.size()),
         static_cast<std::uint32_t>(domains.scenarios.size()),
         static_cast<std::uint32_t>(domains.rosterGroups.size()),
         static_cast<std::uint32_t>(domains.spawnStems.size()),

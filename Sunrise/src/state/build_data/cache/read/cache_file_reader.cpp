@@ -14,7 +14,8 @@ namespace {
     return counts.named != 0 && counts.items != 0 && counts.collectibles != 0
            && counts.materialRequirementSets != 0 && counts.socketPlugRules != 0
            && counts.socketPlugPools != 0 && counts.inventoryBuckets != 0
-           && counts.socketEntryLists != 0 && counts.progressions != 0 && counts.scenarios != 0;
+           && counts.socketEntryLists != 0 && counts.progressions != 0 && counts.records != 0
+           && counts.nodes != 0 && counts.sobjects != 0 && counts.scenarios != 0;
 }
 
 /** @return True when every count fits the output storage. */
@@ -32,7 +33,8 @@ namespace {
            && counts.socketEntryTables <= output.socketEntryTables.size()
            && counts.abilityBuckets <= output.abilityBuckets.size()
            && counts.progressions <= output.progressions.size()
-           && counts.records <= output.records.size()
+           && counts.records <= output.records.size() && counts.nodes <= output.nodes.size()
+           && counts.sobjects <= output.sobjects.size()
            && counts.scenarios <= output.scenarios.size()
            && counts.rosterGroups <= output.rosterGroups.size()
            && counts.spawnStems <= output.spawnStems.size()
@@ -62,6 +64,8 @@ namespace {
         header.abilityBucketCount,
         header.progressionCount,
         header.recordCount,
+        header.nodeCount,
+        header.sobjectCount,
         header.scenarioCount,
         header.rosterGroupCount,
         header.spawnStemCount,

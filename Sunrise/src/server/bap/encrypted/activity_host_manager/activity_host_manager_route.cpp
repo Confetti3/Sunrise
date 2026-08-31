@@ -1,4 +1,3 @@
-#include "../../../../state/activity/current_activity.h"
 #include "activity_host_manager_route.h"
 
 #include <array>
@@ -52,36 +51,6 @@ choose_copy(const request_selection::ActivityManagerSelectionResult& parsed) noe
     const bool secondaryKnown =
         ::sunrise::state::build_data::find_scenario_layout(copy_name(parsed.secondary), layout);
     return !primaryKnown && secondaryKnown ? parsed.secondary : parsed.selection;
-}
-
-/**
- * Reports the destination the client asked for.
- * Without it a wrong destination only shows up several messages later, as a wrong roster.
- * @param source Parsed selection carrying a package name.
- */
-void report_selection(const request_selection::ActivityManagerSelection& source) noexcept {
-    // Keep the bubble: a pickup later needs to know which activity it happened in, and the incident
-    // that reports it carries the bubble at a different place per incident type.
-    state::activity::set_current_bubble(source.hasArrivalBubbleHash ? source.arrivalBubbleHash
-                                                                    : state::activity::kNoBubble);
-    std::array<char, core::log::kLineCapacity> line{};
-    const int written =
-        std::snprintf(line.data(),
-                      line.size(),
-                      "ev=bap svc=6 stage=selection result=ok name=%.*s activity=%d "
-                      "from_activity=%d reason=%d bubble=0x%X spawn=0x%X",
-                      static_cast<int>(source.packageNameLength),
-                      reinterpret_cast<const char*>(source.packageName.data()),
-                      static_cast<int>(source.activityIndex),
-                      static_cast<int>(source.sourceActivityIndex),
-                      static_cast<int>(source.reason),
-                      source.hasArrivalBubbleHash ? source.arrivalBubbleHash : 0U,
-                      source.hasSpawnSetHash ? source.spawnSetHash : 0U);
-    if (written > 0) {
-        core::log::write(core::log::Channel::server,
-                         core::log::Level::info,
-                         {line.data(), static_cast<std::size_t>(written)});
-    }
 }
 
 /**
@@ -139,7 +108,6 @@ prepare_allocation(const request_selection::ActivityManagerSelectionResult& pars
         }
         return state::activity::prepare_session(sessionId, allocation);
     }
-    report_selection(source);
     state::activity::destination::DestinationSelection destination{};
     destination.packageName = source.packageName;
     destination.packageNameLength = source.packageNameLength;

@@ -1,5 +1,6 @@
 #include "record_catalog.h"
 
+#include "../../record_claims/record_claims.h"
 #include "../table.h"
 
 namespace sunrise::state::build_data::records {
@@ -12,8 +13,11 @@ Table<Definition, kDefinitionCapacity> g_definitions;
 
 /** Clears every generated record definition under the catalog lock. */
 void clear() noexcept {
-    const Lock::Exclusive guard(g_lock);
-    g_definitions.clear();
+    {
+        const Lock::Exclusive guard(g_lock);
+        g_definitions.clear();
+    }
+    record_claims::invalidate_build_data_cache();
 }
 
 /** Checks that the definitions are dense and in native index order. */
@@ -34,8 +38,15 @@ bool replace(std::span<const Definition> definitions) noexcept {
     if (!valid(definitions)) {
         return false;
     }
-    const Lock::Exclusive guard(g_lock);
-    return g_definitions.replace(definitions);
+    bool replaced = false;
+    {
+        const Lock::Exclusive guard(g_lock);
+        replaced = g_definitions.replace(definitions);
+    }
+    if (replaced) {
+        record_claims::invalidate_build_data_cache();
+    }
+    return replaced;
 }
 
 /** Finds one record by the native row a claim names. */
@@ -53,22 +64,6 @@ bool find(std::uint16_t definitionIndex, Definition& definition) noexcept {
 bool snapshot(std::span<Definition> output, std::size_t& count) noexcept {
     const Lock::Shared guard(g_lock);
     return g_definitions.snapshot(output, count);
-}
-
-/** Finds the record that displays one lore row. */
-bool find_by_lore_row(std::uint16_t loreRow, Definition& definition) noexcept {
-    if (loreRow == kUnavailableLoreRow) {
-        return false;
-    }
-    const Lock::Shared guard(g_lock);
-    for (const Definition& row : g_definitions.rows()) {
-        if (row.loreRow != loreRow) {
-            continue;
-        }
-        definition = row;
-        return true;
-    }
-    return false;
 }
 
 /** @return Number of generated record definitions, read under the lock. */

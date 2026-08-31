@@ -13,12 +13,13 @@
 #include "hash_names/definition.h"
 #include "inventory/buckets/definition.h"
 #include "items/details/definition.h"
-#include "nodes/definition.h"
-#include "records/definition.h"
 #include "items/item_catalog.h"
 #include "items/socket_plugs/definition.h"
 #include "material_requirements/material_requirement_catalog.h"
+#include "nodes/definition.h"
 #include "progressions/definition.h"
+#include "records/definition.h"
+#include "records/rewards/definition.h"
 #include "scenarios/definition.h"
 #include "socket_entry_buckets/definition.h"
 #include "socket_entry_lists/definition.h"
@@ -96,22 +97,12 @@ publish_item_definitions(std::span<const items::Definition> definitions) noexcep
 [[nodiscard]] bool find_item_definition_index(std::uint16_t definitionIndex,
                                               items::Definition& definition) noexcept;
 
-/**
- * Finds one manifest-sourced reward for a claimed record, from the shipped generated table.
- *
- * This is the fallback source behind `state::account::find_record_reward`: the settings-authored
- * `record_rewards` table is the operator's override and is tried first, and this is consulted only
- * when it names nothing for the claimed record. See `state::build_data::records::rewards` for the
- * shipped table itself. A row naming an item this build never installed (vaulted, or authored in a
- * later era than this build) is skipped rather than failing the lookup.
- * @param recordHash records::Definition::definitionHash of the claimed Triumph.
- * @param itemDefinitionIndex Receives the resolved dense item index only on success.
- * @param quantity Receives the row's authored quantity only on success.
- * @return True when the shipped table holds a resolvable reward for this record.
- */
-[[nodiscard]] bool find_generated_record_reward(std::uint32_t recordHash,
-                                                std::uint16_t& itemDefinitionIndex,
-                                                std::int32_t& quantity) noexcept;
+/** Resolves every installed reward row for one record. Empty output means no usable reward. */
+[[nodiscard]] bool
+find_generated_record_rewards(std::uint32_t recordHash,
+                              std::array<records::rewards::ResolvedReward,
+                                         records::rewards::kRewardPerRecordCapacity>& rewards,
+                              std::size_t& rewardCount) noexcept;
 
 [[nodiscard]] bool collectible_definitions_ready() noexcept;
 
@@ -551,24 +542,6 @@ publish_vendor_catalog(std::span<const vendors::IndexEntry> index,
                        std::span<const vendors::Definition> definitions,
                        std::span<const vendors::SaleRow> saleRows,
                        std::span<const vendors::InstalledRow> installedRows) noexcept;
-
-/**
- * Finds one vendor's index row, which carries the index the wire uses.
- * @param definitionHash Vendor definition hash.
- * @param entry Receives the matching row.
- * @return True when the catalog is ready and exactly one row carries the hash.
- */
-[[nodiscard]] bool find_vendor_index(std::uint32_t definitionHash,
-                                     vendors::IndexEntry& entry) noexcept;
-
-/**
- * Finds one extracted vendor definition.
- * @param definitionHash Vendor definition hash.
- * @param definition Receives the matching definition.
- * @return True when the catalog is ready and holds that definition.
- */
-[[nodiscard]] bool find_vendor_definition(std::uint32_t definitionHash,
-                                          vendors::Definition& definition) noexcept;
 
 /** @return True only when every domain is ready and any needed cache write succeeds. */
 [[nodiscard]] bool persist() noexcept;

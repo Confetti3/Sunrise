@@ -1,6 +1,3 @@
-#include <atomic>
-
-#include "../../../state/build_data/nodes/node_persistence.h"
 #include <Windows.h>
 
 #include "../../../core/ui/busy/busy.h"
@@ -16,26 +13,8 @@ namespace {
 
 SRWLOCK g_refreshLock{SRWLOCK_INIT};
 
-/**
- * @return True when every persistent mapping domain is fully published.
- * The destination layouts and spawn sets belong here even though they are not equipment mappings.
- * This is the only caller of the package pass, so a domain left out of this test stops being
- * extracted once the others finish, and the cache can then never be written.
- */
 [[nodiscard]] bool ready() noexcept {
-    return state::build_data::named_catalog_ready() && state::build_data::item_definitions_ready()
-           && state::build_data::collectible_definitions_ready()
-           && state::build_data::material_requirement_sets_ready()
-           && state::build_data::configured_item_details_ready()
-           && state::build_data::socket_plug_rules_ready()
-           && state::build_data::inventory_bucket_descriptors_ready()
-           && state::build_data::socket_entry_lists_ready()
-           && state::build_data::ability_buckets_ready()
-           && state::build_data::socket_entry_buckets_ready()
-           && state::build_data::progression_definitions_ready()
-           && state::build_data::scenario_layouts_ready() && state::build_data::spawn_sets_ready()
-           && state::build_data::hash_names_ready()
-           && state::build_data::investment_constants_ready();
+    return state::build_data::named_catalog_ready() && items::packages::ready();
 }
 
 } // namespace
@@ -47,16 +26,6 @@ bool requires_package_sweep() noexcept {
 
 /** Publishes every installed equipment mapping domain. */
 bool refresh() noexcept {
-    // The node table is kept in its own file and is not part of the build data cache. Publishing it
-    // here, before the gate below decides whether the package pass runs, is what lets a warm start
-    // count categories: the gate itself is left exactly as it was, so no pass can be made to repeat.
-    // Latches on success, not on the attempt: an early call is refused rather than failed, so
-    // giving up after one try is what left the table empty.
-    static std::atomic<bool> nodesPublished{false};
-    if (!nodesPublished.load(std::memory_order_relaxed)
-        && state::build_data::nodes::load_and_publish()) {
-        nodesPublished.store(true, std::memory_order_relaxed);
-    }
     if (ready()) {
         // The same lock as the extraction path. A cache write holds its own lock across file
         // calls, so a held thread stopped inside one would deadlock the freeze below.

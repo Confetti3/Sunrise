@@ -11,10 +11,6 @@ constexpr std::uint64_t kMaximumCharacterLevel = (std::numeric_limits<std::uint8
 /** A destination definition hash is one unsigned 32-bit field. */
 constexpr std::uint64_t kMaximumDestinationHash = (std::numeric_limits<std::uint32_t>::max)();
 
-} // namespace
-
-namespace {
-
 /** Sets the tier bit one rarity name stands for. */
 [[nodiscard]] bool dismantle_tier_bit(std::string_view name, std::uint8_t& mask) noexcept {
     using Tier = state::build_data::items::Tier;
@@ -42,8 +38,7 @@ namespace {
 
 } // namespace
 
-/** Parses the materials credited by ordinary gear dismantles, with optional rarity/class filters.
- */
+/** Parses materials credited by gear dismantles, with optional rarity and class filters. */
 bool Parser::dismantle_rewards(state::AccountState& output) noexcept {
     output.dismantleRewards = {};
     output.dismantleRewardCount = 0;
@@ -147,10 +142,7 @@ bool Parser::dismantle_rewards(state::AccountState& output) noexcept {
     }
 }
 
-/**
- * Parses the record-claim reward table: one item, optionally with a quantity, per record index.
- * Empty by default, so behavior is unchanged unless the operator populates it.
- */
+/** Parses one optional item grant per record index. */
 bool Parser::record_rewards(state::AccountState& output) noexcept {
     output.recordRewards = {};
     output.recordRewardCount = 0;
@@ -189,12 +181,8 @@ bool Parser::record_rewards(state::AccountState& output) noexcept {
                 reward.itemIndex = static_cast<std::uint16_t>(value);
                 hasItemIndex = true;
             } else if (key == "quantity") {
-                // Halved so a grant added to a stack already at its maximum cannot overflow
-                // before maxStackSize is checked. The real ceiling is the item's own stack size,
-                // enforced where the grant is applied; this only keeps a mis-authored table from
-                // reaching signed overflow.
                 if (hasQuantity || !unsigned_integer(value) || value == 0
-                    || value > (std::numeric_limits<std::int32_t>::max)() / 2) {
+                    || value > (std::numeric_limits<std::int32_t>::max)()) {
                     return false;
                 }
                 reward.quantity = static_cast<std::int32_t>(value);
@@ -209,11 +197,11 @@ bool Parser::record_rewards(state::AccountState& output) noexcept {
                 return false;
             }
         }
-        if (!hasQuantity) {
-            reward.quantity = 1;
-        }
         if (!hasRecordIndex || !hasItemIndex) {
             return false;
+        }
+        if (!hasQuantity) {
+            reward.quantity = 1;
         }
         for (std::size_t index = 0; index < output.recordRewardCount; ++index) {
             if (state::same_record_reward_key(output.recordRewards[index], reward)) {

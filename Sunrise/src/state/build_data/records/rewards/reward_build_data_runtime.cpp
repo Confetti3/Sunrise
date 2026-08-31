@@ -1,47 +1,46 @@
+#include <limits>
+
 #include "../../runtime.h"
 #include "reward_catalog.h"
 
 namespace sunrise::state::build_data {
 namespace {
 
-/** Carries one resolution attempt through the raw RowVisitor callback. */
 struct ResolveContext {
-    std::uint16_t itemDefinitionIndex{};
-    std::int32_t quantity{};
-    bool resolved{false};
+    std::array<records::rewards::ResolvedReward, records::rewards::kRewardPerRecordCapacity>*
+        rewards{};
+    std::size_t count{};
+    bool valid{true};
 };
 
-/** Accepts the first visited row whose item hash resolves in this build's item table. */
-bool resolve_first_installed(void* context, const records::rewards::RewardRow& row) noexcept {
+bool resolve_installed(void* context, const records::rewards::RewardRow& row) noexcept {
     auto& resolution = *static_cast<ResolveContext*>(context);
     items::Definition item{};
     if (!find_item_definition_hash(row.itemHash, item)) {
-        // Vaulted or later-era item this build never installed. Keep looking rather than failing
-        // the whole record: the aggregate count of these is computed once when the table loads.
         return true;
     }
-    resolution.itemDefinitionIndex = item.definitionIndex;
-    resolution.quantity = static_cast<std::int32_t>(row.quantity);
-    resolution.resolved = true;
-    return false;
+    if (row.quantity == 0
+        || row.quantity > static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())
+        || resolution.count >= resolution.rewards->size()) {
+        resolution.valid = false;
+        return false;
+    }
+    (*resolution.rewards)[resolution.count++] = {item.definitionIndex,
+                                                 static_cast<std::int32_t>(row.quantity)};
+    return true;
 }
 
 } // namespace
 
-/** Finds one manifest-sourced reward for a claimed record, from the shipped generated table. */
-bool find_generated_record_reward(std::uint32_t recordHash,
-                                  std::uint16_t& itemDefinitionIndex,
-                                  std::int32_t& quantity) noexcept {
-    itemDefinitionIndex = 0;
-    quantity = 0;
-    ResolveContext resolution;
-    records::rewards::visit_for_record(recordHash, resolve_first_installed, &resolution);
-    if (!resolution.resolved) {
-        return false;
-    }
-    itemDefinitionIndex = resolution.itemDefinitionIndex;
-    quantity = resolution.quantity;
-    return true;
+bool find_generated_record_rewards(std::uint32_t recordHash,
+                                   std::array<records::rewards::ResolvedReward,
+                                              records::rewards::kRewardPerRecordCapacity>& rewards,
+                                   std::size_t& rewardCount) noexcept {
+    rewards = {};
+    ResolveContext resolution{&rewards};
+    records::rewards::visit_for_record(recordHash, resolve_installed, &resolution);
+    rewardCount = resolution.count;
+    return resolution.valid;
 }
 
 } // namespace sunrise::state::build_data

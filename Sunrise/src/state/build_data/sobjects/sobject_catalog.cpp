@@ -36,6 +36,12 @@ bool replace(std::span<const Definition> definitions) noexcept {
     return g_definitions.replace(definitions);
 }
 
+/** Copies every row in incident-target order. */
+bool snapshot(std::span<Definition> output, std::size_t& count) noexcept {
+    const Lock::Shared guard(g_lock);
+    return g_definitions.snapshot(output, count);
+}
+
 /** Finds one row by the target index an incident carries. */
 bool find(std::uint16_t targetIndex, Definition& definition) noexcept {
     const Lock::Shared guard(g_lock);

@@ -7,79 +7,39 @@
 
 namespace sunrise::state::build_data::nodes {
 
-/** Clears every generated node definition. */
+/** Clears all generated nodes. */
 void clear() noexcept;
 
-/**
- * Checks that the definitions are dense and in native index order.
- * @param definitions Candidate rows.
- * @return True when the rows fit storage, index n sits at position n, and no child count overflows.
- */
+/** Checks capacity, native row order, and child bounds. */
 [[nodiscard]] bool valid(std::span<const Definition> definitions) noexcept;
 
-/**
- * Replaces the generated node definitions in one step.
- * @param definitions Complete dense rows in native node order.
- * @return True when the rows pass the checks and fit fixed State storage.
- */
+/** Replaces all nodes atomically after validation. */
 [[nodiscard]] bool replace(std::span<const Definition> definitions) noexcept;
 
-/**
- * Runs one callable over every node that drives a value slot.
- * Held under the shared lock, so the callable must not re-enter this domain.
- * @param visit Receives each node owning at least one record and an addressable value slot.
- */
-void for_each_driving(void* context,
-                      void (*visit)(void* context, const Definition& definition)) noexcept;
-
-/**
- * Copies every row in native node order.
- * @param output Caller-owned fixed row storage.
- * @param count Receives the copied row count, or zero when output is too small.
- * @return True when output can hold every row.
- */
+/** Copies all nodes in native order. */
 [[nodiscard]] bool snapshot(std::span<Definition> output, std::size_t& count) noexcept;
 
 /** @return Number of generated node definitions, read under the lock. */
 [[nodiscard]] std::size_t count() noexcept;
 
-/**
- * Sets the visibility gate of every lore book category over one account flag bank.
- * @param accountFlags Bank already filled from the authored policy.
- * @return Number of gates set.
- */
+/** Sets account-scoped lore visibility flags. */
 std::size_t apply_visibility(std::span<std::uint8_t> accountFlags) noexcept;
 
 /**
  * Calls back for every node, under the shared lock.
  *
- * Copying the table out costs a hundred and fifty kilobytes a call, and both callers wanted only a
- * few fields of a few rows. The callback must not take the catalog lock again.
+ * The callback runs under the catalog's shared lock and must not re-enter it.
  * @param context Passed through untouched.
  * @param visit Called once per node in native order.
  */
 void for_each(void* context, void (*visit)(void*, const Definition&) noexcept) noexcept;
 
-/**
- * Sets the character scoped visibility gates of the lore book categories.
- * @param characterFlags Character bank already filled from the authored policy.
- * @return Number of gates set.
- */
+/** Sets character-scoped lore visibility flags. */
 std::size_t apply_character_visibility(std::span<std::byte> characterFlags) noexcept;
 
 /**
- * Sets the value-gate of every lore book category that has no flag gate at all.
- *
- * Fifteen books are satisfied by apply_visibility over a flag. Eighteen more have no flag gate:
- * their expression instead reads a value slot and tests it against zero, and nothing else in this
- * build ever writes that slot, so they stay redacted forever without this. Call after every other
- * pass that can touch the value bank -- writing a bar count zeroes the same slot on a mis-sourced
- * table entry, and once that gate is zero the book stays hidden for the rest of the image.
- * @param objectiveValues Bank already filled by the authored policy and every value-writing pass.
- * @param revealAll Retained for configuration compatibility; value-gated books are always opened.
- * @return Number of gates set.
+ * Opens value-gated lore categories. Call after progress writers because some gates share bars.
  */
-std::size_t apply_category_gates(std::span<std::int32_t> objectiveValues,
-                                 bool revealAll) noexcept;
+std::size_t apply_category_gates(std::span<std::int32_t> objectiveValues) noexcept;
 
 } // namespace sunrise::state::build_data::nodes

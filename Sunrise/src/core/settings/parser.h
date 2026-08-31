@@ -161,7 +161,7 @@ private:
     [[nodiscard]] bool profile_items(state::AccountState& output) noexcept;
     /** Parses the server-authored, definition-driven ordinary-gear dismantle payout. */
     [[nodiscard]] bool dismantle_rewards(state::AccountState& output) noexcept;
-    /** Parses the server-authored record-claim reward table, keyed by record index. */
+    /** Parses Triumph reward overrides keyed by record index. */
     [[nodiscard]] bool record_rewards(state::AccountState& output) noexcept;
     /**
      * Parses one authored character identity.

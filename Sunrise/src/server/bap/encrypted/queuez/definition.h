@@ -25,7 +25,14 @@ inline constexpr std::int32_t kInitialFamilyVersion = 0;
 inline constexpr std::size_t kResidentCapacity =
     2 + state::kCharacterCapacity * middleware::datagen::family4::loadout::kItemCapacity
     + state::account::inventory::kProfileActionSourceCapacity;
-/** Resident zero is the account object. The character object is found by its definition id. */
+/** Maximum inventory-row identities retained while an acquisition feed is visible. */
+inline constexpr std::size_t kAcquisitionPresentationRowCapacity = 16;
+
+/** One item identity pinned to the inventory row referenced by the active acquisition feed. */
+struct AcquisitionPresentationRow {
+    std::uint64_t instanceSoid{};
+    std::uint16_t inventoryRow{};
+};
 
 /** When the roster is published after a change, as measured in the character-select flow. */
 enum class Family3Phase : std::uint8_t {
@@ -45,6 +52,7 @@ struct SessionState {
     std::uint64_t family4RootSoid{};
     /** Root whose Family-3 roster store has accepted its full snapshot. */
     std::uint64_t family3RootSoid{};
+    /** Resident zero is the account; the character is found by definition id. */
     std::array<ResidentObject, kResidentCapacity> family4Residents{};
     /** Character the resident family-zero pair names. Only a change earns an incremental. */
     std::uint64_t family0Character{};
@@ -165,6 +173,17 @@ struct ProfileItemAcquisition {
     bool appendedResident{};
 };
 
+/** One Family-4 increment for every item row and the accompanying record claim. */
+struct RecordRewardGrant {
+    SessionState after{};
+    std::uint32_t accountDefinitionId{};
+    std::uint32_t characterDefinitionId{};
+    std::uint32_t itemInstanceDefinitionId{};
+    std::uint64_t accountSoid{};
+    std::uint64_t characterSoid{};
+    std::size_t appendedResidentCount{};
+};
+
 /** Validated item-dismantle after-image for one character upsert and one instance release. */
 struct ItemDismantle {
     SessionState after{};
@@ -196,6 +215,11 @@ struct StagedPublication {
     std::uint64_t bannerRepushRoot{};
     /** A subclass selection just staged and owes a delayed ability-icon refresh. */
     bool armsAbilityRefresh{};
+    /** Complete row-identity overlay to retain after this equipment transaction commits. */
+    std::array<AcquisitionPresentationRow, kAcquisitionPresentationRowCapacity>
+        acquisitionPresentationRows{};
+    std::uint8_t acquisitionPresentationRowCount{};
+    bool updatesAcquisitionPresentationRows{};
 };
 
 } // namespace sunrise::server::bap::encrypted::queuez

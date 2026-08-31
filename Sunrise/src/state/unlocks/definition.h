@@ -39,8 +39,8 @@ inline constexpr std::uint8_t kFlagSet = 2;
  * The flag is a 2-bit field and encodes redeemed state only: all four values were measured (0 and
  * 1 show nothing, 2 -- kFlagSet -- shows claimed, 3 shows nothing) and none of them means
  * claimable. Claimable is carried by the objective bank instead: a record reads claimable when its
- * objective value equals its completionValue while this flag stays clear. See
- * record_claims::apply_claimable_objectives.
+ * objective value equals its completionValue while this flag stays clear. The record-claim
+ * account projection writes that objective state.
  */
 inline constexpr std::uint8_t kFlagClear = 0;
 
@@ -59,8 +59,6 @@ struct Table {
     ProgressionBank accountProgressions{};
     /** Lanes published into the selected-character object's progression bank. */
     ProgressionBank characterProgressions{};
-    /** Legacy configuration field retained for parser compatibility; value gates always publish. */
-    bool revealAllLoreBooks{true};
 };
 
 } // namespace sunrise::state::unlocks

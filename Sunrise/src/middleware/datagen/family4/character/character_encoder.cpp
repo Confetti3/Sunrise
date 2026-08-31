@@ -1,8 +1,3 @@
-#include "../../../../state/record_claims/record_claims.h"
-#include "../../../../state/build_data/nodes/node_catalog.h"
-#include <atomic>
-
-#include "../../../../state/build_data/nodes/node_persistence.h"
 #include "character_encoder.h"
 
 #include <algorithm>
@@ -12,11 +7,12 @@
 #include <limits>
 #include <optional>
 
+#include "../../../../state/build_data/nodes/node_catalog.h"
 #include "../../../../state/build_data/runtime.h"
+#include "../../../../state/record_claims/record_claims.h"
 #include "../../../../state/unlocks/unlocks_runtime.h"
 #include "../instance/layout.h"
 #include "../progression/progression_bank_keys.h"
-#include "abi.h"
 #include "equipment_summary_builder.h"
 #include "layout.h"
 
@@ -34,7 +30,7 @@ constexpr std::uint8_t kNativeFalse = 0;
 /** Stackable quest items needed by the collectible interactions currently supported. */
 struct CollectibleQuest {
     std::uint32_t definitionHash{};
-    /** Lore completion flag which consumes this quest, or zero for a permanent test item. */
+    /** Lore completion flag which consumes this quest; zero keeps the prerequisite authored. */
     std::uint16_t completionFlag{};
 };
 constexpr std::array<CollectibleQuest, 4> kCollectibleQuests{{
@@ -44,11 +40,7 @@ constexpr std::array<CollectibleQuest, 4> kCollectibleQuests{{
     {0xC3535D63U, 10769U}, // A Loyal Friend -> Vell Tarlowe's Ghost
 }};
 
-/**
- * Validates the authored fields consumed by the selected-character encoder.
- * @param state Candidate character identity and policy state.
- * @return True when every encoded scalar fits its stable State domain.
- */
+/** Validates the authored fields consumed by the character encoder. */
 [[nodiscard]] bool valid(const state::CharacterState& state) noexcept {
     return state.soid != 0 && state.race <= state::CharacterRace::exo
            && state.gender <= state::CharacterGender::female
@@ -58,16 +50,58 @@ constexpr std::array<CollectibleQuest, 4> kCollectibleQuests{{
 
 /** One new-item flag byte covers 8 consecutive inventory rows. */
 constexpr std::size_t kBitsPerFlagByte = 8;
-/**
- * The watermark an occupied inventory row carries; an empty row keeps 0.
- * This is the character object's own per-row field, not the item instance's roll progress, so it
- * does not share that constant.
- */
+/** Character-object watermark for an occupied inventory row. */
 constexpr std::int32_t kOccupiedRowWatermark = 1;
 
+[[nodiscard]] bool place_character_stacks(const state::CharacterState& state,
+                                          layout::Object& object) noexcept {
+    if (!state::account::inventory::valid(state.stacks)) {
+        return false;
+    }
+    for (std::size_t index = 0; index < state.stacks.count; ++index) {
+        const auto& stack = state.stacks.values[index];
+        state::build_data::items::Definition item{};
+        state::build_data::items::details::Definition detail{};
+        state::build_data::inventory::buckets::Descriptor bucket{};
+        if (stack.quantity <= 0 || stack.mutationSerial < 0
+            || static_cast<std::uint32_t>(stack.mutationSerial) >= state.nextInventorySerial
+            || !state::build_data::find_item_definition_hash(stack.definitionHash, item)
+            || !state::build_data::find_configured_item_detail(item.definitionIndex, detail)
+            || detail.definitionIndex != item.definitionIndex
+            || detail.definitionHash != item.definitionHash || detail.bucketId != item.bucketId
+            || detail.instancedDefinitionState
+                   != state::build_data::items::details::InstancedDefinitionState::stackable
+            || detail.equipmentSlot.has_value() || stack.quantity > detail.maxStackSize
+            || !state::build_data::find_inventory_bucket_descriptor(item.bucketId, bucket)
+            || bucket.arraySelector
+                   != state::build_data::inventory::buckets::ArraySelector::character
+            || bucket.slotCount == 0 || bucket.firstSlot >= object.inventoryItems.size()
+            || bucket.slotCount > object.inventoryItems.size() - bucket.firstSlot) {
+            return false;
+        }
+        const std::size_t end = static_cast<std::size_t>(bucket.firstSlot) + bucket.slotCount;
+        std::size_t rowIndex = bucket.firstSlot;
+        while (rowIndex < end
+               && object.inventoryItems[rowIndex].definitionIndex != kEmptyDefinitionIndex) {
+            ++rowIndex;
+        }
+        if (rowIndex == end) {
+            return false;
+        }
+        auto& row = object.inventoryItems[rowIndex];
+        row.definitionIndex = item.definitionIndex;
+        row.quantity = stack.quantity;
+        row.mutationSerial = stack.mutationSerial;
+        object.newItemFlags[rowIndex / kBitsPerFlagByte] |= std::byte{1U}
+                                                            << (rowIndex % kBitsPerFlagByte);
+        object.instanceProgressWatermarks[rowIndex] = kOccupiedRowWatermark;
+    }
+    return true;
+}
+
 /**
- * Publishes collectible prerequisites in their installed character-inventory quest bucket.
- * Stackable quest rows have no instance SOID and therefore need no Family-4 item residents.
+ * Places collectible prerequisites in the character quest bucket. These stackable rows need no
+ * item-instance resident.
  */
 [[nodiscard]] bool place_collectible_quest_items(layout::Object& object) noexcept {
     std::optional<std::uint8_t> questBucketId;
@@ -114,19 +148,15 @@ constexpr std::int32_t kOccupiedRowWatermark = 1;
         inventory::layout::Entry& row = object.inventoryItems[nextRow];
         row.definitionIndex = item.definitionIndex;
         row.quantity = 1;
-        object.newItemFlags[nextRow / kBitsPerFlagByte] |=
-            std::byte{1U} << (nextRow % kBitsPerFlagByte);
+        object.newItemFlags[nextRow / kBitsPerFlagByte] |= std::byte{1U}
+                                                           << (nextRow % kBitsPerFlagByte);
         object.instanceProgressWatermarks[nextRow] = kOccupiedRowWatermark;
         ++nextRow;
     }
     return true;
 }
 
-/**
- * Validates every inventory and equipment field consumed by the character object.
- * @param resolvedLoadout Candidate row-sorted installed mapping.
- * @return True when rows, slots, SOIDs, indices, quantities, and serials are canonical.
- */
+/** Validates the row-sorted loadout consumed by the character object. */
 [[nodiscard]] bool valid(const loadout::ResolvedLoadout& resolvedLoadout) noexcept {
     if (resolvedLoadout.itemCount > resolvedLoadout.items.size()
         || resolvedLoadout.nextInventorySerial < resolvedLoadout.itemCount
@@ -135,14 +165,12 @@ constexpr std::int32_t kOccupiedRowWatermark = 1;
         return false;
     }
 
-    std::array<bool, layout::kInventoryCapacity> occupiedRows{};
     std::array<bool, layout::kEquipmentCapacity> occupiedEquipmentSlots{};
     std::array<std::uint64_t, loadout::kItemCapacity> instanceSoids{};
     for (std::size_t index = 0; index < resolvedLoadout.itemCount; ++index) {
         const loadout::ResolvedItem& item = resolvedLoadout.items[index];
         const instance::ResolvedInstance& itemInstance = item.instance;
-        const auto priorSoidsEnd = instanceSoids.cbegin() + static_cast<std::ptrdiff_t>(index);
-        if (item.inventoryRow >= occupiedRows.size()
+        if (item.inventoryRow >= layout::kInventoryCapacity
             || item.equipmentSlot >= occupiedEquipmentSlots.size() || item.quantity <= 0
             || itemInstance.instanceSoid == 0 || itemInstance.bounds.itemDefinitionCount == 0
             || itemInstance.bounds.itemDefinitionCount > instance::layout::kDefinitionIndexCapacity
@@ -151,28 +179,21 @@ constexpr std::int32_t kOccupiedRowWatermark = 1;
             || item.mutationSerial < 0
             || static_cast<std::uint32_t>(item.mutationSerial)
                    >= resolvedLoadout.nextInventorySerial
-            || occupiedRows[item.inventoryRow]
             || (item.equipped && occupiedEquipmentSlots[item.equipmentSlot])
-            || std::find(instanceSoids.cbegin(), priorSoidsEnd, itemInstance.instanceSoid)
-                   != priorSoidsEnd
             || (index != 0 && resolvedLoadout.items[index - 1].inventoryRow >= item.inventoryRow)) {
             return false;
         }
-        occupiedRows[item.inventoryRow] = true;
         if (item.equipped) {
             occupiedEquipmentSlots[item.equipmentSlot] = true;
         }
         instanceSoids[index] = itemInstance.instanceSoid;
     }
-    return true;
+    auto end = instanceSoids.begin() + static_cast<std::ptrdiff_t>(resolvedLoadout.itemCount);
+    std::sort(instanceSoids.begin(), end);
+    return std::adjacent_find(instanceSoids.begin(), end) == end;
 }
 
-/**
- * Confirms selected-character summary rows describe exactly the resolved equipped instances.
- * @param resolvedLoadout Canonical row-sorted inventory and equipment mappings.
- * @param evaluation Complete semantic equipment-light evaluation.
- * @return True when every equipped native slot carries the same definition index once.
- */
+/** Confirms the light summary describes exactly the resolved equipped instances. */
 [[nodiscard]] bool
 summary_matches_loadout(const loadout::ResolvedLoadout& resolvedLoadout,
                         const state::equipment::light::Evaluation& evaluation) noexcept {
@@ -206,7 +227,8 @@ summary_matches_loadout(const loadout::ResolvedLoadout& resolvedLoadout,
 bool encode(const state::CharacterState& state,
             const loadout::ResolvedLoadout& resolvedLoadout,
             const state::equipment::light::Evaluation& lightEvaluation,
-            std::span<std::byte> output) noexcept {
+            std::span<std::byte> output,
+            const state::record_claims::PendingClaim* pendingClaim) noexcept {
     if (!valid(state) || !valid(resolvedLoadout)
         || !summary_matches_loadout(resolvedLoadout, lightEvaluation)
         || output.size() < layout::kObjectSize) {
@@ -233,17 +255,6 @@ bool encode(const state::CharacterState& state,
             index < unlocks.characterObjectFlags.size() ? unlocks.characterObjectFlags[index]
                                                         : std::uint8_t{});
     }
-    // A character image is only built once a character is selected, which is later than any
-    // account or content path. The node table is published from here on a warm start, where the
-    // package pass is skipped and every earlier attempt is refused. Latches on success.
-    {
-        static std::atomic<bool> nodesPublished{false};
-        if (!nodesPublished.load(std::memory_order_relaxed)
-            && state::build_data::nodes::load_and_publish()) {
-            nodesPublished.store(true, std::memory_order_relaxed);
-        }
-    }
-
     // The authored bank is laid down first. It used to be copied in after the node pass below,
     // which overwrote every element the pass had just written -- so the character-scoped node
     // progress never reached the client at all.
@@ -253,7 +264,7 @@ bool encode(const state::CharacterState& state,
     }
 
     // One lore book counts in the character bank rather than the account one.
-    (void)state::record_claims::apply_character_node_progress(object.objectiveValues);
+    (void)state::record_claims::apply_character_node_progress(object.objectiveValues, pendingClaim);
 
     // One lore book's gate is character scoped rather than account scoped.
     (void)state::build_data::nodes::apply_character_visibility(object.acquiredFlags);
@@ -282,7 +293,7 @@ bool encode(const state::CharacterState& state,
             object.equippedInstanceSoids[item.equipmentSlot] = item.instance.instanceSoid;
         }
     }
-    if (!place_collectible_quest_items(object)) {
+    if (!place_character_stacks(state, object) || !place_collectible_quest_items(object)) {
         return false;
     }
 

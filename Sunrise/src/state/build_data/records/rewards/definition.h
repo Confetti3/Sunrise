@@ -10,6 +10,14 @@ namespace sunrise::state::build_data::records::rewards {
  * this is ample headroom rather than a measured ceiling.
  */
 inline constexpr std::size_t kRewardCapacity = 4096;
+/** Widest reward bundle in the generated table. */
+inline constexpr std::size_t kRewardPerRecordCapacity = 3;
+
+/** Installed item row resolved from one generated reward. */
+struct ResolvedReward {
+    std::uint16_t itemDefinitionIndex{};
+    std::int32_t quantity{};
+};
 
 /**
  * One manifest-sourced record reward: claiming the named Triumph grants the named item.

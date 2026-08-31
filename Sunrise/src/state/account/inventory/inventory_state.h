@@ -60,12 +60,10 @@ inline constexpr std::uint64_t kFirstProfileItemInstanceSoid = 0x500000000000000
  * Confirmed against the installed build by three observed lock and unlock transitions.
  */
 inline constexpr std::uint32_t kLockedItemFlag = 0x1;
-/**
- * The 16 supported character equipment buckets reserve 151 native rows in this build. One row
-
- * * per semantic slot can be equipped, leaving at most 135 simultaneously unequipped instances.
- */
+/** 151 native rows minus the 16 equipped rows leaves 135 unequipped item rows. */
 inline constexpr std::size_t kCharacterItemCapacity = 135;
+/** Runtime-owned non-instanced character stacks. */
+inline constexpr std::size_t kCharacterStackCapacity = 32;
 
 /** One authored account-wide item, placed by the inventory bucket its definition names. */
 struct ProfileItem {
@@ -110,6 +108,17 @@ struct CharacterItems {
     std::size_t count{};
 };
 
+struct CharacterStack {
+    std::uint32_t definitionHash{};
+    std::int32_t quantity{};
+    std::int32_t mutationSerial{};
+};
+
+struct CharacterStacks {
+    std::array<CharacterStack, kCharacterStackCapacity> values{};
+    std::size_t count{};
+};
+
 /** One optional authored item for every semantic equipment slot. */
 struct Equipment {
     std::array<std::optional<Item>, kEquipmentSlotCount> slots{};
@@ -142,5 +151,7 @@ struct Equipment {
 
 /** Checks the used prefix and empty tail of one character's unequipped item array. */
 [[nodiscard]] bool valid(const CharacterItems& items) noexcept;
+
+[[nodiscard]] bool valid(const CharacterStacks& items) noexcept;
 
 } // namespace sunrise::state::account::inventory

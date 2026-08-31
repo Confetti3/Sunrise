@@ -86,6 +86,8 @@ void clear(records::MutableDomains output) noexcept {
     std::fill(output.abilityBuckets.begin(), output.abilityBuckets.end(), abilities::Definition{});
     std::fill(output.progressions.begin(), output.progressions.end(), progressions::Definition{});
     std::fill(output.records.begin(), output.records.end(), build_data::records::Definition{});
+    std::fill(output.nodes.begin(), output.nodes.end(), nodes::Definition{});
+    std::fill(output.sobjects.begin(), output.sobjects.end(), sobjects::Definition{});
     std::fill(output.scenarios.begin(), output.scenarios.end(), scenarios::Definition{});
     std::fill(output.rosterGroups.begin(), output.rosterGroups.end(), scenarios::RosterGroup{});
     std::fill(output.spawnStems.begin(), output.spawnStems.end(), spawn_sets::Stem{});
@@ -119,6 +121,8 @@ bool expected_size(const records::DomainCounts& counts, std::uint64_t& size) noe
            && add_records(counts.abilityBuckets, sizeof(records::AbilityBucketRecord), size)
            && add_records(counts.progressions, sizeof(records::ProgressionRecord), size)
            && add_records(counts.records, sizeof(records::RecordDefinitionRecord), size)
+           && add_records(counts.nodes, sizeof(records::NodeDefinitionRecord), size)
+           && add_records(counts.sobjects, sizeof(records::SObjectDefinitionRecord), size)
            && add_records(counts.scenarios, sizeof(records::ScenarioRecord), size)
            && add_records(counts.rosterGroups, sizeof(records::RosterGroupRecord), size)
            && add_records(counts.spawnStems, sizeof(records::SpawnStemRecord), size)
@@ -181,6 +185,12 @@ bool read_payload(HANDLE file,
             && read_domain<records::RecordDefinitionRecord>(
                 file, output.records.first(counts.records), checksum);
     valid = valid
+            && read_domain<records::NodeDefinitionRecord>(
+                file, output.nodes.first(counts.nodes), checksum);
+    valid = valid
+            && read_domain<records::SObjectDefinitionRecord>(
+                file, output.sobjects.first(counts.sobjects), checksum);
+    valid = valid
             && read_domain<records::ScenarioRecord>(
                 file, output.scenarios.first(counts.scenarios), checksum);
     valid = valid
@@ -229,6 +239,8 @@ bool read_payload(HANDLE file,
         output.abilityBuckets.first(counts.abilityBuckets),
         output.progressions.first(counts.progressions),
         output.records.first(counts.records),
+        output.nodes.first(counts.nodes),
+        output.sobjects.first(counts.sobjects),
         output.scenarios.first(counts.scenarios),
         output.rosterGroups.first(counts.rosterGroups),
         output.spawnStems.first(counts.spawnStems),

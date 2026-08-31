@@ -1,11 +1,8 @@
-#include <array>
-#include <cstdio>
-#include "../../../../core/logging/log.h"
-#include "../../../../state/build_data/sobjects/sobject_catalog.h"
 #include <cstring>
 #include <limits>
 
 #include "../../../../state/build_data/runtime.h"
+#include "../../../../state/build_data/sobjects/sobject_catalog.h"
 #include "internal.h"
 
 namespace sunrise::client::content::items::packages {
@@ -22,16 +19,13 @@ bool build_collectibles(const reader::Source& source,
     // this table its target is a bare number.
     if (state::build_data::sobjects::count() == 0) {
         namespace sobjects = state::build_data::sobjects;
-        // Geometry is documented and asserted rather than divided out: count at +112, rows at +128,
-        // forty bytes each, name hash at +0, lane 4 at +16, selector group at +32, ordinal at +34,
-        // type at +36.
+        // Count at +112; 40-byte rows at +128 hold the name hash, packed lane, and type.
         constexpr std::size_t kCountOffset = 112;
         constexpr std::size_t kRowBase = 128;
         constexpr std::size_t kRowStride = 40;
         for (const std::uint32_t tag : {0x81327CD4U, 0x80B9E5BFU}) {
             std::vector<std::byte> blob{};
-            if (!reader::read_tag(source, storage.scratch, tag, blob)
-                || blob.size() < kRowBase) {
+            if (!reader::read_tag(source, storage.scratch, tag, blob) || blob.size() < kRowBase) {
                 continue;
             }
             std::uint64_t rowCount = 0;
@@ -43,13 +37,9 @@ bool build_collectibles(const reader::Source& source,
             std::vector<sobjects::Definition> rows(static_cast<std::size_t>(rowCount));
             for (std::size_t row = 0; row < rows.size(); ++row) {
                 const std::size_t at = kRowBase + row * kRowStride;
-                std::memcpy(rows[row].lanes.data(), blob.data() + at,
-                            rows[row].lanes.size() * sizeof(std::uint32_t));
-                std::memcpy(&rows[row].nameHash, blob.data() + at, sizeof(std::uint32_t));
-                std::memcpy(&rows[row].lane4, blob.data() + at + 16, sizeof(std::uint32_t));
-                std::memcpy(&rows[row].selectorGroup, blob.data() + at + 32, sizeof(std::uint16_t));
-                std::memcpy(&rows[row].nodeOrdinal, blob.data() + at + 34, sizeof(std::uint16_t));
-                std::memcpy(&rows[row].typeCode, blob.data() + at + 36, sizeof(std::int32_t));
+                std::memcpy(&rows[row].nameHash, blob.data() + at, sizeof rows[row].nameHash);
+                std::memcpy(&rows[row].lane4, blob.data() + at + 16, sizeof rows[row].lane4);
+                std::memcpy(&rows[row].typeCode, blob.data() + at + 36, sizeof rows[row].typeCode);
             }
             (void)sobjects::replace(std::span<const sobjects::Definition>{rows});
             break;
@@ -131,11 +121,6 @@ bool build_collectibles(const reader::Source& source,
         output.collectibleHash = collectibleHash;
         output.collectibleIndex = static_cast<std::uint16_t>(row);
         output.itemDefinitionIndex = itemDefinitionIndex;
-        // The lore row this collectible unlocks. The record displaying the same row is the chapter
-        // it completes, so the two tables join on the row rather than on any hash. Read after the
-        // reset above, or it would be cleared.
-        std::memcpy(&output.loreRow, table.data() + at + tables::kLoreRowOffset,
-                    sizeof output.loreRow);
         if (requirementSetIndex == domain::kUnavailableMaterialRequirementSetIndex) {
             continue;
         }

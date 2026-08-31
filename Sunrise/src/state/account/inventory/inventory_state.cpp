@@ -104,4 +104,30 @@ bool valid(const CharacterItems& items) noexcept {
     return true;
 }
 
+/** Checks a dense, definition-unique character stack list. */
+bool valid(const CharacterStacks& items) noexcept {
+    if (items.count > items.values.size()) {
+        return false;
+    }
+    for (std::size_t index = 0; index < items.values.size(); ++index) {
+        const CharacterStack& item = items.values[index];
+        if (index >= items.count) {
+            if (item.definitionHash != 0 || item.quantity != 0 || item.mutationSerial != 0) {
+                return false;
+            }
+            continue;
+        }
+        if (item.definitionHash == kNoDefinitionHash || item.quantity <= 0
+            || item.mutationSerial < 0) {
+            return false;
+        }
+        for (std::size_t prior = 0; prior < index; ++prior) {
+            if (items.values[prior].definitionHash == item.definitionHash) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 } // namespace sunrise::state::account::inventory

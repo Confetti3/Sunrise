@@ -1,5 +1,4 @@
 #include <bit>
-#include <limits>
 
 #include "replicate_membership.h"
 
@@ -12,7 +11,6 @@ constexpr std::size_t kMemberKeyByteCount = 8;
 constexpr std::size_t kMemberCount = 32;
 /** Each absent member adds 3 clear presence bits. */
 constexpr std::uint8_t kAbsentMemberBitCount = 3;
-/** Member field 1 uses 10 bits with a bias of 1. */
 /**
  * Member field 1 is a skip test, not a value. The client drops the member when the stored value
  * read as unsigned is at or below 0x1FF, so the only usable wire value is the one that stores -1.
@@ -28,12 +26,7 @@ constexpr std::size_t kIdentityPresenceFieldCount = 15;
 /** The minimal nested player blob is 18 bytes, including one zero pad bit. */
 constexpr std::uint16_t kPlayerBlobByteCount = 18;
 
-/**
- * Writes one 8-element key, low byte first.
- * @param writer Fixed-buffer MSB-first writer.
- * @param key Host-order key to split into byte elements.
- * @return True when all 8 elements fit.
- */
+/** Writes one 8-byte key, low byte first. */
 [[nodiscard]] bool write_member_key(encoding::bits::Writer& writer, std::uint64_t key) noexcept {
     for (std::size_t index = 0; index < kMemberKeyByteCount; ++index) {
         if (!writer.write((key >> (index * 8U)) & 0xFFU, 8)) {
@@ -43,12 +36,7 @@ constexpr std::uint16_t kPlayerBlobByteCount = 18;
     return true;
 }
 
-/**
- * Writes the nested 18-byte player blob with matching identity values.
- * @param writer Fixed-buffer writer sitting after the 14-bit byte count.
- * @param identity Identity values repeated inside the nested player record.
- * @return True when all 144 blob bits fit.
- */
+/** Writes the nested 18-byte player blob. */
 [[nodiscard]] bool write_player_blob(encoding::bits::Writer& writer,
                                      const client_identity::ClientIdentity& identity) noexcept {
     return writer.write(1, 3) && writer.write(0, 1) && writer.write(0, 10) && writer.write(1, 1)
@@ -56,12 +44,7 @@ constexpr std::uint16_t kPlayerBlobByteCount = 18;
            && writer.write(0, 1);
 }
 
-/**
- * Writes the present fields of the nested player identity block.
- * @param writer Fixed-buffer writer sitting at identity field zero.
- * @param identity Values mirrored from the client identity update.
- * @return True when fields 3, 5 and 14 and all presence bits fit.
- */
+/** Writes fields 3, 5, and 14 of the nested player identity block. */
 [[nodiscard]] bool write_player_identity(encoding::bits::Writer& writer,
                                          const client_identity::ClientIdentity& identity) noexcept {
     for (std::size_t field = 0; field < kIdentityPresenceFieldCount; ++field) {

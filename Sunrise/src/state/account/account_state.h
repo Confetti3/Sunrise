@@ -13,7 +13,7 @@ namespace sunrise::state {
 inline constexpr std::size_t kCharacterCapacity = 3;
 /** A server-authored dismantle policy: a few rows per rarity and gear class. */
 inline constexpr std::size_t kDismantleRewardPolicyCapacity = 32;
-/** A server-authored record-reward policy: one row per rewarded Triumph. */
+/** Maximum authored Triumph reward overrides. */
 inline constexpr std::size_t kRecordRewardPolicyCapacity = 256;
 /** Native sentinel used when a character has no title equipped. */
 inline constexpr std::uint16_t kUnequippedTitleRecordIndex = 0xFFFFU;
@@ -53,25 +53,15 @@ same_dismantle_policy_key(const DismantleRewardPolicy& left,
            && left.classMask == right.classMask && left.masterwork == right.masterwork;
 }
 
-/**
- * One item granted alongside a record's completion flag when its claim lands.
- * The map source is deliberately settings-authored for now, kept pluggable behind
- * `account::find_record_reward` so a later task can source it from extracted build data instead.
- */
+/** Settings override for one Triumph claim reward. */
 struct RecordRewardPolicy {
-    /** Native record row an opcode-1801 claim names, matching records::Definition::definitionIndex.
-     */
     std::uint16_t recordIndex{};
-    /** Native item-definition row the claim grants, resolved the same way Collections resolves one.
-     */
     std::uint16_t itemIndex{};
-    /** Units granted. Ignored beyond 1 for a non-stackable (character-bucket) item. */
     std::int32_t quantity{};
 };
 
-/** @return True when both rows reward the same record. */
-[[nodiscard]] constexpr bool
-same_record_reward_key(const RecordRewardPolicy& left, const RecordRewardPolicy& right) noexcept {
+[[nodiscard]] constexpr bool same_record_reward_key(const RecordRewardPolicy& left,
+                                                    const RecordRewardPolicy& right) noexcept {
     return left.recordIndex == right.recordIndex;
 }
 
@@ -105,9 +95,6 @@ enum class CharacterClass : std::uint8_t {
 
 /** Default movement entry. Each subclass offers 3, as entries 4, 5 and 6 of its group. */
 inline constexpr std::uint8_t kDefaultMovementAbilityEntry = 4;
-/** No socket entry list declares more entries than this, so a larger value is not an entry. */
-inline constexpr std::uint8_t kMaximumMovementAbilityEntry = 63;
-
 /**
  * Socket entries of the other abilities a subclass lets the player choose. Each names one entry
  * of that ability's group. The subclass offers several and the character picks one. These
@@ -182,6 +169,8 @@ struct CharacterState {
     account::inventory::Equipment equipment;
     /** Unequipped items routed into their installed character-inventory bucket ranges. */
     account::inventory::CharacterItems inventory;
+    /** Non-instanced character materials granted at runtime. */
+    account::inventory::CharacterStacks stacks;
     /** Next row generation; equip transactions consume two values for the two moved items. */
     std::uint32_t nextInventorySerial{};
 };
@@ -192,7 +181,6 @@ struct AccountState {
     /** Economy policy comes from configuration, never from item-specific runtime constants. */
     std::array<DismantleRewardPolicy, kDismantleRewardPolicyCapacity> dismantleRewards{};
     std::size_t dismantleRewardCount{};
-    /** Server-authored record-claim reward table, empty by default. */
     std::array<RecordRewardPolicy, kRecordRewardPolicyCapacity> recordRewards{};
     std::size_t recordRewardCount{};
     /** Account-wide currencies and materials, placed by bucket rather than by authored slot. */
@@ -222,13 +210,7 @@ namespace account {
  */
 [[nodiscard]] std::uint64_t banner_character_soid(const AccountState& state) noexcept;
 
-/**
- * Finds the configured reward for one claimed record, if any.
- * @param state Account snapshot carrying the authored reward table.
- * @param recordIndex Native record row the claim named.
- * @param reward Receives the matching row only on success.
- * @return True when the table carries a row for this record.
- */
+/** Finds the settings override for a record claim. */
 [[nodiscard]] bool find_record_reward(const AccountState& state,
                                       std::uint16_t recordIndex,
                                       RecordRewardPolicy& reward) noexcept;

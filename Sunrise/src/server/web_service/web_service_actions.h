@@ -20,18 +20,12 @@ void mutate_item_state(const middleware::web_service::Message& message, Outcome&
 void dismantle_item(const middleware::web_service::Message& message, Outcome& outcome) noexcept;
 void acquire_item(const middleware::web_service::Message& message, Outcome& outcome) noexcept;
 
-/**
- * Decodes one opcode-1801 Triumphs claim request and reports the record it names.
- *
- * The request carries a record row index and nothing else. No state transition is prepared yet:
- * the state separating a claimed record from a merely completed one is not identified, since every
- * record completion flag can be set while the client still offers the claim. This is the seam that
- * transition attaches to once that state is known.
- *
- * @param message Parsed Web Service envelope.
- * @param outcome Left untouched, so the shared reply path still answers the claim with success.
- */
+/** Persists an opcode-1801 Triumph claim and prepares its optional reward. */
 void claim_record(const middleware::web_service::Message& message, Outcome& outcome) noexcept;
+
+/** Decodes and prepares one opcode-2400 active-season reward claim. */
+void claim_season_pass_reward(const middleware::web_service::Message& message,
+                              Outcome& outcome) noexcept;
 
 /** Decodes and applies one opcode-1821 earned-title selection. */
 void equip_title(const middleware::web_service::Message& message, Outcome& outcome) noexcept;
