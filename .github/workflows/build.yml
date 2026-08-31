@@ -27,6 +27,34 @@ jobs:
           /p:Platform=x64
           /verbosity:minimal
 
+      - name: Standalone contract tests
+        shell: powershell
+        run: |
+          & .\tests\run_console_core_test.ps1
+          & .\tests\run_console_safety_test.ps1
+          & .\tests\run_console_default_binding_test.ps1
+          & .\tests\run_console_publishers_test.ps1
+          & .\tests\run_player_console_test.ps1
+          & .\tests\run_ui_visibility_runtime_test.ps1
+          & .\tests\run_console_endpoint_protocol_test.ps1
+          & .\tests\run_console_endpoint_loopback_test.ps1
+          & .\tests\run_sqlite_account_snapshot_test.ps1
+          & .\tests\run_sqlite_bootstrap_snapshot_test.ps1
+          & .\tests\run_mission_compiler_test.ps1
+          & .\tests\run_compiled_mission_policy_test.ps1
+          & .\tests\run_content_step_queue_test.ps1
+          & .\tests\run_enemy_wave_queue_test.ps1
+          & .\tests\run_mission_signal_queue_test.ps1
+          & .\tests\run_activity_replicate_membership_encoder_test.ps1
+          & .\tests\run_scenario_slot_classification_test.ps1
+          & .\tests\run_entity_slot_held_mask_test.ps1
+          & .\tests\run_entity_slot_notification_frame_test.ps1
+          & .\tests\run_entity_slot_republish_test.ps1
+          & .\tests\run_entity_slot_republish_contract_test.ps1
+          & .\tests\run_glimmer_extraction_contract_test.ps1
+          & .\tests\run_mission_sensor_auth_test.ps1
+          & .\tests\run_mission_console_test.ps1
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
