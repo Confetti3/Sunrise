@@ -41,6 +41,72 @@ constexpr std::uint64_t kGlobalFamily5Soid =
 constexpr std::uint16_t kActiveSeasonValueSlot = 607;
 /** One-based season number carried by the Season of Arrivals definition. */
 constexpr std::int32_t kSeasonOfArrivalsNumber = 11;
+constexpr std::uint32_t kGlimmerHash = 3159615086U;
+constexpr std::array<std::uint32_t, 25> kArtifactModHashes{
+    715026181U,  715026182U,  715026183U,  715026176U,  715026177U,
+    3213968582U, 3213968581U, 3213968580U, 3213968579U, 3213968578U,
+    3465659109U, 3465659110U, 3465659111U, 3465659104U, 3465659105U,
+    3175764264U, 3175764267U, 3175764266U, 3175764269U, 3175764268U,
+    4186620519U, 4186620516U, 4186620517U, 4186620514U, 4186620515U};
+
+[[nodiscard]] bool is_artifact_mod(std::uint32_t hash) noexcept {
+    return std::find(kArtifactModHashes.begin(), kArtifactModHashes.end(), hash)
+           != kArtifactModHashes.end();
+}
+
+[[nodiscard]] bool same_profile_item(const account::inventory::ProfileItem& left,
+                                     const account::inventory::ProfileItem& right) noexcept {
+    return left.instanceSoid == right.instanceSoid
+           && left.definitionHash == right.definitionHash && left.quantity == right.quantity
+           && left.mutationSerial == right.mutationSerial;
+}
+
+/** Restores artifact-mod sockets to their manifest-declared initial plugs. */
+[[nodiscard]] bool clear_artifact_sockets(account::inventory::Item& item) noexcept {
+    if (item.sockets.policy != account::inventory::SocketPolicy::authored) {
+        return true;
+    }
+    build_data::items::Definition base{};
+    build_data::items::details::Definition detail{};
+    if (!build_data::find_item_definition_hash(item.definitionHash, base)
+        || !build_data::find_configured_item_detail(base.definitionIndex, detail)
+        || detail.definitionIndex != base.definitionIndex
+        || item.sockets.plugCount != detail.ordinarySocketCount) {
+        return false;
+    }
+    for (std::size_t lane = 0; lane < item.sockets.plugCount; ++lane) {
+        const auto& plug = item.sockets.plugs[lane];
+        if (!plug.has_value() || !is_artifact_mod(*plug)) {
+            continue;
+        }
+        const std::uint16_t initial = detail.initialPlugIndices[lane];
+        if (initial == build_data::items::details::kUnavailableItemIndex) {
+            item.sockets.plugs[lane].reset();
+            continue;
+        }
+        build_data::items::Definition replacement{};
+        if (!build_data::find_item_definition_index(initial, replacement)) {
+            return false;
+        }
+        item.sockets.plugs[lane] = replacement.definitionHash;
+    }
+    return true;
+}
+
+[[nodiscard]] bool record_changed_item(const account::inventory::Item& prior,
+                                       const account::inventory::Item& current,
+                                       ArtifactResetResult& result) noexcept {
+    if (prior.sockets.policy == current.sockets.policy
+        && prior.sockets.plugCount == current.sockets.plugCount
+        && prior.sockets.plugs == current.sockets.plugs) {
+        return true;
+    }
+    if (result.instanceCount >= result.instanceSoids.size()) {
+        return false;
+    }
+    result.instanceSoids[result.instanceCount++] = current.instanceSoid;
+    return true;
+}
 
 /**
  * Makes one process-owned global value authoritative without disturbing authored overrides.
@@ -319,11 +385,6 @@ InvestmentState investment_snapshot() noexcept {
     return snapshot;
 }
 
-bool refresh_artifact_progression() noexcept {
-    // Artifact progress is projected into each Family-4 account image at encode time.
-    return true;
-}
-
 bool prepare_artifact_mod_unlock(std::uint16_t saleIndex,
                                  PendingArtifactPurchase& mutation) noexcept {
     mutation = {};
@@ -370,13 +431,6 @@ bool commit_artifact_mod_unlock(PendingArtifactPurchase& mutation) noexcept {
 
 bool reset_artifact(std::int32_t glimmerCost, ArtifactResetResult& result) noexcept {
     result = {};
-    constexpr std::uint32_t kGlimmerHash = 3159615086U;
-    constexpr std::array<std::uint32_t, 25> kArtifactModHashes{
-        715026181U,  715026182U,  715026183U,  715026176U,  715026177U,
-        3213968582U, 3213968581U, 3213968580U, 3213968579U, 3213968578U,
-        3465659109U, 3465659110U, 3465659111U, 3465659104U, 3465659105U,
-        3175764264U, 3175764267U, 3175764266U, 3175764269U, 3175764268U,
-        4186620519U, 4186620516U, 4186620517U, 4186620514U, 4186620515U};
     if (glimmerCost <= 0) {
         return false;
     }
@@ -398,10 +452,7 @@ bool reset_artifact(std::int32_t glimmerCost, ArtifactResetResult& result) noexc
             item.quantity -= spent;
             remainingCost -= spent;
         }
-        const bool artifactMod =
-            std::find(kArtifactModHashes.begin(), kArtifactModHashes.end(), item.definitionHash)
-            != kArtifactModHashes.end();
-        if (item.quantity > 0 && !artifactMod) {
+        if (item.quantity > 0 && !is_artifact_mod(item.definitionHash)) {
             compacted[compactedCount++] = item;
         }
     }
@@ -416,16 +467,11 @@ bool reset_artifact(std::int32_t glimmerCost, ArtifactResetResult& result) noexc
     for (std::size_t index = 0; index < before.profileItemCount; ++index) {
         serial = (std::max)(serial, before.profileItems[index].mutationSerial);
     }
-    const auto same = [](const auto& left, const auto& right) noexcept {
-        return left.instanceSoid == right.instanceSoid
-               && left.definitionHash == right.definitionHash && left.quantity == right.quantity
-               && left.mutationSerial == right.mutationSerial;
-    };
     std::size_t changedRows = 0;
     for (std::size_t index = 0; index < compactedCount; ++index) {
         changedRows += static_cast<std::size_t>(index >= before.profileItemCount
-                                                || !same(compacted[index],
-                                                         before.profileItems[index]));
+                                                || !same_profile_item(compacted[index],
+                                                                      before.profileItems[index]));
     }
     if (changedRows > static_cast<std::size_t>((std::numeric_limits<std::int32_t>::max)()
                                                - serial)) {
@@ -433,7 +479,7 @@ bool reset_artifact(std::int32_t glimmerCost, ArtifactResetResult& result) noexc
     }
     for (std::size_t index = 0; index < compactedCount; ++index) {
         if (index >= before.profileItemCount
-            || !same(compacted[index], before.profileItems[index])) {
+            || !same_profile_item(compacted[index], before.profileItems[index])) {
             compacted[index].mutationSerial = ++serial;
         }
     }
@@ -441,48 +487,16 @@ bool reset_artifact(std::int32_t glimmerCost, ArtifactResetResult& result) noexc
     AccountState candidate = before;
     candidate.profileItems = compacted;
     candidate.profileItemCount = compactedCount;
-    const auto clearArtifactSockets = [&](account::inventory::Item& item) noexcept {
-        if (item.sockets.policy != account::inventory::SocketPolicy::authored) {
-            return true;
-        }
-        build_data::items::Definition base{};
-        build_data::items::details::Definition detail{};
-        if (!build_data::find_item_definition_hash(item.definitionHash, base)
-            || !build_data::find_configured_item_detail(base.definitionIndex, detail)
-            || detail.definitionIndex != base.definitionIndex
-            || item.sockets.plugCount != detail.ordinarySocketCount) {
-            return false;
-        }
-        for (std::size_t lane = 0; lane < item.sockets.plugCount; ++lane) {
-            const auto& plug = item.sockets.plugs[lane];
-            if (!plug.has_value()
-                || std::find(kArtifactModHashes.begin(), kArtifactModHashes.end(), *plug)
-                       == kArtifactModHashes.end()) {
-                continue;
-            }
-            const std::uint16_t initial = detail.initialPlugIndices[lane];
-            if (initial == build_data::items::details::kUnavailableItemIndex) {
-                item.sockets.plugs[lane].reset();
-                continue;
-            }
-            build_data::items::Definition replacement{};
-            if (!build_data::find_item_definition_index(initial, replacement)) {
-                return false;
-            }
-            item.sockets.plugs[lane] = replacement.definitionHash;
-        }
-        return true;
-    };
     for (std::size_t characterIndex = 0; characterIndex < candidate.characterCount;
          ++characterIndex) {
         auto& character = candidate.characters[characterIndex];
         for (auto& item : character.equipment.slots) {
-            if (item.has_value() && !clearArtifactSockets(*item)) {
+            if (item.has_value() && !clear_artifact_sockets(*item)) {
                 return false;
             }
         }
         for (std::size_t itemIndex = 0; itemIndex < character.inventory.count; ++itemIndex) {
-            if (!clearArtifactSockets(character.inventory.values[itemIndex])) {
+            if (!clear_artifact_sockets(character.inventory.values[itemIndex])) {
                 return false;
             }
         }
@@ -493,29 +507,20 @@ bool reset_artifact(std::int32_t glimmerCost, ArtifactResetResult& result) noexc
         if (!before.characters[characterIndex].selected) {
             continue;
         }
-        const auto recordChanged = [&changed](const account::inventory::Item& prior,
-                                              const account::inventory::Item& current) noexcept {
-            if (prior.sockets.policy == current.sockets.policy
-                && prior.sockets.plugCount == current.sockets.plugCount
-                && prior.sockets.plugs == current.sockets.plugs) {
-                return true;
-            }
-            if (changed.instanceCount >= changed.instanceSoids.size()) {
-                return false;
-            }
-            changed.instanceSoids[changed.instanceCount++] = current.instanceSoid;
-            return true;
-        };
         const auto& prior = before.characters[characterIndex];
         const auto& current = candidate.characters[characterIndex];
         for (std::size_t slot = 0; slot < current.equipment.slots.size(); ++slot) {
             if (current.equipment.slots[slot].has_value()
-                && !recordChanged(*prior.equipment.slots[slot], *current.equipment.slots[slot])) {
+                && (!prior.equipment.slots[slot].has_value()
+                    || !record_changed_item(*prior.equipment.slots[slot],
+                                            *current.equipment.slots[slot],
+                                            changed))) {
                 return false;
             }
         }
         for (std::size_t index = 0; index < current.inventory.count; ++index) {
-            if (!recordChanged(prior.inventory.values[index], current.inventory.values[index])) {
+            if (!record_changed_item(
+                    prior.inventory.values[index], current.inventory.values[index], changed)) {
                 return false;
             }
         }

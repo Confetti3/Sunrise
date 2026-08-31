@@ -28,8 +28,6 @@ constexpr std::size_t kRewardClaimByteCount = (kRewardCount + 7U) / 8U;
 constexpr std::size_t kV1DocumentSize = kV1Magic.size() + sizeof(std::int32_t);
 constexpr std::size_t kV2DocumentSize = kV1DocumentSize + kRewardClaimByteCount;
 constexpr std::size_t kDocumentSize = kV2DocumentSize + sizeof(std::uint32_t);
-constexpr std::int32_t kExperiencePerRank = 100'000;
-constexpr std::uint16_t kMaximumRank = 100;
 constexpr std::int64_t kFirstArtifactPowerCost = 55'000;
 constexpr std::int64_t kArtifactPowerCostStep = 110'000;
 constexpr std::uint16_t kArtifactPowerBonusSlot = 602;
@@ -47,11 +45,11 @@ constexpr std::array<std::int32_t, 12> kArtifactPointCosts{0,
                                                            600'000,
                                                            790'000,
                                                            900'000};
-constexpr std::array<std::uint16_t, 26> kArtifactModFlags{
+constexpr std::array<std::uint16_t, kArtifactSaleCount> kArtifactModFlags{
     1428, 1429, 1430, 1431, 1432, 0,    1393, 1394, 1395, 1396, 1397, 1388, 1389,
     1390, 1391, 1392, 1398, 1399, 1400, 1401, 1402, 1403, 1404, 1405, 1406, 1407};
 /** Character acquired-flag mapping rows for each artifact vendor row. */
-constexpr std::array<std::uint16_t, 26> kArtifactModCharacterRows{
+constexpr std::array<std::uint16_t, kArtifactSaleCount> kArtifactModCharacterRows{
     164, 165, 166, 167, 168, 0,   149, 150, 151, 152, 153, 144, 145,
     146, 147, 148, 154, 155, 156, 157, 158, 159, 160, 161, 162, 163};
 /** Character objective mapping row whose destination is artifact value slot 604. */

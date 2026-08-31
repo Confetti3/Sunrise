@@ -601,9 +601,6 @@ commit_profile_item_acquisition(PendingProfileItemAcquisition& mutation) noexcep
 /** @return A copy of the evaluated content state, read under the lock. */
 [[nodiscard]] InvestmentState investment_snapshot() noexcept;
 
-/** Refreshes artifact XP-derived global values after seasonal XP changes. */
-[[nodiscard]] bool refresh_artifact_progression() noexcept;
-
 /** Prepares one artifact purchase without changing persistent state. */
 [[nodiscard]] bool prepare_artifact_mod_unlock(std::uint16_t saleIndex,
                                                PendingArtifactPurchase& mutation) noexcept;

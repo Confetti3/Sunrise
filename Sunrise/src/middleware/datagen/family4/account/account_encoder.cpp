@@ -20,6 +20,8 @@
 namespace sunrise::middleware::datagen::family4::account {
 namespace {
 
+namespace seasonal = state::progression::seasonal_experience;
+
 /** Every bit set is the native empty biased 16-bit definition index. */
 constexpr std::uint16_t kEmptyDefinitionIndex = (std::numeric_limits<std::uint16_t>::max)();
 /** Signed 32-bit maximum keeps publicity deadlines beyond a normal session clock. */
@@ -95,7 +97,7 @@ bool encode(const state::AccountState& state,
     object.profileUnlockFlags = unlocks.profileFlags;
     object.objectiveValues = unlocks.objectiveValues;
     // Season claims map to account flags; pending claims overlay the same response.
-    if (!state::progression::seasonal_experience::apply_reward_claims(object.acquiredFlags)) {
+    if (!seasonal::apply_reward_claims(object.acquiredFlags)) {
         return false;
     }
     if (pendingSeasonReward.has_value()) {
@@ -127,25 +129,22 @@ bool encode(const state::AccountState& state,
                                object.progressions)) {
         return false;
     }
-    const std::int32_t earnedExperience = state::progression::seasonal_experience::earned();
-    constexpr std::int32_t experiencePerRank = 100'000;
-    constexpr std::int32_t maximumPassExperience = 9'900'000;
+    const std::int32_t earnedExperience = seasonal::earned();
     for (std::size_t slot = 0; slot < object.progressions.size(); ++slot) {
         progression::layout::Entry& entry = object.progressions[slot];
         std::int32_t projectedExperience = earnedExperience;
         if (entry.definitionIndex == state::progression::season_pass::kProgressionDefinitionIndex) {
-            projectedExperience = (std::min)(earnedExperience, maximumPassExperience);
+            projectedExperience = (std::min)(earnedExperience, seasonal::kMaximumPassExperience);
         } else if (entry.definitionIndex
                    == state::progression::season_pass::kHudProgressionDefinitionIndex) {
-            projectedExperience = earnedExperience < maximumPassExperience
-                                      ? earnedExperience % experiencePerRank
-                                      : earnedExperience - maximumPassExperience;
+            projectedExperience =
+                earnedExperience < seasonal::kMaximumPassExperience
+                    ? earnedExperience % seasonal::kExperiencePerRank
+                    : earnedExperience - seasonal::kMaximumPassExperience;
         } else if (entry.definitionIndex
-                       != state::progression::seasonal_experience::
-                           kArtifactPowerProgressionDefinitionIndex
+                       != seasonal::kArtifactPowerProgressionDefinitionIndex
                    && entry.definitionIndex
-                          != state::progression::seasonal_experience::
-                              kArtifactUnlockProgressionDefinitionIndex) {
+                          != seasonal::kArtifactUnlockProgressionDefinitionIndex) {
             continue;
         }
         entry.values[0] = (std::max)(entry.values[0], projectedExperience);

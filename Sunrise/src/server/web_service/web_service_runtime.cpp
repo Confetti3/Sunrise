@@ -21,6 +21,7 @@
 #include "../../middleware/web_service/messages/opcode903.h"
 #include "../../middleware/web_service/web_service_envelope.h"
 #include "../../state/account/account_state.h"
+#include "../../state/progression/seasonal_experience.h"
 #include "../../state/runtime/runtime.h"
 #include "opcode_routes.h"
 #include "web_service_actions.h"
@@ -57,7 +58,6 @@ constexpr std::size_t kEchoLineCapacity = 64;
 constexpr std::int32_t kPurchaseRefusedCode = 1;
 /** Season of Arrivals artifact vendor row in the installed build's vendor index. */
 constexpr std::int16_t kArtifactVendorIndex = 430;
-constexpr std::uint16_t kArtifactSaleCount = 26;
 constexpr std::int32_t kArtifactResetGlimmerCost = 20'000;
 
 /**
@@ -126,7 +126,9 @@ constexpr std::int32_t kArtifactResetGlimmerCost = 20'000;
     purchase_codec::Request purchase{};
     if (!purchase_codec::parse_request(message, purchase)
         || purchase.vendorIndex != kArtifactVendorIndex || purchase.saleIndex < 0
-        || purchase.saleIndex >= static_cast<std::int16_t>(kArtifactSaleCount)) {
+        || purchase.saleIndex
+               >= static_cast<std::int16_t>(
+                   state::progression::seasonal_experience::kArtifactSaleCount)) {
         return false;
     }
     const auto saleIndex = static_cast<std::uint16_t>(purchase.saleIndex);

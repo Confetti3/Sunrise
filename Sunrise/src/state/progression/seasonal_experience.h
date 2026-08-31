@@ -12,6 +12,12 @@ namespace sunrise::state::progression::seasonal_experience {
 
 inline constexpr std::uint16_t kArtifactPowerProgressionDefinitionIndex = 38;
 inline constexpr std::uint16_t kArtifactUnlockProgressionDefinitionIndex = 39;
+inline constexpr std::uint16_t kArtifactSaleCount = 26;
+inline constexpr std::int32_t kExperiencePerRank = 100'000;
+inline constexpr std::uint16_t kMaximumRank = 100;
+inline constexpr std::int32_t kMaximumPassExperience =
+    (static_cast<std::int32_t>(kMaximumRank) - 1) * kExperiencePerRank;
+inline constexpr std::uint32_t kSeedOfSilverWingsHash = 0x613A3DA6U;
 
 /** Resolves persistent storage and restores earned seasonal XP. */
 [[nodiscard]] bool initialize(void* module) noexcept;

@@ -10,9 +10,7 @@ namespace sunrise::middleware::datagen::character_record::appearance {
 namespace {
 
 namespace constants = state::build_data::constants;
-
-/** Season 11's visible artifact; its sole declared stat is the conditional Power bonus. */
-constexpr std::uint32_t kSeedOfSilverWingsHash = 0x613A3DA6U;
+namespace seasonal = state::progression::seasonal_experience;
 
 /**
  * Sums one definition's declared contribution to a single stat row.
@@ -156,12 +154,13 @@ bool apply_stats(const family4::loadout::ResolvedInstances& instances,
         details::Definition detail{};
         Equipped equipped{};
         if (!resolve_equipped(instances.items[index], detail, equipped)
-            || detail.definitionHash != kSeedOfSilverWingsHash || detail.statCount == 0
+            || detail.definitionHash != seasonal::kSeedOfSilverWingsHash
+            || detail.statCount == 0
             || detail.stats.front().row == details::kEmptyStatRow) {
             continue;
         }
         append(detail.stats.front().row,
-               state::progression::seasonal_experience::artifact_power_bonus(),
+               seasonal::artifact_power_bonus(),
                appearance.characterStats,
                written);
         break;

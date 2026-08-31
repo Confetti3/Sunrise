@@ -208,6 +208,40 @@ bool prepare_selection_move(Scratch& scratch,
     return true;
 }
 
+/** Compresses and commits one selected-character-only Family-4 increment. */
+[[nodiscard]] bool finish_character_upsert(Scratch& scratch,
+                                           const Reservation& reservation,
+                                           std::span<std::byte> characterBytes,
+                                           const queuez::EquipmentSwap& update,
+                                           const char* objectFailure,
+                                           const char* commitFailure,
+                                           Prepared& prepared) noexcept {
+    Prepared staged{};
+    staged.rawClearSize =
+        (std::max)(reservation.rawClearSize,
+                   reservation.rawWriteOffset + family4_datagen::character::layout::kObjectSize);
+    std::size_t compressedExtent = reservation.compressedWriteOffset;
+    if (!append_object(scratch,
+                       characterBytes,
+                       update.characterDefinitionId,
+                       update.characterSoid,
+                       staged.objects.front(),
+                       compressedExtent)) {
+        return report_failure(objectFailure);
+    }
+    staged.compressedClearSize = (std::max)(reservation.compressedClearSize, compressedExtent);
+    staged.family = middleware::queuez::Family{kAccountFamilyType,
+                                                update.after.family4RootSoid,
+                                                update.after.family4Version,
+                                                0,
+                                                std::span(staged.objects).first(1)};
+    if (!commit(staged, prepared)) {
+        clear_after(scratch, reservation);
+        return report_failure(commitFailure);
+    }
+    return true;
+}
+
 /** Builds a single-character Family-4 upsert from an uncommitted equipment after-image. */
 bool prepare_equipment_swap(
     Scratch& scratch,
@@ -279,32 +313,13 @@ bool prepare_equipment_swap(
             return report_failure("equip_moved_inventory_row");
         }
     }
-    Prepared staged{};
-    staged.rawClearSize =
-        (std::max)(reservation.rawClearSize,
-                   reservation.rawWriteOffset + family4_datagen::character::layout::kObjectSize);
-    std::size_t compressedExtent = reservation.compressedWriteOffset;
-    if (!append_object(scratch,
-                       characterBytes,
-                       swap.characterDefinitionId,
-                       swap.characterSoid,
-                       staged.objects.front(),
-                       compressedExtent)) {
-        return report_failure("equip_character_object");
-    }
-    staged.compressedClearSize = (std::max)(reservation.compressedClearSize, compressedExtent);
-    staged.family = middleware::queuez::Family{
-        kAccountFamilyType,
-        swap.after.family4RootSoid,
-        swap.after.family4Version,
-        0,
-        std::span(staged.objects).first(1),
-    };
-    if (!commit(staged, prepared)) {
-        clear_after(scratch, reservation);
-        return report_failure("equip_commit");
-    }
-    return true;
+    return finish_character_upsert(scratch,
+                                   reservation,
+                                   characterBytes,
+                                   swap,
+                                   "equip_character_object",
+                                   "equip_commit",
+                                   prepared);
 }
 
 /** Builds a single-character Family-4 upsert from an uncommitted item-state after-image. */
@@ -368,32 +383,13 @@ bool prepare_item_state(
         return report_failure("item_state_presentation");
     }
 
-    Prepared staged{};
-    staged.rawClearSize =
-        (std::max)(reservation.rawClearSize,
-                   reservation.rawWriteOffset + family4_datagen::character::layout::kObjectSize);
-    std::size_t compressedExtent = reservation.compressedWriteOffset;
-    if (!append_object(scratch,
-                       characterBytes,
-                       update.characterDefinitionId,
-                       update.characterSoid,
-                       staged.objects.front(),
-                       compressedExtent)) {
-        return report_failure("item_state_character_object");
-    }
-    staged.compressedClearSize = (std::max)(reservation.compressedClearSize, compressedExtent);
-    staged.family = middleware::queuez::Family{
-        kAccountFamilyType,
-        update.after.family4RootSoid,
-        update.after.family4Version,
-        0,
-        std::span(staged.objects).first(1),
-    };
-    if (!commit(staged, prepared)) {
-        clear_after(scratch, reservation);
-        return report_failure("item_state_commit");
-    }
-    return true;
+    return finish_character_upsert(scratch,
+                                   reservation,
+                                   characterBytes,
+                                   update,
+                                   "item_state_character_object",
+                                   "item_state_commit",
+                                   prepared);
 }
 
 /** Builds a single-character Family-4 upsert from an uncommitted artifact mask. */
@@ -446,30 +442,13 @@ bool prepare_artifact_purchase(
         return report_failure("artifact_projection");
     }
 
-    Prepared staged{};
-    staged.rawClearSize =
-        (std::max)(reservation.rawClearSize,
-                   reservation.rawWriteOffset + family4_datagen::character::layout::kObjectSize);
-    std::size_t compressedExtent = reservation.compressedWriteOffset;
-    if (!append_object(scratch,
-                       characterBytes,
-                       update.characterDefinitionId,
-                       update.characterSoid,
-                       staged.objects.front(),
-                       compressedExtent)) {
-        return report_failure("artifact_character_object");
-    }
-    staged.compressedClearSize = (std::max)(reservation.compressedClearSize, compressedExtent);
-    staged.family = middleware::queuez::Family{kAccountFamilyType,
-                                                update.after.family4RootSoid,
-                                                update.after.family4Version,
-                                                0,
-                                                std::span(staged.objects).first(1)};
-    if (!commit(staged, prepared)) {
-        clear_after(scratch, reservation);
-        return report_failure("artifact_commit");
-    }
-    return true;
+    return finish_character_upsert(scratch,
+                                   reservation,
+                                   characterBytes,
+                                   update,
+                                   "artifact_character_object",
+                                   "artifact_commit",
+                                   prepared);
 }
 
 /** Builds an incremental reset image without re-announcing every resident item. */

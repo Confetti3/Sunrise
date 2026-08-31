@@ -40,6 +40,19 @@ void fail_seasonal_experience_presentation(Session& session) noexcept {
                      "ev=season_xp stage=deferred_presentation result=drop reason=retry_limit");
 }
 
+[[nodiscard]] const state::CharacterState*
+selected_character(const state::AccountState& account) noexcept {
+    if (!state::account::valid(account)) {
+        return nullptr;
+    }
+    for (std::size_t index = 0; index < account.characterCount; ++index) {
+        if (account.characters[index].selected) {
+            return &account.characters[index];
+        }
+    }
+    return nullptr;
+}
+
 /** Publishes and commits one character-inventory world reward. */
 [[nodiscard]] bool consume_world_item_acquisition(const WorldRewardRequest& request,
                                                   Session& session,
@@ -421,20 +434,14 @@ void fail_seasonal_experience_presentation(Session& session) noexcept {
         return false;
     }
     const state::AccountState account = state::account_snapshot();
-    std::size_t selected = account.characterCount;
-    for (std::size_t index = 0; index < account.characterCount; ++index) {
-        if (account.characters[index].selected) {
-            selected = index;
-            break;
-        }
-    }
-    if (!state::account::valid(account) || selected >= account.characterCount) {
+    const state::CharacterState* selected = selected_character(account);
+    if (selected == nullptr) {
         return false;
     }
     state::PendingArtifactPurchase refresh{};
     refresh.accountSoid = account.primarySoid;
-    refresh.characterSoid = account.characters[selected].soid;
-    refresh.characterIndex = selected;
+    refresh.characterSoid = selected->soid;
+    refresh.characterIndex = static_cast<std::size_t>(selected - account.characters.data());
     refresh.beforeMask = state::progression::seasonal_experience::artifact_mod_mask();
     refresh.afterMask = refresh.beforeMask;
     refresh.prepared = true;
@@ -480,14 +487,8 @@ void fail_seasonal_experience_presentation(Session& session) noexcept {
         return false;
     }
     const state::AccountState account = state::account_snapshot();
-    std::size_t selected = account.characterCount;
-    for (std::size_t index = 0; index < account.characterCount; ++index) {
-        if (account.characters[index].selected) {
-            selected = index;
-            break;
-        }
-    }
-    if (!state::account::valid(account) || selected >= account.characterCount) {
+    const state::CharacterState* selected = selected_character(account);
+    if (selected == nullptr) {
         return false;
     }
     const std::uint64_t instanceSoid =
@@ -496,8 +497,7 @@ void fail_seasonal_experience_presentation(Session& session) noexcept {
     auto nextSendNonce = session.sendNonce;
     std::size_t framedSize = 0;
     touchesScratch = true;
-    if (!queuez::stage_equipment_swap(
-            session.queuez, account.characters[selected].soid, update)
+    if (!queuez::stage_equipment_swap(session.queuez, selected->soid, update)
         || !push::append_artifact_item_refresh_notification(scratch,
                                                             update,
                                                             instanceSoid,

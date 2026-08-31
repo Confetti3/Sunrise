@@ -81,6 +81,23 @@ prepare_destination_resource_bundle(state::PendingSeasonPassReward& grant) noexc
 }
 
 /** Chooses one installed weapon or selected-class armour item from an auto-decrypting engram. */
+template <std::size_t Size>
+[[nodiscard]] std::span<const std::uint32_t>
+class_armour_pool(state::CharacterClass characterClass,
+                  const std::array<std::uint32_t, Size>& titan,
+                  const std::array<std::uint32_t, Size>& hunter,
+                  const std::array<std::uint32_t, Size>& warlock) noexcept {
+    switch (characterClass) {
+    case state::CharacterClass::hunter:
+        return hunter;
+    case state::CharacterClass::warlock:
+        return warlock;
+    case state::CharacterClass::titan:
+    default:
+        return titan;
+    }
+}
+
 [[nodiscard]] bool choose_engram_reward(std::uint32_t engramHash,
                                         std::uint16_t& itemIndex) noexcept {
     namespace pass = state::progression::season_pass;
@@ -100,32 +117,16 @@ prepare_destination_resource_bundle(state::PendingSeasonPassReward& grant) noexc
 
     if (engramHash == pass::kLegendaryEngramHash) {
         weapons = pass::kLegendaryEngramWeapons;
-        switch (character->characterClass) {
-        case state::CharacterClass::hunter:
-            armour = pass::kLegendaryHunterArmour;
-            break;
-        case state::CharacterClass::warlock:
-            armour = pass::kLegendaryWarlockArmour;
-            break;
-        case state::CharacterClass::titan:
-        default:
-            armour = pass::kLegendaryTitanArmour;
-            break;
-        }
+        armour = class_armour_pool(character->characterClass,
+                                   pass::kLegendaryTitanArmour,
+                                   pass::kLegendaryHunterArmour,
+                                   pass::kLegendaryWarlockArmour);
     } else if (engramHash == pass::kExoticEngramHash) {
         weapons = pass::kExoticEngramWeapons;
-        switch (character->characterClass) {
-        case state::CharacterClass::hunter:
-            armour = pass::kExoticHunterArmour;
-            break;
-        case state::CharacterClass::warlock:
-            armour = pass::kExoticWarlockArmour;
-            break;
-        case state::CharacterClass::titan:
-        default:
-            armour = pass::kExoticTitanArmour;
-            break;
-        }
+        armour = class_armour_pool(character->characterClass,
+                                   pass::kExoticTitanArmour,
+                                   pass::kExoticHunterArmour,
+                                   pass::kExoticWarlockArmour);
     } else {
         return false;
     }

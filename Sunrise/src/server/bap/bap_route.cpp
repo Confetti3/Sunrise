@@ -305,7 +305,6 @@ bool arm_seasonal_experience_presentation(std::int32_t amount) noexcept {
         if (!state::progression::seasonal_experience::grant(amount)) {
             return false;
         }
-        (void)state::refresh_artifact_progression();
         peer.pendingSeasonalExperienceAmount += amount;
         peer.pendingSeasonalExperienceFailures = 0;
         return true;
