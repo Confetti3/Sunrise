@@ -4,6 +4,8 @@
 /.direnv/
 /.xwin-cache/
 /.cache/
+/.claude/settings.local.json
+/.claude/worktrees/
 *.user
 *.suo
 *.userosscache
@@ -15,4 +17,5 @@
 /build/
 /bin/
 /out/
+/tests/build/
 __pycache__/

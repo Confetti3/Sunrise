@@ -32,7 +32,7 @@ if (-not (Test-Path -LiteralPath $vcvars)) {
 
 New-Item -ItemType Directory -Force -Path $objectDirectory | Out-Null
 $quotedSources = ($Sources | ForEach-Object { '"{0}"' -f $_ }) -join ' '
-$command = 'cd /d "{0}" && "{1}" >nul && cl.exe /nologo /std:c++20 /W4 /WX /EHsc /I"{2}" {3} /Fe:"{4}"' -f $objectDirectory, $vcvars, $include, $quotedSources, $output
+$command = 'cd /d "{0}" && "{1}" >nul && cl.exe /nologo /std:c++20 /W4 /WX /EHsc /DNOMINMAX /DWIN32_LEAN_AND_MEAN /I"{2}" {3} /Fe:"{4}"' -f $objectDirectory, $vcvars, $include, $quotedSources, $output
 try {
     & $env:ComSpec /d /s /c $command
     if ($LASTEXITCODE -ne 0) {
@@ -40,7 +40,7 @@ try {
     }
     & $output
     if ($LASTEXITCODE -ne 0) {
-        throw "$Name failed."
+        throw "$Name failed with exit code $LASTEXITCODE."
     }
 } finally {
     Remove-Item -LiteralPath $outputDirectory -Recurse -Force -ErrorAction SilentlyContinue
