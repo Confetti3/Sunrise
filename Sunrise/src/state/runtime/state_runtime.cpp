@@ -32,6 +32,10 @@ namespace {
 constexpr std::uint32_t kLoopbackAddress = 0x7F000001;
 /** Default one-hour lifetime for generated SignOn session tokens. */
 constexpr std::uint32_t kDefaultTokenLifetimeSeconds = 3600;
+/** Destination and arrival proven by the World Browser for the Trostland mission research slice. */
+constexpr char kTrostlandDestination[] = "edz_freeroam";
+constexpr std::uint8_t kTrostlandBubble = 51;
+constexpr std::uint16_t kTrostlandSliceSet = 408;
 /** Family 5 uses the largest signed 64-bit value as its process-global object key. */
 constexpr std::uint64_t kGlobalFamily5Soid =
     static_cast<std::uint64_t>((std::numeric_limits<std::int64_t>::max)());
@@ -243,6 +247,19 @@ bool initialize(void* module,
     initialized.signOn.tokenLifetimeSeconds = kDefaultTokenLifetimeSeconds;
     initialized.account = runtimeAccount;
     initialized.activity.defaults = activityDefaults;
+    if (core::settings::get().server.activation.trostlandMissionPreset) {
+        auto& preset = initialized.activity.forced;
+        for (std::size_t index = 0; index < sizeof(kTrostlandDestination) - 1; ++index) {
+            preset.packageName[index] = kTrostlandDestination[index];
+        }
+        preset.packageNameLength =
+            static_cast<std::uint8_t>(sizeof(kTrostlandDestination) - 1);
+        preset.bubble = kTrostlandBubble;
+        preset.sliceSet = kTrostlandSliceSet;
+        preset.hasBubble = true;
+        preset.hasSliceSet = true;
+        preset.enabled = true;
+    }
     initialized.investment.family5.objectSoid = kGlobalFamily5Soid;
     // Only the override lists come from settings. Identity and gate stay owned by State.
     const Family5State& authored = core::settings::get().initialFamily5;

@@ -49,6 +49,33 @@ struct SessionBinding {
     std::uint64_t createdRevision{};
 };
 
+/** @return True when both values name the same full immutable session generation. */
+[[nodiscard]] inline bool same_binding(const SessionBinding& left,
+                                       const SessionBinding& right) noexcept {
+    const auto& a = left.destination;
+    const auto& b = right.destination;
+    return left.sessionId != kAbsentSessionId && left.sessionId == right.sessionId
+           && left.createdRevision != kInvalidRevision
+           && left.createdRevision == right.createdRevision
+           && a.packageName == b.packageName && a.packageNameLength == b.packageNameLength
+           && a.reason == b.reason && a.previousActivityIndex == b.previousActivityIndex
+           && a.activityIndex == b.activityIndex && a.elementIndex == b.elementIndex
+           && a.arrivalBubbleHash == b.arrivalBubbleHash
+           && a.spawnSetHash == b.spawnSetHash && a.hasElementIndex == b.hasElementIndex
+           && a.hasArrivalBubbleHash == b.hasArrivalBubbleHash
+           && a.hasSpawnSetHash == b.hasSpawnSetHash
+           && a.arrivalBubbleOverride == b.arrivalBubbleOverride
+           && a.hasArrivalBubbleOverride == b.hasArrivalBubbleOverride
+           && a.sliceSetOverride == b.sliceSetOverride
+           && a.hasSliceSetOverride == b.hasSliceSetOverride
+           && a.spawnSetOverride == b.spawnSetOverride
+           && a.hasSpawnSetOverride == b.hasSpawnSetOverride
+           && a.descriptorBits == b.descriptorBits
+           && a.descriptorBitLength == b.descriptorBitLength
+           && a.descriptorNameBit == b.descriptorNameBit
+           && a.hasDescriptorName == b.hasDescriptorName;
+}
+
 /** Caller-owned runtime status for one committed activity-session generation. */
 struct SessionSnapshot {
     SessionBinding binding{};

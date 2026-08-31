@@ -1,5 +1,7 @@
 #include "bap_connection_publication.h"
 
+#include "push/activity/activity_roster_push.h"
+
 #include <Windows.h>
 
 #include <atomic>
@@ -39,6 +41,7 @@ void release_host_generation(std::uint64_t generation) noexcept {
 
 /** Clears all connection state rebuilt by a successful activity join. */
 void reset_join_state(Session& session) noexcept {
+    push::activity::discard_staged_roster(session);
     session.activityMemberKey = 0;
     session.activityCharacterSoid = 0;
     session.activityKeepaliveDueTick = 0;
@@ -48,7 +51,6 @@ void reset_join_state(Session& session) noexcept {
     session.activityRosterGroups = 0;
     session.activityRosterSends = 0;
     session.activityRosterReason = 0;
-    session.activityRosterStaged = {};
     if (session.activity.role == ActivityClientRole::privateCurrent) {
         session.activity.advertisedRegion = -1;
     }
@@ -156,6 +158,7 @@ void discard_staged_advertisement(Session& session) noexcept {
 
 /** Releases every exact activity owner held by one BAP connection. */
 void release_activity_connection(Session& session) noexcept {
+    push::activity::discard_staged_roster(session);
     discard_staged_advertisement(session);
     release_host_generation(session.activityAdvertisementHostGeneration);
     session.activityAdvertisementHostGeneration = 0;

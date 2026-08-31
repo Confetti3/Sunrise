@@ -9,6 +9,7 @@
 #include "../hooks/graphics/renderer/native_debug_renderer.h"
 #include "../hooks/inactivity/inactivity_override.h"
 #include "../hooks/infinite_ammo/infinite_ammo.h"
+#include "../hooks/membership_probe/membership_probe.h"
 #include "../hooks/network/runtime.h"
 #include "../hooks/noclip/runtime.h"
 #include "../hooks/package_trust/package_trust_bypass.h"
@@ -17,6 +18,7 @@
 #include "../hooks/presentation/presentation.h"
 #include "../hooks/queuez/queuez_hook_lifecycle.h"
 #include "../hooks/retail_log/retail_log_lifecycle.h"
+#include "../hooks/squad_reference_probe/squad_reference_probe.h"
 #include "../hooks/teleport/runtime.h"
 #include "../hooks/viewer_audio/viewer_audio.h"
 #include "../hooks/viewer_camera/viewer_camera.h"
@@ -42,6 +44,7 @@ namespace sunrise::client {
 
 /** Initializes Client-owned process state without installing hooks. */
 bool initialize(void* module) noexcept {
+    hooks::squad_reference_probe::initialize();
     // Loaded before the pages register, so each page draws saved values on its first frame.
     movement::initialize(module);
     player::initialize(module);
@@ -167,6 +170,14 @@ bool shutdown() noexcept {
     hooks::bootflow::uninstall();
     hooks::infinite_ammo::uninstall();
     hooks::inactivity::uninstall();
+    if (!hooks::squad_reference_probe::uninstall()
+        || !hooks::membership_probe::uninstall()) {
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::error,
+                         "ev=shutdown stage=research_probes result=fail");
+        ReleaseSRWLockExclusive(&runtime::g_lock);
+        return false;
+    }
     if (!hooks::noclip::uninstall()) {
         core::log::write(core::log::Channel::client,
                          core::log::Level::error,

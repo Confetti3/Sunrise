@@ -30,6 +30,12 @@ namespace sunrise::server::bap::encrypted::push::activity {
                                               bool burst) noexcept;
 
 /**
+ * Counts and compare-consumes a staged manual type-0 token immediately after caller copy.
+ * This runs before a delivered transaction may rebind and discard binding-scoped roster effects.
+ */
+void commit_staged_entity_slot_republish(Session& session) noexcept;
+
+/**
  * Settles a staged roster body that reached the caller.
  * A bubble is offered once, so its grant is recorded only where the frame is known published.
  * @param session Connection-owned staged roster, cleared here.

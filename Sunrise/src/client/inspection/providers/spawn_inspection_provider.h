@@ -45,6 +45,12 @@ public:
     /** Refreshes copied world state and classifies no-op, value-only, and graph rebuild changes. */
     [[nodiscard]] RefreshResult refresh();
 
+    /**
+     * Selects continuous bounded runtime membership sampling. Intended for explicit research
+     * capture because busy maps can rebuild the inspection graph frequently.
+     */
+    void set_live_runtime_membership(bool enabled) noexcept;
+
     /** Returns the current pointer-free inspection document. */
     [[nodiscard]] const InspectionDocument& snapshot() const noexcept;
     void reset() noexcept;
@@ -130,6 +136,7 @@ private:
     std::uint32_t generation_{};
     std::uint32_t producerEpoch_{};
     std::uint64_t valueRevision_{};
+    bool liveRuntimeMembership_{};
     PlacedCacheKey placedCacheKey_{};
     std::vector<placed_objects::Snapshot> placedCache_;
     bool placedCachePresent_{};

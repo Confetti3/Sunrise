@@ -88,6 +88,47 @@ struct Roster final {
     std::span<const BubbleSubBlock> bubbleSubBlocks{};
 };
 
+/** One build-86657 sense delta attached to an otherwise complete roster update. */
+struct SenseContribution final {
+    std::uint32_t group{};
+    std::uint32_t definition{};
+    std::uint32_t generation{};
+    std::uint8_t slotType{};
+    std::uint16_t slotIndex{};
+    std::uint8_t mode{};
+    std::array<std::uint32_t, 2> requested{};
+    /** Reflected delta chunks in wire order; the final chunk uses `deltaWidth % 32` bits. */
+    std::array<std::uint32_t, 3> delta{0x220C3124, 0, 0};
+    std::uint8_t deltaWidth{30};
+    bool reset{};
+};
+
+/** One build-scoped authored sequence pulse; callers never supply raw roster coordinates. */
+enum class ContentStep : std::uint8_t {
+    none,
+    glimmerIntro,
+    glimmerSite0ShipSpawn,
+    glimmerSite0Enter,
+    glimmerSite0Crew,
+    glimmerSite0Exit,
+    glimmerSite1ShipSpawn,
+    glimmerSite1Enter,
+    glimmerSite1Crew,
+    glimmerSite1Exit,
+    glimmerSite2ShipSpawn,
+    glimmerSite2Enter,
+    glimmerSite2Crew,
+    glimmerSite2Exit,
+    glimmerComplete,
+    glimmerNormalChest,
+    glimmerCleanup,
+};
+
+struct ContentStepContribution final {
+    ContentStep step{ContentStep::none};
+    std::uint32_t generation{};
+};
+
 /** Everything one `sensor_auth_update` carries. */
 struct Snapshot final {
     /** Message 52's payload, echoed exactly. A wrong epoch skips phase 2 and reports nothing. */
@@ -116,6 +157,10 @@ struct Snapshot final {
      * gets the body, so filling the first slot alone can miss that object.
      */
     bool keyOnEveryParticipationSlot{};
+    SenseContribution sense{};
+    bool hasSense{};
+    ContentStepContribution contentStep{};
+    bool hasContentStep{};
 };
 
 /**
@@ -247,24 +292,33 @@ bubble_bits(std::span<const BubbleSubBlock> subBlocks) noexcept {
 /**
  * Reports how many bits of auth body one slot carries.
  * @param snapshot Message input, which decides the type-13 body width.
+ * @param key Registry key of the owning group.
  * @param slotType Slot type from the group's slot array.
+ * @param slotIndex Slot ordinal from the group's slot array.
  * @param carriesPlayerKey True for the one type-13 block that binds the player.
  * @return Body bits, or zero for a seed-only block.
  */
-[[nodiscard]] std::size_t
-auth_body_bits(const Snapshot& snapshot, std::uint8_t slotType, bool carriesPlayerKey) noexcept;
+[[nodiscard]] std::size_t auth_body_bits(const Snapshot& snapshot,
+                                         std::uint32_t key,
+                                         std::uint8_t slotType,
+                                         std::uint16_t slotIndex,
+                                         bool carriesPlayerKey) noexcept;
 
 /**
  * Writes one slot's auth body.
  * @param writer Body writer positioned after the auth delta's root bit.
  * @param snapshot Message input.
+ * @param key Registry key of the owning group.
  * @param slotType Slot type from the group's slot array.
+ * @param slotIndex Slot ordinal from the group's slot array.
  * @param carriesPlayerKey True for the one type-13 block that binds the player.
  * @return True when the body fits and matches its declared width.
  */
 [[nodiscard]] bool write_auth_body(encoding::bits::Writer& writer,
                                    const Snapshot& snapshot,
+                                   std::uint32_t key,
                                    std::uint8_t slotType,
+                                   std::uint16_t slotIndex,
                                    bool carriesPlayerKey) noexcept;
 
 /**

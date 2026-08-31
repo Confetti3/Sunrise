@@ -67,6 +67,7 @@ constexpr std::uint32_t kCurrentRevision = 0;
     }
     written = framedSize;
     session.sendNonce = nextSendNonce;
+    commit_staged_entity_slot_republish(session);
     // Settled only here: the grant and the state byte may move only on a delivered frame.
     commit_staged_roster(session);
     commit_staged_advertisement(session);

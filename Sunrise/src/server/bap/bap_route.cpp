@@ -194,7 +194,8 @@ bool snapshot_private_activity(ActivitySnapshot& output) noexcept {
         if (session.id == 0 || !session.authenticated
             || activity.role != ActivityClientRole::privateCurrent
             || activity.session.sessionId == state::activity::kAbsentSessionId
-            || (found && activity.session.createdRevision <= output.binding.createdRevision)) {
+            || activity.bindingGeneration == 0
+            || (found && activity.bindingGeneration <= output.bindingGeneration)) {
             continue;
         }
         output.binding = activity.session;
@@ -204,6 +205,11 @@ bool snapshot_private_activity(ActivitySnapshot& output) noexcept {
     }
     ReleaseSRWLockShared(&g_lock);
     return found;
+}
+
+/** Tests one exact snapshot against the newest private binding while the caller holds g_lock. */
+bool newest_private_activity_matches_locked(const ActivitySnapshot& expected) noexcept {
+    return newest_private_activity_matches(g_sessions, expected);
 }
 
 /** Applies one serialized BAP connection lifecycle event. */

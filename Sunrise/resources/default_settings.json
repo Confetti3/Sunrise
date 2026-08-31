@@ -54,7 +54,10 @@
       "default_client_activation": true,
       "activity_compatibility_mirror": true,
       "gameplay_external_body": false,
-      "server_default_entity": false
+      "server_default_entity": false,
+      "trostland_spawner_probe": false,
+      "mission_script_host": false,
+      "trostland_mission_preset": false
     },
     "entitlements": [
       { "name": "1085660", "owned": "handle" },

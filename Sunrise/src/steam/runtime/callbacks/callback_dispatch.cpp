@@ -4,6 +4,7 @@
 
 #include "../../../client/content/investment/worker.h"
 #include "../../../client/hooks/membership_probe/membership_probe.h"
+#include "../../../client/hooks/squad_reference_probe/squad_reference_probe.h"
 #include "../../../core/logging/log.h"
 #include "../../../core/ui/busy/busy.h"
 #include "../../../server/runtime/server_runtime.h"
@@ -122,6 +123,9 @@ void run_callbacks() noexcept {
         // Read-only. The container bind lands on a tick after the message, so the probe cannot
         // see its effect from inside the message handler.
         client::hooks::membership_probe::service(now);
+        // The build-86657 AI bodies unpack after main activation, so the gated recorder attaches
+        // here and keeps retrying without requiring another activity reload.
+        client::hooks::squad_reference_probe::service(now);
     }
 }
 

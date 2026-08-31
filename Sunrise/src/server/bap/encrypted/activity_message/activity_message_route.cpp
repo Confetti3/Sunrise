@@ -256,8 +256,7 @@ struct FramingRoute {
 }
 
 /** Every message type this route frames and records without changing State. */
-constexpr std::array<FramingRoute, 22> kFramingRoutes{{
-    {service::sense_update::kMessageType, receipts::frame_sense_update},
+constexpr std::array<FramingRoute, 21> kFramingRoutes{{
     {kLocalActivityHostMessageType, receipts::frame_route_misuse},
     {telemetry::kReservationRequestType, receipts::frame_reservation_request},
     {ledger::kReleaseReservationType, receipts::frame_reservation_release},
@@ -286,7 +285,13 @@ constexpr std::array<FramingRoute, 22> kFramingRoutes{{
  * @param request Validated envelope.
  * @return Always true: a framing-only message can never fail the transport frame.
  */
-[[nodiscard]] bool frame_only(const service::Request& request) noexcept {
+[[nodiscard]] bool frame_only(const ActivityClientBinding& binding,
+                                    const service::Request& request) noexcept {
+    if (request.messageType == service::sense_update::kMessageType) {
+        const receipts::Framed framed = receipts::frame_sense_update(binding, request);
+        record(request, framed.verdict, framed.consumedBits);
+        return true;
+    }
     const auto row = std::find_if(kFramingRoutes.begin(),
                                   kFramingRoutes.end(),
                                   [&request](const FramingRoute& candidate) noexcept {
@@ -351,7 +356,7 @@ bool process(const ActivityClientBinding& binding,
         }
         prepared = membership::prepare_start_activity(request, plan);
     } else {
-        return frame_only(request);
+        return frame_only(binding, request);
     }
     // A message that cannot be staged is reported and dropped. Failing the frame would leave the
     // client's pending ring jammed.

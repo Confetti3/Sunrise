@@ -99,4 +99,13 @@ lease_counts(std::uint64_t sessionId, std::size_t& held, std::size_t& reserved) 
 [[nodiscard]] bool
 lease_masks(std::uint64_t sessionId, LeaseMask& held, LeaseMask& reserved) noexcept;
 
+/**
+ * Copies only the client-held mask for one exact committed session generation.
+ * The server reserve is deliberately not returned so diagnostic publication cannot merge it.
+ * @param binding Full immutable activity-session identity, validated under the State lock.
+ * @param held Cleared, then receives only `heldEntitySlots`.
+ * @return True when the exact generation still exists and is joined.
+ */
+[[nodiscard]] bool held_mask(const SessionBinding& binding, LeaseMask& held) noexcept;
+
 } // namespace sunrise::state::activity::entity_slots

@@ -30,6 +30,7 @@ namespace {
         return false;
     }
     SlotDescriptor candidate{};
+    candidate.definitionTag = ownTag;
     if (!read(blob, base + kDescriptorComponentClassOffset, candidate.componentClass)
         || !read(blob, base + kDescriptorSenseSchemaOffset, candidate.senseSchema)
         || !read(blob, base + kDescriptorAuthSchemaOffset, candidate.authSchema)

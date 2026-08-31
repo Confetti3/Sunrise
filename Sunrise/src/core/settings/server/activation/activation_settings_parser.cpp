@@ -48,6 +48,21 @@ bool Parser::activation_settings(server::activation::Settings& output) noexcept 
                 return false;
             }
             candidate.activityPublicMembership = value;
+        } else if (key == "trostland_spawner_probe") {
+            if (!boolean(value)) {
+                return false;
+            }
+            candidate.trostlandSpawnerProbe = value;
+        } else if (key == "mission_script_host") {
+            if (!boolean(value)) {
+                return false;
+            }
+            candidate.missionScriptHost = value;
+        } else if (key == "trostland_mission_preset") {
+            if (!boolean(value)) {
+                return false;
+            }
+            candidate.trostlandMissionPreset = value;
         } else if (!skip_value(0)) {
             return false;
         }

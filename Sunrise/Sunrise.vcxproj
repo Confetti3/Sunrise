@@ -301,6 +301,7 @@
     <ClCompile Include="src\client\hooks\package_trust\package_trust_bypass.cpp" />
     <ClCompile Include="src\client\hooks\bitmap\bitmap_hook_lifecycle.cpp" />
     <ClCompile Include="src\client\hooks\membership_probe\membership_probe.cpp" />
+    <ClCompile Include="src\client\hooks\squad_reference_probe\squad_reference_probe.cpp" />
     <ClCompile Include="src\client\hooks\bitmap\bitmap_ref_guard.cpp" />
     <ClCompile Include="src\client\hooks\external_server\external_server_route.cpp" />
     <ClCompile Include="src\client\hooks\external_server\external_server_setopt_guard.cpp" />
@@ -548,6 +549,7 @@
     <ClCompile Include="src\state\build_data\named_build_data_runtime.cpp" />
     <ClCompile Include="src\state\build_data\socket_entry_lists\socket_entry_list_catalog.cpp" />
     <ClCompile Include="src\client\content\handles\handle_resolver.cpp" />
+    <ClCompile Include="src\client\content\handles\handle_debug_dump.cpp" />
     <ClCompile Include="src\client\content\activity\activity_logic_packages.cpp" />
     <ClCompile Include="src\client\content\activity\activity_statevars.cpp" />
     <ClCompile Include="src\client\content\bootstrap\bootstrap_token_publish.cpp" />
@@ -600,6 +602,8 @@
     <ClCompile Include="src\server\bap\encrypted\push\queuez\queuez_change_character.cpp" />
     <ClCompile Include="src\server\bap\encrypted\push\queuez\queuez_select_character.cpp" />
     <ClCompile Include="src\server\bap\encrypted\push\activity\activity_message_push.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\push\activity\activity_entity_slot_push.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\push\activity\activity_entity_slot_republish.cpp" />
     <ClCompile Include="src\server\bap\encrypted\push\activity\activity_roster_push.cpp" />
     <ClCompile Include="src\server\bap\encrypted\push\activity\activity_roster_snapshot.cpp" />
     <ClCompile Include="src\server\bap\encrypted\push\activity\activity_roster_report.cpp" />
@@ -859,6 +863,7 @@
     <ClCompile Include="src\server\gameplay\physics\replication\world_projection.cpp" />
     <ClCompile Include="src\server\gameplay\physics\world\activity_policy.cpp" />
     <ClCompile Include="src\server\gameplay\mission\compiled_mission_policy.cpp" />
+    <ClCompile Include="src\server\gameplay\mission\mission_console.cpp" />
     <ClCompile Include="src\server\gameplay\mission\enemy_wave_queue.cpp" />
     <ClCompile Include="src\server\gameplay\mission\content_step_queue.cpp" />
     <ClCompile Include="src\server\gameplay\mission\mission_compiler.cpp" />
@@ -1081,6 +1086,7 @@
     <ClInclude Include="src\client\memory\current_process_memory.h" />
     <ClInclude Include="src\client\content\handles\layout.h" />
     <ClInclude Include="src\client\content\handles\handle_resolver.h" />
+    <ClInclude Include="src\client\content\handles\handle_debug_dump.h" />
     <ClInclude Include="src\client\content\activity\activity_logic_packages.h" />
     <ClInclude Include="src\client\content\activity\activity_statevars.h" />
     <ClInclude Include="src\client\content\scenarios\scenario_build.h" />
@@ -1280,6 +1286,9 @@
     <ClInclude Include="src\server\bap\encrypted\push\queuez\queuez_update_frame.h" />
     <ClInclude Include="src\server\bap\encrypted\push\activity\activity_message_push.h" />
     <ClInclude Include="src\server\bap\encrypted\push\activity\activity_roster_push.h" />
+    <ClInclude Include="src\server\bap\encrypted\push\activity\activity_entity_slot_republish.h" />
+    <ClInclude Include="src\server\bap\encrypted\push\activity\activity_roster_atomic.h" />
+    <ClInclude Include="src\server\bap\encrypted\push\activity\activity_roster_research.h" />
     <ClInclude Include="src\server\bap\encrypted\push\activity\activity_global_state_push.h" />
     <ClInclude Include="src\server\bap\encrypted\push\activity\activity_keepalive_push.h" />
     <ClInclude Include="src\server\bap\encrypted\bap_connection_publication.h" />
@@ -1309,6 +1318,7 @@
     <ClInclude Include="src\middleware\bap\activity_message\definition.h" />
     <ClInclude Include="src\middleware\bap\activity_message\activity_message_request_parser.h" />
     <ClInclude Include="src\middleware\bap\activity_message\sensor_auth_update.h" />
+    <ClInclude Include="src\middleware\bap\activity_message\glimmer_extraction_contract.h" />
     <ClInclude Include="src\middleware\bap\activity_message\activity_global_state_encoder.h" />
     <ClInclude Include="src\middleware\bap\activity_message\client_authoritative_data.h" />
     <ClInclude Include="src\middleware\bap\activity_message\activity_client_keepalive_validator.h" />
@@ -1407,6 +1417,7 @@
     <ClInclude Include="src\client\hooks\bitmap\bitmap_ref_guard.h" />
     <ClInclude Include="src\client\hooks\bitmap\bitmap_hook_lifecycle.h" />
     <ClInclude Include="src\client\hooks\membership_probe\membership_probe.h" />
+    <ClInclude Include="src\client\hooks\squad_reference_probe\squad_reference_probe.h" />
     <ClInclude Include="src\client\hooks\bootflow\internal.h" />
     <ClInclude Include="src\client\hooks\bootflow\bootflow_hook_lifecycle.h" />
     <ClInclude Include="src\client\hooks\bootflow\spawn\spawn_gate_record_dump.h" />
@@ -1551,6 +1562,7 @@
     <ClInclude Include="src\server\gameplay\physics\replication\world_projection.h" />
     <ClInclude Include="src\server\gameplay\physics\world\activity_policy.h" />
     <ClInclude Include="src\server\gameplay\mission\compiled_mission_policy.h" />
+    <ClInclude Include="src\server\gameplay\mission\mission_console.h" />
     <ClInclude Include="src\server\gameplay\mission\enemy_wave_queue.h" />
     <ClInclude Include="src\server\gameplay\mission\content_step_queue.h" />
     <ClInclude Include="src\server\gameplay\mission\mission_compiler.h" />

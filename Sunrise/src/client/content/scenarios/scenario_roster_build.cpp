@@ -1,7 +1,9 @@
 #include <array>
 #include <cstdio>
+#include <string_view>
 
 #include "../../../core/logging/log.h"
+#include "../../../core/settings/settings.h"
 #include "../../../middleware/content/packages/tables/roster_intersection.h"
 #include "../../../middleware/content/packages/tables/scenario_reader.h"
 #include "internal.h"
@@ -20,6 +22,61 @@ constexpr std::array<std::size_t, 3> kRegistryDescriptors = {
 
 /** Destinations between progress lines. */
 constexpr std::size_t kRosterProgressInterval = 64;
+constexpr std::string_view kTrostlandDestination{"edz_freeroam"};
+constexpr std::uint32_t kTrostlandEncounterGroup = 0x1F6C5054;
+constexpr std::uint32_t kTrostlandEncounterObject = 0x80BE91F7;
+constexpr std::uint32_t kTrostlandEncounterSliceSet = 408;
+constexpr std::uint64_t kTrostlandEncounterSliceBit = std::uint64_t{1} << 51U;
+
+void report_trostland_group(const layouts::Definition& row,
+                            const Walk& walk,
+                            const RosterStorage& storage) noexcept {
+    if (!core::settings::get().server.activation.trostlandSpawnerProbe) {
+        return;
+    }
+    for (std::size_t index = 0; index < walk.candidateCount; ++index) {
+        const Candidate& candidate = walk.candidates[index];
+        if (candidate.key != kTrostlandEncounterGroup) {
+            continue;
+        }
+        const layouts::RosterGroup& group = storage.groups[candidate.group];
+        std::uint64_t mask = 0;
+        for (std::size_t key = 0; key < walk.intersection.keyCount; ++key) {
+            if (walk.intersection.keys[key] == candidate.key) {
+                mask = walk.intersection.masks[key];
+                break;
+            }
+        }
+        std::array<char, core::log::kLineCapacity> line{};
+        const int written =
+            std::snprintf(line.data(),
+                          line.size(),
+                          "ev=spawner_probe stage=encounter_group result=found destination=%.*s "
+                          "group=0x%08X object=0x%08X slots=%u mask=0x%016llX observed=0x%016llX "
+                          "top_level=%u bubble_groups=%u",
+                          static_cast<int>(row.nameLength),
+                          row.name.data(),
+                          group.registryKey,
+                          group.objectTag,
+                          static_cast<unsigned>(group.slotCount),
+                          static_cast<unsigned long long>(mask),
+                          static_cast<unsigned long long>(walk.intersection.observedSets),
+                          static_cast<unsigned>(row.rosterGroupCount),
+                          static_cast<unsigned>(row.bubbleGroupCount));
+        if (written > 0) {
+            core::log::write(core::log::Channel::state,
+                             core::log::Level::info,
+                             {line.data(), static_cast<std::size_t>(written)});
+        }
+        return;
+    }
+    if (std::string_view(row.name.data(), row.nameLength) == kTrostlandDestination) {
+        core::log::write(core::log::Channel::state,
+                         core::log::Level::warn,
+                         "ev=spawner_probe stage=encounter_group result=missing "
+                         "destination=edz_freeroam group=0x1F6C5054");
+    }
+}
 
 /**
  * Reports how far the walk has reached.
@@ -208,7 +265,25 @@ bool build_rosters(const reader::Source& source,
         if (!walk_destination(source, scratch, storage, walk)) {
             continue;
         }
+        if ((core::settings::get().server.activation.trostlandSpawnerProbe
+             || core::settings::get().server.activation.missionScriptHost)
+            && std::string_view(row.name.data(), row.nameLength) == kTrostlandDestination) {
+            std::uint16_t encounter = kNotARosterGroup;
+            if (!resolve_object(
+                    source, scratch, storage, kTrostlandEncounterObject, encounter)) {
+                continue;
+            }
+            if (encounter != kNotARosterGroup
+                && storage.groups[encounter].registryKey == kTrostlandEncounterGroup
+                && (walk.intersection.observedSets & kTrostlandEncounterSliceBit) != 0) {
+                note_candidate(walk, storage, encounter, false);
+                (void)tables::observe_roster_key(walk.intersection,
+                                                 kTrostlandEncounterSliceSet,
+                                                 storage.groups[encounter].registryKey);
+            }
+        }
         publish_groups(walk, row);
+        report_trostland_group(row, walk, storage);
     }
     return storage.cursor >= rows.size();
 }

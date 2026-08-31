@@ -44,6 +44,16 @@ struct Settings {
      * link's membership block, and a body that does not carry the local player destroys it.
      */
     bool activityPublicMembership{false};
+    /**
+     * Read-only build-86657 package probe for the Trostland Fallen spawner fixture.
+     *
+     * It records descriptor ownership only; it never grants authority or emits component state.
+ */
+    bool trostlandSpawnerProbe{false};
+    /** Loads a destination-matched Lua mission into the native physics policy host. */
+    bool missionScriptHost{false};
+    /** Starts with the EDZ free-roam Trostland arrival selected for the mission research slice. */
+    bool trostlandMissionPreset{false};
 };
 
 } // namespace sunrise::core::settings::server::activation

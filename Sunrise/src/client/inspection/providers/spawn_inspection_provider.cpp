@@ -337,7 +337,8 @@ RefreshResult SpawnInspectionProvider::refresh() {
     // copy can hold, so emitter churn continually changed which handles won the 1024-row bound.
     // Freeze all three memberships for one activity epoch. Matching observations still update
     // the retained nodes below as value-only changes.
-    if (keyPresent_ && next.activitySession != 0 && next.activitySession == key_.activitySession
+    if (!liveRuntimeMembership_ && keyPresent_ && next.activitySession != 0
+        && next.activitySession == key_.activitySession
         && next.activityRevision == key_.activityRevision) {
         next.runtimeObjectHandles = key_.runtimeObjectHandles;
         next.runtimeObjectTypes = key_.runtimeObjectTypes;
@@ -526,6 +527,10 @@ RefreshResult SpawnInspectionProvider::refresh() {
     rebuild(next, livePlayer, objects, triggers, audio, physics);
     synchronize_document(RefreshKind::structural, objects, triggers, physics);
     return RefreshResult{RefreshKind::structural, valueRevision_};
+}
+
+void SpawnInspectionProvider::set_live_runtime_membership(bool enabled) noexcept {
+    liveRuntimeMembership_ = enabled;
 }
 
 void SpawnInspectionProvider::rebuild(const Key& key,

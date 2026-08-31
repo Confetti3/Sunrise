@@ -126,6 +126,7 @@ struct WorkspaceState final {
     float focusContextOpacity{inspection::settings::kDefaultFocusContextOpacity};
     bool trackRuntimeOnly{true};
     bool trackTransforms{};
+    bool liveRuntimeMembership{};
     bool bottomCollapsed{};
     bool viewportNavigation{};
     bool layoutDirty{};

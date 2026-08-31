@@ -64,6 +64,38 @@ namespace {
     return true;
 }
 
+[[nodiscard]] bool same_destination(const destination::DestinationSelection& left,
+                                    const destination::DestinationSelection& right) noexcept {
+    return left.packageName == right.packageName
+           && left.packageNameLength == right.packageNameLength && left.reason == right.reason
+           && left.previousActivityIndex == right.previousActivityIndex
+           && left.activityIndex == right.activityIndex && left.elementIndex == right.elementIndex
+           && left.arrivalBubbleHash == right.arrivalBubbleHash
+           && left.spawnSetHash == right.spawnSetHash
+           && left.hasElementIndex == right.hasElementIndex
+           && left.hasArrivalBubbleHash == right.hasArrivalBubbleHash
+           && left.hasSpawnSetHash == right.hasSpawnSetHash
+           && left.arrivalBubbleOverride == right.arrivalBubbleOverride
+           && left.hasArrivalBubbleOverride == right.hasArrivalBubbleOverride
+           && left.sliceSetOverride == right.sliceSetOverride
+           && left.hasSliceSetOverride == right.hasSliceSetOverride
+           && left.spawnSetOverride == right.spawnSetOverride
+           && left.hasSpawnSetOverride == right.hasSpawnSetOverride
+           && left.descriptorBits == right.descriptorBits
+           && left.descriptorBitLength == right.descriptorBitLength
+           && left.descriptorNameBit == right.descriptorNameBit
+           && left.hasDescriptorName == right.hasDescriptorName;
+}
+
+[[nodiscard]] bool exact_joined_record(const SessionRecord& record,
+                                       const SessionBinding& binding) noexcept {
+    return record.occupied && record.joined && binding.sessionId != kAbsentSessionId
+           && binding.createdRevision != kInvalidRevision
+           && record.sessionId == binding.sessionId
+           && record.createdRevision == binding.createdRevision
+           && same_destination(record.destination, binding.destination);
+}
+
 } // namespace
 
 /** Commits one join, grant, or release when its captured revisions still match. */
@@ -199,6 +231,21 @@ bool lease_masks(std::uint64_t sessionId, LeaseMask& held, LeaseMask& reserved) 
         held = state.sessions[target].heldEntitySlots;
         reserved = state.sessions[target].serverEntitySlots;
     }
+    ReleaseSRWLockShared(&runtime::storage::g_stateLock);
+    return found;
+}
+
+/** Copies only the client-held mask for one exact joined session generation. */
+bool held_mask(const SessionBinding& binding, LeaseMask& held) noexcept {
+    held = {};
+    if (binding.sessionId == kAbsentSessionId
+        || binding.createdRevision == kInvalidRevision) return false;
+    AcquireSRWLockShared(&runtime::storage::g_stateLock);
+    const ActivityState& state = runtime::storage::g_state.activity;
+    const std::size_t target = activity::transactions::find_session(state, binding.sessionId);
+    const bool found = target != kInvalidSessionSlot
+                       && exact_joined_record(state.sessions[target], binding);
+    if (found) held = state.sessions[target].heldEntitySlots;
     ReleaseSRWLockShared(&runtime::storage::g_stateLock);
     return found;
 }

@@ -14,6 +14,7 @@ namespace sunrise::client::inspection {
 class InspectionSession final {
 public:
     [[nodiscard]] providers::RefreshResult refresh();
+    void set_live_runtime_membership(bool enabled) noexcept;
     void reset() noexcept;
     void reset_document() noexcept;
 

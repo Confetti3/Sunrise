@@ -1,6 +1,7 @@
 #include <algorithm>
 
 #include "sensor_auth_update.h"
+#include "glimmer_extraction_contract.h"
 
 namespace sunrise::middleware::bap::activity_message::sensor_auth_update {
 namespace {
@@ -11,6 +12,57 @@ namespace bits = encoding::bits;
 constexpr std::uint8_t kSlotTypeParticipation = 13;
 /** The participation region rides a signed field, so this is the widest index it accepts. */
 constexpr std::uint32_t kMaximumRegion = 0x7FFFFFFF;
+constexpr std::uint32_t kTrostlandGroup = 0x2986181D;
+constexpr std::uint32_t kTrostlandSpawner = 0x80C26B0A;
+constexpr std::uint8_t kTrostlandSlotType = 1;
+constexpr std::uint16_t kTrostlandSlotIndex = 271;
+namespace contract = glimmer_extraction;
+
+[[nodiscard]] bool glimmer_spawn_slot(ContentStep step, std::uint16_t& slot) noexcept {
+    switch (step) {
+    case ContentStep::glimmerSite0ShipSpawn: slot = contract::kSites[0].dropship.slot; return true;
+    case ContentStep::glimmerSite1ShipSpawn: slot = contract::kSites[1].dropship.slot; return true;
+    case ContentStep::glimmerSite2ShipSpawn: slot = contract::kSites[2].dropship.slot; return true;
+    default: return false;
+    }
+}
+
+[[nodiscard]] bool glimmer_sequence_slot(ContentStep step, std::uint16_t& slot) noexcept {
+    if (step == ContentStep::glimmerIntro) {
+        slot = contract::kIntroSequence;
+        return true;
+    }
+    switch (step) {
+    case ContentStep::glimmerSite0Enter:
+    case ContentStep::glimmerSite0Exit:
+    case ContentStep::glimmerSite1Enter:
+    case ContentStep::glimmerSite1Exit:
+    case ContentStep::glimmerSite2Enter:
+    case ContentStep::glimmerSite2Exit:
+    case ContentStep::glimmerCleanup:
+        slot = contract::kActiveSequence;
+        return true;
+    default: return false;
+    }
+}
+
+[[nodiscard]] bool has_auth_slot(const Snapshot& snapshot,
+                                 std::uint32_t key,
+                                 std::uint8_t type,
+                                 std::uint16_t index) noexcept {
+    std::size_t matches = 0;
+    for (std::size_t group = 0; group < snapshot.roster.groupCount; ++group) {
+        const Group& row = snapshot.roster.groups[group];
+        if (row.key != key) continue;
+        for (std::size_t slot = 0; slot < row.slotTypes.size(); ++slot) {
+            if (row.slotTypes[slot] == type && row.slotIndices[slot] == index
+                && (row.slotFlags[slot] & kSlotAuthFlag) != 0) {
+                ++matches;
+            }
+        }
+    }
+    return matches == 1;
+}
 
 /**
  * Checks the per-bubble sub-blocks against what the client's own arrays hold.
@@ -81,6 +133,45 @@ constexpr std::uint32_t kMaximumRegion = 0x7FFFFFFF;
             if (index > kMaximumSlotIndex) {
                 return false;
             }
+        }
+    }
+    if (snapshot.hasSense) {
+        if (snapshot.sense.group != kTrostlandGroup
+            || snapshot.sense.definition != kTrostlandSpawner
+            || snapshot.sense.slotType != kTrostlandSlotType
+            || snapshot.sense.slotIndex != kTrostlandSlotIndex || snapshot.sense.mode != 0
+            || snapshot.sense.requested != std::array<std::uint32_t, 2>{1, 0}
+            || snapshot.sense.generation == 0 || snapshot.sense.generation > 0x7FFFFFFFU
+            || snapshot.sense.deltaWidth == 0
+            || snapshot.sense.deltaWidth > 96) {
+            return false;
+        }
+        std::size_t matches = 0;
+        for (std::size_t group = 0; group < snapshot.roster.groupCount; ++group) {
+            const Group& row = snapshot.roster.groups[group];
+            if (row.key != snapshot.sense.group) continue;
+            for (std::size_t slot = 0; slot < row.slotTypes.size(); ++slot) {
+                if (row.slotTypes[slot] == snapshot.sense.slotType
+                    && row.slotIndices[slot] == snapshot.sense.slotIndex
+                    && (row.slotFlags[slot] & kSlotAuthFlag) != 0) ++matches;
+            }
+        }
+        if (matches != 1) return false;
+    }
+    if (snapshot.hasContentStep) {
+        if (snapshot.contentStep.generation == 0
+            || snapshot.contentStep.generation > 0x7FFFFFFFU) return false;
+        std::uint16_t slot = 0;
+        if (glimmer_spawn_slot(snapshot.contentStep.step, slot)) {
+            if (!has_auth_slot(snapshot, contract::kGroup, contract::kSpawnerType, slot)) {
+                return false;
+            }
+        } else if (glimmer_sequence_slot(snapshot.contentStep.step, slot)) {
+            if (!has_auth_slot(snapshot, contract::kGroup, contract::kSequenceType, slot)) {
+                return false;
+            }
+        } else {
+            return false;
         }
     }
     return valid_sub_blocks(snapshot.roster.bubbleSubBlocks);

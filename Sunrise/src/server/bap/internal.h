@@ -13,6 +13,7 @@
 #include "../../state/activity/definition.h"
 #include "../../state/build_data/scenarios/definition.h"
 #include "../../state/runtime/state.h"
+#include "runtime.h"
 #include "encrypted/queuez/definition.h"
 
 namespace sunrise::server::bap {
@@ -56,8 +57,23 @@ struct RosterPublication {
     std::uint32_t priorGroups{};
     std::uint8_t priorSends{};
     std::uint8_t priorState{};
+    std::uint64_t enemyWaveTicket{};
+    std::uint64_t contentStepToken{};
+    std::uint64_t contentStepTicket{};
+    /** Scoped mission-signal reservation paired with an enter-command ticket, if any. */
+    std::uint64_t contentStepSignalReservation{};
+    /** Exact manual entity-slot diagnostic delivered with this roster, if any. */
+    state::activity::SessionBinding entitySlotRepublishBinding{};
+    std::uint64_t entitySlotRepublishBindingGeneration{};
+    std::uint64_t entitySlotRepublishToken{};
     /** Set when the staged body carried a bubble grant that State has not recorded yet. */
     bool hasGrant{};
+    bool hasEnemyWave{};
+    bool hasContentStep{};
+    bool hasQueuedContentStep{};
+    bool hasContentStepSignalReservation{};
+    /** Set only after an authentic type-0 frame and this roster both encode. */
+    bool hasEntitySlotRepublish{};
     /** Set while a roster body is staged and its outcome is undecided. */
     bool staged{};
 };
@@ -181,6 +197,33 @@ struct Session {
     /** True while one ability-icon refresh is still owed to this peer. */
     bool abilityRefreshArmed{};
 };
+
+/** Tests a supplied snapshot against the highest-generation active private row. */
+[[nodiscard]] inline bool newest_private_activity_matches(
+    std::span<const Session> sessions,
+    const ActivitySnapshot& expected) noexcept {
+    const ActivityClientBinding* newest = nullptr;
+    for (const Session& session : sessions) {
+        const ActivityClientBinding& activity = session.activity;
+        if (session.id == 0 || !session.authenticated
+            || activity.role != ActivityClientRole::privateCurrent
+            || activity.session.sessionId == state::activity::kAbsentSessionId
+            || activity.bindingGeneration == 0
+            || (newest != nullptr
+                && activity.bindingGeneration <= newest->bindingGeneration)) continue;
+        newest = &activity;
+    }
+    return newest != nullptr
+           && newest->bindingGeneration == expected.bindingGeneration
+           && state::activity::same_binding(newest->session, expected.binding);
+}
+
+/**
+ * Tests a supplied exact private snapshot against the newest private ActivityClient.
+ * The caller must already hold the BAP session lock; roster staging does so for the whole append.
+ */
+[[nodiscard]] bool newest_private_activity_matches_locked(
+    const ActivitySnapshot& expected) noexcept;
 
 namespace plaintext {
 

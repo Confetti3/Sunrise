@@ -83,6 +83,12 @@ public:
                             state::gameplay::physics::ContextHandle context) noexcept;
 
     /**
+     * Releases an empty binding so the coordinator slot can serve a later world generation.
+     * @return True when already empty or when no actor/peer owner prevented the release.
+     */
+    [[nodiscard]] bool unbind() noexcept;
+
+    /**
      * Reconciles one committed world snapshot into stable allocation identities.
      * @param snapshot Canonical live world actors.
      * @param options Optional exact per-actor combat and relevance inputs.

@@ -5,6 +5,8 @@
 #include "../../../../../middleware/bap/activity_message/definition.h"
 #include "../../../../../state/activity/receipts/definition.h"
 
+namespace sunrise::server::bap { struct ActivityClientBinding; }
+
 namespace sunrise::server::bap::encrypted::activity_message::receipts {
 
 /** One message framed by the route, which changed no State. */
@@ -18,7 +20,8 @@ struct Framed {
 namespace message = middleware::bap::activity_message;
 
 /** Frames a sensor sense update and reports its epoch. */
-[[nodiscard]] Framed frame_sense_update(const message::Request& request) noexcept;
+[[nodiscard]] Framed frame_sense_update(const ActivityClientBinding& binding,
+                                         const message::Request& request) noexcept;
 
 /** Records a service-8 envelope carrying the local-only activity-host request type. */
 [[nodiscard]] Framed frame_route_misuse(const message::Request& request) noexcept;

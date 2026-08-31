@@ -55,6 +55,11 @@ It does not modify game rendering when nodes are hidden or isolated.
 See [INSPECTOR.md](INSPECTOR.md) for architecture, safety limits, supported-build constraints,
 optional catalog generation, export interfaces, and the manual verification checklist.
 
+## Build-specific research
+
+See [RESEARCH.md](RESEARCH.md) for the current build-86657 evidence boundary, canonical reports,
+research-only probes, and narrow validation routes.
+
 ## Bounded mission programs
 
 The current research build includes a fixed-budget, load-time Lua mission compiler. See

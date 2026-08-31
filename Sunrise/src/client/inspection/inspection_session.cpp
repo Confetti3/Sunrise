@@ -21,6 +21,10 @@ providers::RefreshResult InspectionSession::refresh() {
     return result;
 }
 
+void InspectionSession::set_live_runtime_membership(bool enabled) noexcept {
+    provider_.set_live_runtime_membership(enabled);
+}
+
 void InspectionSession::reset() noexcept {
     provider_.reset();
     history_.clear();

@@ -3,7 +3,9 @@
 #include <Windows.h>
 
 #include <array>
+#include <atomic>
 
+#include "../../../core/settings/settings.h"
 #include "../../../middleware/crypto/random_bytes.h"
 #include "../../../middleware/encoding/bit_reader.h"
 #include "../../../middleware/encoding/bit_writer.h"
@@ -62,11 +64,109 @@ constexpr std::size_t kMessageReportCapacity = 8;
  * sequences ahead of its window, so this host must not send faster than the peer does.
  */
 constexpr std::uint64_t kResendInterval = 250;
+/** At most eight authenticated present external bodies are retained for observation. */
+constexpr std::uint32_t kExternalCaptureLimit = 8;
+/** One raw external observation contributes no more than 1 KiB of bytes. */
+constexpr std::size_t kExternalCaptureByteLimit = 1024;
+/** Keep each observation line below the structured log line limit. */
+constexpr std::size_t kExternalCaptureChunk = 48;
+std::atomic_uint32_t g_externalCaptureCount{};
 
 SRWLOCK g_lock{SRWLOCK_INIT};
 std::array<gp::PeerLink, gp::kAssociationCapacity> g_peers;
 /** Channel ids this host hands out. The peer refuses one that does not increase. */
 std::uint32_t g_channelId{0};
+
+/**
+ * Captures one present external body as opaque MSB-first bits. No field is decoded or applied.
+ * @param payload Whole decrypted established packet.
+ * @param presenceBitOffset Offset reported by the established decoder.
+ * @param sessionId Sole group session, or zero when the link multiplexes several.
+ * @param localSequence Host connection sequence.
+ * @param remoteSequence Peer connection sequence.
+ */
+void capture_external_body(std::span<const std::byte> payload,
+                           std::size_t presenceBitOffset,
+                           std::uint64_t sessionId,
+                           std::uint32_t localSequence,
+                           std::uint32_t remoteSequence) noexcept {
+    bits::Reader reader(payload);
+    if (!reader.skip(presenceBitOffset)) {
+        return;
+    }
+    std::uint64_t present = 0;
+    if (!reader.read(1, present) || present == 0) {
+        return;
+    }
+    const std::size_t bodyBitOffset = presenceBitOffset + 1;
+    const std::size_t bodyBitCount = reader.remaining_bits();
+    const std::uint32_t capture =
+        g_externalCaptureCount.fetch_add(1, std::memory_order_relaxed);
+    if (capture >= kExternalCaptureLimit) {
+        return;
+    }
+
+    const std::size_t maximumBits = kExternalCaptureByteLimit * kByteBits;
+    const std::size_t capturedBits = bodyBitCount < maximumBits ? bodyBitCount : maximumBits;
+    const std::size_t capturedBytes = (capturedBits + kByteBits - 1) / kByteBits;
+    std::array<std::byte, kExternalCaptureByteLimit> bytes{};
+    bits::Reader bodyReader(payload);
+    if (!bodyReader.skip(bodyBitOffset)) {
+        return;
+    }
+    std::size_t remaining = capturedBits;
+    for (std::size_t index = 0; index < capturedBytes; ++index) {
+        const auto width = static_cast<std::uint8_t>(remaining < kByteBits ? remaining
+                                                                              : kByteBits);
+        std::uint64_t value = 0;
+        if (!bodyReader.read(width, value)) {
+            return;
+        }
+        bytes[index] = static_cast<std::byte>(value << (kByteBits - width));
+        remaining -= width;
+    }
+
+    constexpr char kHex[] = "0123456789ABCDEF";
+    const char* sessionField = sessionId == 0 ? "unresolved" : "resolved";
+    report(core::log::Level::info,
+           "ev=gameplay stage=external_observation result=present mode=observation_only "
+           "capture=%u session=%s session_id=0x%016llX local_seq=0x%08X remote_seq=0x%08X "
+           "presence_bit_offset=%zu body_bit_offset=%zu body_remaining_bits=%zu bytes=%zu",
+           capture,
+           sessionField,
+           static_cast<unsigned long long>(sessionId),
+           localSequence,
+           remoteSequence,
+           presenceBitOffset,
+           bodyBitOffset,
+           bodyBitCount,
+           capturedBytes);
+    for (std::size_t offset = 0; offset < capturedBytes; offset += kExternalCaptureChunk) {
+        const std::size_t count = capturedBytes - offset < kExternalCaptureChunk
+                                      ? capturedBytes - offset
+                                      : kExternalCaptureChunk;
+        std::array<char, kExternalCaptureChunk * 2 + 1> hex{};
+        for (std::size_t index = 0; index < count; ++index) {
+            const auto value = std::to_integer<unsigned>(bytes[offset + index]);
+            hex[index * 2] = kHex[value >> 4U];
+            hex[index * 2 + 1] = kHex[value & 0x0FU];
+        }
+        report(core::log::Level::info,
+               "ev=gameplay stage=external_observation result=chunk mode=observation_only "
+               "capture=%u session=%s session_id=0x%016llX local_seq=0x%08X remote_seq=0x%08X "
+               "body_bit_offset=%zu chunk_offset=%zu bytes=%zu total=%zu hex=%s",
+               capture,
+               sessionField,
+               static_cast<unsigned long long>(sessionId),
+               localSequence,
+               remoteSequence,
+               bodyBitOffset,
+               offset,
+               count,
+               capturedBytes,
+               hex.data());
+    }
+}
 
 /** @return True when both endpoints name the same address and port. */
 [[nodiscard]] bool same_endpoint(const gp::Endpoint& left, const gp::Endpoint& right) noexcept {
@@ -610,7 +710,8 @@ void consume_established(const gp::Endpoint& from,
                          std::span<const std::byte> payload,
                          std::uint64_t now) noexcept {
     wire::EstablishedPacket packet{};
-    if (!wire::decode_established(payload, false, packet)) {
+    const bool observeExternal = core::settings::get().server.activation.gameplayExternalBody;
+    if (!wire::decode_established(payload, observeExternal, packet)) {
         report(core::log::Level::debug, "ev=gameplay stage=packet result=drop reason=grammar");
         return;
     }
@@ -628,6 +729,9 @@ void consume_established(const gp::Endpoint& from,
     bool peerFound = false;
     bool guardAccepted = false;
     std::uint8_t expectedGuard = 0;
+    bool viewBound = false;
+    std::uint32_t localConnectionSequence = 0;
+    std::uint32_t remoteConnectionSequence = 0;
     AcquireSRWLockExclusive(&g_lock);
     gp::PeerLink* peer = find_locked(from);
     std::array<wire::AssembledMessage, kMessageReportCapacity> bodies{};
@@ -638,6 +742,9 @@ void consume_established(const gp::Endpoint& from,
     }
     if (guardAccepted) {
         sessionId = sole_session_locked(*peer);
+        viewBound = peer->view.bound;
+        localConnectionSequence = peer->localConnectionSequence;
+        remoteConnectionSequence = peer->remoteConnectionSequence;
         if (packet.ack.outboundHeadPresent) {
             record_sequence(*peer, packet.ack.outboundHead);
         }
@@ -678,6 +785,13 @@ void consume_established(const gp::Endpoint& from,
                static_cast<unsigned>(packet.connectionSequenceLow2),
                static_cast<unsigned>(expectedGuard));
         return;
+    }
+    if (observeExternal && packet.hasExternal && viewBound) {
+        capture_external_body(payload,
+                              packet.externalBitOffset,
+                              sessionId,
+                              localConnectionSequence,
+                              remoteConnectionSequence);
     }
     for (std::size_t index = 0; index < deliveredCount; ++index) {
         report(core::log::Level::info,

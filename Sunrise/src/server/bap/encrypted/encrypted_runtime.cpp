@@ -210,6 +210,9 @@ bool consume(Session& session,
             written = framedSize;
             // The caller copy finishes before connection fields are published.
             session.sendNonce = nextSendNonce;
+            // Delivery precedes connection publication. Consume the exact diagnostic token now,
+            // before a delivered rebind can discard binding-scoped roster effects.
+            push::activity::commit_staged_entity_slot_republish(session);
             if (publishesQueuez) {
                 session.queuez = nextQueuez;
             }

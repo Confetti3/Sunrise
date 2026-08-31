@@ -38,6 +38,8 @@ inline constexpr std::size_t kDescriptorAuthSchemaOffset = 72;
 
 /** What one slot type resolves to. */
 struct SlotDescriptor {
+    /** Definition tag of the descriptor blob that owns this slot. */
+    std::uint32_t definitionTag{};
     std::uint32_t componentClass{};
     std::uint32_t senseSchema{};
     std::uint32_t authSchema{};

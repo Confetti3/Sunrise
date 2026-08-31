@@ -1,4 +1,6 @@
+#include <array>
 #include <atomic>
+#include <cstdio>
 #include <cstdint>
 #include <string_view>
 
@@ -7,6 +9,7 @@
 #include "../../../state/activity/runtime.h"
 #include "../../hooking/detour.h"
 #include "internal.h"
+#include "spawn/probe.h"
 
 namespace sunrise::client::hooks::bootflow {
 namespace {
@@ -29,6 +32,48 @@ using SpawnGate = bool(__fastcall*)(std::int32_t) noexcept;
 
 hooking::detour::Handle g_handle{};
 std::atomic<SpawnGate> g_original{nullptr};
+/** Last gate outcome reported. The gate is polled every frame, so stable failures stay quiet. */
+std::atomic_uint64_t g_reported{~std::uint64_t{0}};
+
+/** Reports one changed native/hold decision together with the recovered native refusal. */
+void report_gate(std::int32_t datum,
+                 bool allowed,
+                 bool loading,
+                 bool gaveUp,
+                 state::activity::WorldPhase phase,
+                 std::uint64_t age) noexcept {
+    const spawn::Reading reading = spawn::examine(datum);
+    const auto refusal = static_cast<std::uint8_t>(reading.refusal);
+    const std::uint64_t outcome = static_cast<std::uint32_t>(datum)
+                                  | (static_cast<std::uint64_t>(allowed) << 32U)
+                                  | (static_cast<std::uint64_t>(loading) << 33U)
+                                  | (static_cast<std::uint64_t>(gaveUp) << 34U)
+                                  | (static_cast<std::uint64_t>(phase) << 35U)
+                                  | (static_cast<std::uint64_t>(refusal) << 40U);
+    if (g_reported.exchange(outcome, std::memory_order_relaxed) == outcome) {
+        return;
+    }
+    std::array<char, 256> detail{};
+    const std::size_t detailLength = spawn::describe(reading, detail);
+    std::array<char, core::log::kLineCapacity> line{};
+    const int written = std::snprintf(line.data(),
+                                      line.size(),
+                                      "ev=bootflow stage=spawn_gate datum=%d native=%u hold=%u "
+                                      "gave_up=%u phase=%u age=%llu %.*s",
+                                      datum,
+                                      allowed ? 1U : 0U,
+                                      loading ? 1U : 0U,
+                                      gaveUp ? 1U : 0U,
+                                      static_cast<unsigned>(phase),
+                                      static_cast<unsigned long long>(age),
+                                      static_cast<int>(detailLength),
+                                      detail.data());
+    if (written > 0) {
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::info,
+                         {line.data(), static_cast<std::size_t>(written)});
+    }
+}
 
 /**
  * Puts the spawn after the world-transition fade is armed.
@@ -48,6 +93,7 @@ __declspec(noinline) bool __fastcall spawn_gate(std::int32_t datum) noexcept {
     const core::settings::client::Settings& client = core::settings::get().client;
     const bool gaveUp = age >= client.spawnHoldMs;
     const bool loading = transitioning && !gaveUp && client.holdSpawn;
+    report_gate(datum, allowed, loading, gaveUp, phase, age);
     // Release only on arrival. The step-37 exit re-arms the fade unless one is already up, and
     // nothing polls this gate after the spawn, so an early release leaves a fade nobody clears.
     if (phase == state::activity::WorldPhase::arrived) {
@@ -90,6 +136,7 @@ void uninstall_spawn_hold() noexcept {
         (void)hooking::detour::uninstall(g_handle);
     }
     g_original.store(nullptr, std::memory_order_release);
+    g_reported.store(~std::uint64_t{0}, std::memory_order_release);
 }
 
 } // namespace sunrise::client::hooks::bootflow

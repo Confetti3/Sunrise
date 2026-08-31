@@ -151,6 +151,21 @@ bool WorldCoordinator::bind(const world::WorldIdentity& identity,
     return true;
 }
 
+bool WorldCoordinator::unbind() noexcept {
+    if (!bound_) return true;
+    for (const ActorRecord& actor : actors_) {
+        if (actor.occupied) return false;
+    }
+    for (const PeerRecord& peer : peers_) {
+        if (peer.occupied) return false;
+    }
+    context_ = {};
+    activity_ = {};
+    world_ = {};
+    bound_ = false;
+    return true;
+}
+
 /** @return Fixed actor slot for an exact logical generation. */
 std::size_t WorldCoordinator::find_actor(const world::ActorKey& actor) const noexcept {
     for (std::size_t index = 0; index < actors_.size(); ++index) {

@@ -49,9 +49,17 @@ struct RosterStorage {
     std::size_t groupCount{};
     /** Descriptors found on the object being resolved, one per slot it can publish. */
     std::array<SlotRecord, layouts::kRosterSlotCapacity> slots{};
+    /** Declared type for each slot index of the object currently being resolved. */
+    std::array<std::uint32_t, layouts::kRosterSlotCapacity> declaredSlotTypes{};
     std::size_t slotCount{};
     /** Set when the object declared more descriptors than storage holds, which refuses it. */
     bool slotsOverflowed{};
+    /** A placed-handle chain could not be read or classified completely. */
+    bool descriptorWalkIncomplete{};
+    /** Two descriptors claimed the same index with different wire metadata. */
+    bool descriptorConflict{};
+    /** Slot descriptors recovered from fixture definitions. */
+    std::size_t probeDescriptorCount{};
     /** Group objects whose descriptor walk yielded no publishable slot. */
     std::size_t unresolvedGroups{};
     /** Destinations walked so far. The walk resumes here on the next call. */
@@ -180,7 +188,7 @@ void record_slot(RosterStorage& storage,
  * @param storage Working storage holding the descriptors.
  * @param declaredSlotCount Slots the object's own slot array declares.
  * @param group Receives the slot types, flags and indices.
- * @return True when every declared slot has a descriptor and nothing overflowed.
+ * @return True when at least one in-range placed descriptor was recovered and nothing overflowed.
  */
 [[nodiscard]] bool fill_slots(RosterStorage& storage,
                               std::size_t declaredSlotCount,
@@ -247,6 +255,17 @@ void publish_groups(Walk& walk, layouts::Definition& row) noexcept;
                                   RosterStorage& storage,
                                   std::uint32_t objectTag,
                                   std::uint16_t& group) noexcept;
+
+/**
+ * Reads and reports the exact build-86657 Trostland event roster independently of publication.
+ * This keeps the research probe available when the generated build-data cache made the normal
+ * destination walk unnecessary.
+ * @param source Package directory and borrowed block keys.
+ * @param scratch Lock-owned block storage.
+ * @return True once the object and every placed descriptor have been read.
+ */
+[[nodiscard]] bool probe_trostland_roster(const reader::Source& source,
+                                          reader::Scratch& scratch) noexcept;
 
 /**
  * Walks the next batch of destination rows for their roster groups.

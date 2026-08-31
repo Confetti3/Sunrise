@@ -58,9 +58,21 @@ find_actor(const BubbleHost::Storage::WorldSlot& slot, backend::BodyHandle body)
     world::CommittedEvent event{};
     event.actor = {source.actor.actorId, source.actor.generation};
     event.tick = source.tick;
-    event.actorRevision = static_cast<std::uint64_t>(source.edge);
     event.value = source.triggerId;
-    event.kind = world::CommittedEventKind::serviceTickCommitted;
+    switch (source.edge) {
+    case mechanics::TriggerEdge::enter:
+        event.kind = world::CommittedEventKind::triggerEntered;
+        break;
+    case mechanics::TriggerEdge::stay:
+        event.kind = world::CommittedEventKind::triggerStayed;
+        break;
+    case mechanics::TriggerEdge::leave:
+        event.kind = world::CommittedEventKind::triggerLeft;
+        break;
+    default:
+        event.kind = world::CommittedEventKind::count;
+        break;
+    }
     return event;
 }
 

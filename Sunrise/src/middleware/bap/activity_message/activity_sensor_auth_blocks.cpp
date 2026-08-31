@@ -7,7 +7,6 @@ namespace bits = encoding::bits;
 
 /** The widest chunk the bit writer accepts in one call. */
 constexpr std::uint8_t kChunkWidth = 32;
-
 } // namespace
 
 /** Writes zero bits in chunks the writer accepts. */
@@ -159,7 +158,11 @@ bool write_object_block(bits::Writer& writer,
                         bool carriesPlayerKey) noexcept {
     const bool emitAuth = (flags & kSlotAuthFlag) != 0;
     const bool emitSense = (flags & kSlotSenseFlag) != 0;
-    const std::size_t body = emitAuth ? auth_body_bits(snapshot, slotType, carriesPlayerKey) : 0;
+    // The client reports `0x80807ECC` through type 6, but the host authors this component through
+    // its distinct `0x80807EC9` auth schema. Echoing the type-6 delta into this sense sub-block
+    // only moves the acknowledgement mirror and never constructs a spawner state.
+    const std::size_t body =
+        emitAuth ? auth_body_bits(snapshot, key, slotType, slotIndex, carriesPlayerKey) : 0;
     const std::size_t remainder = (emitAuth ? 2U : 0U) + (emitSense ? 1U : 0U) + body;
     bool encoded = writer.write(1, kPresenceWidth) && writer.write(key, kKeyWidth)
                    && writer.write(std::uint32_t{slotType} + kSlotTypeBias, kSlotTypeWidth)
@@ -171,10 +174,10 @@ bool write_object_block(bits::Writer& writer,
         encoded =
             writer.write(1, kPresenceWidth) && writer.write(body > 0 ? 1U : 0U, kPresenceWidth);
         if (encoded && body > 0) {
-            encoded = write_auth_body(writer, snapshot, slotType, carriesPlayerKey);
+            encoded =
+                write_auth_body(writer, snapshot, key, slotType, slotIndex, carriesPlayerKey);
         }
     }
-    // A sense-present bit of one costs 35 more bits, not one, so it is always sent absent.
     if (encoded && emitSense) {
         encoded = writer.write(0, kPresenceWidth);
     }

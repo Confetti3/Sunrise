@@ -34,10 +34,10 @@ constexpr std::int32_t kRemoteSlot = 1;
 constexpr std::uint8_t kNotArmed = 0;
 
 /** Lines allowed per run. The check runs once per activity container. */
-constexpr unsigned kMaxReports = 4;
+constexpr unsigned kMaxReports = 16;
 
-/** Size of one forcing line, set by its slot fields. */
-constexpr std::size_t kLineCapacity = 96;
+/** Size of one forcing line, including the container and argument diagnostics. */
+constexpr std::size_t kLineCapacity = 192;
 
 using CheckBubbles =
     std::uint8_t(__fastcall*)(void*, void*, std::int32_t, void*, std::int64_t, std::int32_t);
@@ -47,20 +47,31 @@ std::atomic<CheckBubbles> g_original{nullptr};
 std::atomic<unsigned> g_reported{0};
 
 /**
- * Emits one forcing event while the per-run budget lasts.
- * @param slot The slot the caller passed.
+ * Emits one bounded owner-slot event with the untouched call arguments.
+ * @param container The roster container being checked.
+ * @param activity The caller's activity selector.
+ * @param role The caller's fifth argument; its ownership meaning is not assumed.
+ * @param slot The native owner slot.
  */
-void report(std::int32_t slot) noexcept {
+void report(void* container,
+            std::int32_t activity,
+            std::int64_t role,
+            std::int32_t slot) noexcept {
     // One atomic claim per line, so a concurrent check cannot reuse a budget slot.
     if (g_reported.fetch_add(1, std::memory_order_relaxed) >= kMaxReports) {
         return;
     }
     std::array<char, kLineCapacity> line{};
-    const int written = std::snprintf(line.data(),
-                                      line.size(),
-                                      "ev=bootflow stage=owner_slot result=forced was=%d now=%d",
-                                      static_cast<int>(slot),
-                                      static_cast<int>(kRemoteSlot));
+    const int written = std::snprintf(
+        line.data(),
+        line.size(),
+        "ev=bootflow stage=owner_slot result=%s container=%p activity=%d role=%lld was=%d now=%d",
+        slot == kRemoteSlot ? "kept" : "forced",
+        container,
+        static_cast<int>(activity),
+        static_cast<long long>(role),
+        static_cast<int>(slot),
+        static_cast<int>(kRemoteSlot));
     if (written > 0) {
         core::log::write(core::log::Channel::client,
                          core::log::Level::info,
@@ -87,9 +98,7 @@ __declspec(noinline) std::uint8_t __fastcall check(void* container,
     if (!core::settings::get().client.pinReplicatedRecord) {
         return original(container, reporter, activity, prefix, roleIsLocal, slot);
     }
-    if (slot != kRemoteSlot) {
-        report(slot);
-    }
+    report(container, activity, roleIsLocal, slot);
     return original(container, reporter, activity, prefix, roleIsLocal, kRemoteSlot);
 }
 

@@ -33,6 +33,8 @@
 #include "../../hooks/graphics/renderer/graphics_depth_observer.h"
 #include "../../hooks/graphics/renderer/native_debug_renderer.h"
 #include "../../hooks/graphics/renderer/renderer.h"
+#include "../../hooks/retail_log/retail_log_enqueue_observer.h"
+#include "../../hooks/squad_reference_probe/squad_reference_probe.h"
 #include "../../hooks/viewer_camera/viewer_camera.h"
 #include "../../inspection/inspection_capture.h"
 #include "../../inspection/current_location_catalog.h"
@@ -43,6 +45,8 @@
 #include "../../inspection/world_inspection_model.h"
 #include "../../player/player_settings_store.h"
 #include "../../viewer/viewer_input_ownership.h"
+#include "../../../server/gameplay/physics/host/physics_session.h"
+#include "../../../server/bap/encrypted/push/activity/activity_roster_research.h"
 #include "world_debug_scene_lines.h"
 #include "world_inspector_commands.h"
 #include "world_inspector_graph.h"
@@ -68,6 +72,7 @@ namespace toggle = core::ui::components::toggle;
 namespace viewer_input = client::viewer::input;
 namespace scenario_state = state::build_data::scenarios;
 namespace worlds = state::build_data::worlds;
+namespace roster_push = server::bap::encrypted::push::activity;
 
 using commands::copy_camera_position;
 using commands::copy_id;
@@ -85,6 +90,7 @@ constexpr float kMinimumTreeRowHeight = 28.0F;
 constexpr float kInspectorRowPadding = 6.0F;
 constexpr float kTreeIndent = 14.0F;
 constexpr float kPi = 3.14159265358979323846F;
+constexpr std::uint64_t kTrostlandEventVolume = 0xA55DF98A17C13E3CULL;
 constexpr ImU32 kGuideColor = IM_COL32(63, 55, 42, 210);
 constexpr ImVec4 kSelection{0.796F, 0.608F, 0.318F, 1.0F};
 
@@ -3826,6 +3832,137 @@ void draw_toolbar() noexcept {
             domain("Activity Logic", catalogStatus.activityLogic);
             domain("Bubble bounds", catalogStatus.bubbleBounds);
             domain("Statics", catalogStatus.statics);
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("Runtime")) {
+            if (ImGui::MenuItem(
+                    "Continuously refresh membership", nullptr, &g_state.liveRuntimeMembership)) {
+                g_state.session.set_live_runtime_membership(g_state.liveRuntimeMembership);
+            }
+            ImGui::TextDisabled("Research mode: observes bounded object, trigger, and physics");
+            ImGui::TextDisabled("membership changes without requiring an activity reload.");
+            if (g_state.liveRuntimeMembership) {
+                ImGui::TextColored(kWarning, "Live membership may rebuild on busy maps.");
+            }
+            ImGui::Separator();
+            ImGui::TextDisabled("Glimmer Test");
+            static std::uint64_t entitySlotRepublishToken = 0;
+            if (ImGui::MenuItem("Republish held entity slots once")) {
+                entitySlotRepublishToken = roster_push::request_entity_slot_republish();
+            }
+            const auto entitySlotRepublish = roster_push::entity_slot_republish_status();
+            ImGui::TextDisabled(
+                "Entity slots: pending %llu, staged %llu, delivered %llu (last %llu)",
+                static_cast<unsigned long long>(entitySlotRepublish.pendingToken),
+                static_cast<unsigned long long>(entitySlotRepublish.stagedToken),
+                static_cast<unsigned long long>(entitySlotRepublish.delivered),
+                static_cast<unsigned long long>(entitySlotRepublish.deliveredToken));
+            ImGui::TextDisabled(
+                "Attempts req/bound/staged %llu/%llu/%llu, discard %llu, "
+                "stale/public/no-private %llu/%llu/%llu, encode %llu",
+                static_cast<unsigned long long>(entitySlotRepublish.requested),
+                static_cast<unsigned long long>(entitySlotRepublish.bound),
+                static_cast<unsigned long long>(entitySlotRepublish.staged),
+                static_cast<unsigned long long>(entitySlotRepublish.discarded),
+                static_cast<unsigned long long>(entitySlotRepublish.staleRejected),
+                static_cast<unsigned long long>(entitySlotRepublish.publicRejected),
+                static_cast<unsigned long long>(entitySlotRepublish.noPrivateRejected),
+                static_cast<unsigned long long>(entitySlotRepublish.encodeFailed));
+            if (entitySlotRepublishToken == 0
+                && entitySlotRepublish.noPrivateRejected != 0) {
+                ImGui::TextColored(kWarning, "Republish requires an exact private-current binding.");
+            }
+            ImGui::TextDisabled("Manual diagnostic only; duplicate type-0 semantics are unproven.");
+            const auto reload =
+                server::gameplay::physics::host::session::mission_reload_status();
+            ImGui::BeginDisabled(reload.activeWorlds == 0);
+            if (ImGui::MenuItem("Trigger Trostland Glimmer once")) {
+                (void)server::gameplay::physics::host::session::request_mission_trigger(
+                    kTrostlandEventVolume);
+            }
+            if (ImGui::MenuItem("Reload / re-arm active Lua mission")) {
+                (void)server::gameplay::physics::host::session::request_mission_reload();
+            }
+            ImGui::EndDisabled();
+            if (ImGui::MenuItem("Arm wide sobject code capture")) {
+                (void)hooks::retail_log::rearm_sobject_capture();
+            }
+            static std::uint64_t manualCaptureRva = 0x35EE10;
+            static std::uint64_t manualCaptureGeneration = 0;
+            ImGui::SetNextItemWidth(120.0F);
+            ImGui::InputScalar("Function RVA",
+                               ImGuiDataType_U64,
+                               &manualCaptureRva,
+                               nullptr,
+                               nullptr,
+                               "%llX",
+                               ImGuiInputTextFlags_CharsHexadecimal);
+            if (ImGui::MenuItem("Capture function RVA")) {
+                manualCaptureGeneration = hooks::retail_log::capture_sobject_function(
+                    static_cast<std::uintptr_t>(manualCaptureRva));
+            }
+            if (manualCaptureGeneration != 0) {
+                ImGui::TextDisabled("Manual code capture: %llu",
+                                    static_cast<unsigned long long>(manualCaptureGeneration));
+            }
+            const auto codeCapture = hooks::retail_log::sobject_capture_status();
+            ImGui::TextDisabled("Mission: state %u, objective %u, worlds %u",
+                                reload.missionState,
+                                reload.objective0,
+                                reload.activeWorlds);
+            ImGui::TextDisabled("Reload: %llu/%llu  trigger: %llu/%llu",
+                                static_cast<unsigned long long>(reload.completed),
+                                static_cast<unsigned long long>(reload.requested),
+                                static_cast<unsigned long long>(reload.triggerCompleted),
+                                static_cast<unsigned long long>(reload.triggerRequested));
+            ImGui::TextDisabled("Program: 0x%016llX",
+                                static_cast<unsigned long long>(reload.programHash));
+            ImGui::TextDisabled("Code capture %llu: %s, background %u, recent %u",
+                                static_cast<unsigned long long>(codeCapture.generation),
+                                codeCapture.wideArmed
+                                    ? "armed"
+                                    : (codeCapture.wideCapturing
+                                           ? "capturing"
+                                           : (codeCapture.wideRearming ? "re-arming" : "captured")),
+                                codeCapture.backgroundFailures,
+                                codeCapture.recentFailures);
+            ImGui::TextDisabled("Passive telemetry only; no lifecycle signal is emitted.");
+            const auto spawner = hooks::squad_reference_probe::runtime_snapshot();
+            ImGui::TextDisabled(
+                "Spawner applies: %llu, resolves: %llu, requests: %llu, create outcomes: %llu",
+                static_cast<unsigned long long>(spawner.applyCalls),
+                static_cast<unsigned long long>(spawner.resolveCalls),
+                static_cast<unsigned long long>(spawner.buildRequestCalls),
+                static_cast<unsigned long long>(spawner.createOutcomeCalls));
+            if (spawner.lastActiveInstance != 0) {
+                ImGui::TextDisabled("Last active: 0x%llX  requested {%u,%u}  pending %u",
+                                    static_cast<unsigned long long>(spawner.lastActiveInstance),
+                                    spawner.requestedFirst,
+                                    spawner.requestedSecond,
+                                    spawner.pending);
+            } else {
+                ImGui::TextDisabled("No non-idle spawner state observed.");
+            }
+            if (spawner.decodedState != 0) {
+                ImGui::TextDisabled(
+                    "Decoded: count %u requested {%u,%u} gen %u mode %u active %u",
+                    spawner.decodedSlotCount,
+                    spawner.decodedRequestedFirst,
+                    spawner.decodedRequestedSecond,
+                    spawner.decodedGeneration,
+                    static_cast<unsigned>(spawner.decodedMode),
+                    spawner.decodedActive ? 1U : 0U);
+            }
+            const auto research = roster_push::trostland_spawner_research();
+            ImGui::TextDisabled("Sense observed: gen %u delta 0x%08X",
+                                research.observedGeneration,
+                                research.observedDelta);
+            static std::uint32_t manualGeneration = 0;
+            ImGui::SetNextItemWidth(110.0F);
+            ImGui::InputScalar("Manual generation", ImGuiDataType_U32, &manualGeneration);
+            if (ImGui::MenuItem("Apply generation override")) {
+                roster_push::set_trostland_spawner_generation(manualGeneration);
+            }
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Overlays")) {
