@@ -228,8 +228,7 @@ bool process(const ServiceRoute& route,
         auto* seasonPassReward =
             web_service::mutation_if<state::PendingSeasonPassReward>(webOutcome);
         if (webOutcome.hasArtifactReset) {
-            if (queuezState.family4Version
-                == (std::numeric_limits<std::int32_t>::max)()) {
+            if (queuezState.family4Version == (std::numeric_limits<std::int32_t>::max)()) {
                 return refuse_web_action(message, output, written);
             }
             middleware::web_service::StatusResponse status{};
@@ -572,6 +571,12 @@ bool process(const ServiceRoute& route,
                                                           bundle->firstInstanceSoid,
                                                           bundle->itemCount,
                                                           stagedVersion);
+            } else if (const auto* resources =
+                           std::get_if<state::PendingRecordRewardGrant>(&seasonPassReward->grant)) {
+                auto& update = transaction->update.emplace<queuez::RecordRewardGrant>();
+                staged = queuez::stage_record_reward_grant(
+                    queuezState, resources->accountSoid, resources->characterSoid, {}, update);
+                stagedVersion = update.after.family4Version;
             }
             if (!staged) {
                 core::log::write(core::log::Channel::server,

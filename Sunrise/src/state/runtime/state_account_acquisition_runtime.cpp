@@ -24,6 +24,10 @@ namespace family4_loadout = middleware::datagen::family4::loadout;
 
 namespace {
 
+[[nodiscard]] bool materialize_record_reward(const AccountState& current,
+                                             const PendingRecordRewardGrant& mutation,
+                                             AccountState& after) noexcept;
+
 struct GrantSource {
     std::uint32_t materialRequirementSetHash{};
     std::uint16_t collectibleIndex{};
@@ -423,20 +427,45 @@ namespace {
 
 [[nodiscard]] bool reward_matches(const progression::season_pass::Reward& reward,
                                   const PendingSeasonPassReward& mutation) noexcept {
-    if (!mutation.prepared) {
+    if (!mutation.prepared || mutation.sourceDefinitionHash != reward.itemHash) {
         return false;
     }
     if (const auto* item = std::get_if<PendingItemAcquisition>(&mutation.grant)) {
-        return reward.quantity == 1 && item->acquiredDefinitionHash == reward.itemHash;
+        if (reward.quantity != 1) {
+            return false;
+        }
+        if (reward.itemHash != progression::season_pass::kLegendaryEngramHash
+            && reward.itemHash != progression::season_pass::kExoticEngramHash) {
+            return item->acquiredDefinitionHash == reward.itemHash;
+        }
+        return progression::season_pass::contains_engram_reward(
+            reward.itemHash,
+            item->acquiredDefinitionHash,
+            static_cast<std::uint8_t>(item->afterCharacter.characterClass));
     }
     if (const auto* profile = std::get_if<PendingProfileItemAcquisition>(&mutation.grant)) {
         return profile->acquiredDefinitionHash == reward.itemHash
                && profile->acquiredQuantity - profile->previousQuantity == reward.quantity;
     }
-    const auto* bundle = std::get_if<PendingDirectItemBundle>(&mutation.grant);
-    return bundle != nullptr && reward.quantity == 1
-           && bundle->sourceDefinitionHash == reward.itemHash
-           && progression::season_pass::find_premium_class_package(reward.itemHash) != nullptr;
+    if (const auto* bundle = std::get_if<PendingDirectItemBundle>(&mutation.grant)) {
+        return reward.quantity == 1 && bundle->sourceDefinitionHash == reward.itemHash
+               && progression::season_pass::find_premium_class_package(reward.itemHash) != nullptr;
+    }
+    const auto* resources = std::get_if<PendingRecordRewardGrant>(&mutation.grant);
+    if (resources == nullptr || reward.quantity != 1
+        || reward.itemHash != progression::season_pass::kDestinationResourceBundleHash
+        || resources->rewardCount != progression::season_pass::kDestinationResourceHashes.size()) {
+        return false;
+    }
+    for (std::size_t index = 0; index < resources->rewardCount; ++index) {
+        if (resources->rewards[index].definitionHash
+                != progression::season_pass::kDestinationResourceHashes[index]
+            || resources->rewards[index].quantity
+                   != progression::season_pass::kDestinationResourceQuantity) {
+            return false;
+        }
+    }
+    return true;
 }
 
 void restore_reward_grant(AccountState& account, const PendingItemAcquisition& mutation) noexcept {
@@ -453,6 +482,13 @@ void restore_reward_grant(AccountState& account,
 
 void restore_reward_grant(AccountState& account, const PendingDirectItemBundle& mutation) noexcept {
     account.characters[mutation.characterIndex] = mutation.beforeCharacter;
+}
+
+void restore_reward_grant(AccountState& account,
+                          const PendingRecordRewardGrant& mutation) noexcept {
+    account.characters[mutation.characterIndex] = mutation.beforeCharacter;
+    account.profileItems = mutation.beforeProfileItems;
+    account.profileItemCount = mutation.beforeProfileItemCount;
 }
 
 } // namespace
@@ -503,6 +539,8 @@ bool commit_season_pass_reward(PendingSeasonPassReward& mutation) noexcept {
         ready = materialize_profile_acquisition(runtime::storage::g_state.account, *profile, after);
     } else if (const auto* bundle = std::get_if<PendingDirectItemBundle>(&mutation.grant)) {
         ready = materialize_direct_item_bundle(runtime::storage::g_state.account, *bundle, after);
+    } else if (const auto* resources = std::get_if<PendingRecordRewardGrant>(&mutation.grant)) {
+        ready = materialize_record_reward(runtime::storage::g_state.account, *resources, after);
     }
     if (ready) {
         runtime::storage::g_state.account = after;

@@ -171,8 +171,8 @@ constexpr std::int32_t kOccupiedRowWatermark = 1;
     for (std::size_t index = 0; index < resolvedLoadout.itemCount; ++index) {
         const loadout::ResolvedItem& item = resolvedLoadout.items[index];
         const instance::ResolvedInstance& itemInstance = item.instance;
-        if (item.inventoryRow >= layout::kInventoryCapacity
-            || item.equipmentSlot >= occupiedEquipmentSlots.size() || item.quantity <= 0
+        const bool validEquipmentSlot = item.equipmentSlot < occupiedEquipmentSlots.size();
+        if (item.inventoryRow >= layout::kInventoryCapacity || item.quantity <= 0
             || itemInstance.instanceSoid == 0 || itemInstance.bounds.itemDefinitionCount == 0
             || itemInstance.bounds.itemDefinitionCount > instance::layout::kDefinitionIndexCapacity
             || itemInstance.baseDefinitionIndex == kEmptyDefinitionIndex
@@ -180,7 +180,8 @@ constexpr std::int32_t kOccupiedRowWatermark = 1;
             || item.mutationSerial < 0
             || static_cast<std::uint32_t>(item.mutationSerial)
                    >= resolvedLoadout.nextInventorySerial
-            || (item.equipped && occupiedEquipmentSlots[item.equipmentSlot])
+            || (item.equipped
+                && (!validEquipmentSlot || occupiedEquipmentSlots[item.equipmentSlot]))
             || (index != 0 && resolvedLoadout.items[index - 1].inventoryRow >= item.inventoryRow)) {
             return false;
         }

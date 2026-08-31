@@ -96,7 +96,11 @@ struct RecordRewardGrantTransaction {
 /** Season reward grant plus the exact Queuez after-image promised by opcode 2400. */
 struct SeasonPassRewardTransaction {
     std::unique_ptr<state::PendingSeasonPassReward> pending{};
-    std::variant<std::monostate, queuez::ItemAcquisition, queuez::ProfileItemAcquisition> update{};
+    std::variant<std::monostate,
+                 queuez::ItemAcquisition,
+                 queuez::ProfileItemAcquisition,
+                 queuez::RecordRewardGrant>
+        update{};
 };
 
 /** Optional side effect produced while decoding one authenticated service body. */
@@ -306,6 +310,7 @@ void append_queuez_notification(Scratch& scratch,
     const queuez::SessionState& before,
     const queuez::RecordRewardGrant& update,
     const state::PendingRecordRewardGrant& mutation,
+    std::optional<std::uint16_t> pendingSeasonReward,
     std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
     std::span<const std::byte, state::kAesKeySize> key,
     std::span<const std::byte, state::kBapNonceSize> nonce,

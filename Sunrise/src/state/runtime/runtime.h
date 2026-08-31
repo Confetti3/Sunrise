@@ -160,16 +160,9 @@ struct PendingDirectItemBundle {
     bool prepared{};
 };
 
-/** One uncommitted Season reward and the exact native row it will claim. */
-struct PendingSeasonPassReward {
-    std::variant<PendingItemAcquisition, PendingProfileItemAcquisition, PendingDirectItemBundle>
-        grant{};
-    std::uint16_t rewardIndex{};
-    bool prepared{};
-};
-
-inline constexpr std::size_t kRecordRewardGrantCapacity =
-    build_data::records::rewards::kRewardPerRecordCapacity;
+/** Shared batch capacity covers both Triumph rewards and the nine-row Season package. */
+inline constexpr std::size_t kRecordRewardGrantCapacity = 9;
+static_assert(kRecordRewardGrantCapacity >= build_data::records::rewards::kRewardPerRecordCapacity);
 
 /** One direct item requested by a record reward policy. */
 struct DirectRecordReward {
@@ -212,6 +205,18 @@ struct PendingRecordRewardGrant {
     std::size_t beforeProfileItemCount{};
     std::size_t afterProfileItemCount{};
     std::size_t rewardCount{};
+    bool prepared{};
+};
+
+/** One uncommitted Season reward and the exact native row or bundle it will claim. */
+struct PendingSeasonPassReward {
+    std::variant<PendingItemAcquisition,
+                 PendingProfileItemAcquisition,
+                 PendingDirectItemBundle,
+                 PendingRecordRewardGrant>
+        grant{};
+    std::uint32_t sourceDefinitionHash{};
+    std::uint16_t rewardIndex{};
     bool prepared{};
 };
 

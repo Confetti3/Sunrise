@@ -505,6 +505,7 @@ bool prepare_record_reward_grant(
     const queuez::SessionState& before,
     const queuez::RecordRewardGrant& update,
     const state::PendingRecordRewardGrant& mutation,
+    std::optional<std::uint16_t> pendingSeasonReward,
     std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
     Prepared& prepared) noexcept {
     namespace account_layout = family4_datagen::account::layout;
@@ -627,7 +628,8 @@ bool prepare_record_reward_grant(
                                             selected.loadout,
                                             selected.lightEvaluation,
                                             characterBytes,
-                                            &mutation.claim)) {
+                                            pendingSeasonReward.has_value() ? nullptr
+                                                                            : &mutation.claim)) {
         clear_after(scratch, reservation);
         return report_failure("record_reward_character_encode");
     }
@@ -699,7 +701,11 @@ bool prepare_record_reward_grant(
     }
 
     const auto accountBytes = rawStorage.first(account_layout::kObjectSize);
-    if (!family4_datagen::account::encode(account, accountBytes, std::nullopt, &mutation.claim)) {
+    if (!family4_datagen::account::encode(account,
+                                          accountBytes,
+                                          pendingSeasonReward,
+                                          pendingSeasonReward.has_value() ? nullptr
+                                                                          : &mutation.claim)) {
         clear_after(scratch, reservation);
         return report_failure("record_reward_account_encode");
     }

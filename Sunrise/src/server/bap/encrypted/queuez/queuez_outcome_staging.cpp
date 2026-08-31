@@ -575,6 +575,7 @@ bool stage_service_outcome(Scratch& scratch,
                                                      before,
                                                      recordRewardGrant->update,
                                                      *recordRewardGrant->pending,
+                                                     std::nullopt,
                                                      presentationRows,
                                                      key,
                                                      nonce,
@@ -637,6 +638,25 @@ bool stage_service_outcome(Scratch& scratch,
                                                                    after);
             if (staged) {
                 middleware::secure_channel::advance_nonce(nonce);
+            }
+        } else if (const auto* resourceUpdate =
+                       std::get_if<RecordRewardGrant>(&seasonPassReward->update)) {
+            if (const auto* resources =
+                    std::get_if<state::PendingRecordRewardGrant>(&pending.grant)) {
+                staged = push::append_record_reward_notification(scratch,
+                                                                 before,
+                                                                 *resourceUpdate,
+                                                                 *resources,
+                                                                 pending.rewardIndex,
+                                                                 presentationRows,
+                                                                 key,
+                                                                 nonce,
+                                                                 response,
+                                                                 written);
+                if (staged) {
+                    middleware::secure_channel::advance_nonce(nonce);
+                    after = resourceUpdate->after;
+                }
             }
         }
         if (!staged) {

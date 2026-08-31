@@ -4,9 +4,12 @@
 #include <array>
 #include <cstdio>
 #include <limits>
+#include <span>
 #include <string_view>
 
 #include "../../core/logging/log.h"
+#include "../../middleware/crypto/random_bytes.h"
+#include "../../middleware/encoding/byte_order.h"
 #include "../../middleware/web_service/messages/opcode1801.h"
 #include "../../middleware/web_service/messages/opcode1820.h"
 #include "../../middleware/web_service/messages/opcode1821.h"
@@ -58,6 +61,201 @@ prepare_premium_class_package(const state::progression::season_pass::PremiumClas
         itemIndices[index] = definition.definitionIndex;
     }
     return state::prepare_direct_item_bundle(package.hash, itemIndices, mutation);
+}
+
+/** Expands the manifest-authored destination package into all nine material stacks. */
+[[nodiscard]] bool
+prepare_destination_resource_bundle(state::PendingSeasonPassReward& grant) noexcept {
+    namespace pass = state::progression::season_pass;
+    std::array<state::DirectRecordReward, pass::kDestinationResourceHashes.size()> rewards{};
+    for (std::size_t index = 0; index < rewards.size(); ++index) {
+        state::build_data::items::Definition definition{};
+        if (!state::build_data::find_item_definition_hash(pass::kDestinationResourceHashes[index],
+                                                          definition)) {
+            return false;
+        }
+        rewards[index] = {definition.definitionIndex, pass::kDestinationResourceQuantity};
+    }
+    auto& mutation = grant.grant.emplace<state::PendingRecordRewardGrant>();
+    return state::prepare_record_reward_grant(rewards, {}, mutation);
+}
+
+/** Chooses one installed weapon or selected-class armour item from an auto-decrypting engram. */
+[[nodiscard]] bool choose_engram_reward(std::uint32_t engramHash,
+                                        std::uint16_t& itemIndex) noexcept {
+    namespace pass = state::progression::season_pass;
+    std::span<const std::uint32_t> weapons;
+    std::span<const std::uint32_t> armour;
+    const state::AccountState account = state::account_snapshot();
+    const state::CharacterState* character = nullptr;
+    for (std::size_t index = 0; index < account.characterCount; ++index) {
+        if (account.characters[index].selected) {
+            character = &account.characters[index];
+            break;
+        }
+    }
+    if (character == nullptr) {
+        return false;
+    }
+
+    if (engramHash == pass::kLegendaryEngramHash) {
+        weapons = pass::kLegendaryEngramWeapons;
+        switch (character->characterClass) {
+        case state::CharacterClass::hunter:
+            armour = pass::kLegendaryHunterArmour;
+            break;
+        case state::CharacterClass::warlock:
+            armour = pass::kLegendaryWarlockArmour;
+            break;
+        case state::CharacterClass::titan:
+        default:
+            armour = pass::kLegendaryTitanArmour;
+            break;
+        }
+    } else if (engramHash == pass::kExoticEngramHash) {
+        weapons = pass::kExoticEngramWeapons;
+        switch (character->characterClass) {
+        case state::CharacterClass::hunter:
+            armour = pass::kExoticHunterArmour;
+            break;
+        case state::CharacterClass::warlock:
+            armour = pass::kExoticWarlockArmour;
+            break;
+        case state::CharacterClass::titan:
+        default:
+            armour = pass::kExoticTitanArmour;
+            break;
+        }
+    } else {
+        return false;
+    }
+
+    std::array<std::byte, sizeof(std::uint32_t)> randomBytes{};
+    if (!middleware::crypto::random::fill(randomBytes)) {
+        return false;
+    }
+    const std::size_t count = weapons.size() + armour.size();
+    const std::size_t first = middleware::encoding::read_u32_le(randomBytes) % count;
+    for (std::size_t offset = 0; offset < count; ++offset) {
+        const std::size_t selected = (first + offset) % count;
+        const std::uint32_t hash = selected < weapons.size()
+                                       ? weapons[selected]
+                                       : armour[selected - weapons.size()];
+        state::build_data::items::Definition definition{};
+        if (state::build_data::find_item_definition_hash(hash, definition)) {
+            itemIndex = definition.definitionIndex;
+            return true;
+        }
+    }
+    return false;
+}
+
+struct SeasonArmourRoll {
+    std::uint16_t rewardIndex{};
+    std::uint32_t itemHash{};
+    std::array<std::uint32_t, 4> statPlugs{};
+};
+
+/** Exact rolls shown by the free, early premium, and high-stat pass tiles. */
+constexpr std::array<SeasonArmourRoll, 36> kSeasonArmourRolls{{
+    // Hunter
+    {29, 3097544525U, {1232924472U, 3898228147U, 1177742666U, 1322519294U}},
+    {106, 3097544525U, {2191854732U, 3198072315U, 1322519294U, 597281635U}},
+    {139, 3097544525U, {3072193746U, 772656086U, 2692705068U, 1300719726U}},
+    {3, 3750210364U, {1232924472U, 3898228147U, 1177742666U, 757147114U}},
+    {78, 3750210364U, {2120002858U, 1526511067U, 1277668557U, 3014984195U}},
+    {111, 3750210364U, {2600679334U, 3955940376U, 3026009912U, 115819390U}},
+    {24, 2930001572U, {1232924472U, 2518640481U, 1177742666U, 4237052128U}},
+    {97, 2930001572U, {2191854732U, 2440285137U, 1322519294U, 597281635U}},
+    {134, 2930001572U, {4286256569U, 2148570570U, 594234536U, 2664898188U}},
+    {10, 3136019014U, {2191854732U, 2236091344U, 1177742666U, 2596709069U}},
+    {83, 3136019014U, {3407231789U, 1798836563U, 1322519294U, 3203727595U}},
+    {120, 3136019014U, {3346214146U, 2399358832U, 594234536U, 2701881372U}},
+    // Titan
+    {30, 1214477175U, {1232924472U, 3898228147U, 1177742666U, 1322519294U}},
+    {107, 1214477175U, {479726201U, 176934377U, 1322519294U, 597281635U}},
+    {140, 1214477175U, {2868325782U, 2387165386U, 2692705068U, 1300719726U}},
+    {4, 287888126U, {1232924472U, 3898228147U, 1177742666U, 757147114U}},
+    {79, 287888126U, {2120002858U, 1369119565U, 1277668557U, 3014984195U}},
+    {112, 287888126U, {2148570570U, 2148570570U, 3026009912U, 115819390U}},
+    {25, 1585947570U, {1232924472U, 2518640481U, 1177742666U, 4237052128U}},
+    {98, 1585947570U, {1232924472U, 1533918171U, 1322519294U, 597281635U}},
+    {135, 1585947570U, {2868325782U, 1087628722U, 594234536U, 2664898188U}},
+    {11, 1131831128U, {2191854732U, 2236091344U, 1177742666U, 2596709069U}},
+    {84, 1131831128U, {1232924472U, 4002613733U, 1322519294U, 3203727595U}},
+    {121, 1131831128U, {2387165386U, 2148570570U, 594234536U, 2701881372U}},
+    // Warlock
+    {31, 1173249516U, {1232924472U, 3898228147U, 1177742666U, 1322519294U}},
+    {108, 1173249516U, {2191854732U, 2433764085U, 1322519294U, 597281635U}},
+    {141, 1173249516U, {2868325782U, 3072193746U, 2692705068U, 1300719726U}},
+    {5, 327547301U, {1232924472U, 3898228147U, 1177742666U, 757147114U}},
+    {80, 327547301U, {1232924472U, 3554741641U, 1277668557U, 3014984195U}},
+    {113, 327547301U, {4248662490U, 1281324436U, 3026009912U, 115819390U}},
+    {26, 119457531U, {1232924472U, 2518640481U, 1177742666U, 4237052128U}},
+    {99, 119457531U, {1232924472U, 1858911761U, 1322519294U, 597281635U}},
+    {136, 119457531U, {3198618292U, 643846500U, 594234536U, 2664898188U}},
+    {12, 674876967U, {2191854732U, 2236091344U, 1177742666U, 2596709069U}},
+    {85, 674876967U, {2576224072U, 1534361879U, 1322519294U, 3203727595U}},
+    {122, 674876967U, {643846500U, 4248662490U, 594234536U, 2701881372U}},
+}};
+
+[[nodiscard]] constexpr bool season_armour_rolls_valid() noexcept {
+    for (const SeasonArmourRoll& roll : kSeasonArmourRolls) {
+        const auto* reward = state::progression::season_pass::find(roll.rewardIndex);
+        if (reward == nullptr || reward->itemHash != roll.itemHash) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static_assert(season_armour_rolls_valid());
+
+/** Replaces native stat plugs with the fixed roll represented by one known pass tile. */
+[[nodiscard]] bool apply_season_armour_roll(std::uint16_t rewardIndex,
+                                            state::PendingItemAcquisition& mutation) noexcept {
+    const auto roll = std::find_if(kSeasonArmourRolls.begin(),
+                                   kSeasonArmourRolls.end(),
+                                   [rewardIndex](const SeasonArmourRoll& candidate) {
+                                       return candidate.rewardIndex == rewardIndex;
+                                   });
+    if (roll == kSeasonArmourRolls.end()) {
+        return true;
+    }
+    if (mutation.inventoryIndex >= mutation.afterCharacter.inventory.count) {
+        return false;
+    }
+    auto& acquired = mutation.afterCharacter.inventory.values[mutation.inventoryIndex];
+    state::build_data::items::Definition item{};
+    state::build_data::items::details::Definition detail{};
+    if (acquired.definitionHash != mutation.acquiredDefinitionHash
+        || acquired.definitionHash != roll->itemHash
+        || !state::build_data::find_item_definition_hash(acquired.definitionHash, item)
+        || !state::build_data::find_configured_item_detail(item.definitionIndex, detail)
+        || detail.definitionIndex != item.definitionIndex || detail.ordinarySocketCount <= 9U
+        || detail.ordinarySocketCount > acquired.sockets.plugs.size()) {
+        return false;
+    }
+
+    state::account::inventory::Sockets sockets{};
+    sockets.policy = state::account::inventory::SocketPolicy::authored;
+    sockets.plugCount = detail.ordinarySocketCount;
+    for (std::size_t lane = 0; lane < sockets.plugCount; ++lane) {
+        const std::uint16_t plugIndex = detail.initialPlugIndices[lane];
+        if (plugIndex == state::build_data::items::details::kUnavailableItemIndex) {
+            continue;
+        }
+        state::build_data::items::Definition plug{};
+        if (!state::build_data::find_item_definition_index(plugIndex, plug)) {
+            return false;
+        }
+        sockets.plugs[lane] = plug.definitionHash;
+    }
+    for (std::size_t index = 0; index < roll->statPlugs.size(); ++index) {
+        sockets.plugs[6U + index] = roll->statPlugs[index];
+    }
+    acquired.sockets = sockets;
+    return state::account::inventory::valid(acquired.sockets);
 }
 
 } // namespace
@@ -639,13 +837,35 @@ void claim_season_pass_reward(const middleware::web_service::Message& message,
             clear_mutation(outcome);
             return fail("package_grant");
         }
+    } else if (reward->itemHash == pass::kDestinationResourceBundleHash) {
+        if (!prepare_destination_resource_bundle(*grant)) {
+            clear_mutation(outcome);
+            return fail("resource_bundle");
+        }
+    } else if (reward->itemHash == pass::kLegendaryEngramHash
+               || reward->itemHash == pass::kExoticEngramHash) {
+        std::uint16_t decryptedItemIndex = 0;
+        if (!choose_engram_reward(reward->itemHash, decryptedItemIndex)) {
+            clear_mutation(outcome);
+            return fail("engram_pool");
+        }
+        if (const char* reason = prepare_direct_reward(decryptedItemIndex, 1, *grant)) {
+            clear_mutation(outcome);
+            return fail(reason);
+        }
     } else {
         if (const char* reason =
                 prepare_direct_reward(item.definitionIndex, reward->quantity, *grant)) {
             clear_mutation(outcome);
             return fail(reason);
         }
+        if (auto* armour = std::get_if<state::PendingItemAcquisition>(&grant->grant);
+            armour != nullptr && !apply_season_armour_roll(request.rewardIndex, *armour)) {
+            clear_mutation(outcome);
+            return fail("armour_roll");
+        }
     }
+    grant->sourceDefinitionHash = reward->itemHash;
     grant->rewardIndex = request.rewardIndex;
     grant->prepared = true;
 }

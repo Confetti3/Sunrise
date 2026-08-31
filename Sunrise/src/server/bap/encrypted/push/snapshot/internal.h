@@ -220,6 +220,7 @@ prepare_profile_item_acquisition(Scratch& scratch,
     const queuez::SessionState& before,
     const queuez::RecordRewardGrant& update,
     const state::PendingRecordRewardGrant& mutation,
+    std::optional<std::uint16_t> pendingSeasonReward,
     std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
     Prepared& prepared) noexcept;
 

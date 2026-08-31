@@ -461,14 +461,20 @@ bool append_record_reward_notification(
     const queuez::SessionState& before,
     const queuez::RecordRewardGrant& update,
     const state::PendingRecordRewardGrant& mutation,
+    std::optional<std::uint16_t> pendingSeasonReward,
     std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
     std::span<const std::byte, state::kAesKeySize> key,
     std::span<const std::byte, state::kBapNonceSize> nonce,
     std::span<std::byte> response,
     std::size_t& written) noexcept {
     snapshot::Prepared prepared{};
-    if (!snapshot::prepare_record_reward_grant(
-            scratch, before, update, mutation, acquisitionPresentationRows, prepared)
+    if (!snapshot::prepare_record_reward_grant(scratch,
+                                               before,
+                                               update,
+                                               mutation,
+                                               pendingSeasonReward,
+                                               acquisitionPresentationRows,
+                                               prepared)
         || prepared.family.type != queuez::kAccountFamilyType
         || prepared.family.rootSoid != before.family4RootSoid
         || prepared.family.version != before.family4Version + 1 || prepared.family.flags != 0
