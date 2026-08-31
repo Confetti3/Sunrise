@@ -15,7 +15,12 @@ inline constexpr std::uint32_t kSchemaVersion = 4;
 inline constexpr std::uint32_t kCollectorVersion = 4;
 inline constexpr std::size_t kDigestSize = 32;
 inline constexpr std::size_t kHeaderSize = 240;
+inline constexpr std::uint64_t kNonSpatialWorldId = (std::numeric_limits<std::uint64_t>::max)();
 using Digest = std::array<std::uint8_t, kDigestSize>;
+
+[[nodiscard]] constexpr bool is_spatial_world_id(std::uint64_t worldId) noexcept {
+    return worldId != 0 && worldId != kNonSpatialWorldId;
+}
 
 enum class Role : std::uint8_t {
     actionSequence = 0,

@@ -444,6 +444,9 @@ void append_activity_nodes(Graph& graph,
 
         std::size_t ordinal = 0;
         for (const catalog::Placement& placement : entity.placements) {
+            if (!catalog::is_spatial_world_id(placement.worldId)) {
+                continue;
+            }
             Node placementNode;
             placementNode.name = entity.name;
             placementNode.searchText = "authored exact worldid map placement activity logic "

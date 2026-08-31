@@ -4,6 +4,7 @@
 #include <array>
 #include <cstdio>
 #include <fstream>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
@@ -47,7 +48,21 @@ logic::Catalog logic_catalog(const std::array<std::byte, logic::kDigestSize>& fi
          "Three",
          "three",
          "localized",
-         {{7, 8, 9, {1.0F, 2.0F, 3.0F}, {0.0F, 0.0F, 0.0F, 1.0F}}}},
+         {{7,
+           0x80B9A42FU,
+           9,
+           {0.0F, 0.0F, 0.0F},
+           {0.0F, 0.0F, 0.0F, 1.0F}},
+          {8,
+           0x80BE0E85U,
+           10,
+           {0.0F, 0.0F, 0.0F},
+           {0.0F, 0.0F, 0.0F, 1.0F}},
+          {11,
+           12,
+           13,
+           {1.0F, 2.0F, 3.0F},
+           {0.0F, 0.0F, 0.0F, 1.0F}}}},
     };
     value.activities = {{0x80B3E142U, "Titan", "fleet", {0, 1}}};
     value.edges = {{0, 1, 0x1234U, 2}};
@@ -110,6 +125,19 @@ graphs::Catalog graph_catalog(
 }
 
 void overwrite_u32(const std::wstring& path, std::streamoff offset, std::uint32_t value) {
+    std::fstream file(path, std::ios::binary | std::ios::in | std::ios::out);
+    file.seekp(offset);
+    file.write(reinterpret_cast<const char*>(&value), sizeof value);
+}
+
+bool read_u32(const std::wstring& path, std::streamoff offset, std::uint32_t& value) {
+    std::ifstream file(path, std::ios::binary);
+    file.seekg(offset);
+    file.read(reinterpret_cast<char*>(&value), sizeof value);
+    return static_cast<bool>(file);
+}
+
+void overwrite_u64(const std::wstring& path, std::streamoff offset, std::uint64_t value) {
     std::fstream file(path, std::ios::binary | std::ios::in | std::ios::out);
     file.seekp(offset);
     file.write(reinterpret_cast<const char*>(&value), sizeof value);
@@ -181,7 +209,9 @@ int main() {
     valid = check(cache::load_activity_logic(
                       logicPath, 0x80B3E142U, fingerprint, loadedLogic).state
                       == cache::LoadState::ready
-                      && loadedLogic.entities.size() == 2 && loadedLogic.edges.size() == 1
+                      && loadedLogic.entities.size() == 2
+                      && loadedLogic.entities.back().placements.size() == 3
+                      && loadedLogic.edges.size() == 1
                       && loadedLogic.stateVars.size() == 1
                       && loadedLogic.stateVars.front().initial == 7
                       && loadedLogic.stateVars.front().triggers.size() == 1
@@ -196,6 +226,30 @@ int main() {
                              == logic::LogicReference::kUnjoinedStateVar,
                   "logic cache round trip failed")
             && valid;
+
+    std::uint32_t placementSectionOffset = 0;
+    valid = check(read_u32(logicPath, 64 + 3 * 12, placementSectionOffset),
+                  "logic placement section offset could not be read")
+            && valid;
+    overwrite_u64(logicPath,
+                  placementSectionOffset,
+                  (std::numeric_limits<std::uint64_t>::max)());
+    overwrite_u64(logicPath,
+                  static_cast<std::streamoff>(placementSectionOffset) + 44,
+                  (std::numeric_limits<std::uint64_t>::max)());
+    valid = check(cache::load_activity_logic(
+                      logicPath, 0x80B3E142U, fingerprint, loadedLogic).state
+                          == cache::LoadState::ready
+                      && loadedLogic.entities.back().placements.size() == 1
+                      && loadedLogic.entities.back().placements.front().worldId == 11,
+                  "non-spatial sentinel placements were not suppressed")
+            && valid;
+    diagnostic.clear();
+    valid = check(cache::store_activity_logic_atomic(
+                      logicPath, logicValue, 0x80B3E142U, fingerprint, diagnostic),
+                  "logic cache did not replace sentinel placements")
+            && valid;
+
     valid = check(cache::load_activity_logic(
                       logicPath, 0x80F4696AU, fingerprint, loadedLogic).state
                       == cache::LoadState::rejected,
@@ -219,6 +273,14 @@ int main() {
     valid = check(!cache::store_activity_logic_atomic(
                       logicPath, invalidLogic, 0x80B3E142U, fingerprint, diagnostic),
                   "duplicate logic edge replaced the valid file")
+            && valid;
+    invalidLogic = logicValue;
+    invalidLogic.entities.back().placements.front().worldId =
+        (std::numeric_limits<std::uint64_t>::max)();
+    diagnostic.clear();
+    valid = check(!cache::store_activity_logic_atomic(
+                      logicPath, invalidLogic, 0x80B3E142U, fingerprint, diagnostic),
+                  "non-spatial logic placement replaced the valid file")
             && valid;
     valid = check(cache::load_activity_logic(
                       logicPath, 0x80B3E142U, fingerprint, loadedLogic).state

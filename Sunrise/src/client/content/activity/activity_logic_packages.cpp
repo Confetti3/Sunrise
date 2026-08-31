@@ -552,7 +552,8 @@ bool build(const reader::Source& source,
                     || !tables::read(blob, offset + 0x70, placement.worldId)
                     || !tables::read(blob, offset + 0x20, placement.position)
                     || !tables::read(blob, offset + 0x10, placement.rotation)
-                    || placement.worldId == 0 || !finite_placement(placement)) {
+                    || !catalog::is_spatial_world_id(placement.worldId)
+                    || !finite_placement(placement)) {
                     ++progress.rejected;
                     continue;
                 }

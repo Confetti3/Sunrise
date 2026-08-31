@@ -236,8 +236,8 @@ bool validate(const Catalog& catalog, std::string& error) {
             return fail(error, "activity logic placement count exceeds supported maximum");
         }
         for (const Placement& placement : entity.placements) {
-            if (placement.worldId == 0) {
-                return fail(error, "activity logic placement WorldID is zero");
+            if (!is_spatial_world_id(placement.worldId)) {
+                return fail(error, "activity logic placement WorldID is non-spatial");
             }
             for (const float lane : placement.position) {
                 if (!std::isfinite(lane)) {
@@ -561,6 +561,10 @@ bool load(std::span<const std::byte> bytes, Catalog& catalog, std::string& error
                                          placement.rotation[lane])) {
                         return fail(error, "activity logic placement rotation is truncated");
                     }
+                }
+                // Schema 4 shards may already contain authored non-spatial sentinel rows.
+                if (placement.worldId == kNonSpatialWorldId) {
+                    continue;
                 }
                 entity.placements.push_back(placement);
             }
