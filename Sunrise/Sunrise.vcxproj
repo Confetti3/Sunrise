@@ -1057,6 +1057,8 @@
     <ClCompile Include="src\client\content\items\packages\package_build_report.cpp" />
     <ClCompile Include="src\client\content\items\packages\package_root_tables.cpp" />
     <ClCompile Include="src\client\content\items\packages\package_item_rows.cpp" />
+    <ClCompile Include="src\client\diagnostics\entity_create_probe.cpp" />
+    <ClCompile Include="src\client\diagnostics\image_dump.cpp" />
     <ClCompile Include="src\client\diagnostics\module_range.cpp" />
     <ClCompile Include="src\client\process\freeze\client_process_freeze.cpp" />
     <ClCompile Include="src\core\settings\address_text.cpp" />
@@ -1866,6 +1868,8 @@
     <ClInclude Include="src\server\transport\internal.h" />
     <ClInclude Include="src\middleware\content\packages\reader\locator_cache.h" />
     <ClInclude Include="src\server\bap\encrypted\push\queuez\queuez_push_reporting.h" />
+    <ClInclude Include="src\client\diagnostics\entity_create_probe.h" />
+    <ClInclude Include="src\client\diagnostics\image_dump.h" />
     <ClInclude Include="src\client\diagnostics\module_range.h" />
     <ClInclude Include="src\client\process\freeze\client_process_freeze.h" />
     <ClInclude Include="src\core\settings\address_text.h" />
