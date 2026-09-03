@@ -408,7 +408,7 @@ struct VendorSaleRowRecord {
     std::uint16_t rowIndex{};
     std::uint16_t itemIndex{};
     std::uint16_t secondaryItemIndex{};
-    std::int32_t installedIndex{};
+    std::int32_t categoryIndex{};
     std::uint32_t raw104{};
     std::uint32_t raw108{};
     std::int32_t raw172{};

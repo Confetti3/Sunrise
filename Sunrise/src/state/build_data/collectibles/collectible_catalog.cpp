@@ -106,6 +106,21 @@ bool grants_item(std::uint16_t itemDefinitionIndex) noexcept {
     return false;
 }
 
+/** Finds the collectible that grants one installed item row. */
+bool find_granting(std::uint16_t itemDefinitionIndex, std::uint16_t& collectibleIndex) noexcept {
+    if (itemDefinitionIndex == kUnavailableItemDefinitionIndex) {
+        return false;
+    }
+    const Lock::Shared guard(g_lock);
+    for (const Definition& definition : g_definitions.rows()) {
+        if (definition.itemDefinitionIndex == itemDefinitionIndex) {
+            collectibleIndex = definition.collectibleIndex;
+            return true;
+        }
+    }
+    return false;
+}
+
 /** Copies the dense rows without exposing catalog storage. */
 bool snapshot(std::span<Definition> output, std::size_t& count) noexcept {
     const std::shared_lock guard(g_lock);
