@@ -1195,6 +1195,7 @@
     <ClInclude Include="src\core\logging\snapshot\internal.h" />
     <ClInclude Include="src\core\logging\view\log_snapshot_view.h" />
     <ClInclude Include="src\core\filesystem\path.h" />
+    <ClInclude Include="src\core\settings\rule_text.h" />
     <ClInclude Include="src\core\filesystem\temporary_sibling.h" />
     <ClInclude Include="src\core\settings\settings.h" />
     <ClInclude Include="src\core\settings\parser.h" />
