@@ -247,6 +247,7 @@
     <ClCompile Include="src\client\hooks\infinite_ammo\infinite_ammo.cpp" />
     <ClCompile Include="src\client\input\window_focus.cpp" />
     <ClCompile Include="src\client\hooks\teleport\teleport_lifecycle.cpp" />
+    <ClCompile Include="src\client\hooks\vendor_banner\vendor_banner_retire.cpp" />
     <ClCompile Include="src\client\hooks\teleport\teleport_move.cpp" />
     <ClCompile Include="src\client\hooks\teleport\teleport_action_key.cpp" />
     <ClCompile Include="src\client\hooks\world_objects\world_object_registry.cpp" />
@@ -612,6 +613,7 @@
     <ClCompile Include="src\state\matchmaking\transactions\matchmaking_commit.cpp" />
     <ClCompile Include="src\state\runtime\equipment\configured_equipment_identity.cpp" />
     <ClCompile Include="src\state\account\pursuit_hold.cpp" />
+    <ClCompile Include="src\state\vendors\answered_interactions.cpp" />
     <ClCompile Include="src\state\account\account_state.cpp" />
     <ClCompile Include="src\state\account\inventory\inventory_state.cpp" />
     <ClCompile Include="src\state\account\settings\settings_state.cpp" />
@@ -1274,6 +1276,7 @@
     <ClInclude Include="src\client\hooks\infinite_ammo\infinite_ammo.h" />
     <ClInclude Include="src\client\input\window_focus.h" />
     <ClInclude Include="src\client\hooks\teleport\internal.h" />
+    <ClInclude Include="src\client\hooks\vendor_banner\vendor_banner_retire.h" />
     <ClInclude Include="src\client\hooks\teleport\runtime.h" />
     <ClInclude Include="src\client\hooks\world_objects\world_object_registry.h" />
     <ClInclude Include="src\client\ui\movement\movement_panel.h" />
@@ -1401,6 +1404,7 @@
     <ClInclude Include="src\state\matchmaking\transactions\internal.h" />
     <ClInclude Include="src\state\runtime\equipment\configured_equipment_identity.h" />
     <ClInclude Include="src\state\account\pursuit_hold.h" />
+    <ClInclude Include="src\state\vendors\answered_interactions.h" />
     <ClInclude Include="src\state\account\account_state.h" />
     <ClInclude Include="src\state\account\inventory\inventory_state.h" />
     <ClInclude Include="src\state\account\settings\settings_state.h" />
