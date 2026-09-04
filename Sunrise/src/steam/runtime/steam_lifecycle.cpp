@@ -60,7 +60,7 @@ bool initialize(void* module) noexcept {
         return false;
     }
 
-    return g_lifecycle.lock_write([module](Lifecycle& lifecycle) {
+    return g_lifecycle.lock_write([module](Lifecycle&) {
         if (g_initialized.load(std::memory_order_acquire)) {
             return true;
         }

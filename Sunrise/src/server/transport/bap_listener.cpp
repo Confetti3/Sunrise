@@ -51,7 +51,7 @@ void accept_peer(Listener& listener, std::size_t slot) noexcept {
     peer.streamSize = 0;
     peer.outputOffset = 0;
     peer.outputSize = 0;
-    peer.connectionId = connection_id(slot + 1);
+    peer.connectionId = connection_id(slot);
 
     std::array<char, core::log::kLineCapacity> line{};
     const int written = std::snprintf(

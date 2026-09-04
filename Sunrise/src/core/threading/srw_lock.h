@@ -15,28 +15,28 @@ public:
     SrwLock& operator=(SrwLock&&) = delete;
 
     // stl Lockable
-    constexpr void lock() noexcept {
+    void lock() noexcept {
         AcquireSRWLockExclusive(&lock_);
     }
 
-    [[nodiscard]] constexpr bool try_lock() noexcept {
+    [[nodiscard]] bool try_lock() noexcept {
         return TryAcquireSRWLockExclusive(&lock_);
     }
 
-    constexpr void unlock() noexcept {
+    void unlock() noexcept {
         ReleaseSRWLockExclusive(&lock_);
     }
 
     // stl SharedLockable
-    constexpr void lock_shared() noexcept {
+    void lock_shared() noexcept {
         AcquireSRWLockShared(&lock_);
     }
 
-    [[nodiscard]] constexpr bool try_lock_shared() noexcept {
+    [[nodiscard]] bool try_lock_shared() noexcept {
         return TryAcquireSRWLockShared(&lock_);
     }
 
-    constexpr void unlock_shared() noexcept {
+    void unlock_shared() noexcept {
         ReleaseSRWLockShared(&lock_);
     }
 
