@@ -138,7 +138,8 @@ struct ServiceOutcome {
                                      std::unique_ptr<ProfileItemAcquisitionTransaction>,
                                      std::unique_ptr<ItemDismantleTransaction>,
                                      std::unique_ptr<RecordRewardGrantTransaction>,
-                                     std::unique_ptr<SeasonPassRewardTransaction>>;
+                                     std::unique_ptr<SeasonPassRewardTransaction>,
+                                     std::unique_ptr<state::PendingSettingsUpdate>>;
     Transaction transaction{};
 };
 
@@ -268,6 +269,18 @@ namespace body {
 
 /** Owns server-initiated encrypted frames appended after correlated replies. */
 namespace push {
+
+/**
+ * Canonicalizes the account ahead of the family-specific snapshot dispatch.
+ * Families 0, 3 and 4 each take their own account snapshot, and the roster is built before the
+ * account companion, so a migration performed inside one family's builder would leave the others
+ * describing a different account: a Family-3 character record naming an emote instance the
+ * Family-4 manifest has already replaced, with no correction published afterwards. Running it
+ * ahead of every builder is what keeps the three images talking about one account.
+ * Idempotent, and one relaxed load once the answer can no longer change, so calling it from every
+ * entry point that reaches a builder costs nothing.
+ */
+void ensure_account_canonical() noexcept;
 
 /**
  * Appends the queuez snapshots one subscription needs, including the Family-4 companion.

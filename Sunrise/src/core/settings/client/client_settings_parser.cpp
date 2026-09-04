@@ -17,6 +17,9 @@ bool Parser::client_settings(client::Settings& output) noexcept {
     bool hasPinReplicatedRecord = false;
     bool hasHoldSpawn = false;
     bool hasSpawnHoldMs = false;
+    bool hasDumpGameImage = false;
+    bool hasStockEntityPool = false;
+    bool hasRestockDrained = false;
     if (consume('}')) {
         return true;
     }
@@ -73,6 +76,21 @@ bool Parser::client_settings(client::Settings& output) noexcept {
             }
             candidate.spawnHoldMs = value;
             hasSpawnHoldMs = true;
+        } else if (key == "dump_game_image") {
+            if (hasDumpGameImage || !boolean(candidate.dumpGameImage)) {
+                return false;
+            }
+            hasDumpGameImage = true;
+        } else if (key == "stock_entity_pool") {
+            if (hasStockEntityPool || !boolean(candidate.stockEntityPool)) {
+                return false;
+            }
+            hasStockEntityPool = true;
+        } else if (key == "restock_drained_entity_pool") {
+            if (hasRestockDrained || !boolean(candidate.restockDrainedEntityPool)) {
+                return false;
+            }
+            hasRestockDrained = true;
         } else if (!skip_value(0)) {
             return false;
         }

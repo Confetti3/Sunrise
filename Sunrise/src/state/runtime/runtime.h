@@ -10,6 +10,12 @@
 #include "../record_claims/record_claims.h"
 #include "state.h"
 
+namespace sunrise::state::account::settings {
+
+struct SettingsDelta;
+
+} // namespace sunrise::state::account::settings
+
 namespace sunrise::state {
 
 /**
@@ -17,6 +23,18 @@ namespace sunrise::state {
  * Currency, material, and consumable profile rows remain canonically non-instanced.
  */
 [[nodiscard]] bool ensure_profile_item_identities() noexcept;
+
+/** Why one attempt to canonicalize the "Emotes" collection item ended. */
+enum class EmoteCollectionOutcome : std::uint8_t {
+    /** Every character carries a sound collection item, either already or as of this call. */
+    ready,
+    /** The build data or account this reads is not published yet, so a retry is still owed. */
+    notReady,
+    /** The installed content does not carry the item this expects, so it can never be applied. */
+    unsupported,
+    /** The item could not be placed, so no character was changed and a retry is still owed. */
+    failed,
+};
 
 /**
  * Grants each character the other 2 subclasses of its equipped subclass's class, placing missing
@@ -59,6 +77,19 @@ struct PendingSubclassSelection {
 
 /** Commits a prepared subclass selection behind the exact full-character staleness guard. */
 [[nodiscard]] bool commit_subclass_selection(PendingSubclassSelection& mutation) noexcept;
+
+/**
+ * Equips each character with the "Emotes" collection item (hash 3183180185) in the emote slot, in
+ * place of an individual emote. The stock client opens its own wheel-configuration screen for this
+ * item; its 4 ordinary sockets seed default lanes from the item's real plug pool so the wheel has
+ * something in every slot the first time it opens.
+ * Idempotent, and safe to call from more than one boundary: a character already carrying a sound
+ * copy is left alone, and one whose sockets no longer resolve is repaired in place, keeping its
+ * instance identity and every field this does not own.
+ * The outcome distinguishes "nothing to do" from "could not be done", so a caller never records
+ * the account as canonical on the strength of a prerequisite that was never met.
+ */
+[[nodiscard]] EmoteCollectionOutcome ensure_character_emote_collection() noexcept;
 
 /** Direction of one checked character equipment mutation. */
 enum class EquipmentMutationKind : std::uint8_t {
@@ -341,6 +372,21 @@ struct PendingCurrentActivity {
     std::uint64_t characterSoid{};
     std::size_t characterIndex{};
     std::uint16_t activityIndex{};
+    bool prepared{};
+};
+
+/** Result of validating one sparse settings writeback against authoritative State. */
+enum class SettingsUpdateDisposition : std::uint8_t {
+    rejected,
+    acceptedNoChange,
+    preparedMutation,
+};
+
+/** Complete checked settings before/after images held until the BAP transaction commits. */
+struct PendingSettingsUpdate {
+    account::settings::AccountSettings beforeSettings{};
+    account::settings::AccountSettings afterSettings{};
+    std::uint64_t accountSoid{};
     bool prepared{};
 };
 
@@ -631,11 +677,32 @@ commit_profile_item_acquisition(PendingProfileItemAcquisition& mutation) noexcep
 /** Commits one prepared current-activity change behind an exact character staleness guard. */
 [[nodiscard]] bool commit_current_activity(PendingCurrentActivity& mutation) noexcept;
 
+/**
+ * Merges and validates a sparse WS-701 settings update without publishing it.
+ * @param delta Supported fields decoded from one reflected settings request.
+ * @param mutation Receives a complete before/after pair only when State would change.
+ * @return Rejection, an accepted no-op, or a prepared mutation.
+ */
+[[nodiscard]] SettingsUpdateDisposition
+prepare_settings_update(const account::settings::SettingsDelta& delta,
+                        PendingSettingsUpdate& mutation) noexcept;
+
+/**
+ * Publishes one prepared settings after-image behind account-key and settings staleness guards.
+ * @param mutation Prepared update, always cleared before this function returns.
+ * @return True when the after-image was already current or was committed successfully.
+ */
+[[nodiscard]] bool commit_settings_update(PendingSettingsUpdate& mutation) noexcept;
+
 /** @return A copy of the active account state, read under the lock. */
 [[nodiscard]] AccountState account_snapshot() noexcept;
 
-/** @return A copy of the evaluated content state, read under the lock. */
-[[nodiscard]] InvestmentState investment_snapshot() noexcept;
+/**
+ * Copies the evaluated content state and adds build-derived catalyst completion overrides.
+ * @param output Receives one complete Family-5 snapshot on success.
+ * @return False when the fixed override banks cannot hold the complete state.
+ */
+[[nodiscard]] bool investment_snapshot(InvestmentState& output) noexcept;
 
 /** Prepares one artifact purchase without changing persistent state. */
 [[nodiscard]] bool prepare_artifact_mod_unlock(std::uint16_t saleIndex,

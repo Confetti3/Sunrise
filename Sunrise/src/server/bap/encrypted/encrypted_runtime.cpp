@@ -405,7 +405,8 @@ bool consume(Session& session,
         || transaction_if<ProfileItemAcquisitionTransaction>(outcome) != nullptr
         || transaction_if<ItemDismantleTransaction>(outcome) != nullptr
         || transaction_if<RecordRewardGrantTransaction>(outcome) != nullptr
-        || transaction_if<SeasonPassRewardTransaction>(outcome) != nullptr;
+        || transaction_if<SeasonPassRewardTransaction>(outcome) != nullptr
+        || transaction_if<state::PendingSettingsUpdate>(outcome) != nullptr;
     const bool presentsAcquisition =
         transaction_if<ItemAcquisitionTransaction>(outcome) != nullptr
         || transaction_if<ProfileItemAcquisitionTransaction>(outcome) != nullptr

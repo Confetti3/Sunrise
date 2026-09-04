@@ -1380,6 +1380,8 @@ build_roster_snapshot(Session& session,
     // them. So every participation record carries the same player key. Selecting the first slot
     // leaves the authored cinematic participant unbound whenever it names another record.
     snapshot.keyOnEveryParticipationSlot = true;
+    snapshot.authorDirectorBodies = defaults.authorDirectorBodies;
+    snapshot.authorWideRecordBodies = defaults.authorWideRecordBodies;
     // The participation record's `+0` latches only when the region index is known.
     snapshot.region = static_cast<std::uint32_t>(region.index);
     snapshot.hasRegion = true;

@@ -19,6 +19,7 @@
 #include "../../middleware/web_service/messages/opcode403.h"
 #include "../../middleware/web_service/messages/opcode406.h"
 #include "../../middleware/web_service/messages/opcode504.h"
+#include "../../middleware/web_service/messages/opcode701/opcode701_codec.h"
 #include "../../middleware/web_service/messages/opcode801.h"
 #include "../../middleware/web_service/messages/opcode903.h"
 #include "../../state/account/account_state.h"
@@ -260,6 +261,44 @@ static_assert(season_armour_rolls_valid());
 }
 
 } // namespace
+
+/** Decodes and prepares one sparse account-settings writeback without publishing State. */
+state::SettingsUpdateDisposition mutate_settings(const middleware::web_service::Message& message,
+                                                 Outcome& outcome) noexcept {
+    namespace opcode701 = middleware::web_service::messages::opcode701;
+
+    opcode701::Request request{};
+    if (!opcode701::parse_request(message, request)) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::warn,
+                         "ev=ws701 stage=prepare result=rejected reason=parse");
+        return state::SettingsUpdateDisposition::rejected;
+    }
+
+    state::PendingSettingsUpdate mutation{};
+    const state::SettingsUpdateDisposition disposition =
+        state::prepare_settings_update(request.settings, mutation);
+    if (disposition == state::SettingsUpdateDisposition::preparedMutation) {
+        if (emplace_mutation<state::PendingSettingsUpdate>(outcome, mutation) == nullptr) {
+            return state::SettingsUpdateDisposition::rejected;
+        }
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::debug,
+                         "ev=ws701 stage=prepare result=ready");
+        return disposition;
+    }
+    if (disposition == state::SettingsUpdateDisposition::acceptedNoChange) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::debug,
+                         "ev=ws701 stage=prepare result=no_change");
+        return disposition;
+    }
+
+    core::log::write(core::log::Channel::server,
+                     core::log::Level::warn,
+                     "ev=ws701 stage=prepare result=rejected reason=validation");
+    return state::SettingsUpdateDisposition::rejected;
+}
 
 /**
  * Records the player's character pick, which arrives nowhere else.

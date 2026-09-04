@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Framing handlers for every activity message that changes no State.
  * Each one reads as much of its body as the known grammar reaches, and reports what it saw.
  * It returns how completely the body was read, so the caller can record one arrival receipt.
@@ -8,6 +8,7 @@
 #include "activity_message_receipts.h"
 
 #include <array>
+#include <bit>
 #include <cstdarg>
 #include <cstddef>
 #include <cstdint>
@@ -1002,6 +1003,19 @@ Framed frame_authority_release(const message::Request& request, bool expectReaso
     if (!parsed) {
         return {report_malformed("authority", request), 0};
     }
+    // The mask says how much lease the client believes it is handing back with the bubble. A
+    // release Sunrise records as authority-only while the client counts it as slots returned is
+    // how the two ledgers drift apart, and nothing else on this path reports the size.
+    std::size_t returning = 0;
+    for (const std::byte byte : decoded.mask) {
+        returning += static_cast<std::size_t>(std::popcount(std::to_integer<unsigned char>(byte)));
+    }
+    report(core::log::Level::debug,
+           "ev=activity stage=authority result=noted type=%u selector=%u reason=%d slots=%zu",
+           request.messageType,
+           static_cast<unsigned>(decoded.selector),
+           decoded.hasReason ? decoded.reason : 0,
+           returning);
     return {Verdict::framed, payload_bits(request)};
 }
 

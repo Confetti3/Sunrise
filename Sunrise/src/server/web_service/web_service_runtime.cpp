@@ -17,6 +17,7 @@
 #include "../../middleware/web_service/messages/opcode503.h"
 #include "../../middleware/web_service/messages/opcode504.h"
 #include "../../middleware/web_service/messages/opcode601/opcode601_codec.h"
+#include "../../middleware/web_service/messages/opcode701/opcode701_codec.h"
 #include "../../middleware/web_service/messages/opcode702.h"
 #include "../../middleware/web_service/messages/opcode801.h"
 #include "../../middleware/web_service/messages/opcode901/opcode901_codec.h"
@@ -293,9 +294,10 @@ bool consume(std::span<const std::byte> request,
         note_character_writeback(message);
     }
     if (message.opcode == middleware::web_service::messages::opcode205::kOpcode) {
-        const auto investment = state::investment_snapshot();
-        return middleware::web_service::messages::opcode205::encode_response(
-                   message, investment, next_family5_clock(), response, written)
+        state::InvestmentState investment{};
+        return (state::investment_snapshot(investment)
+                && middleware::web_service::messages::opcode205::encode_response(
+                    message, investment, next_family5_clock(), response, written))
                || encode_echo(message, response, written);
     }
 
@@ -308,8 +310,8 @@ bool consume(std::span<const std::byte> request,
         if (!bootstrap.hasPrimarySoid) {
             bootstrap.primarySoid = state::account_snapshot().primarySoid;
         }
-        const auto investment = state::investment_snapshot();
-        if (!parsed
+        state::InvestmentState investment{};
+        if (!parsed || !state::investment_snapshot(investment)
             || !middleware::web_service::messages::opcode503::encode_response(
                 message, bootstrap, investment, next_family5_clock(), response, written)) {
             return encode_echo(message, response, written);
@@ -351,9 +353,10 @@ bool consume(std::span<const std::byte> request,
         && middleware::web_service::messages::opcode206::parse_request(message, subscription);
 
     // The action runs before its reply is encoded, because the reply reports whether it worked.
-    // An action fills the outcome only once it has prepared its whole transition, so an outcome
-    // still empty afterwards is that action refusing the request. Nothing is published here.
+    // Most actions fill the outcome only after preparing a whole transition. WS-701 also accepts
+    // a valid no-op heartbeat, so that one success is tracked separately from mutation presence.
     bool dispatched = true;
+    bool acceptedWithoutMutation = false;
     if (message.opcode == middleware::web_service::messages::opcode1801::kOpcode) {
         claim_record(message, outcome);
     } else if (message.opcode == middleware::web_service::messages::opcode504::kOpcode) {
@@ -374,6 +377,9 @@ bool consume(std::span<const std::byte> request,
         mutate_equipped_socket_plug(message, outcome);
     } else if (message.opcode == kItemStateOpcode) {
         mutate_item_state(message, outcome);
+    } else if (message.opcode == middleware::web_service::messages::opcode701::kOpcode) {
+        const state::SettingsUpdateDisposition disposition = mutate_settings(message, outcome);
+        acceptedWithoutMutation = disposition == state::SettingsUpdateDisposition::acceptedNoChange;
     } else if (message.opcode == kItemAcquisitionOpcode) {
         acquire_item(message, outcome);
     } else if (message.opcode == middleware::web_service::messages::opcode2400::kOpcode) {
@@ -387,7 +393,7 @@ bool consume(std::span<const std::byte> request,
     middleware::web_service::ResponseShape shape{};
     resolve_response_shape(message.opcode, shape);
     middleware::web_service::StatusResponse status{};
-    if (dispatched && !prepared) {
+    if (dispatched && !prepared && !acceptedWithoutMutation) {
         status.code = kRefusedStatus;
     }
     if (!middleware::web_service::encode_response(message, shape, status, response, written)) {

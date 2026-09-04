@@ -12,6 +12,7 @@
 #include "../hooks/graphics/graphics_hook_lifecycle.h"
 #include "../hooks/inactivity/inactivity_override.h"
 #include "../hooks/infinite_ammo/infinite_ammo.h"
+#include "../hooks/membership_probe/membership_probe.h"
 #include "../hooks/network/runtime.h"
 #include "../hooks/noclip/runtime.h"
 #include "../hooks/package_trust/package_trust_bypass.h"
@@ -38,6 +39,8 @@ bool initialize(void* module) noexcept {
         core::settings::get().activitySdkGeneration;
     content::activity::sdk_generation::initialize(module,
                                                   {generation.enabled, generation.luaDeclarations});
+    // Kept for activation, which resolves the artifact directory from Sunrise's own module.
+    runtime::g_sunriseModule = module;
     // Loaded before the pages register, so each page draws saved values on its first frame.
     movement::initialize(module);
     player::initialize(module);
@@ -77,6 +80,15 @@ bool shutdown() noexcept {
         core::log::write(core::log::Channel::client,
                          core::log::Level::error,
                          "ev=shutdown stage=package_trust result=fail");
+        ReleaseSRWLockExclusive(&runtime::g_lock);
+        return false;
+    }
+    // Attached last, so it detaches first. The probe reads through a detour, so one left in
+    // place is a branch into code a later unload unmaps.
+    if (!hooks::membership_probe::uninstall()) {
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::error,
+                         "ev=shutdown stage=membership_probe result=fail");
         ReleaseSRWLockExclusive(&runtime::g_lock);
         return false;
     }

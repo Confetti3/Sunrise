@@ -99,36 +99,41 @@ __declspec(noinline) bool __fastcall spawn_gate(std::int32_t datum) noexcept {
 
 } // namespace
 
-/** Attaches the spawn hold. */
-bool install_spawn_hold() noexcept {
+/** Stages the spawn hold. */
+StageResult stage_spawn_hold(hooking::detour::Spec& spec) noexcept {
     if (g_handle.attached) {
-        return true;
+        return StageResult::attached;
     }
     std::byte* const target = scan_main_image_unique(kSpawnGateSignature, "player_spawn_gate");
     if (target == nullptr) {
         core::log::write(core::log::Channel::client,
                          core::log::Level::warn,
                          "ev=bootflow stage=spawn_hold result=fail reason=target");
-        return false;
+        return StageResult::unavailable;
     }
     if (!spawn::resolve(target)) {
         core::log::write(core::log::Channel::client,
                          core::log::Level::warn,
                          "ev=bootflow stage=current_slice result=fail reason=targets");
     }
-    const hooking::detour::Spec spec{target, reinterpret_cast<void*>(&spawn_gate)};
-    if (!hooking::detour::install(spec, g_handle)) {
+    spec = hooking::detour::Spec{target, reinterpret_cast<void*>(&spawn_gate)};
+    return StageResult::staged;
+}
+
+/** Takes the spawn hold's attached handle, or a detached one. */
+void publish_spawn_hold(const hooking::detour::Handle& handle) noexcept {
+    if (!handle.attached) {
         spawn::forget();
         core::log::write(core::log::Channel::client,
                          core::log::Level::warn,
                          "ev=bootflow stage=spawn_hold result=fail reason=attach");
-        return false;
+        return;
     }
+    g_handle = handle;
     g_original.store(reinterpret_cast<SpawnGate>(g_handle.original), std::memory_order_release);
     core::log::write(core::log::Channel::client,
                      core::log::Level::info,
                      "ev=bootflow stage=spawn_hold result=ok");
-    return true;
 }
 
 /** Detaches the spawn hold. */

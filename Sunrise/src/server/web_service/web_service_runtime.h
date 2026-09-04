@@ -40,7 +40,8 @@ struct Outcome {
                                   std::unique_ptr<state::PendingItemState>,
                                   std::unique_ptr<state::PendingArtifactPurchase>,
                                   std::unique_ptr<state::PendingRecordRewardGrant>,
-                                  std::unique_ptr<state::PendingSeasonPassReward>>;
+                                  std::unique_ptr<state::PendingSeasonPassReward>,
+                                  std::unique_ptr<state::PendingSettingsUpdate>>;
     Mutation mutation{};
 };
 

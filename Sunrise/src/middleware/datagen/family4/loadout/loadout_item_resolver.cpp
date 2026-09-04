@@ -136,6 +136,7 @@ bool resolve_item(const authored_inventory::Item& authored,
     build_details::Definition itemDetail{};
     build_buckets::Descriptor bucket{};
     build_socket_lists::Definition socketList{};
+    std::uint8_t nativeEquipmentSlot = 0;
     if (!state::build_data::find_item_definition_hash(authored.definitionHash, itemDefinition)
         || !state::build_data::find_configured_item_detail(itemDefinition.definitionIndex,
                                                            itemDetail)
@@ -151,15 +152,16 @@ bool resolve_item(const authored_inventory::Item& authored,
 
     Candidate candidate{};
     candidate.bucket = bucket;
-    if (itemDetail.equipmentSlot.has_value()) {
-        if (*itemDetail.equipmentSlot < 0) {
+    if (authored_inventory::resolve_native_equipment_slot(
+            authored.definitionHash, itemDetail.equipmentSlot, nativeEquipmentSlot)) {
+        if (static_cast<std::size_t>(nativeEquipmentSlot) >= build_details::kEquipmentSlotCount) {
             return false;
         }
-        candidate.item.equipmentSlot = static_cast<std::uint8_t>(*itemDetail.equipmentSlot);
+        candidate.item.equipmentSlot = nativeEquipmentSlot;
+    } else if (itemDetail.equipmentSlot.has_value()
+               || bucket.equipmentSlot != build_buckets::kUnavailableEquipmentSlot) {
+        return false;
     } else {
-        if (bucket.equipmentSlot != build_buckets::kUnavailableEquipmentSlot) {
-            return false;
-        }
         candidate.item.equipmentSlot = kUnavailableEquipmentSlot;
     }
     candidate.item.mutationSerial = authored.mutationSerial;
@@ -170,6 +172,14 @@ bool resolve_item(const authored_inventory::Item& authored,
                                      itemDefinitionCount,
                                      candidate.item.instance.ordinarySockets)) {
         return false;
+    }
+    std::uint32_t completedFlags = candidate.item.flags;
+    auto completedPlugs = candidate.item.instance.ordinarySockets.plugs;
+    if (state::build_data::complete_exotic_catalyst(
+            itemDefinition.definitionIndex, completedFlags, completedPlugs)
+        == state::build_data::items::catalysts::ApplyResult::completed) {
+        candidate.item.flags = completedFlags;
+        candidate.item.instance.ordinarySockets.plugs = completedPlugs;
     }
 
     candidate.item.instance.instanceSoid = authored.instanceSoid;

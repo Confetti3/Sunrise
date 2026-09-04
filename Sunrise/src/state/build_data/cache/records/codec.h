@@ -41,6 +41,22 @@ namespace sunrise::state::build_data::cache::records {
 [[nodiscard]] bool decode(const SocketPlugMemberRecord& record,
                           items::socket_plugs::Member& value) noexcept;
 
+/**
+ * @param value Runtime catalyst relation to pack.
+ * @param record Receives the canonical disk form.
+ * @return True when the runtime relation has a supported availability value.
+ */
+[[nodiscard]] bool encode(const items::catalysts::Definition& value,
+                          ExoticCatalystRecord& record) noexcept;
+
+/**
+ * @param record Canonical disk form to unpack.
+ * @param value Receives the runtime catalyst relation.
+ * @return True when the disk form has a supported availability value.
+ */
+[[nodiscard]] bool decode(const ExoticCatalystRecord& record,
+                          items::catalysts::Definition& value) noexcept;
+
 [[nodiscard]] bool encode(const inventory::buckets::Descriptor& value,
                           InventoryBucketRecord& record) noexcept;
 [[nodiscard]] bool decode(const InventoryBucketRecord& record,

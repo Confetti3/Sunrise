@@ -12,6 +12,7 @@
 #include "../../spawn_sets/spawn_set_build.h"
 #include "build.h"
 #include "internal.h"
+#include "package_socket_plug_build.h"
 
 namespace sunrise::client::content::items::packages {
 namespace {
@@ -31,7 +32,8 @@ namespace {
            && state::build_data::record_definitions_ready()
            && state::build_data::node_definitions_ready()
            && state::build_data::sobjects::count() != 0
-           && state::build_data::investment_constants_ready();
+           && state::build_data::investment_constants_ready()
+           && state::build_data::exotic_catalysts_ready();
 }
 
 } // namespace
@@ -114,6 +116,22 @@ bool build() noexcept {
                     || !tables::find_array_at(std::span<const std::byte>{storage.plugSetTable},
                                               tables::kTableArrayDescriptor,
                                               plugSets)) {
+                    continue;
+                }
+            }
+            if (!state::build_data::exotic_catalysts_ready()) {
+                reason = "catalyst_gates";
+                if (!read_catalyst_acquisition_gates(source,
+                                                     storage.scratch,
+                                                     std::span<const std::byte>{storage.root},
+                                                     storage.child,
+                                                     storage.catalystAcquisitionGates)
+                    || !read_catalyst_objective_values(
+                        source,
+                        storage.scratch,
+                        std::span<const std::byte>{storage.root},
+                        storage.child,
+                        storage.catalystObjectiveValues)) {
                     continue;
                 }
             }

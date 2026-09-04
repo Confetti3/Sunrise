@@ -7,8 +7,11 @@
 #include <atomic>
 #include <cstdio>
 #include <cstring>
+#include <mutex>
+#include <shared_mutex>
 
 #include "../filesystem/path.h"
+#include "core/threading/srw_lock.h"
 #include "snapshot/internal.h"
 
 namespace sunrise::core::log {
@@ -42,7 +45,7 @@ constexpr std::size_t kEventTextCapacity =
 constexpr std::size_t kStampCapacity = 32;
 
 struct LogState {
-    SRWLOCK lock{SRWLOCK_INIT};
+    threading::SrwLock lock{};
     std::array<std::atomic<Level>, static_cast<std::size_t>(Channel::count)> levels{};
     HANDLE file{INVALID_HANDLE_VALUE};
     /** Tick the sinks opened on. Every line carries its offset from this, so stalls are visible. */
@@ -135,7 +138,7 @@ Settings defaults() noexcept {
 
 /** Applies log thresholds and opens the optional file sink. */
 bool initialize(void* module, const Settings& settings) noexcept {
-    AcquireSRWLockExclusive(&g_log.lock);
+    const std::lock_guard lock(g_log.lock);
     // Resetting under the lifetime lock prevents an admitted writer from repopulating stale view.
     snapshot::internal::reset();
     if (g_log.file != INVALID_HANDLE_VALUE) {
@@ -159,13 +162,13 @@ bool initialize(void* module, const Settings& settings) noexcept {
             level.store(Level::off, std::memory_order_relaxed);
         }
     }
-    ReleaseSRWLockExclusive(&g_log.lock);
     return ready;
 }
 
 /** Closes the optional sink and clears the bounded in-memory view. */
 void shutdown() noexcept {
-    AcquireSRWLockExclusive(&g_log.lock);
+    const std::lock_guard lock(g_log.lock);
+
     g_log.initialized = false;
     for (std::atomic<Level>& level : g_log.levels) {
         level.store(Level::off, std::memory_order_relaxed);
@@ -177,7 +180,6 @@ void shutdown() noexcept {
     }
     // The same lifetime lock excludes writers until both sinks and retained entries are empty.
     snapshot::internal::reset();
-    ReleaseSRWLockExclusive(&g_log.lock);
 }
 
 /** Writes one line straight to the debugger, bypassing the sinks and every threshold. */
@@ -194,9 +196,8 @@ void early(std::string_view event) noexcept {
 
 /** Reports whether an event would be emitted, so callers can skip the cost of building one. */
 bool accepts(Channel channel, Level level) noexcept {
-    AcquireSRWLockShared(&g_log.lock);
+    const std::shared_lock lock(g_log.lock);
     const bool admitted = g_log.initialized && enabled(channel, level);
-    ReleaseSRWLockShared(&g_log.lock);
     return admitted;
 }
 
@@ -208,9 +209,8 @@ void write(Channel channel, Level level, std::string_view event) noexcept {
         return;
     }
 
-    AcquireSRWLockShared(&g_log.lock);
+    const std::shared_lock lock(g_log.lock);
     if (!g_log.initialized || !enabled(channel, level)) {
-        ReleaseSRWLockShared(&g_log.lock);
         return;
     }
 
@@ -248,7 +248,6 @@ void write(Channel channel, Level level, std::string_view event) noexcept {
     g_writers.fetch_sub(1, std::memory_order_acq_rel);
     // Record after sink writes while the shared lifetime lock still excludes shutdown reset.
     snapshot::internal::record(channel, level, std::string_view(line.data(), snapshotLength));
-    ReleaseSRWLockShared(&g_log.lock);
 }
 
 /** Formats and emits one debug event carrying a duration in the ms field. */

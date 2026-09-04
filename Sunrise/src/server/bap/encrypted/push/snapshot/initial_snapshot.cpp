@@ -26,6 +26,8 @@ bool prepare_initial(
     Prepared staged{};
     staged.rawClearSize = reservation.rawClearSize;
     staged.compressedClearSize = reservation.compressedClearSize;
+    // Family two's directory and the family-three roster object both live in slot zero, so one
+    // expression covers every family that reaches here.
     const std::uint32_t slotIndex = subscription.familyType == kAccountFamilyType
                                         ? kAccountDefinitionSlotIndex
                                         : kRosterDefinitionSlotIndex;
@@ -33,7 +35,9 @@ bool prepare_initial(
     const bool hasDefinition =
         middleware::datagen::object_id(subscription.familyType, slotIndex, objectId);
     bool success = false;
-    if (subscription.familyType == kRosterFamilyType && hasDefinition) {
+    if (subscription.familyType == kSocialRosterFamilyType && hasDefinition) {
+        success = prepare_social_roster(scratch, subscription, objectId, reservation, staged);
+    } else if (subscription.familyType == kRosterFamilyType && hasDefinition) {
         success = prepare_roster(scratch, subscription, objectId, reservation, staged);
     } else if (subscription.familyType == kAccountFamilyType && hasDefinition) {
         success = prepare(

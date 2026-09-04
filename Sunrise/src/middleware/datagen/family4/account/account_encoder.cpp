@@ -96,6 +96,9 @@ bool encode(const state::AccountState& state,
     object.acquiredFlags = unlocks.accountFlags;
     object.profileUnlockFlags = unlocks.profileFlags;
     object.objectiveValues = unlocks.objectiveValues;
+    if (!state::build_data::complete_exotic_catalyst_objectives(object.objectiveValues)) {
+        return false;
+    }
     // Season claims map to account flags; pending claims overlay the same response.
     if (!seasonal::apply_reward_claims(object.acquiredFlags)) {
         return false;

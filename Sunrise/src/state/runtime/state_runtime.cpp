@@ -328,6 +328,8 @@ bool initialize(void* module,
     if (!build_data::initialize(module, runtime::equipment::configured_hash(*runtimeAccount))) {
         return false;
     }
+    build_data::set_exotic_catalyst_completion_enabled(
+        core::settings::get().completeExoticCatalysts);
     if (build_data::records::rewards::initialize(module)) {
         (void)build_data::records::rewards::load_and_publish();
     }
@@ -470,13 +472,17 @@ bool new_bap_session(BapState& output) noexcept {
     return true;
 }
 
-/** @return A copy of the evaluated content state, read under the lock. */
-InvestmentState investment_snapshot() noexcept {
+/** Copies one complete evaluated content state with build-derived catalyst overrides. */
+bool investment_snapshot(InvestmentState& output) noexcept {
     AcquireSRWLockShared(&runtime::storage::g_stateLock);
     InvestmentState snapshot = runtime::storage::g_state.investment;
     ReleaseSRWLockShared(&runtime::storage::g_stateLock);
     (void)progression::seasonal_experience::apply_artifact_state(snapshot.family5);
-    return snapshot;
+    if (!build_data::complete_exotic_catalyst_investment(snapshot.family5)) {
+        return false;
+    }
+    output = snapshot;
+    return true;
 }
 
 bool prepare_artifact_mod_unlock(std::uint16_t saleIndex,

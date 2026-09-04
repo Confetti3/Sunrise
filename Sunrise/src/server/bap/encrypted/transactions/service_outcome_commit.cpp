@@ -1,4 +1,4 @@
-﻿#include "service_outcome_commit.h"
+#include "service_outcome_commit.h"
 
 #include <array>
 #include <cstdio>
@@ -13,15 +13,15 @@
 #include "../internal.h"
 
 namespace sunrise::server::bap::encrypted::transactions {
-namespace {
 
 namespace slots = state::activity::entity_slots;
 
 /** Log names for each lease operation, in the enum's own order. */
-constexpr std::array<const char*, 4> kLeaseKinds = {"none", "join", "grant", "release"};
+static constexpr std::array<const char*, 4> kLeaseKinds = {"none", "join", "grant", "release"};
 
 /** Retains one newly committed private ActivityClient generation for its BAP link. */
-[[nodiscard]] bool retain_private(std::uint64_t sessionId, Publication& publication) noexcept {
+[[nodiscard]] static bool retain_private(std::uint64_t sessionId,
+                                         Publication& publication) noexcept {
     state::activity::SessionBinding binding{};
     if (!state::activity::snapshot_binding(sessionId, binding)
         || !state::activity::retain_binding(binding)) {
@@ -37,8 +37,8 @@ constexpr std::array<const char*, 4> kLeaseKinds = {"none", "join", "grant", "re
 }
 
 /** Retains one exact advertised public target before its join mutation commits. */
-[[nodiscard]] bool retain_public(const activity_message::ActivityPlan& plan,
-                                 Publication& publication) noexcept {
+[[nodiscard]] static bool retain_public(const activity_message::ActivityPlan& plan,
+                                        Publication& publication) noexcept {
     server::gameplay::group::HostSessionBinding current{};
     if (!server::gameplay::group::host_session_for_activity(plan.sessionId, current)
         || current.generation != plan.publicHost.generation
@@ -70,7 +70,7 @@ constexpr std::array<const char*, 4> kLeaseKinds = {"none", "join", "grant", "re
 }
 
 /** Releases provisional activity owners when the following State commit fails. */
-void discard_activity_publication(Publication& publication) noexcept {
+static void discard_activity_publication(Publication& publication) noexcept {
     if (publication.activity.hostGeneration != 0) {
         server::gameplay::group::release_host_session(publication.activity.hostGeneration);
     }
@@ -87,7 +87,7 @@ void discard_activity_publication(Publication& publication) noexcept {
  * @param mutation Plan as it was before the commit consumed it.
  * @param committed Whether the commit succeeded.
  */
-void report_lease(const slots::PendingMutation& mutation, bool committed) noexcept {
+static void report_lease(const slots::PendingMutation& mutation, bool committed) noexcept {
     if (committed) {
         return;
     }
@@ -100,13 +100,17 @@ void report_lease(const slots::PendingMutation& mutation, bool committed) noexce
         std::snprintf(line.data(),
                       line.size(),
                       "ev=activity stage=entity_slots result=fail kind=%s soid=0x%llX "
-                      "requested=%zu picked=%zu held=%zu reserved=%zu known=%u",
+                      "requested=%zu picked=%zu held=%zu reserved=%zu returned=%zu known=%u",
                       kind < kLeaseKinds.size() ? kLeaseKinds[kind] : "bad",
                       static_cast<unsigned long long>(mutation.sessionId),
                       mutation.requestedCount,
                       slots::slot_count(mutation.mask),
                       held,
                       reserved,
+                      // Only a release carries one, so every other kind reports zero. A release
+                      // whose returned set and picked set disagree means the two ledgers have
+                      // diverged, which nothing else on this path would show.
+                      slots::slot_count(mutation.returnedMask),
                       known ? 1U : 0U);
     if (written > 0) {
         core::log::write(core::log::Channel::server,
@@ -115,14 +119,12 @@ void report_lease(const slots::PendingMutation& mutation, bool committed) noexce
     }
 }
 
-[[nodiscard]] bool report_commit(bool committed, const char* failure) noexcept {
+[[nodiscard]] static bool report_commit(bool committed, const char* failure) noexcept {
     if (!committed) {
         core::log::write(core::log::Channel::server, core::log::Level::warn, failure);
     }
     return committed;
 }
-
-} // namespace
 
 /**
  * Commits at most one delayed State transaction.
@@ -214,6 +216,14 @@ bool commit(ServiceOutcome& outcome, Publication& publication, const char*& reas
     if (auto* mutation = transaction_if<state::matchmaking::PendingMutation>(outcome)) {
         reason = "matchmaking";
         return state::matchmaking::commit(*mutation);
+    }
+    if (auto* mutation = transaction_if<state::PendingSettingsUpdate>(outcome)) {
+        const bool committed = state::commit_settings_update(*mutation);
+        core::log::write(core::log::Channel::server,
+                         committed ? core::log::Level::debug : core::log::Level::warn,
+                         committed ? "ev=ws701 stage=transaction_commit result=ok"
+                                   : "ev=ws701 stage=transaction_commit result=fail");
+        return committed;
     }
     if (auto* transaction = transaction_if<EquipmentSwapTransaction>(outcome)) {
         if (transaction->pending == nullptr) {

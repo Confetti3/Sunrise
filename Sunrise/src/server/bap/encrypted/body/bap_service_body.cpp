@@ -307,6 +307,15 @@ bool process(const ServiceRoute& route,
             transaction->pending =
                 web_service::take_mutation<state::PendingArtifactPurchase>(webOutcome);
         }
+        const auto* settingsUpdate =
+            web_service::mutation_if<state::PendingSettingsUpdate>(webOutcome);
+        if (settingsUpdate != nullptr) {
+            // WS-701 promises no immediate QueueZ after-image, so State alone is delayed.
+            if (emplace_transaction<state::PendingSettingsUpdate>(outcome, *settingsUpdate)
+                == nullptr) {
+                return refuse_web_action(message, output, written);
+            }
+        }
         if (equipmentSwap != nullptr) {
             // Promise the Family-4 revision carrying this optimistic equip.
             auto* transaction = emplace_transaction<EquipmentSwapTransaction>(outcome);
