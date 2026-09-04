@@ -17,7 +17,7 @@ namespace sunrise::server::bap::encrypted::activity_message::membership {
 /**
  * Stages the kept host-state changes, and an updated snapshot only when needed.
  * @param request Validated owned svc8 envelope.
- * @param plan Cleared, then receives the authoritative membership transaction.
+ * @param plan Cleared, then receives the host-owned client-state transaction.
  * @return True when the exact sparse body is valid for the joined session.
  */
 [[nodiscard]] bool prepare_authoritative(const middleware::bap::activity_message::Request& request,
@@ -34,7 +34,7 @@ namespace sunrise::server::bap::encrypted::activity_message::membership {
 
 /**
  * Stages the host snapshot a start-new-activity request asks for.
- * The request has no recovered reply of its own. The response is the same three notifications a
+ * The request has no known reply of its own. The response is the same three notifications a
  * refresh carries, so the client re-reads the state it is about to move through.
  * @param request Validated owned svc8 envelope.
  * @param plan Cleared, then receives the refresh transaction and its delivery.

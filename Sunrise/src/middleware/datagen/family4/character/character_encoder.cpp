@@ -2,12 +2,12 @@
 
 #include <algorithm>
 #include <array>
-#include <cmath>
 #include <cstring>
 #include <limits>
 #include <optional>
 
 #include "../../../../state/unlocks/unlocks_runtime.h"
+#include "../../character_record/layout.h"
 #include "../instance/layout.h"
 #include "../progression/progression_bank_keys.h"
 #include "abi.h"
@@ -19,12 +19,21 @@ namespace {
 
 /** Every bit set is the native empty biased 16-bit definition index. */
 constexpr std::uint16_t kEmptyDefinitionIndex = (std::numeric_limits<std::uint16_t>::max)();
+/** Every bit set is the native absent activity index. 0 is the orbit activity, not absent. */
+constexpr std::uint16_t kAbsentActivityIndex = (std::numeric_limits<std::uint16_t>::max)();
 /** Every set bit marks all default per-character messages as already seen. */
 constexpr std::byte kSeenMessageByte{0xFF};
+/** Native stack insertion treats -1 as an unused row; 0 is a real selector. */
+constexpr std::int16_t kEmptyItemStackSelector = -1;
 /** Native 1-byte booleans encode true as 1. */
 constexpr std::uint8_t kNativeTrue = 1;
 /** Native 1-byte booleans encode false as 0. */
 constexpr std::uint8_t kNativeFalse = 0;
+/** One character has one customisation header, so both records carry the same 36 bytes. */
+static_assert(character_record::layout::kHeaderBlockBytes.size()
+              == layout::kCustomisationHeaderSize);
+/** Character object B repeats the family-three periodic-reset block byte for byte. */
+static_assert(sizeof(character_record::layout::PeriodicReset) == layout::kPeriodicResetRecordSize);
 
 /**
  * Validates the authored fields consumed by the selected-character encoder.
@@ -34,8 +43,7 @@ constexpr std::uint8_t kNativeFalse = 0;
 [[nodiscard]] bool valid(const state::CharacterState& state) noexcept {
     return state.soid != 0 && state.race <= state::CharacterRace::exo
            && state.gender <= state::CharacterGender::female
-           && state.characterClass <= state::CharacterClass::warlock
-           && std::isfinite(state.appearanceValue);
+           && state.characterClass <= state::CharacterClass::warlock;
 }
 
 /** One new-item flag byte covers 8 consecutive inventory rows. */
@@ -54,7 +62,6 @@ constexpr std::int32_t kOccupiedRowWatermark = 1;
  */
 [[nodiscard]] bool valid(const loadout::ResolvedLoadout& resolvedLoadout) noexcept {
     if (resolvedLoadout.itemCount > resolvedLoadout.items.size()
-        || resolvedLoadout.nextInventorySerial < resolvedLoadout.itemCount
         || resolvedLoadout.nextInventorySerial
                > static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())) {
         return false;
@@ -143,12 +150,30 @@ bool encode(const state::CharacterState& state,
     object.identity.race = static_cast<std::int8_t>(state.race);
     object.identity.gender = static_cast<std::int8_t>(state.gender);
     object.identity.characterClass = static_cast<std::int8_t>(state.characterClass);
+    std::memcpy(object.customisationHeader.data(),
+                character_record::layout::kHeaderBlockBytes.data(),
+                character_record::layout::kHeaderBlockBytes.size());
     object.lastOrbitedDestination = state.lastOrbitedDestination;
+    // No previous activity is tracked, and a zero here would name the orbit activity.
+    object.previousActivityIndex = kAbsentActivityIndex;
+    // Absent, the client's transition classifier takes the orbit as its from side.
+    object.activityOverrideIndex = kAbsentActivityIndex;
+    object.currentActivityIndex = state.currentActivityIndex;
     object.previewMirrors.fill(state.previewAvailable ? kNativeTrue : kNativeFalse);
     object.contentBypass = state.contentBypass ? kNativeTrue : kNativeFalse;
     object.seenMessages.fill(kSeenMessageByte);
+    // Both stamps are the last reset before sign-in. Zero would make the client run a daily and
+    // a weekly rollover as soon as it accepts the object.
+    character_record::layout::PeriodicReset reset{};
+    reset.lastDailyResetSeconds = state.signInSeconds;
+    reset.lastWeeklyResetSeconds = state.signInSeconds;
+    std::memcpy(object.periodicResetRecord.data(), &reset, sizeof reset);
     for (inventory::layout::Entry& item : object.inventoryItems) {
         item.definitionIndex = kEmptyDefinitionIndex;
+    }
+    // Sunrise retains no item stacks, so every physical row must read as unused.
+    for (layout::ItemStackRow& stack : object.itemStacks) {
+        stack.selector = kEmptyItemStackSelector;
     }
     // Acquired flags and objective progress are authored policy, published once per process.
     const state::unlocks::Table& unlocks = state::unlocks::get();
@@ -168,7 +193,12 @@ bool encode(const state::CharacterState& state,
                                object.progressions)) {
         return false;
     }
-    object.nextInventorySerial = resolvedLoadout.nextInventorySerial;
+    // Rows are validated sorted, so the last row bounds the prefix the native walk must cover.
+    object.inventoryRowCount =
+        resolvedLoadout.itemCount == 0
+            ? std::uint32_t{}
+            : static_cast<std::uint32_t>(
+                  resolvedLoadout.items[resolvedLoadout.itemCount - 1].inventoryRow + 1);
     for (std::size_t index = 0; index < resolvedLoadout.itemCount; ++index) {
         const loadout::ResolvedItem& item = resolvedLoadout.items[index];
         inventory::layout::Entry& inventoryRow = object.inventoryItems[item.inventoryRow];

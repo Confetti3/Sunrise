@@ -11,8 +11,9 @@ bool Parser::client_settings(client::Settings& output) noexcept {
     bool hasUserInterface = false;
     bool hasExternalServer = false;
     bool hasFadeRelease = false;
-    bool hasForceJoinRequestReady = false;
     bool hasRegionPrivate = false;
+    bool hasSkipOrbitCinematicWait = false;
+    bool hasSuppressPeerRelay = false;
     bool hasPinReplicatedRecord = false;
     bool hasHoldSpawn = false;
     bool hasSpawnHoldMs = false;
@@ -39,16 +40,21 @@ bool Parser::client_settings(client::Settings& output) noexcept {
                 return false;
             }
             hasFadeRelease = true;
-        } else if (key == "force_join_request_ready") {
-            if (hasForceJoinRequestReady || !boolean(candidate.forceJoinRequestReady)) {
-                return false;
-            }
-            hasForceJoinRequestReady = true;
         } else if (key == "region_private") {
             if (hasRegionPrivate || !boolean(candidate.regionPrivate)) {
                 return false;
             }
             hasRegionPrivate = true;
+        } else if (key == "skip_orbit_cinematic_wait") {
+            if (hasSkipOrbitCinematicWait || !boolean(candidate.skipOrbitCinematicWait)) {
+                return false;
+            }
+            hasSkipOrbitCinematicWait = true;
+        } else if (key == "suppress_peer_relay") {
+            if (hasSuppressPeerRelay || !boolean(candidate.suppressPeerRelay)) {
+                return false;
+            }
+            hasSuppressPeerRelay = true;
         } else if (key == "pin_replicated_record") {
             if (hasPinReplicatedRecord || !boolean(candidate.pinReplicatedRecord)) {
                 return false;

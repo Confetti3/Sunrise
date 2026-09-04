@@ -27,51 +27,43 @@ enum class ConnectId : std::uint8_t {
     mayday = 42,
 };
 
-/** Declared decoded sizes the registry holds for those ids. */
+/** Declared decoded sizes the registry holds for those ids. Each header must carry its own. */
 inline constexpr std::uint32_t kRequestSize = 96;
-/** See kRequestSize. */
 inline constexpr std::uint32_t kResponseSize = 104;
-/** See kRequestSize. */
 inline constexpr std::uint32_t kRefuseSize = 12;
-/** See kRequestSize. */
 inline constexpr std::uint32_t kEstablishSize = 8;
-/** See kRequestSize. */
 inline constexpr std::uint32_t kClosedSize = 12;
-/** See kRequestSize. */
 inline constexpr std::uint32_t kPingSize = 24;
-/** See kRequestSize. */
 inline constexpr std::uint32_t kPongSize = 24;
-/** See kRequestSize. */
 inline constexpr std::uint32_t kPacketsDiscardedSize = 4;
-/** See kRequestSize. */
 inline constexpr std::uint32_t kMaydaySize = 10;
 
 /** The pong response kind is two bits wide and its largest named value is 2. */
 inline constexpr std::uint8_t kPongResponseKind = 2;
-/** A mayday code decodes to one above its wire value and may not exceed this. */
-inline constexpr std::uint16_t kMaydayCodeMaximum = 365;
+/** Largest wire value of a mayday code. The logical code is the wire value minus one. */
+inline constexpr std::uint16_t kMaydayCodeWireMaximum = 365;
 
 /** Body of a ping, and of the pong that echoes its first two fields. */
 struct PingBody {
     std::uint16_t sequence{};
     std::uint64_t timestamp{};
-    /** One-bit field the sender chose. The pong does not carry it. */
-    bool flag{};
+    /** Trailing one-bit field the sender chose. The pong does not carry it. */
+    bool trailingFlag{};
 };
 
 /** Body of a pong. It echoes the ping and names the kind of response it is. */
 struct PongBody {
     std::uint16_t sequence{};
     std::uint64_t timestamp{};
-    /** Two-bit response kind. The recovered response uses the largest named value. */
+    /** Two-bit response kind. The response uses the largest named value. */
     std::uint8_t responseKind{kPongResponseKind};
 };
 
 /** Body of a recovery diagnostic. The session is the group it was raised for. */
 struct MaydayBody {
     std::uint64_t sessionId{};
-    /** Decoded code, one above the wire value. */
-    std::uint16_t code{};
+    /** Logical state-change reason, the wire value minus one. -1 names no reason. */
+    std::int16_t code{};
 };
 
 /** Body of a connect request. */

@@ -8,6 +8,65 @@
 #include "../queuez_state_validation.h"
 
 namespace sunrise::server::bap::encrypted::queuez {
+namespace {
+
+/**
+ * Stages a resident character upsert while preserving the Family-4 object manifest.
+ * @param event Event tag the report line carries, so each caller stays greppable.
+ */
+[[nodiscard]] bool stage_character_upsert(const SessionState& before,
+                                          std::uint64_t characterSoid,
+                                          const char* event,
+                                          EquipmentSwap& swap) noexcept {
+    swap = {};
+    std::uint32_t characterDefinitionId = 0;
+    if (!valid(before) || !before.family4Active || before.family4RootSoid == 0 || characterSoid == 0
+        || before.family4ResidentCount == 0
+        || before.family4ResidentCount > before.family4Residents.size()
+        || before.family4Version == (std::numeric_limits<std::int32_t>::max)()
+        || !middleware::datagen::object_id(
+            kAccountFamilyType, middleware::datagen::kCharacterSlot, characterDefinitionId)) {
+        return false;
+    }
+    bool resident = false;
+    for (std::size_t index = 0; index < before.family4ResidentCount; ++index) {
+        const ResidentObject& object = before.family4Residents[index];
+        if (object.definitionId == characterDefinitionId && object.objectSoid == characterSoid) {
+            resident = true;
+            break;
+        }
+    }
+    if (!resident) {
+        return false;
+    }
+    swap.after = before;
+    ++swap.after.family4Version;
+    swap.characterDefinitionId = characterDefinitionId;
+    swap.characterSoid = characterSoid;
+    const bool staged = valid(swap.after);
+    std::array<char, core::log::kLineCapacity> line{};
+    const int count = std::snprintf(
+        line.data(),
+        line.size(),
+        "ev=%s stage=queuez_version result=%s root=0x%llX before=%d after=%d residents=%u "
+        "character=0x%llX definition=%u",
+        event,
+        staged ? "ok" : "fail",
+        static_cast<unsigned long long>(before.family4RootSoid),
+        before.family4Version,
+        swap.after.family4Version,
+        static_cast<unsigned>(before.family4ResidentCount),
+        static_cast<unsigned long long>(characterSoid),
+        characterDefinitionId);
+    if (count > 0) {
+        core::log::write(core::log::Channel::server,
+                         staged ? core::log::Level::debug : core::log::Level::warn,
+                         {line.data(), static_cast<std::size_t>(count)});
+    }
+    return staged;
+}
+
+} // namespace
 
 /** Stages the account-selection patch without changing the resident manifest. */
 bool stage_change_character(const SessionState& before, ChangeCharacter& change) noexcept {
@@ -15,6 +74,7 @@ bool stage_change_character(const SessionState& before, ChangeCharacter& change)
     if (!valid(before) || !before.family4Active || !before.family3Active
         || before.family4RootSoid == 0 || before.family4ResidentCount == 0
         || before.family4ResidentCount > before.family4Residents.size()
+        || before.family4Version == (std::numeric_limits<std::int32_t>::max)()
         || before.family3Phase != Family3Phase::normal) {
         return false;
     }
@@ -39,6 +99,7 @@ bool stage_select_character(const SessionState& before,
     if (!valid(before) || !before.family4Active || selectedCharacterSoid == 0
         || before.family4RootSoid == 0 || selectedCharacterSoid == before.family4RootSoid
         || before.family4ResidentCount == 0
+        || before.family4Version == (std::numeric_limits<std::int32_t>::max)()
         || !middleware::datagen::object_id(
             kAccountFamilyType, middleware::datagen::kAccountSlot, accountDefinitionId)
         || !middleware::datagen::object_id(
@@ -107,51 +168,14 @@ bool stage_select_character(const SessionState& before,
 bool stage_equipment_swap(const SessionState& before,
                           std::uint64_t characterSoid,
                           EquipmentSwap& swap) noexcept {
-    swap = {};
-    std::uint32_t characterDefinitionId = 0;
-    if (!valid(before) || !before.family4Active || before.family4RootSoid == 0 || characterSoid == 0
-        || before.family4ResidentCount == 0
-        || before.family4ResidentCount > before.family4Residents.size()
-        || before.family4Version == (std::numeric_limits<std::int32_t>::max)()
-        || !middleware::datagen::object_id(
-            kAccountFamilyType, middleware::datagen::kCharacterSlot, characterDefinitionId)) {
-        return false;
-    }
-    bool resident = false;
-    for (std::size_t index = 0; index < before.family4ResidentCount; ++index) {
-        const ResidentObject& object = before.family4Residents[index];
-        if (object.definitionId == characterDefinitionId && object.objectSoid == characterSoid) {
-            resident = true;
-            break;
-        }
-    }
-    if (!resident) {
-        return false;
-    }
-    swap.after = before;
-    ++swap.after.family4Version;
-    swap.characterDefinitionId = characterDefinitionId;
-    swap.characterSoid = characterSoid;
-    const bool staged = valid(swap.after);
-    std::array<char, core::log::kLineCapacity> line{};
-    const int count = std::snprintf(
-        line.data(),
-        line.size(),
-        "ev=equip stage=queuez_version result=%s root=0x%llX before=%d after=%d residents=%u "
-        "character=0x%llX definition=%u",
-        staged ? "ok" : "fail",
-        static_cast<unsigned long long>(before.family4RootSoid),
-        before.family4Version,
-        swap.after.family4Version,
-        static_cast<unsigned>(before.family4ResidentCount),
-        static_cast<unsigned long long>(characterSoid),
-        characterDefinitionId);
-    if (count > 0) {
-        core::log::write(core::log::Channel::server,
-                         staged ? core::log::Level::debug : core::log::Level::warn,
-                         {line.data(), static_cast<std::size_t>(count)});
-    }
-    return staged;
+    return stage_character_upsert(before, characterSoid, "equip", swap);
+}
+
+/** Stages the character upsert a current-activity change carries, preserving the manifest. */
+bool stage_current_activity_character(const SessionState& before,
+                                      std::uint64_t characterSoid,
+                                      EquipmentSwap& swap) noexcept {
+    return stage_character_upsert(before, characterSoid, "current_activity", swap);
 }
 
 /** Stages a same-character Family-0 appearance-record upsert after an equipment swap. */

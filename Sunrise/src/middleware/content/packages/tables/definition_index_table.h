@@ -124,6 +124,19 @@ using RowVisitor = bool (*)(void* context, std::uint32_t index, const IndexRow& 
                                  Array& output) noexcept;
 
 /**
+ * Reads the array descriptor at one known offset and accepts an array with no entries.
+ * A zero count is authored either with no header at all or with a header repeating that count.
+ * Use this where an empty list is ordinary data rather than an unreadable one.
+ * @param blob Whole definition bytes.
+ * @param descriptorOffset Offset of the count and self-relative offset pair.
+ * @param output Receives the array, with count zero when the list is empty.
+ * @return True when the descriptor is a valid array or a valid empty one.
+ */
+[[nodiscard]] bool find_optional_array_at(std::span<const std::byte> blob,
+                                          std::size_t descriptorOffset,
+                                          Array& output) noexcept;
+
+/**
  * Finds the first array whose header names one element class.
  * @param blob Whole definition bytes.
  * @param elementClass Element class the header must carry.

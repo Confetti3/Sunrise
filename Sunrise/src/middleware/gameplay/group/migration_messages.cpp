@@ -1,7 +1,7 @@
 /**
- * Host-migration and election bodies. Each one is read into typed fields and nothing more: this
- * host keeps a stable host, and an answer built from a half-read election can leave two peers each
- * believing they carry the group.
+ * Host-migration and election bodies. Each one is read into typed fields and nothing more.
+ * This host keeps a stable host. An answer built from a half-read election can leave two peers
+ * each believing they carry the group.
  */
 
 #include "migration_messages.h"
@@ -83,6 +83,14 @@ bool read_host_reestablish(bits::Reader& reader, HostReestablish& output) noexce
     }
     output = candidate;
     return true;
+}
+
+/** Writes one host-reestablishment body. */
+bool write_host_reestablish(
+    bits::Writer& writer,
+    std::uint64_t sessionId,
+    std::span<const std::byte, descriptor::kDescriptorSize> descriptor) noexcept {
+    return bits::write_raw_u64(writer, sessionId) && bits::write_raw(writer, descriptor);
 }
 
 /** Reads a session-only migration body. */

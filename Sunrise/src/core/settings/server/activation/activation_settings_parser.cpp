@@ -38,16 +38,21 @@ bool Parser::activation_settings(server::activation::Settings& output) noexcept 
                 return false;
             }
             candidate.serverDefaultEntity = value;
-        } else if (key == "physics_host_session") {
-            if (!boolean(value)) {
-                return false;
-            }
-            candidate.physicsHostSession = value;
         } else if (key == "activity_public_membership") {
             if (!boolean(value)) {
                 return false;
             }
             candidate.activityPublicMembership = value;
+        } else if (key == "prevent_ownerless_channel_close") {
+            if (!boolean(value)) {
+                return false;
+            }
+            candidate.preventOwnerlessChannelClose = value;
+        } else if (key == "mission_scripting") {
+            if (!boolean(value)) {
+                return false;
+            }
+            candidate.missionScripting = value;
         } else if (!skip_value(0)) {
             return false;
         }

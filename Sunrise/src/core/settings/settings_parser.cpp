@@ -82,6 +82,7 @@ bool Parser::core(Settings& output) noexcept {
         return true;
     }
     bool hasLogging = false;
+    bool hasActivitySdkGeneration = false;
     for (;;) {
         std::string_view key;
         if (!string(key) || !consume(':')) {
@@ -92,10 +93,56 @@ bool Parser::core(Settings& output) noexcept {
                 return false;
             }
             hasLogging = true;
+        } else if (key == "activity_sdk_generation") {
+            if (hasActivitySdkGeneration
+                || !activity_sdk_generation_settings(output.activitySdkGeneration)) {
+                return false;
+            }
+            hasActivitySdkGeneration = true;
         } else if (!skip_value(0)) {
             return false;
         }
         if (consume('}')) {
+            return true;
+        }
+        if (!consume(',')) {
+            return false;
+        }
+    }
+}
+
+/** Parses the Core-owned, fail-closed activity SDK generation gate. */
+bool Parser::activity_sdk_generation_settings(ActivitySdkGenerationSettings& output) noexcept {
+    if (!consume('{')) {
+        return false;
+    }
+    ActivitySdkGenerationSettings candidate{};
+    if (consume('}')) {
+        output = candidate;
+        return true;
+    }
+    bool hasEnabled = false;
+    bool hasLuaDeclarations = false;
+    for (;;) {
+        std::string_view key;
+        if (!string(key) || !consume(':')) {
+            return false;
+        }
+        if (key == "enabled") {
+            if (hasEnabled || !boolean(candidate.enabled)) {
+                return false;
+            }
+            hasEnabled = true;
+        } else if (key == "lua_declarations") {
+            if (hasLuaDeclarations || !boolean(candidate.luaDeclarations)) {
+                return false;
+            }
+            hasLuaDeclarations = true;
+        } else if (!skip_value(0)) {
+            return false;
+        }
+        if (consume('}')) {
+            output = candidate;
             return true;
         }
         if (!consume(',')) {
@@ -184,6 +231,7 @@ Settings defaults() noexcept {
     return Settings{
         .version = kSettingsVersion,
         .logging = log::defaults(),
+        .activitySdkGeneration = {},
         .server = server::Settings{state::entitlements::authored()},
         .initialActivityDefaults = state::activity::defaults::authored(),
     };

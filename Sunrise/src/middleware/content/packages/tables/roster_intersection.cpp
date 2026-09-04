@@ -59,6 +59,10 @@ bool observe_slice_set(RosterIntersection& state, std::uint32_t sliceSetIndex) n
         state.overflowed = true;
         return false;
     }
+    ++state.stateCount;
+    ++state.bubbleStateCounts[bit];
+    state.currentBubble = bit;
+    state.stateOpen = true;
     state.observedSets |= std::uint64_t{1} << bit;
     return true;
 }
@@ -78,12 +82,20 @@ bool observe_roster_key(RosterIntersection& state,
         state.overflowed = true;
         return false;
     }
+    if (!state.stateOpen || bit != state.currentBubble || state.stateCount == 0) {
+        state.overflowed = true;
+        return false;
+    }
     const std::uint64_t mask = std::uint64_t{1} << bit;
-    state.observedSets |= mask;
 
     for (std::size_t index = 0; index < state.keyCount; ++index) {
         if (state.keys[index] == objectKey) {
             state.masks[index] |= mask;
+            if (state.lastKeyState[index] != state.stateCount) {
+                state.lastKeyState[index] = state.stateCount;
+                ++state.keyStateCounts[index];
+                ++state.keyBubbleStateCounts[index][bit];
+            }
             return true;
         }
     }
@@ -94,6 +106,9 @@ bool observe_roster_key(RosterIntersection& state,
     }
     state.keys[state.keyCount] = objectKey;
     state.masks[state.keyCount] = mask;
+    state.lastKeyState[state.keyCount] = state.stateCount;
+    state.keyStateCounts[state.keyCount] = 1;
+    state.keyBubbleStateCounts[state.keyCount][bit] = 1;
     ++state.keyCount;
     return true;
 }
@@ -125,7 +140,7 @@ bool safe_roster_keys(const RosterIntersection& state,
         return true;
     }
     for (std::size_t index = 0; index < state.keyCount; ++index) {
-        if (state.masks[index] != state.observedSets) {
+        if (state.stateCount == 0 || state.keyStateCounts[index] != state.stateCount) {
             continue;
         }
         if (count == output.size()) {
@@ -159,7 +174,13 @@ bool partial_roster_keys(const RosterIntersection& state,
         return true;
     }
     for (std::size_t index = 0; index < state.keyCount; ++index) {
-        const std::uint64_t mask = state.masks[index];
+        std::uint64_t mask = 0;
+        for (std::size_t bubble = 0; bubble < kSliceSetCapacity; ++bubble) {
+            if (state.bubbleStateCounts[bubble] != 0
+                && state.keyBubbleStateCounts[index][bubble] == state.bubbleStateCounts[bubble]) {
+                mask |= std::uint64_t{1} << bubble;
+            }
+        }
         if (mask == 0 || mask == state.observedSets) {
             continue;
         }

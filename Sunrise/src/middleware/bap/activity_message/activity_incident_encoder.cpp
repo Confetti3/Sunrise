@@ -12,23 +12,6 @@ namespace {
                   == kPoisonTargets.end();
 }
 
-/** @return True when every bounded incident field can be represented on the wire. */
-[[nodiscard]] bool valid(const Incident& incident) noexcept {
-    if (!target_allowed(incident.primaryTarget) || incident.extraTargetCount > kExtraTargetMaximum
-        || incident.selectorLength > kSelectorMaximum || incident.payloadLength > kPayloadMaximum
-        || (!incident.hasCompressedSelector && incident.selectorLength != 0)
-        || (!incident.hasOptionalBlock
-            && (incident.optionalWordA != 0 || incident.optionalWordB != 0))) {
-        return false;
-    }
-    for (std::uint32_t index = 0; index < incident.extraTargetCount; ++index) {
-        if (!target_allowed(incident.extraTargets[index])) {
-            return false;
-        }
-    }
-    return true;
-}
-
 [[nodiscard]] bool write_bytes(encoding::bits::Writer& writer,
                                std::span<const std::byte> bytes) noexcept {
     for (const std::byte value : bytes) {
@@ -39,7 +22,7 @@ namespace {
     return true;
 }
 
-/** Writes fields after the caller has established semantic validity. */
+/** Writes fields after the caller has established outer-field validity. */
 [[nodiscard]] bool write_fields(encoding::bits::Writer& writer, const Incident& incident) noexcept {
     bool written = writer.write(incident.primaryTarget, kTargetWidth)
                    && writer.write(incident.extraTargetCount, kExtraCountWidth);
@@ -64,9 +47,26 @@ namespace {
 
 } // namespace
 
-/** Writes one bounded incident body after a complete semantic preflight. */
+/** @return True when every outer wire field is bounded; payload semantics are not checked. */
+bool outer_valid(const Incident& incident) noexcept {
+    if (!target_allowed(incident.primaryTarget) || incident.extraTargetCount > kExtraTargetMaximum
+        || incident.selectorLength > kSelectorMaximum || incident.payloadLength > kPayloadMaximum
+        || (!incident.hasCompressedSelector && incident.selectorLength != 0)
+        || (!incident.hasOptionalBlock
+            && (incident.optionalWordA != 0 || incident.optionalWordB != 0))) {
+        return false;
+    }
+    for (std::uint32_t index = 0; index < incident.extraTargetCount; ++index) {
+        if (!target_allowed(incident.extraTargets[index])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/** Writes one bounded incident body after outer-field preflight. */
 bool write(encoding::bits::Writer& writer, const Incident& incident) noexcept {
-    return valid(incident) && write_fields(writer, incident);
+    return outer_valid(incident) && write_fields(writer, incident);
 }
 
 } // namespace sunrise::middleware::bap::activity_message::incident

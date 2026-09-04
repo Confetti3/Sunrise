@@ -1,5 +1,5 @@
 {
-  "version": 8,
+  "version": 13,
   "core": {
     "logging": {
       "debugger_sink": true,
@@ -11,6 +11,10 @@
         "server": "warn",
         "middleware": "warn"
       }
+    },
+    "activity_sdk_generation": {
+      "enabled": false,
+      "lua_declarations": true
     }
   },
   "steam": {
@@ -30,8 +34,8 @@
       "config_url": "https://127.0.0.1/config/",
       "config_guid": "d2legacy-0000-0000-0000-000000000001"
     },
+    "suppress_peer_relay": true,
     "fade_release": true,
-    "force_join_request_ready": true,
     "region_private": false,
     "pin_replicated_record": true,
     "hold_spawn": true,
@@ -52,7 +56,10 @@
       "default_client_activation": true,
       "activity_compatibility_mirror": true,
       "gameplay_external_body": false,
-      "server_default_entity": false
+      "server_default_entity": false,
+      "activity_public_membership": true,
+      "prevent_ownerless_channel_close": false,
+      "mission_scripting": false
     },
     "entitlements": [
       { "name": "1085660", "owned": "handle" },
@@ -91,10 +98,9 @@
     },
     "activity": {
       "roster_key_from_identity": false,
-      "roster_key_on_all_slots": false,
       "default_destination": {
         "reason": -1,
-        "previous_activity_index": -1,
+        "source_activity_index": -1,
         "activity_index": 20,
         "package_name": "city_tower_social_d2",
         "bubble_count": 8,
@@ -110,6 +116,7 @@
         {
           "package_name": "raid_gluttony_0",
           "bubble": 2,
+          "slice_set": 17,
           "spawn_set_hash": "0x8029E4B4"
         },
         {

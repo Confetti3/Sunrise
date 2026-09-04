@@ -86,8 +86,7 @@ struct PendingEquipmentSwap {
 struct PendingItemAcquisition {
     CharacterState beforeCharacter{};
     CharacterState afterCharacter{};
-    /** Exact profile material view observed before and after charging the native requirement set.
-     */
+    /** Profile material view, before and after charging the native requirement set. */
     std::array<account::inventory::ProfileItem, account::inventory::kProfileItemCapacity>
         beforeProfileItems{};
     std::array<account::inventory::ProfileItem, account::inventory::kProfileItemCapacity>
@@ -235,6 +234,16 @@ struct PendingItemState {
     bool prepared{};
 };
 
+/** Prepared current-activity change for the selected character, private until it publishes. */
+struct PendingCurrentActivity {
+    CharacterState beforeCharacter{};
+    CharacterState afterCharacter{};
+    std::uint64_t characterSoid{};
+    std::size_t characterIndex{};
+    std::uint16_t activityIndex{};
+    bool prepared{};
+};
+
 /**
  * Loads cached build data and generates secrets with Sunrise's authored activity defaults.
  * @param module Loaded Sunrise module, or null to disable disk persistence.
@@ -264,8 +273,24 @@ void shutdown() noexcept;
 
 [[nodiscard]] bool publish_bootstrap_token(std::span<const std::byte> token) noexcept;
 
+/**
+ * Records when the account signed in.
+ * Every character record publishes this as its last applied daily and weekly reset.
+ * @param seconds Unix seconds taken when the SignOn success is answered.
+ */
+void publish_sign_in_time(std::uint64_t seconds) noexcept;
+
 /** @return Immutable generated BAP session fields. */
 [[nodiscard]] const BapState& bap() noexcept;
+
+/**
+ * Generates one connection's own secure-channel material.
+ * Two links sharing a key and a starting nonce would encrypt different plaintexts under the same
+ * pair, so every accepted connection gets its own.
+ * @param output Cleared, then filled with a fresh nonce, session key and envelope IV.
+ * @return True when the system generated every byte.
+ */
+[[nodiscard]] bool new_bap_session(BapState& output) noexcept;
 
 /**
  * Stores the active nonzero account key when the account remains complete.
@@ -310,8 +335,7 @@ void shutdown() noexcept;
  * Commits a prepared equipment mutation only while the full captured character still matches.
  *
  * @param mutation Prepared mutation, always cleared before this function returns.
- * @return True
- * when the equip or unequip commits atomically and leaves the whole account valid.
+ * @return True when the equip or unequip commits atomically and leaves the account valid.
  */
 [[nodiscard]] bool commit_equipment_swap(PendingEquipmentSwap& mutation) noexcept;
 
@@ -452,6 +476,18 @@ commit_profile_item_acquisition(PendingProfileItemAcquisition& mutation) noexcep
 
 /** Commits one prepared item-state change behind an exact full-character staleness guard. */
 [[nodiscard]] bool commit_item_state(PendingItemState& mutation) noexcept;
+
+/**
+ * Prepares the selected character's current activity, family-4 `+45896`, without changing State.
+ * @param activityIndex Activity the character is launching into.
+ * @param mutation Gets the checked after-image.
+ * @return True when a character is selected and the value changes.
+ */
+[[nodiscard]] bool prepare_current_activity(std::uint16_t activityIndex,
+                                            PendingCurrentActivity& mutation) noexcept;
+
+/** Commits one prepared current-activity change behind an exact character staleness guard. */
+[[nodiscard]] bool commit_current_activity(PendingCurrentActivity& mutation) noexcept;
 
 /** @return A copy of the active account state, read under the lock. */
 [[nodiscard]] AccountState account_snapshot() noexcept;

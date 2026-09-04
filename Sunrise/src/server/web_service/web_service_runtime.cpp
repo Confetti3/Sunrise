@@ -2,58 +2,54 @@
 
 #include <algorithm>
 #include <array>
-#include <chrono>
+#include <atomic>
 #include <cstdio>
 #include <cstring>
-#include <limits>
 #include <string_view>
 
 #include "../../core/logging/log.h"
+#include "../../core/runtime/server_clock.h"
 #include "../../middleware/encoding/bit_reader.h"
 #include "../../middleware/encoding/byte_order.h"
+#include "../../middleware/web_service/messages/opcode1820.h"
 #include "../../middleware/web_service/messages/opcode1901.h"
 #include "../../middleware/web_service/messages/opcode205.h"
 #include "../../middleware/web_service/messages/opcode206.h"
+#include "../../middleware/web_service/messages/opcode402.h"
+#include "../../middleware/web_service/messages/opcode403.h"
+#include "../../middleware/web_service/messages/opcode406.h"
 #include "../../middleware/web_service/messages/opcode501_codec.h"
 #include "../../middleware/web_service/messages/opcode503.h"
 #include "../../middleware/web_service/messages/opcode504.h"
 #include "../../middleware/web_service/messages/opcode601/opcode601_codec.h"
+#include "../../middleware/web_service/messages/opcode702.h"
 #include "../../middleware/web_service/messages/opcode801.h"
 #include "../../middleware/web_service/messages/opcode901/opcode901_codec.h"
 #include "../../middleware/web_service/messages/opcode903.h"
 #include "../../middleware/web_service/web_service_envelope.h"
 #include "../../state/account/account_state.h"
+#include "../../state/activity/membership/activity_membership_query.h"
 #include "../../state/build_data/runtime.h"
 #include "../../state/runtime/runtime.h"
+#include "internal.h"
 #include "opcode_routes.h"
 #include "web_service_actions.h"
 
 namespace sunrise::server::web_service {
+namespace {
+
+namespace messages = middleware::web_service::messages;
 
 /** One ordinary event line carries an opcode and its fixed prefix. */
 constexpr std::size_t kOpcodeLineCapacity = 64;
+/** One refusal line carries both request indices, the clock presence, and the clock verdict. */
+constexpr std::size_t kPurchaseLineCapacity = 128;
 /** A request trace keeps enough payload to identify an item-action descriptor. */
 constexpr std::size_t kRequestPayloadTraceBytes = 192;
 /** Marks a trace that stopped at the cap, so a short hex string is not read as a short payload. */
 constexpr std::string_view kTruncated = " truncated=1";
-/** Web Service opcode used by the Character screen's Equip action. */
-constexpr std::uint16_t kEquipOpcode = 403;
-/** Web Service opcode used by the Character screen's Unequip action. */
-constexpr std::uint16_t kUnequipOpcode = 404;
-/** Web Service opcode used by item-state actions such as finisher Favorite. */
-constexpr std::uint16_t kItemStateOpcode = 406;
-/** Web Service opcode used by the Character screen's Dismantle action. */
-constexpr std::uint16_t kItemDismantleOpcode = 402;
-/** Web Service opcode used by Collections to create one item instance. */
-constexpr std::uint16_t kItemAcquisitionOpcode = 1820;
 /** The mutation variant's first alternative is the empty one, so index zero prepared nothing. */
 constexpr std::size_t kNoMutation = 0;
-/**
- * Logical status of a refused action. The descriptor biases logical zero to the wire success the
- * Client expects, so any other logical value reports a refusal. Its five bits hold no error
- * taxonomy, so one code covers every reason and the log line names the actual one.
- */
-constexpr std::int32_t kRefusedStatus = 1;
 
 /**
  * Logs the Web Service opcode and a bounded payload trace.
@@ -81,27 +77,7 @@ void report_request(const middleware::web_service::Message& message) noexcept {
         std::memcpy(line.data() + length, kTruncated.data(), kTruncated.size());
         length += kTruncated.size();
     }
-    if (length != 0) {
-        core::log::write(core::log::Channel::server, core::log::Level::info, {line.data(), length});
-    }
-}
-
-/** One refusal line carries both request indices, the clock presence, and the clock verdict. */
-constexpr std::size_t kPurchaseLineCapacity = 128;
-/**
- * Status code answered to a purchase request.
- * Any non-zero value refuses. Zero is the success code, so it must not be used here.
- */
-constexpr std::int32_t kPurchaseRefusedCode = 1;
-
-/**
- * Reads the server's own clock for the purchase clock rule.
- * The system clock counts from the Unix epoch, which is the same base the request field uses.
- * @return Current time in Unix seconds.
- */
-[[nodiscard]] std::int64_t server_clock_seconds() noexcept {
-    const auto sinceEpoch = std::chrono::system_clock::now().time_since_epoch();
-    return std::chrono::duration_cast<std::chrono::seconds>(sinceEpoch).count();
+    core::log::write(core::log::Channel::server, core::log::Level::info, {line.data(), length});
 }
 
 /**
@@ -116,11 +92,11 @@ constexpr std::int32_t kPurchaseRefusedCode = 1;
 [[nodiscard]] bool refuse_purchase(const middleware::web_service::Message& message,
                                    std::span<std::byte> response,
                                    std::size_t& written) noexcept {
-    namespace purchase_codec = middleware::web_service::messages::opcode901;
-    purchase_codec::Request purchase;
-    const bool parsed = purchase_codec::parse_request(message, purchase);
+    messages::opcode901::Request purchase;
+    const bool parsed = messages::opcode901::parse_request(message, purchase);
     // The clock verdict is logged, never acted on. Nothing can pass while the route refuses.
-    const auto policy = purchase_codec::check_clock(purchase, server_clock_seconds());
+    const auto policy =
+        messages::opcode901::check_clock(purchase, core::runtime::server_clock_seconds());
     std::array<char, kPurchaseLineCapacity> line{};
     const int length =
         parsed ? std::snprintf(
@@ -130,17 +106,15 @@ constexpr std::int32_t kPurchaseRefusedCode = 1;
                      static_cast<int>(purchase.vendorIndex),
                      static_cast<int>(purchase.saleIndex),
                      purchase.hasClock ? 1U : 0U,
-                     purchase_codec::clock_policy_name(policy))
+                     messages::opcode901::clock_policy_name(policy))
                : std::snprintf(line.data(),
                                line.size(),
                                "ev=ws901 stage=purchase result=refuse reason=parse");
-    if (length > 0) {
-        core::log::write(core::log::Channel::server,
-                         core::log::Level::error,
-                         {line.data(), static_cast<std::size_t>(length)});
-    }
+    report_line(core::log::Level::error, line, length);
     middleware::web_service::StatusResponse status{};
-    status.code = kPurchaseRefusedCode;
+    status.code = middleware::web_service::kRefusedStatusCode;
+    // A refused purchase grants nothing, so no Family-4 revision carries its result.
+    status.value = middleware::web_service::kNoFamily4Publication;
     // The trailing bool drives a local action effect on the client, so it stays clear.
     status.trailingBool = false;
     return middleware::web_service::encode_response(
@@ -153,8 +127,8 @@ constexpr std::int32_t kPurchaseRefusedCode = 1;
 
 /**
  * Answers a request whose own codec refused with the bare correlated echo.
- * The Client matches on the echoed transaction id. A missing body is worse than a thin one. It
- * under-runs the decoder and takes the BAP connection down.
+ * The Client matches on the echoed transaction id. A missing body under-runs its decoder and
+ * takes the BAP connection down, so a thin body is always sent.
  * @param message Parsed request whose correlation fields are echoed.
  * @param response Svc-11 response-body storage owned by the caller.
  * @param written Gets the encoded response-body size in bytes.
@@ -166,23 +140,79 @@ bool encode_echo(const middleware::web_service::Message& message,
     std::array<char, kOpcodeLineCapacity> line{};
     const int count = std::snprintf(
         line.data(), line.size(), "ev=ws stage=body result=echo opcode=%u", message.opcode);
-    if (count > 0) {
-        core::log::write(core::log::Channel::server,
-                         core::log::Level::warn,
-                         {line.data(), static_cast<std::size_t>(count)});
-    }
+    report_line(core::log::Level::warn, line, count);
     namespace ws = middleware::web_service;
     return ws::encode_response(
         message, ws::ResponseShape::generic, ws::StatusResponse{}, response, written);
 }
 
 /**
- * Parses and answers one Web Service request with its whole descriptor layout.
- * @param request Whole decrypted svc-10 body.
- * @param response Svc-11 response-body storage owned by the caller.
- * @param written Gets the encoded response-body size, or zero when the header does not parse.
- * @return False only when the envelope header does not parse.
+ * Issues the family-5 server clock the Client extrapolates its family-5 time from.
+ * The wire field counts whole seconds. A repeated value reads as no change and stalls the
+ * Client's family-5 boot task, so the issued count must strictly increase.
+ * @return Unix seconds, always greater than the previous call's result.
  */
+[[nodiscard]] std::uint64_t next_family5_clock() noexcept {
+    static std::atomic<std::uint64_t> issued{0};
+    const auto wall = static_cast<std::uint64_t>(core::runtime::server_clock_seconds());
+    std::uint64_t previous = issued.load(std::memory_order_relaxed);
+    std::uint64_t next = 0;
+    do {
+        next = wall > previous ? wall : previous + 1;
+    } while (!issued.compare_exchange_weak(previous, next, std::memory_order_relaxed));
+    return next;
+}
+
+/**
+ * Records the world state the character write-back reports.
+ * The body is client-owned state; the world-state field is the one value the host acts on.
+ * @param message Parsed ws-702 envelope.
+ */
+void note_character_writeback(const middleware::web_service::Message& message) noexcept {
+    messages::opcode702::Request request;
+    const bool parsed = messages::opcode702::parse_request(message, request);
+    std::array<char, core::log::kLineCapacity> line{};
+    const int written = std::snprintf(line.data(),
+                                      line.size(),
+                                      "ev=activity stage=writeback result=%s world_state=%u",
+                                      parsed ? "ok" : "unparsed",
+                                      static_cast<unsigned>(request.worldState));
+    if (written > 0) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::info,
+                         {line.data(), static_cast<std::size_t>(written)});
+    }
+    if (parsed) {
+        state::activity::membership::note_client_writeback(request.worldState
+                                                           == messages::opcode702::kInWorld);
+    }
+}
+
+/**
+ * Applies the report that carries no answer of its own beyond the shared status pair.
+ * @param message Parsed request envelope and borrowed payload.
+ */
+void note_reports(const middleware::web_service::Message& message) noexcept {
+    if (message.opcode == messages::opcode702::kOpcode) {
+        note_character_writeback(message);
+    }
+}
+
+} // namespace
+
+/** Re-encodes a prepared reply as a refusal after its Queuez staging failed. */
+bool encode_staging_refusal(const middleware::web_service::Message& message,
+                            std::span<std::byte> response,
+                            std::size_t& written) noexcept {
+    middleware::web_service::ResponseShape shape{};
+    resolve_response_shape(message.opcode, shape);
+    middleware::web_service::StatusResponse status{};
+    status.code = middleware::web_service::kRefusedStatusCode;
+    status.value = middleware::web_service::kNoFamily4Publication;
+    return middleware::web_service::encode_response(message, shape, status, response, written);
+}
+
+/** Answers one Web Service request when its caller has no action to publish. */
 bool consume(std::span<const std::byte> request,
              std::span<std::byte> response,
              std::size_t& written) noexcept {
@@ -190,15 +220,7 @@ bool consume(std::span<const std::byte> request,
     return consume(request, response, written, outcome);
 }
 
-/**
- * Parses one request, prepares any action it names, and encodes the reply that reports it.
- * @param request Whole decrypted svc-10 body.
- * @param response Svc-11 response-body storage owned by the caller.
- * @param written Gets the encoded response-body size, or zero when the header does not parse.
- * @param outcome Gets the prepared action for the caller to publish, and is left empty when
- * the action was refused or the reply could not be encoded.
- * @return False only when the envelope header does not parse.
- */
+/** Parses one request, prepares any action it names, and encodes the reply that reports it. */
 bool consume(std::span<const std::byte> request,
              std::span<std::byte> response,
              std::size_t& written,
@@ -212,18 +234,18 @@ bool consume(std::span<const std::byte> request,
         return false;
     }
     report_request(message);
+    note_reports(message);
 
-    if (message.opcode == middleware::web_service::messages::opcode205::kOpcode) {
+    if (message.opcode == messages::opcode205::kOpcode) {
         const auto investment = state::investment_snapshot();
-        return middleware::web_service::messages::opcode205::encode_response(
-                   message, investment, response, written)
+        return messages::opcode205::encode_response(
+                   message, investment, next_family5_clock(), response, written)
                || encode_echo(message, response, written);
     }
 
-    if (message.opcode == middleware::web_service::messages::opcode503::kOpcode) {
-        middleware::web_service::messages::opcode503::Request bootstrap;
-        const bool parsed =
-            middleware::web_service::messages::opcode503::parse_request(message, bootstrap);
+    if (message.opcode == messages::opcode503::kOpcode) {
+        messages::opcode503::Request bootstrap;
+        const bool parsed = messages::opcode503::parse_request(message, bootstrap);
         // The request's own key is echoed and adopted. An authored id here costs the ship and the
         // banner.
         if (!bootstrap.hasPrimarySoid) {
@@ -231,8 +253,8 @@ bool consume(std::span<const std::byte> request,
         }
         const auto investment = state::investment_snapshot();
         if (!parsed
-            || !middleware::web_service::messages::opcode503::encode_response(
-                message, bootstrap, investment, response, written)) {
+            || !messages::opcode503::encode_response(
+                message, bootstrap, investment, next_family5_clock(), response, written)) {
             return encode_echo(message, response, written);
         }
         if (bootstrap.hasPrimarySoid && !state::set_primary_soid(bootstrap.primarySoid)) {
@@ -243,54 +265,51 @@ bool consume(std::span<const std::byte> request,
         return true;
     }
 
-    if (message.opcode == middleware::web_service::messages::opcode501::kOpcode) {
+    if (message.opcode == messages::opcode501::kOpcode) {
         // Returns a SOID family three already publishes. The request body is not parsed.
         const std::uint64_t characterSoid =
             state::account::selected_character_soid(state::account_snapshot());
-        return middleware::web_service::messages::opcode501::encode_response(
-                   message, characterSoid, response, written)
+        return messages::opcode501::encode_response(message, characterSoid, response, written)
                || encode_echo(message, response, written);
     }
 
     // Runs before the shared response-shape path, which would answer the success status.
-    if (message.opcode == middleware::web_service::messages::opcode901::kOpcode) {
+    if (message.opcode == messages::opcode901::kOpcode) {
         return refuse_purchase(message, response, written)
                || encode_echo(message, response, written);
     }
 
-    if (message.opcode == middleware::web_service::messages::opcode601::kOpcode) {
-        return middleware::web_service::messages::opcode601::encode_response(
-                   message, response, written)
+    if (message.opcode == messages::opcode601::kOpcode) {
+        return messages::opcode601::encode_response(message, response, written)
                || encode_echo(message, response, written);
     }
 
     // A subscribe whose body does not parse is still answered; only the subscription is dropped.
     middleware::queuez::Subscription subscription;
-    const bool subscribes =
-        message.opcode == middleware::web_service::messages::opcode206::kOpcode
-        && middleware::web_service::messages::opcode206::parse_request(message, subscription);
+    const bool subscribes = message.opcode == messages::opcode206::kOpcode
+                            && messages::opcode206::parse_request(message, subscription);
 
     // The action runs before its reply is encoded, because the reply reports whether it worked.
     // An action fills the outcome only once it has prepared its whole transition, so an outcome
     // still empty afterwards is that action refusing the request. Nothing is published here.
     bool dispatched = true;
-    if (message.opcode == middleware::web_service::messages::opcode504::kOpcode) {
+    if (message.opcode == messages::opcode504::kOpcode) {
         select_character(message, outcome);
-    } else if (message.opcode == kItemDismantleOpcode) {
+    } else if (message.opcode == messages::opcode402::kOpcode) {
         dismantle_item(message, outcome);
-    } else if (message.opcode == kEquipOpcode) {
+    } else if (message.opcode == messages::opcode403::kOpcode) {
         mutate_equipment(message, false, outcome);
-    } else if (message.opcode == kUnequipOpcode) {
+    } else if (message.opcode == messages::opcode403::kUnequipOpcode) {
         mutate_equipment(message, true, outcome);
-    } else if (message.opcode == middleware::web_service::messages::opcode801::kOpcode) {
+    } else if (message.opcode == messages::opcode801::kOpcode) {
         mutate_subclass_selection(message, outcome);
-    } else if (message.opcode == middleware::web_service::messages::opcode903::kOpcode) {
+    } else if (message.opcode == messages::opcode903::kOpcode) {
         mutate_socket_plug(message, outcome);
-    } else if (message.opcode == middleware::web_service::messages::opcode1901::kOpcode) {
+    } else if (message.opcode == messages::opcode1901::kOpcode) {
         mutate_equipped_socket_plug(message, outcome);
-    } else if (message.opcode == kItemStateOpcode) {
+    } else if (message.opcode == messages::opcode406::kOpcode) {
         mutate_item_state(message, outcome);
-    } else if (message.opcode == kItemAcquisitionOpcode) {
+    } else if (message.opcode == messages::opcode1820::kOpcode) {
         acquire_item(message, outcome);
     } else {
         dispatched = false;
@@ -300,8 +319,12 @@ bool consume(std::span<const std::byte> request,
     middleware::web_service::ResponseShape shape{};
     resolve_response_shape(message.opcode, shape);
     middleware::web_service::StatusResponse status{};
+    if (awaits_family4_version(message.opcode)) {
+        // Nothing is published from here. A staged mutation re-encodes this with its own revision.
+        status.value = middleware::web_service::kNoFamily4Publication;
+    }
     if (dispatched && !prepared) {
-        status.code = kRefusedStatus;
+        status.code = middleware::web_service::kRefusedStatusCode;
     }
     if (!middleware::web_service::encode_response(message, shape, status, response, written)) {
         // The echo carries no status, so nothing may be published against it.

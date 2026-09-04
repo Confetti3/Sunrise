@@ -11,16 +11,17 @@
 #include "entity_slots/definition.h"
 #include "forced/definition.h"
 #include "membership/definition.h"
+#include "mission/definition.h"
 #include "receipts/definition.h"
 
 namespace sunrise::state::activity {
 
 /**
- * Records bound process-local session lookup with no heap storage. It must hold every live
- * session at once: the private one plus one activity host per region. A full table evicts the
- * oldest record, which can be the private one, so the margin is deliberate.
+ * Records bound process-local session lookup with no heap storage. It holds the private session
+ * and one activity host per advertised region, peaking at two host directories at once, which
+ * `group_host_sessions.cpp` asserts. A full table evicts the oldest record, so the margin is real.
  */
-inline constexpr std::size_t kSessionCapacity = 16;
+inline constexpr std::size_t kSessionCapacity = 24;
 /** Zero is reserved as the absent activity-session id. */
 inline constexpr std::uint64_t kAbsentSessionId = 0;
 /** An unjoined record keeps its member-key storage cleared. */
@@ -47,7 +48,15 @@ struct SessionBinding {
     std::uint64_t sessionId{};
     /** Creation revision distinguishes a replacement that reuses the same session id. */
     std::uint64_t createdRevision{};
+    /** Whole-second time origin of this generation, so every member shares one periodic phase. */
+    std::uint64_t timeOrigin{};
 };
+
+/** True when both bindings name the same committed session record generation. */
+[[nodiscard]] inline bool same_binding(const SessionBinding& left,
+                                       const SessionBinding& right) noexcept {
+    return left.sessionId == right.sessionId && left.createdRevision == right.createdRevision;
+}
 
 /** One committed activity-session id and its lifecycle revisions. */
 struct SessionRecord {
@@ -64,10 +73,18 @@ struct SessionRecord {
     membership::MembershipState membership{};
     /** Bubble grant tokens reset with the bounded activity session record. */
     bubble_authority::AuthorityState bubbleAuthority{};
+    /** Server-authored mission state survives Lua reattach for this exact session generation. */
+    mission::MissionState mission{};
     std::uint64_t sessionId{};
     /** Join binds this key before any later client identity update can be accepted. */
     std::uint64_t memberKey{};
     std::uint64_t createdRevision{};
+    /**
+     * Activity Host time origin in whole seconds, taken once when this record is created.
+     * The client adds its own elapsed seconds to it and reduces the sum to a 0..1 periodic phase,
+     * so it must not be re-read per message or per member.
+     */
+    std::uint64_t timeOrigin{};
     /** Last State revision that changed this record. */
     std::uint64_t recordRevision{};
     /** Last successful join revision, or the invalid revision before any join. */
@@ -92,7 +109,7 @@ struct PendingAllocation {
     /**
      * Set when this plan re-creates an id the allocator has already passed.
      * Such a plan takes the id it was given instead of the next one, and leaves the allocator
-     * where it is, because the counter it fills was spent long ago.
+     * where it is. The counter it fills was spent long ago.
      */
     bool recreated{};
     bool prepared{};

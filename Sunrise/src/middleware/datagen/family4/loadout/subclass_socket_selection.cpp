@@ -1,7 +1,7 @@
 /**
- * Subclass socket selection. An item's socket entries start absent or ready; the entries the
- * character has selected make their whole group active, and the super lane is active although it
- * carries no plug source.
+ * Subclass socket selection. An item's socket entries start absent or ready.
+ * The entries the character has selected make their whole group active. The super lane is
+ * active too, although it carries no plug source.
  */
 
 #include "subclass_socket_selection.h"
@@ -41,17 +41,22 @@ void resolve_socket_states(
     std::array<instance::SocketSelector, kSelectorBucketCount>& selectors) noexcept {
     output.fill(instance::SocketEntryState::absent);
     selectors.fill(instance::SocketSelector{});
+    // Only a subclass keeps an entry table, so this lookup is what identifies one.
+    build_socket_lists::EntryTable entries{};
+    const bool subclass =
+        state::build_data::find_socket_entry_table(definition.definitionIndex, entries);
     for (std::size_t index = 0; index < definition.entryCount; ++index) {
         const std::uint64_t bit = std::uint64_t{1} << index;
         if ((definition.readyMask & bit) != 0) {
-            output[index] = (acquiredSubclassAbilityMask & bit) != 0
+            // The mask names subclass ability entries, so an ordinary item's lane stays ready.
+            // It defaults to all set, and a lane past bit 63 would read as clear, so promoting
+            // every item here made ready unreachable for all 36 entries.
+            output[index] = subclass && (acquiredSubclassAbilityMask & bit) != 0
                                 ? instance::SocketEntryState::acquired
                                 : instance::SocketEntryState::ready;
         }
     }
-    // Only a subclass keeps an entry table, so this lookup is what identifies one.
-    build_socket_lists::EntryTable entries{};
-    if (!state::build_data::find_socket_entry_table(definition.definitionIndex, entries)) {
+    if (!subclass) {
         return;
     }
     SubclassSelection selection{};

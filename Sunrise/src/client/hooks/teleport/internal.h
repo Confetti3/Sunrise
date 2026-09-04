@@ -22,8 +22,13 @@ inline constexpr std::uint32_t kInvalidHandle = 0xFFFFFFFF;
 
 /** Camera pose block stride, indexed by player. Its vectors are plain floats. */
 inline constexpr std::size_t kCameraBlockStride = 0xC50;
+/** Camera pose fields inside one player camera block. */
+inline constexpr std::size_t kCameraPositionX = 0x594;
 /** Camera forward vector. Its default is (1,0,0), so the basis is X forward, Z up. */
-inline constexpr std::size_t kCameraForwardX = 1468;
+inline constexpr std::size_t kCameraForwardX = kCameraPositionX + 0x28;
+inline constexpr std::size_t kCameraUpX = kCameraPositionX + 0x34;
+inline constexpr std::size_t kCameraHorizontalFov = kCameraPositionX + 0x40;
+inline constexpr std::size_t kCameraAspect = kCameraPositionX + 0xB8;
 
 /** Object handle the physics component drives, as a u16. */
 inline constexpr std::size_t kPhysicsComponentObjectHandle = 44;

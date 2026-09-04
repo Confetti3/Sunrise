@@ -41,11 +41,10 @@ void record_slot(RosterStorage& storage, const tables::SlotDescriptor& descripto
 bool fill_slots(RosterStorage& storage,
                 std::size_t declaredSlotCount,
                 layouts::RosterGroup& group) noexcept {
-    // A short group is refused, not trimmed. The client registers a record per declared slot and
-    // holds its whole apply back while any record in the current bubble is unseeded, so publishing
-    // a group this host cannot seed in full stalls that bubble with nothing reported.
-    if (storage.slotsOverflowed || storage.slotCount == 0
-        || storage.slotCount != declaredSlotCount) {
+    // The wire group is the complete descriptor-bearing subset. Declared slots with no descriptor
+    // are absent from it, while every retained descriptor must still name a real object slot.
+    // Requiring every declared slot instead publishes nothing: no Tower object has one.
+    if (storage.slotsOverflowed || storage.slotCount == 0 || declaredSlotCount == 0) {
         return false;
     }
     const auto last = storage.slots.begin() + static_cast<std::ptrdiff_t>(storage.slotCount);
@@ -55,6 +54,10 @@ bool fill_slots(RosterStorage& storage,
         return first.index < second.index;
     });
     for (std::size_t slot = 0; slot < storage.slotCount; ++slot) {
+        if (storage.slots[slot].index >= declaredSlotCount
+            || (slot != 0 && storage.slots[slot - 1].index >= storage.slots[slot].index)) {
+            return false;
+        }
         group.slotTypes[slot] = storage.slots[slot].type;
         group.slotFlags[slot] = storage.slots[slot].flags;
         group.slotIndices[slot] = storage.slots[slot].index;

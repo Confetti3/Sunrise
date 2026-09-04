@@ -5,20 +5,20 @@
 namespace sunrise::middleware::gameplay::external {
 namespace {
 
-/** Presence, count, shortcut, and trailing fields use one bit. */
-constexpr std::uint8_t kFlagWidth = 1;
 /** The wire token carries a 13-bit slot. */
 constexpr std::uint8_t kEntitySlotWidth = 13;
 /** The wire token carries a four-bit incarnation. */
 constexpr std::uint8_t kEntityIncarnationWidth = 4;
-/** A raw bubble that fits on wire uses one byte. */
-constexpr std::uint8_t kRawBubbleWidth = 8;
-/** The optional raw-bubble value is limited to one unsigned byte. */
-constexpr std::uint16_t kMaximumRawBubble = 0xFF;
+/** A current or per-record entity cell that fits on wire uses one byte. */
+constexpr std::uint8_t kEntityCellWidth = 8;
+/** The optional entity-cell value is limited to one unsigned byte. */
+constexpr std::uint16_t kMaximumEntityCell = 0xFF;
+/** The lane prelude carries a one-bit auxiliary-token count. */
+constexpr std::uint8_t kAuxiliaryCountWidth = 1;
 /** A strict remove declares its one-bit body in a signed 16-bit field. */
 constexpr std::uint8_t kSubrecordLengthWidth = 16;
-/** A create carries one lifecycle byte. */
-constexpr std::uint8_t kLifecycleRevisionWidth = 8;
+/** A create carries one object-allocation sequence byte. */
+constexpr std::uint8_t kAllocationSequenceWidth = 8;
 /** A create carries one two-bit entity type. */
 constexpr std::uint8_t kEntityTypeWidth = 2;
 /** A strict administrative remove contains only its trailing false bit. */
@@ -36,29 +36,14 @@ struct PayloadPlan {
     std::size_t updateBits{};
 };
 
-/** Reads one boolean field. */
-[[nodiscard]] bool read_flag(encoding::bits::Reader& reader, bool& output) noexcept {
-    std::uint64_t value = 0;
-    if (!reader.read(kFlagWidth, value)) {
-        return false;
-    }
-    output = value != 0;
-    return true;
-}
-
-/** Writes one boolean field. */
-[[nodiscard]] bool write_flag(encoding::bits::Writer& writer, bool value) noexcept {
-    return writer.write(value ? 1U : 0U, kFlagWidth);
-}
-
 /** @return True when a token fits its 17-bit wire identity. */
 [[nodiscard]] bool valid_token(const EntityToken& token) noexcept {
     return token.slot <= kMaximumEntitySlot && token.incarnation <= kMaximumEntityIncarnation;
 }
 
-/** @return True when a raw bubble is absent or fits the optional byte. */
-[[nodiscard]] bool valid_raw_bubble(std::uint16_t rawBubble) noexcept {
-    return rawBubble == kNoRawBubble || rawBubble <= kMaximumRawBubble;
+/** @return True when an entity cell is absent or fits the optional byte. */
+[[nodiscard]] bool valid_cell(std::uint16_t cell) noexcept {
+    return cell == kNoEntityCell || cell <= kMaximumEntityCell;
 }
 
 /** @return True when a value is one of the four wire entity types. */
@@ -93,12 +78,11 @@ struct PayloadPlan {
 
 /** Validates the canonical record forms accepted by the generic envelope. */
 [[nodiscard]] bool valid_record(const EntityRecord& record) noexcept {
-    if (!valid_token(record.token) || !valid_raw_bubble(record.rawBubble)
-        || !valid_flags(record.flags)) {
+    if (!valid_token(record.token) || !valid_cell(record.cell) || !valid_flags(record.flags)) {
         return false;
     }
     if (record.flags == entityRemove) {
-        return !record.anchorPresent && !record.trailingState && record.lifecycleRevision == 0
+        return !record.anchorPresent && !record.trailingState && record.allocationSequence == 0
                && record.baseline.byteCount == 0 && record.update.byteCount == 0;
     }
     if (!valid_type(record.type) || (record.anchorPresent && (record.flags & entityAnchor) == 0)
@@ -108,7 +92,7 @@ struct PayloadPlan {
         return false;
     }
     if ((record.flags & entityCreate) == 0
-        && (record.lifecycleRevision != 0 || record.baseline.byteCount != 0)) {
+        && (record.allocationSequence != 0 || record.baseline.byteCount != 0)) {
         return false;
     }
     return (record.flags & entityUpdate) != 0 || record.update.byteCount == 0;
@@ -133,19 +117,32 @@ struct PayloadPlan {
     return true;
 }
 
+/** @return The record body one part carries. */
+[[nodiscard]] const TypePayload& part_payload(const EntityRecord& record,
+                                              TypePayloadPart part) noexcept {
+    return part == TypePayloadPart::baseline ? record.baseline : record.update;
+}
+
+/** @return The same-record baseline an update diffs against, or null when there is none. */
+[[nodiscard]] const TypePayload* part_baseline(const EntityRecord& record,
+                                               TypePayloadPart part) noexcept {
+    return part == TypePayloadPart::update && (record.flags & entityCreate) != 0 ? &record.baseline
+                                                                                 : nullptr;
+}
+
 /** Measures one pure payload callback before any envelope bits are written. */
 [[nodiscard]] bool measure_payload(const TypePayloadCodec& codec,
                                    const EntityRecord& record,
                                    TypePayloadPart part,
                                    std::size_t& bitCount) noexcept {
-    const TypePayload& payload =
-        part == TypePayloadPart::baseline ? record.baseline : record.update;
+    const TypePayload& payload = part_payload(record, part);
+    const TypePayload* baseline = part_baseline(record, part);
     if (codec.write == nullptr || !valid_payload(codec, part, payload)) {
         return false;
     }
     encoding::bits::Writer writer = encoding::bits::Writer::measuring();
     std::size_t ignored = 0;
-    if (!codec.write(codec.context, record.token, record.type, part, payload, writer)
+    if (!codec.write(codec.context, record.token, record.type, part, baseline, payload, writer)
         || !writer.finish(ignored) || writer.bit_count() > payload_limit(codec, part)) {
         return false;
     }
@@ -159,12 +156,12 @@ struct PayloadPlan {
                                  TypePayloadPart part,
                                  std::size_t expectedBits,
                                  encoding::bits::Writer& writer) noexcept {
-    const TypePayload& payload =
-        part == TypePayloadPart::baseline ? record.baseline : record.update;
+    const TypePayload& payload = part_payload(record, part);
+    const TypePayload* baseline = part_baseline(record, part);
     const std::size_t before = writer.bit_count();
     std::size_t ignored = 0;
     return codec.write != nullptr
-           && codec.write(codec.context, record.token, record.type, part, payload, writer)
+           && codec.write(codec.context, record.token, record.type, part, baseline, payload, writer)
            && writer.finish(ignored) && writer.bit_count() >= before
            && writer.bit_count() - before == expectedBits;
 }
@@ -174,6 +171,7 @@ struct PayloadPlan {
                                 const EntityToken& token,
                                 EntityType type,
                                 TypePayloadPart part,
+                                const TypePayload* baseline,
                                 encoding::bits::Reader& reader,
                                 TypePayload& output) noexcept {
     const std::size_t limit = payload_limit(codec, part);
@@ -183,8 +181,8 @@ struct PayloadPlan {
     const std::size_t before = reader.remaining_bits();
     TypePayload candidate{};
     std::uint64_t ignored = 0;
-    if (!codec.read(codec.context, token, type, part, reader, candidate) || !reader.read(0, ignored)
-        || candidate.byteCount > candidate.state.size()) {
+    if (!codec.read(codec.context, token, type, part, baseline, reader, candidate)
+        || !reader.read(0, ignored) || candidate.byteCount > candidate.state.size()) {
         return false;
     }
     const std::size_t after = reader.remaining_bits();
@@ -211,8 +209,13 @@ resolve_type(const TypePayloadCodec& codec, const EntityToken& token, EntityType
 [[nodiscard]] bool
 prepare_batch(const TypePayloadCodec& codec, const EntityBatch& batch, PayloadPlan& plan) noexcept {
     plan = {};
-    if (!valid_raw_bubble(batch.defaultRawBubble)) {
+    if (!valid_cell(batch.currentCell) || batch.auxiliaryCount > batch.auxiliaryTokens.size()) {
         return false;
+    }
+    for (std::size_t index = 0; index < batch.auxiliaryCount; ++index) {
+        if (!valid_token(batch.auxiliaryTokens[index])) {
+            return false;
+        }
     }
     if (!batch.recordPresent) {
         return true;
@@ -271,31 +274,31 @@ prepare_batch(const TypePayloadCodec& codec, const EntityBatch& batch, PayloadPl
     return true;
 }
 
-/** Writes one inherited, byte-sized, or reset raw bubble. */
-[[nodiscard]] bool write_record_bubble(encoding::bits::Writer& writer,
-                                       std::uint16_t defaultRawBubble,
-                                       std::uint16_t rawBubble) noexcept {
-    const bool changed = rawBubble != defaultRawBubble;
+/** Writes one inherited, byte-sized, or reset entity cell. */
+[[nodiscard]] bool write_record_cell(encoding::bits::Writer& writer,
+                                     std::uint16_t currentCell,
+                                     std::uint16_t recordCell) noexcept {
+    const bool changed = recordCell != currentCell;
     if (!write_flag(writer, changed)) {
         return false;
     }
     if (!changed) {
         return true;
     }
-    const bool fits = rawBubble <= kMaximumRawBubble;
-    return write_flag(writer, fits) && (!fits || writer.write(rawBubble, kRawBubbleWidth));
+    const bool fits = recordCell <= kMaximumEntityCell;
+    return write_flag(writer, fits) && (!fits || writer.write(recordCell, kEntityCellWidth));
 }
 
-/** Reads one inherited, byte-sized, or reset raw bubble. */
-[[nodiscard]] bool read_record_bubble(encoding::bits::Reader& reader,
-                                      std::uint16_t defaultRawBubble,
-                                      std::uint16_t& output) noexcept {
+/** Reads one inherited, byte-sized, or reset entity cell. */
+[[nodiscard]] bool read_record_cell(encoding::bits::Reader& reader,
+                                    std::uint16_t currentCell,
+                                    std::uint16_t& output) noexcept {
     bool changed = false;
     if (!read_flag(reader, changed)) {
         return false;
     }
     if (!changed) {
-        output = defaultRawBubble;
+        output = currentCell;
         return true;
     }
     bool fits = false;
@@ -303,14 +306,14 @@ prepare_batch(const TypePayloadCodec& codec, const EntityBatch& batch, PayloadPl
         return false;
     }
     if (!fits) {
-        output = kNoRawBubble;
+        output = kNoEntityCell;
         return true;
     }
-    std::uint64_t bubble = 0;
-    if (!reader.read(kRawBubbleWidth, bubble)) {
+    std::uint64_t cell = 0;
+    if (!reader.read(kEntityCellWidth, cell)) {
         return false;
     }
-    output = static_cast<std::uint16_t>(bubble);
+    output = static_cast<std::uint16_t>(cell);
     return true;
 }
 
@@ -318,7 +321,7 @@ prepare_batch(const TypePayloadCodec& codec, const EntityBatch& batch, PayloadPl
 [[nodiscard]] bool write_record(encoding::bits::Writer& writer,
                                 const TypePayloadCodec& codec,
                                 const EntityRecord& record,
-                                std::uint16_t defaultRawBubble,
+                                std::uint16_t currentCell,
                                 const PayloadPlan& plan) noexcept {
     if (!write_record_flags(writer, record.flags)) {
         return false;
@@ -328,7 +331,7 @@ prepare_batch(const TypePayloadCodec& codec, const EntityBatch& batch, PayloadPl
             || (record.anchorPresent && !write_token(writer, record.anchor)))) {
         return false;
     }
-    if (!write_record_bubble(writer, defaultRawBubble, record.rawBubble)) {
+    if (!write_record_cell(writer, currentCell, record.cell)) {
         return false;
     }
     if (record.flags == entityRemove
@@ -336,7 +339,7 @@ prepare_batch(const TypePayloadCodec& codec, const EntityBatch& batch, PayloadPl
         return false;
     }
     if ((record.flags & entityCreate) != 0
-        && (!writer.write(record.lifecycleRevision, kLifecycleRevisionWidth)
+        && (!writer.write(record.allocationSequence, kAllocationSequenceWidth)
             || !writer.write(static_cast<std::uint8_t>(record.type), kEntityTypeWidth)
             || !write_payload(
                 codec, record, TypePayloadPart::baseline, plan.baselineBits, writer))) {
@@ -352,7 +355,7 @@ prepare_batch(const TypePayloadCodec& codec, const EntityBatch& batch, PayloadPl
 /** Reads one record body into temporary state. */
 [[nodiscard]] bool read_record(encoding::bits::Reader& reader,
                                const TypePayloadCodec& codec,
-                               std::uint16_t defaultRawBubble,
+                               std::uint16_t currentCell,
                                EntityRecord& output) noexcept {
     EntityRecord candidate{};
     candidate.token = output.token;
@@ -364,7 +367,7 @@ prepare_batch(const TypePayloadCodec& codec, const EntityBatch& batch, PayloadPl
             || (candidate.anchorPresent && !read_token(reader, candidate.anchor)))) {
         return false;
     }
-    if (!read_record_bubble(reader, defaultRawBubble, candidate.rawBubble)) {
+    if (!read_record_cell(reader, currentCell, candidate.cell)) {
         return false;
     }
     if ((candidate.flags & (entityCreate | entityRemove)) == entityRemove) {
@@ -374,19 +377,20 @@ prepare_batch(const TypePayloadCodec& codec, const EntityBatch& batch, PayloadPl
         }
     }
     if ((candidate.flags & entityCreate) != 0) {
-        std::uint64_t revision = 0;
+        std::uint64_t allocationSequence = 0;
         std::uint64_t type = 0;
-        if (!reader.read(kLifecycleRevisionWidth, revision)
+        if (!reader.read(kAllocationSequenceWidth, allocationSequence)
             || !reader.read(kEntityTypeWidth, type)) {
             return false;
         }
-        candidate.lifecycleRevision = static_cast<std::uint8_t>(revision);
+        candidate.allocationSequence = static_cast<std::uint8_t>(allocationSequence);
         candidate.type = static_cast<EntityType>(type);
         if (!valid_type(candidate.type)
             || !read_payload(codec,
                              candidate.token,
                              candidate.type,
                              TypePayloadPart::baseline,
+                             nullptr,
                              reader,
                              candidate.baseline)) {
             return false;
@@ -400,6 +404,7 @@ prepare_batch(const TypePayloadCodec& codec, const EntityBatch& batch, PayloadPl
                          candidate.token,
                          candidate.type,
                          TypePayloadPart::update,
+                         (candidate.flags & entityCreate) != 0 ? &candidate.baseline : nullptr,
                          reader,
                          candidate.update)) {
         return false;
@@ -420,17 +425,26 @@ prepare_batch(const TypePayloadCodec& codec, const EntityBatch& batch, PayloadPl
                                       const TypePayloadCodec& codec,
                                       const EntityBatch& batch,
                                       const PayloadPlan& plan) noexcept {
-    if (!write_flag(writer, batch.recordPresent)
-        || (batch.recordPresent && !write_token(writer, batch.record.token))) {
+    if (!writer.write(batch.auxiliaryCount, kAuxiliaryCountWidth)) {
         return false;
     }
-    const bool defaultPresent = batch.defaultRawBubble != kNoRawBubble;
-    if (!write_flag(writer, defaultPresent)
-        || (defaultPresent && !writer.write(batch.defaultRawBubble, kRawBubbleWidth))) {
+    for (std::size_t index = 0; index < batch.auxiliaryCount; ++index) {
+        if (!write_token(writer, batch.auxiliaryTokens[index])) {
+            return false;
+        }
+    }
+    const bool currentCellPresent = batch.currentCell != kNoEntityCell;
+    if (!write_flag(writer, currentCellPresent)
+        || (currentCellPresent && !writer.write(batch.currentCell, kEntityCellWidth))) {
         return false;
     }
-    return !batch.recordPresent
-           || write_record(writer, codec, batch.record, batch.defaultRawBubble, plan);
+    if (batch.recordPresent
+        && (!write_flag(writer, false) || !write_flag(writer, true)
+            || !write_token(writer, batch.record.token)
+            || !write_record(writer, codec, batch.record, batch.currentCell, plan))) {
+        return false;
+    }
+    return write_flag(writer, true);
 }
 
 /** Reads a channel-2 batch into temporary state. */
@@ -438,24 +452,43 @@ prepare_batch(const TypePayloadCodec& codec, const EntityBatch& batch, PayloadPl
                                      const TypePayloadCodec& codec,
                                      EntityBatch& output) noexcept {
     EntityBatch candidate{};
-    if (!read_flag(reader, candidate.recordPresent)
-        || (candidate.recordPresent && !read_token(reader, candidate.record.token))) {
+    std::uint64_t auxiliaryCount = 0;
+    if (!reader.read(kAuxiliaryCountWidth, auxiliaryCount)
+        || auxiliaryCount > candidate.auxiliaryTokens.size()) {
         return false;
     }
-    bool defaultPresent = false;
-    if (!read_flag(reader, defaultPresent)) {
-        return false;
-    }
-    if (defaultPresent) {
-        std::uint64_t bubble = 0;
-        if (!reader.read(kRawBubbleWidth, bubble)) {
+    candidate.auxiliaryCount = static_cast<std::uint8_t>(auxiliaryCount);
+    for (std::size_t index = 0; index < candidate.auxiliaryCount; ++index) {
+        if (!read_token(reader, candidate.auxiliaryTokens[index])) {
             return false;
         }
-        candidate.defaultRawBubble = static_cast<std::uint16_t>(bubble);
     }
-    if (candidate.recordPresent
-        && !read_record(reader, codec, candidate.defaultRawBubble, candidate.record)) {
+    bool currentCellPresent = false;
+    if (!read_flag(reader, currentCellPresent)) {
         return false;
+    }
+    if (currentCellPresent) {
+        std::uint64_t cell = 0;
+        if (!reader.read(kEntityCellWidth, cell)) {
+            return false;
+        }
+        candidate.currentCell = static_cast<std::uint16_t>(cell);
+    }
+    bool laneEnded = false;
+    if (!read_flag(reader, laneEnded)) {
+        return false;
+    }
+    if (!laneEnded) {
+        bool directToken = false;
+        if (!read_flag(reader, directToken) || !directToken
+            || !read_token(reader, candidate.record.token)
+            || !read_record(reader, codec, candidate.currentCell, candidate.record)) {
+            return false;
+        }
+        candidate.recordPresent = true;
+        if (!read_flag(reader, laneEnded) || !laneEnded) {
+            return false;
+        }
     }
     output = candidate;
     return true;
@@ -475,8 +508,8 @@ prepare_batch(const TypePayloadCodec& codec, const EntityBatch& batch, PayloadPl
         || !write_batch_fields(writer, codec, frame.entities, plan)) {
         return false;
     }
-    // Channel 3 and its enclosing list stay absent in the generic fallback.
-    return write_flag(writer, false) && write_flag(writer, false);
+    // Channel 3 is one absence bit. Its trailing list exists only in the present form.
+    return write_flag(writer, false);
 }
 
 /** Reads common and all four fixed channels into temporary state. */
@@ -491,7 +524,7 @@ prepare_batch(const TypePayloadCodec& codec, const EntityBatch& batch, PayloadPl
     bool present = false;
     if (!read_flag(reader, present) || present || !read_flag(reader, present) || present
         || !read_batch_fields(reader, codec, candidate.entities) || !read_flag(reader, present)
-        || present || !read_flag(reader, present) || present) {
+        || present) {
         return false;
     }
     output = candidate;

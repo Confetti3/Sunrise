@@ -5,6 +5,9 @@
 
 namespace sunrise::state::gameplay::external {
 
+/** Outbound external records use the transport packet ring size. */
+inline constexpr std::size_t kExternalContributionCapacity = 128;
+
 /** Protected carrier used by one peer generation. */
 enum class CarrierKind : std::uint8_t {
     engineAssociation,
@@ -35,9 +38,19 @@ struct ExternalShadow {
     ExternalShadowKey key{};
     std::array<std::uint64_t, 2> patchEpoch{};
     std::uint8_t reconciliationGeneration{};
-    std::uint8_t defaultBubble{};
-    bool defaultBubblePresent{};
-    bool channel3TrailingList{};
+    std::uint8_t currentCell{};
+    bool currentCellPresent{};
+    bool occupied{};
+};
+
+/** Immutable external state staged in one outbound packet. */
+struct ExternalContributionSnapshot {
+    std::uint64_t transmissionId{};
+    std::uint64_t groupSessionId{};
+    std::uint64_t viewGeneration{};
+    std::uint16_t packetSequence{};
+    bool commonPresent{};
+    bool lane0Present{};
     bool occupied{};
 };
 

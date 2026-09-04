@@ -7,6 +7,7 @@
 #include "../../../state/activity/runtime.h"
 #include "../../hooking/detour.h"
 #include "internal.h"
+#include "spawn/probe.h"
 
 namespace sunrise::client::hooks::bootflow {
 namespace {
@@ -70,8 +71,14 @@ bool install_spawn_hold() noexcept {
                          "ev=bootflow stage=spawn_hold result=fail reason=target");
         return false;
     }
+    if (!spawn::resolve(target)) {
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::warn,
+                         "ev=bootflow stage=current_slice result=fail reason=targets");
+    }
     const hooking::detour::Spec spec{target, reinterpret_cast<void*>(&spawn_gate)};
     if (!hooking::detour::install(spec, g_handle)) {
+        spawn::forget();
         core::log::write(core::log::Channel::client,
                          core::log::Level::warn,
                          "ev=bootflow stage=spawn_hold result=fail reason=attach");
@@ -90,6 +97,7 @@ void uninstall_spawn_hold() noexcept {
         (void)hooking::detour::uninstall(g_handle);
     }
     g_original.store(nullptr, std::memory_order_release);
+    spawn::forget();
 }
 
 } // namespace sunrise::client::hooks::bootflow

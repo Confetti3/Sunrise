@@ -10,6 +10,7 @@
 *.sln.docstates
 *.aps
 *.log
+/Sunrise/build/
 
 # CMake build files
 /build/

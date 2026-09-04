@@ -26,9 +26,9 @@ constexpr std::uint8_t kPongKindWidth = 2;
 constexpr std::uint8_t kDiscardedWidth = 5;
 /** A mayday names its group session in raw bits. */
 constexpr std::uint8_t kMaydaySessionWidth = 64;
-/** The mayday code is nine bits and decodes to one above its wire value. */
+/** The mayday code is nine bits on the wire. */
 constexpr std::uint8_t kMaydayCodeWidth = 9;
-/** The mayday code carries a bias of one. */
+/** The sender adds one to the logical code, so the reader subtracts it. */
 constexpr std::uint16_t kMaydayCodeBias = 1;
 
 /** Reads the two sequence fields every connection message starts with. */
@@ -102,14 +102,14 @@ bool read_closed(bits::Reader& reader, ConnectEnd& output) noexcept {
 /** Reads a ping body. */
 bool read_ping(bits::Reader& reader, PingBody& output) noexcept {
     std::uint64_t sequence = 0;
-    std::uint64_t flag = 0;
+    std::uint64_t trailing = 0;
     if (!reader.read(kPingSequenceWidth, sequence)
         || !reader.read(kPingTimestampWidth, output.timestamp)
-        || !reader.read(kPingFlagWidth, flag)) {
+        || !reader.read(kPingFlagWidth, trailing)) {
         return false;
     }
     output.sequence = static_cast<std::uint16_t>(sequence);
-    output.flag = flag != 0;
+    output.trailingFlag = trailing != 0;
     return true;
 }
 
@@ -139,10 +139,10 @@ bool read_mayday(bits::Reader& reader, MaydayBody& output) noexcept {
         || !reader.read(kMaydayCodeWidth, code)) {
         return false;
     }
-    candidate.code = static_cast<std::uint16_t>(code) + kMaydayCodeBias;
-    if (candidate.code > kMaydayCodeMaximum) {
+    if (code > kMaydayCodeWireMaximum) {
         return false;
     }
+    candidate.code = static_cast<std::int16_t>(static_cast<int>(code) - kMaydayCodeBias);
     output = candidate;
     return true;
 }

@@ -106,6 +106,7 @@ Pull Requests are welcome. Please follow these rules:
 
 - https://github.com/ocornut/imgui
 - https://github.com/microsoft/detours
+- https://lua.org/
 
 ### Artwork:
 

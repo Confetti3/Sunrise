@@ -15,6 +15,8 @@ namespace {
 std::atomic<WorldPhase> g_phase{WorldPhase::idle};
 /** Tick the current load started on. Read only while the phase is transitioning. */
 std::atomic<std::uint64_t> g_transitionTick{};
+/** Durable edge generation; the mission runtime may sample after arrived has already fallen. */
+std::atomic<std::uint64_t> g_arrivalRevision{};
 
 } // namespace
 
@@ -26,11 +28,19 @@ void note_world_phase(WorldPhase phase) noexcept {
         g_transitionTick.store(GetTickCount64(), std::memory_order_relaxed);
     }
     g_phase.store(phase, std::memory_order_relaxed);
+    if (phase == WorldPhase::arrived && previous != WorldPhase::arrived) {
+        g_arrivalRevision.fetch_add(1, std::memory_order_release);
+    }
 }
 
 /** @return How far the client has got through the current destination load. */
 WorldPhase world_phase() noexcept {
     return g_phase.load(std::memory_order_relaxed);
+}
+
+/** @return Durable generation of the latest edge into arrived. */
+std::uint64_t world_arrival_revision() noexcept {
+    return g_arrivalRevision.load(std::memory_order_acquire);
 }
 
 /** @return Milliseconds since the running load started, or zero when none is running. */

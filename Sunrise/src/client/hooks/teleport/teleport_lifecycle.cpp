@@ -78,13 +78,14 @@ template <typename T> [[nodiscard]] T original(std::size_t slot) noexcept {
 std::int64_t __fastcall camera_transform(std::uint32_t playerIndex) noexcept {
     const CameraTransform next = original<CameraTransform>(kCameraSlot);
     const std::int64_t result = next != nullptr ? next(playerIndex) : 0;
-    capture_forward(playerIndex);
+    capture_camera_pose(playerIndex);
     poll_request();
     force_pending();
     // Read here, not on the physics tick: that tick stops for a player who is standing still.
     hooks::fly::poll_toggle();
     client::player::position::poll();
     hooks::bootflow::poll_world_step();
+    hooks::bootflow::poll_current_slice_set();
     return result;
 }
 

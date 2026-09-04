@@ -60,6 +60,16 @@ std::atomic<std::uint64_t> g_reported{kNoOutcome};
 
 /** Log names for RegionSource, in its declaration order. */
 constexpr const char* kSources[] = {"reported", "arrival"};
+/** Log names for Skip, in its declaration order. */
+constexpr const char* kReasons[] = {"none",
+                                    "not_ready",
+                                    "no_region",
+                                    "slot_range",
+                                    "no_source",
+                                    "descriptor",
+                                    "no_host_session",
+                                    "host_session_conflict",
+                                    "host_session_full"};
 
 /** Reports one changed advertisement outcome. */
 void report_outcome(Skip skip,
@@ -83,16 +93,6 @@ void report_outcome(Skip skip,
                static_cast<unsigned>(ambassadorSlot));
         return;
     }
-    /** Stable log labels follow the Skip enumeration's ordinal order. */
-    static constexpr const char* kReasons[] = {"none",
-                                               "not_ready",
-                                               "no_region",
-                                               "slot_range",
-                                               "no_source",
-                                               "descriptor",
-                                               "no_host_session",
-                                               "host_session_conflict",
-                                               "host_session_full"};
     report(core::log::Level::info,
            "ev=gameplay stage=advertise result=skip reason=%s region=%d region_source=%s",
            kReasons[static_cast<std::size_t>(skip)],
@@ -103,6 +103,37 @@ void report_outcome(Skip skip,
 /** @return Encodable ambassador slot that differs from the joining client's slot. */
 [[nodiscard]] std::uint8_t ambassador_slot(std::uint8_t localMemberSlot) noexcept {
     return localMemberSlot == 0 ? 1 : 0;
+}
+
+/** Encodes one already allocated host row for the region its member currently serves. */
+[[nodiscard]] bool encode_candidate(const group::HostSessionBinding& host,
+                                    std::uint64_t onlineSessionId,
+                                    std::int32_t regionIndex,
+                                    std::uint8_t localMemberSlot,
+                                    message::CitizenAdvertisement& candidate,
+                                    std::uint64_t& hostGeneration) noexcept {
+    candidate = {};
+    hostGeneration = 0;
+    if (host.groupSessionId == 0 || host.target.sessionId == 0 || onlineSessionId == 0
+        || !group::retain_host_session(host.generation)) {
+        return false;
+    }
+    const state::gameplay::Endpoint advertised = endpoint::advertised();
+    middleware::gameplay::descriptor::JoinEndpoint join{};
+    join.address = advertised.address;
+    join.port = host.port != 0 ? host.port : advertised.port;
+    join.machineId = host.groupSessionId;
+    join.onlineSessionId = onlineSessionId;
+    if (!middleware::gameplay::descriptor::build(join, candidate.descriptor)) {
+        group::release_host_session(host.generation);
+        return false;
+    }
+    candidate.onlineSessionId = host.target.sessionId;
+    candidate.regionIndex = regionIndex;
+    candidate.ambassadorSlot = ambassador_slot(localMemberSlot);
+    candidate.present = true;
+    hostGeneration = host.generation;
+    return true;
 }
 
 /** Builds one source-bound candidate and retains its host generation on success. */
@@ -124,7 +155,6 @@ void report_outcome(Skip skip,
     }
 
     const endpoint::Identity identity = endpoint::identity();
-    const state::gameplay::Endpoint advertised = endpoint::advertised();
     group::HostSessionBinding host{};
     switch (
         group::request_host_session(region_machine_id(regionIndex), source, regionIndex, host)) {
@@ -140,26 +170,14 @@ void report_outcome(Skip skip,
     default:
         return Skip::noSource;
     }
-    if (!group::retain_host_session(host.generation)) {
+    if (!encode_candidate(host,
+                          region_identity(identity.onlineSessionId, regionIndex),
+                          regionIndex,
+                          localMemberSlot,
+                          candidate,
+                          hostGeneration)) {
         return Skip::noHostSession;
     }
-
-    middleware::gameplay::descriptor::JoinEndpoint join{};
-    join.address = advertised.address;
-    join.port = advertised.port;
-    join.machineId = host.groupSessionId;
-    join.onlineSessionId = region_identity(identity.onlineSessionId, regionIndex);
-    if (!middleware::gameplay::descriptor::build(join, candidate.descriptor)) {
-        group::release_host_session(host.generation);
-        candidate = {};
-        return Skip::descriptor;
-    }
-
-    candidate.onlineSessionId = host.target.sessionId;
-    candidate.regionIndex = regionIndex;
-    candidate.ambassadorSlot = ambassador_slot(localMemberSlot);
-    candidate.present = true;
-    hostGeneration = host.generation;
     return Skip::none;
 }
 
@@ -174,6 +192,16 @@ void build_advertisement(const state::activity::SessionBinding& source,
                          std::uint64_t& hostGeneration) noexcept {
     const Skip skip = build_candidate(source, regionIndex, localMemberSlot, output, hostGeneration);
     report_outcome(skip, regionIndex, regionSource, output.ambassadorSlot);
+}
+
+/** Builds one further directory entry from the same source, without reporting an outcome. */
+void build_directory_entry(const state::activity::SessionBinding& source,
+                           std::int32_t regionIndex,
+                           std::uint8_t localMemberSlot,
+                           message::CitizenAdvertisement& output,
+                           std::uint64_t& hostGeneration) noexcept {
+    static_cast<void>(
+        build_candidate(source, regionIndex, localMemberSlot, output, hostGeneration));
 }
 
 /** Claims a missing host row and reports whether its advertisement is ready. */
@@ -196,19 +224,84 @@ AdvertisementState advertisement_state(const state::activity::SessionBinding& so
     }
 }
 
+/** Claims the region's host row and completes a pending allocation at once. */
+void complete_host_session(const state::activity::SessionBinding& source,
+                           std::int32_t regionIndex) noexcept {
+    if (advertisement_state(source, regionIndex) == AdvertisementState::pending) {
+        group::allocate_claimed_host_sessions();
+    }
+}
+
+/** Starts the private activity's stable logical Bubble Host and completes its allocation. */
+bool complete_private_host_session(const state::activity::SessionBinding& source,
+                                   std::int32_t initialRegion) noexcept {
+    const endpoint::Identity identity = endpoint::identity();
+    if (!endpoint::ready() || identity.machineId == 0 || initialRegion < 0) {
+        return false;
+    }
+    group::HostSessionBinding host{};
+    const group::HostSessionState state =
+        group::request_host_session(identity.machineId, source, initialRegion, host);
+    if (state == group::HostSessionState::pending) {
+        group::allocate_claimed_host_sessions();
+    } else if (state != group::HostSessionState::ready) {
+        return false;
+    }
+    return private_host_session(source, host);
+}
+
+/** Claims the private activity's Bubble Host row without allocating it. */
+bool claim_private_host_session(const state::activity::SessionBinding& source,
+                                std::int32_t initialRegion) noexcept {
+    const endpoint::Identity identity = endpoint::identity();
+    if (!endpoint::ready() || identity.machineId == 0 || initialRegion < 0) {
+        return false;
+    }
+    group::HostSessionBinding host{};
+    // A claimed row stays pending until the pump service allocates it, so a pending claim is not
+    // an error: the next advertisement finds the row ready.
+    return group::request_host_session(identity.machineId, source, initialRegion, host)
+               == group::HostSessionState::ready
+           && private_host_session(source, host);
+}
+
+/** Copies the private activity's stable logical Bubble Host row. */
+bool private_host_session(const state::activity::SessionBinding& source,
+                          group::HostSessionBinding& output) noexcept {
+    const endpoint::Identity identity = endpoint::identity();
+    return identity.machineId != 0
+           && group::host_session_for_source_group(source, identity.machineId, output);
+}
+
+/** Builds the private logical host's remote-member descriptor for its current region. */
+void build_private_host_advertisement(const state::activity::SessionBinding& source,
+                                      std::int32_t regionIndex,
+                                      std::uint8_t localMemberSlot,
+                                      message::CitizenAdvertisement& output,
+                                      std::uint64_t& hostGeneration) noexcept {
+    output = {};
+    hostGeneration = 0;
+    const endpoint::Identity identity = endpoint::identity();
+    group::HostSessionBinding host{};
+    if (!endpoint::ready() || regionIndex < 0 || localMemberSlot > kMaximumMemberSlot
+        || identity.onlineSessionId == 0 || !private_host_session(source, host)
+        || !encode_candidate(
+            host, identity.onlineSessionId, regionIndex, localMemberSlot, output, hostGeneration)) {
+        return;
+    }
+}
+
 /** Source-less publishers remain wire-silent and do not claim a host row. */
 void build_advertisement(std::int32_t regionIndex,
                          RegionSource regionSource,
-                         std::uint8_t localMemberSlot,
+                         std::uint8_t,
                          message::CitizenAdvertisement& output) noexcept {
-    static_cast<void>(localMemberSlot);
     output = {};
     report_outcome(Skip::noSource, regionIndex, regionSource, 0);
 }
 
 /** Source-less readiness queries remain absent and do not claim a host row. */
-AdvertisementState advertisement_state(std::int32_t regionIndex) noexcept {
-    static_cast<void>(regionIndex);
+AdvertisementState advertisement_state(std::int32_t) noexcept {
     return AdvertisementState::absent;
 }
 

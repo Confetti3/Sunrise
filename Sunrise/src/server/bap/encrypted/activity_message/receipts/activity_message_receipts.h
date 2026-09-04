@@ -3,6 +3,8 @@
 #include <cstddef>
 
 #include "../../../../../middleware/bap/activity_message/definition.h"
+#include "../../../../../middleware/bap/activity_message/incident.h"
+#include "../../../../../middleware/bap/activity_message/sense_update.h"
 #include "../../../../../state/activity/receipts/definition.h"
 
 namespace sunrise::server::bap::encrypted::activity_message::receipts {
@@ -18,7 +20,8 @@ struct Framed {
 namespace message = middleware::bap::activity_message;
 
 /** Frames a sensor sense update and reports its epoch. */
-[[nodiscard]] Framed frame_sense_update(const message::Request& request) noexcept;
+[[nodiscard]] Framed frame_sense_update(const message::Request& request,
+                                        const message::sense_update::SenseUpdate& update) noexcept;
 
 /** Records a service-8 envelope carrying the local-only activity-host request type. */
 [[nodiscard]] Framed frame_route_misuse(const message::Request& request) noexcept;
@@ -26,7 +29,7 @@ namespace message = middleware::bap::activity_message;
 /** Frames a start-new-activity request without applying any transition policy to it. */
 [[nodiscard]] Framed frame_start_activity(const message::Request& request) noexcept;
 
-/** Frames a peer-reservation request as far as its revision. */
+/** Frames a complete peer-reservation request without reserving a row. */
 [[nodiscard]] Framed frame_reservation_request(const message::Request& request) noexcept;
 
 /** Frames a reservation release. */
@@ -44,10 +47,10 @@ namespace message = middleware::bap::activity_message;
 /** Records a client heartbeat as a bounded body. */
 [[nodiscard]] Framed frame_heartbeat(const message::Request& request) noexcept;
 
-/** Frames a lag-switch report as far as its record count. */
+/** Frames a complete lag-switch report without applying network policy. */
 [[nodiscard]] Framed frame_lag_switch(const message::Request& request) noexcept;
 
-/** Records a connection-quality report as a bounded body. */
+/** Frames a complete connection-quality report without applying network policy. */
 [[nodiscard]] Framed frame_connection_quality(const message::Request& request) noexcept;
 
 /** Frames a speculative migration proposal without acting on it. */
@@ -65,6 +68,11 @@ namespace message = middleware::bap::activity_message;
 /** Frames one incident and quarantines a poison target. */
 [[nodiscard]] Framed frame_incident(const message::Request& request) noexcept;
 
+/** Frames one incident and returns its parsed outer fields for Activity Host diagnostics. */
+[[nodiscard]] Framed
+frame_incident_copy(const message::Request& request,
+                    middleware::bap::activity_message::incident::Incident& incident) noexcept;
+
 /** Frames one authority release, which records authority and returns no lease. */
 [[nodiscard]] Framed frame_authority_release(const message::Request& request,
                                              bool expectReason) noexcept;
@@ -75,7 +83,7 @@ namespace message = middleware::bap::activity_message;
 /** Frames one authority query answer. */
 [[nodiscard]] Framed frame_query_answer(const message::Request& request) noexcept;
 
-/** Records an envelope whose message type has no recovered body grammar. */
+/** Records an envelope whose message type has no known body grammar. */
 [[nodiscard]] Framed frame_unknown(const message::Request& request) noexcept;
 
 } // namespace sunrise::server::bap::encrypted::activity_message::receipts

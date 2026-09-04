@@ -25,11 +25,11 @@ namespace peer = server::gameplay::peer;
 namespace tables = middleware::content::packages::tables;
 
 /** Instances one snapshot reads. The host table holds no more than this. */
-constexpr std::size_t kRowCapacity = 8;
+constexpr std::size_t kRowCapacity = group::kHostSessionCapacity;
 /** Admitted peers one snapshot reads. */
 constexpr std::size_t kAdmittedCapacity = 8;
 /** Columns of the instance table, in draw order. */
-constexpr int kColumnCount = 7;
+constexpr int kColumnCount = 8;
 /** Shown while this host serves no instance. */
 constexpr char kNoInstance[] = "no session instances";
 /** Shown for a row no advertisement gave a region. */
@@ -47,7 +47,7 @@ constexpr std::array<const char*, 6> kChannelStages{
 
 /**
  * The two state words for one instance, in the order the join reaches them.
- * `hosted` is the end of the join ladder: the peer builds no activity client until it holds the
+ * `hosted` is the end of the join ladder. The peer builds no activity client until it holds the
  * activity-host parameter, so a row short of it is still waiting on this host.
  */
 struct InstanceState {
@@ -77,13 +77,7 @@ instance_state(const std::array<group::AdmittedRow, kAdmittedCapacity>& admitted
         } else {
             state.join = row.activityHostPublished ? "hosted" : "admitted";
         }
-        // A peer that has asked for no player owes nothing, which is not the same as one whose
-        // player row the reliable queue has refused so far.
-        if (!row.hasPlayer) {
-            state.player = "none";
-        } else {
-            state.player = row.playerPublished ? "published" : "owed";
-        }
+        state.player = row.hasPlayer ? "present" : "none";
         return state;
     }
     return {};
@@ -143,6 +137,7 @@ void draw() noexcept {
     ImGui::TableSetupColumn("bubble");
     ImGui::TableSetupColumn("group session");
     ImGui::TableSetupColumn("activity host");
+    ImGui::TableSetupColumn("port");
     ImGui::TableSetupColumn("channel");
     ImGui::TableSetupColumn("join");
     ImGui::TableSetupColumn("player");
@@ -156,6 +151,13 @@ void draw() noexcept {
         draw_session_cell(row.groupSessionId);
         ImGui::TableNextColumn();
         draw_session_cell(row.hostSessionId);
+        ImGui::TableNextColumn();
+        // Two rows sharing a port share the client's channel, and that is what this table is for.
+        if (row.port == 0) {
+            ImGui::TextDisabled("primary");
+        } else {
+            ImGui::Text("%u", static_cast<unsigned>(row.port));
+        }
         ImGui::TableNextColumn();
         ImGui::TextUnformatted(channel_name(stages[index]));
         const InstanceState state = instance_state(admitted, admittedCount, row.groupSessionId);

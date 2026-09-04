@@ -142,8 +142,19 @@ struct CharacterState {
     float appearanceValue{};
     /** Compact default destination hash used until a later runtime selection replaces it. */
     std::uint32_t lastOrbitedDestination{};
+    /**
+     * Activity whose orbit bubble the character is in, family-4 `+45896`. Authored at sign-in.
+     * A launch moves it to the target before the client's launch commit, which latches it.
+     */
+    std::uint16_t currentActivityIndex{};
     /** Server policy that arms content checks only with the matching family-5 flag. */
     bool contentBypass{};
+    /**
+     * Unix seconds the account signed in, from one clock read shared by every character.
+     * The character records publish it as their last applied daily and weekly reset; zero
+     * makes both rollovers due the moment the client accepts the record.
+     */
+    std::uint64_t signInSeconds{};
     /**
      * Runtime-only socket entries the player has selected at least once. Selected entries still
      * publish active; this mask keeps a later inactive entry acquired instead of new. Unverified:

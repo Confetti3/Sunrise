@@ -8,12 +8,13 @@
 #include "../../../state/activity/runtime.h"
 #include "bootflow_hook_lifecycle.h"
 #include "internal.h"
+#include "spawn/probe.h"
 
 namespace sunrise::client::hooks::bootflow {
 namespace {
 
 /**
- * The current boot-flow step accessor, `BootFlow_GetStep_NoBubbleArg`* @ `0x7FF742AED510`.
+ * The current boot-flow step accessor, `BootFlow_GetStep_NoBubbleArg`*.
  * Decrypts the manager global and returns `mgr + 912`, or -1 when it is null. Only the call's
  * displacement is wildcarded; the `mgr + 912` field offset makes the pattern unique.
  */
@@ -29,6 +30,8 @@ constexpr std::int32_t kActivityLoadFirst = 33;
 constexpr std::int32_t kInWorld = 38;
 /** No step has been published. */
 constexpr std::int32_t kNoStep = -1;
+/** Distinguishes a missing target from an addressable manager with no current slice set. */
+constexpr std::int32_t kSliceSetUnavailable = -2;
 /** A published step older than this says nothing: the tick that publishes it has stopped. */
 constexpr std::uint64_t kStepStaleMs = 1'000;
 
@@ -39,6 +42,9 @@ std::atomic<GetStep> g_step{nullptr};
 std::atomic_int32_t g_publishedStep{kNoStep};
 /** Tick that step was read on. A stale value reads as out of world. */
 std::atomic_uint64_t g_publishedTick{0};
+/** Last current slice-set sample, or one of the negative sentinels above. */
+std::atomic_int32_t g_publishedSliceSet{kSliceSetUnavailable};
+std::atomic_uint64_t g_publishedSliceSetTick{0};
 
 /** @return The current step, or the absent one when the accessor is missing. */
 [[nodiscard]] std::int32_t read_step() noexcept {
@@ -52,6 +58,34 @@ std::atomic_uint64_t g_publishedTick{0};
 void poll_world_step() noexcept {
     g_publishedStep.store(read_step(), std::memory_order_relaxed);
     g_publishedTick.store(GetTickCount64(), std::memory_order_release);
+}
+
+/** Publishes the client's current local slice-set index. */
+void poll_current_slice_set() noexcept {
+    const std::int32_t index = spawn::sample_current_slice_set();
+    const std::int32_t previous = g_publishedSliceSet.load(std::memory_order_relaxed);
+    // A slice-set change is a world replacement whose transition arms a fresh fade, and a
+    // teleport never passes the off-destination step that re-arms the release. Re-arm here or
+    // the new world stays black behind the spent one-shot.
+    if (index >= 0 && previous >= 0 && index != previous) {
+        rearm_fade_release();
+    }
+    g_publishedSliceSet.store(index, std::memory_order_relaxed);
+    g_publishedSliceSetTick.store(GetTickCount64(), std::memory_order_release);
+}
+
+/** Reads the last fresh local slice-set sample. */
+CurrentSliceSet current_slice_set() noexcept {
+    CurrentSliceSet value{};
+    const std::uint64_t published = g_publishedSliceSetTick.load(std::memory_order_acquire);
+    if (published == 0 || GetTickCount64() - published >= kStepStaleMs) {
+        return value;
+    }
+    const std::int32_t index = g_publishedSliceSet.load(std::memory_order_relaxed);
+    value.available = index != kSliceSetUnavailable;
+    value.present = index >= 0;
+    value.index = value.present ? index : -1;
+    return value;
 }
 
 /** Reports whether the player is in a loaded destination. */
@@ -101,6 +135,8 @@ bool install_world_step() noexcept {
 /** Clears the boot-flow step accessor it found. */
 void uninstall_world_step() noexcept {
     g_step.store(nullptr, std::memory_order_release);
+    g_publishedSliceSet.store(kSliceSetUnavailable, std::memory_order_relaxed);
+    g_publishedSliceSetTick.store(0, std::memory_order_release);
 }
 
 } // namespace sunrise::client::hooks::bootflow

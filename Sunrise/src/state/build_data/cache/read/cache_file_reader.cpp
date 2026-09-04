@@ -14,7 +14,8 @@ namespace {
     return counts.named != 0 && counts.items != 0 && counts.collectibles != 0
            && counts.materialRequirementSets != 0 && counts.socketPlugRules != 0
            && counts.socketPlugPools != 0 && counts.inventoryBuckets != 0
-           && counts.socketEntryLists != 0 && counts.progressions != 0 && counts.scenarios != 0;
+           && counts.socketEntryLists != 0 && counts.progressions != 0 && counts.scenarios != 0
+           && counts.rosterGroups != 0;
 }
 
 /** @return True when every count fits the output storage. */

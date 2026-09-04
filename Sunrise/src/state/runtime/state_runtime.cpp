@@ -7,7 +7,11 @@
 #include <cstdint>
 #include <cstdio>
 #include <limits>
+#include <memory>
+#include <new>
 #include <span>
+#include <utility>
+#include <vector>
 
 #include "../../core/logging/log.h"
 #include "../../core/settings/settings.h"
@@ -48,6 +52,23 @@ template <std::size_t Size>
                            static_cast<ULONG>(output.size()),
                            BCRYPT_USE_SYSTEM_PREFERRED_RNG)
            >= 0;
+}
+
+/** Erases owned payload bytes before releasing their vector storage, then resets valid State. */
+void secure_reset(State& state) noexcept {
+    SecureZeroMemory(&state.signOn, sizeof state.signOn);
+    SecureZeroMemory(&state.bap, sizeof state.bap);
+    for (activity::SessionRecord& session : state.activity.sessions) {
+        for (activity::mission::PendingIntent& pending : session.mission.pendingIntents) {
+            if (!pending.value.authBody.empty()) {
+                SecureZeroMemory(pending.value.authBody.data(), pending.value.authBody.size());
+            }
+        }
+        std::vector<activity::mission::PendingIntent>{}.swap(session.mission.pendingIntents);
+    }
+    // State is too large for a stack temporary, so the reset reconstructs it in place.
+    state.~State();
+    new (&state) State{};
 }
 
 /** @return True when any authored or already-seeded account identity owns one SOID. */
@@ -147,7 +168,7 @@ template <std::size_t Size>
         }
     }
 
-    // Currency, material, and consumable rows are native non-instanced stacks.  Clear any stale
+    // Currency, material, and consumable rows are native non-instanced stacks. Clear any stale
     // runtime key before allocating action-source identities so it cannot reserve the namespace.
     for (std::size_t index = 0; index < accountState.profileItemCount; ++index) {
         if (!actionSources[index]) {
@@ -197,19 +218,26 @@ bool initialize(void* module, const AccountState& initialAccount) noexcept {
 bool initialize(void* module,
                 const AccountState& initialAccount,
                 const activity::defaults::ActivityDefaults& activityDefaults) noexcept {
-    AccountState runtimeAccount = initialAccount;
-    if (!seed_inventory_runtime_fields(runtimeAccount)
+    // AccountState and State are multi-megabyte fixed-capacity values. Keeping both as locals
+    // exceeds the game's startup-thread stack before this function can execute any code.
+    const std::unique_ptr<AccountState> runtimeAccount{new (std::nothrow)
+                                                           AccountState(initialAccount)};
+    const std::unique_ptr<State> initialized{new (std::nothrow) State{}};
+    if (!runtimeAccount || !initialized) {
+        return false;
+    }
+    if (!seed_inventory_runtime_fields(*runtimeAccount)
         || !activity::defaults::valid(activityDefaults)) {
         return false;
     }
-    if (!build_data::initialize(module, runtime::equipment::configured_hash(runtimeAccount))) {
+    if (!build_data::initialize(module, runtime::equipment::configured_hash(*runtimeAccount))) {
         return false;
     }
     // A cache hit already has the complete plug relation, so publish canonical profile identities
-    // in the first State image.  On a first cache build, snapshot preparation repeats this step
+    // in the first State image. On a first cache build, snapshot preparation repeats this step
     // after package extraction has published the relation.
     if (build_data::socket_plug_rules_ready()
-        && !canonicalize_profile_item_identities(runtimeAccount)) {
+        && !canonicalize_profile_item_identities(*runtimeAccount)) {
         build_data::shutdown();
         return false;
     }
@@ -220,58 +248,58 @@ bool initialize(void* module,
             std::snprintf(line.data(),
                           line.size(),
                           "ev=account stage=identity primary=0x%016llX characters=%zu",
-                          static_cast<unsigned long long>(runtimeAccount.primarySoid),
-                          runtimeAccount.characterCount);
+                          static_cast<unsigned long long>(runtimeAccount->primarySoid),
+                          runtimeAccount->characterCount);
         if (written > 0) {
             core::log::write(core::log::Channel::state,
                              core::log::Level::info,
                              {line.data(), static_cast<std::size_t>(written)});
         }
     }
-    State initialized{};
-    if (!randomize(initialized.signOn.encryptionKey)
-        || !randomize(initialized.signOn.authenticationKey)
-        || !randomize(initialized.signOn.sessionToken) || !randomize(initialized.bap.nonce)
-        || !randomize(initialized.bap.sessionKey) || !randomize(initialized.bap.envelopeIv)) {
-        SecureZeroMemory(&initialized, sizeof initialized);
+    if (!randomize(initialized->signOn.encryptionKey)
+        || !randomize(initialized->signOn.authenticationKey)
+        || !randomize(initialized->signOn.sessionToken) || !randomize(initialized->bap.nonce)
+        || !randomize(initialized->bap.sessionKey) || !randomize(initialized->bap.envelopeIv)) {
+        secure_reset(*initialized);
         build_data::shutdown();
         return false;
     }
-    initialized.signOn.relayAddress = kLoopbackAddress;
+    initialized->signOn.relayAddress = kLoopbackAddress;
     // The published relay port is the one the listener binds, so both move with one setting.
-    initialized.signOn.relayPort = core::settings::get().server.bapPort;
-    initialized.signOn.tokenLifetimeSeconds = kDefaultTokenLifetimeSeconds;
-    initialized.account = runtimeAccount;
-    initialized.activity.defaults = activityDefaults;
-    initialized.investment.family5.objectSoid = kGlobalFamily5Soid;
+    initialized->signOn.relayPort = core::settings::get().server.bapPort;
+    initialized->signOn.tokenLifetimeSeconds = kDefaultTokenLifetimeSeconds;
+    initialized->account = *runtimeAccount;
+    initialized->activity.defaults = activityDefaults;
+    initialized->investment.family5.objectSoid = kGlobalFamily5Soid;
     // Only the override lists come from settings. Identity and gate stay owned by State.
     const Family5State& authored = core::settings::get().initialFamily5;
-    initialized.investment.family5.flags = authored.flags;
-    initialized.investment.family5.flagCount = authored.flagCount;
-    initialized.investment.family5.values = authored.values;
-    initialized.investment.family5.valueCount = authored.valueCount;
+    initialized->investment.family5.flags = authored.flags;
+    initialized->investment.family5.flagCount = authored.flagCount;
+    initialized->investment.family5.values = authored.values;
+    initialized->investment.family5.valueCount = authored.valueCount;
     // The arm is account-wide and rides the first ws-503, which goes out before any pick. Nothing
     // is selected at boot, so it is armed when any authored character carries the bypass. The
     // per-character objB byte is the other half, and it still decides which character it opens.
-    for (std::size_t index = 0; index < runtimeAccount.characterCount; ++index) {
-        if (runtimeAccount.characters[index].contentBypass) {
-            initialized.investment.family5.contentGateArm = true;
+    for (std::size_t index = 0; index < runtimeAccount->characterCount; ++index) {
+        if (runtimeAccount->characters[index].contentBypass) {
+            initialized->investment.family5.contentGateArm = true;
             break;
         }
     }
 
     // Publish one complete State only after every generated secret is valid.
     AcquireSRWLockExclusive(&runtime::storage::g_stateLock);
-    runtime::storage::g_state = initialized;
+    secure_reset(runtime::storage::g_state);
+    runtime::storage::g_state = std::move(*initialized);
     ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
-    SecureZeroMemory(&initialized, sizeof initialized);
+    secure_reset(*initialized);
     return true;
 }
 
 /** Securely erases State, including activity destinations and matchmaking descriptors. */
 void shutdown() noexcept {
     AcquireSRWLockExclusive(&runtime::storage::g_stateLock);
-    SecureZeroMemory(&runtime::storage::g_state, sizeof runtime::storage::g_state);
+    secure_reset(runtime::storage::g_state);
     ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
     build_data::shutdown();
 }
@@ -308,9 +336,30 @@ bool publish_bootstrap_token(std::span<const std::byte> token) noexcept {
     return true;
 }
 
+/** Records when the account signed in, on every character the account owns. */
+void publish_sign_in_time(std::uint64_t seconds) noexcept {
+    AcquireSRWLockExclusive(&runtime::storage::g_stateLock);
+    AccountState& accountState = runtime::storage::g_state.account;
+    for (std::size_t index = 0; index < accountState.characterCount; ++index) {
+        accountState.characters[index].signInSeconds = seconds;
+    }
+    ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
+}
+
 /** @return Immutable generated BAP session fields. */
 const BapState& bap() noexcept {
     return runtime::storage::g_state.bap;
+}
+
+/** Generates one connection's own secure-channel material. */
+bool new_bap_session(BapState& output) noexcept {
+    output = {};
+    if (!randomize(output.nonce) || !randomize(output.sessionKey)
+        || !randomize(output.envelopeIv)) {
+        output = {};
+        return false;
+    }
+    return true;
 }
 
 /** @return A copy of the evaluated content state, read under the lock. */

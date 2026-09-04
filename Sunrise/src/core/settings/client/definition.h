@@ -25,16 +25,23 @@ struct Settings {
      */
     bool fadeRelease{true};
     /**
-     * Forces the activity session's status 5-to-6 ready check.
-     * Two of its five terms are client flags no host message reaches, so the host cannot open it.
-     */
-    bool forceJoinRequestReady{true};
-    /**
      * Reports a public region as private to the region transition.
      * On, a public region loads solo. Off, it waits for a public activity host, which is the
      * route to the citizen join. A forced destination loads solo either way.
      */
     bool regionPrivate{false};
+    /**
+     * Answers the orbit destination hold as released without calling the game's predicate.
+     * The predicate waits for an armed destination or a starting cinematic, so skipping it
+     * suppresses the orbit-side entry cinematic.
+     */
+    bool skipOrbitCinematicWait{false};
+    /**
+     * Forces the peer channel to connect directly instead of through a NAT relay.
+     * The stock client always relays the gameplay peer channel, which cannot complete against a
+     * loopback host with no relay server. On by default; a client stand-in for the peer relay.
+     */
+    bool suppressPeerRelay{true};
     /**
      * Pins the participation record to the replicated snapshot at `comp + 496`.
      * Off, the record is the local one at `comp + 1256`, whose spawn-gate byte no wire field

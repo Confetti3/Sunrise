@@ -55,13 +55,13 @@ using ReleaseChannel = std::int64_t(__fastcall*)(void*, std::uint32_t*, float*, 
 
 void* g_manager{nullptr};
 std::atomic<ReleaseChannel> g_release{nullptr};
-std::atomic_bool g_logged{false};
+std::atomic_bool g_released{false};
 
 } // namespace
 
-/** Re-arms the one line the release logs, so the next load reports its own. */
+/** Re-arms the release, so the next world load fades in once and logs its own line. */
 void rearm_fade_release() noexcept {
-    g_logged.store(false, std::memory_order_release);
+    g_released.store(false, std::memory_order_release);
 }
 
 /** Releases the world-transition fade channel. The spawn gate decides when. */
@@ -70,12 +70,15 @@ void release_world_fade() noexcept {
     if (release == nullptr || g_manager == nullptr || !core::settings::get().client.fadeRelease) {
         return;
     }
+    // Fire once per arming. The spawn gate polls this every frame while the player is arriving, and
+    // restarting the blend each frame re-slams the channel to black, which reads as flicker. The
+    // off-destination step re-arms it through `rearm_fade_release`.
+    if (g_released.exchange(true, std::memory_order_relaxed)) {
+        return;
+    }
     std::uint32_t channel = kWorldTransitionChannel;
     std::array<float, 4> colour = kOpaqueBlack;
     (void)release(g_manager, &channel, colour.data(), kFadeInSeconds);
-    if (g_logged.exchange(true, std::memory_order_relaxed)) {
-        return;
-    }
     std::array<char, kLineCapacity> line{};
     const int written = std::snprintf(line.data(),
                                       line.size(),
@@ -113,7 +116,7 @@ bool install_fade_release() noexcept {
 void uninstall_fade_release() noexcept {
     g_release.store(nullptr, std::memory_order_release);
     g_manager = nullptr;
-    g_logged.store(false, std::memory_order_release);
+    g_released.store(false, std::memory_order_release);
 }
 
 } // namespace sunrise::client::hooks::bootflow

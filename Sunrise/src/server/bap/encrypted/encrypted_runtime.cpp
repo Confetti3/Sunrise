@@ -5,8 +5,12 @@
 #include <cstdio>
 
 #include "../../../core/logging/log.h"
+#include "../../../middleware/encoding/byte_order.h"
 #include "../../../middleware/secure_channel/runtime.h"
 #include "../../../state/runtime/runtime.h"
+#include "../../activity/host_runtime.h"
+#include "../activity_authority_query_owner.h"
+#include "../activity_authority_reset_owner.h"
 #include "../internal.h"
 #include "activity_transaction/activity_transaction_notifications.h"
 #include "bap_connection_publication.h"
@@ -25,6 +29,122 @@ namespace {
  */
 void clear_prefix(std::span<std::byte> buffer, std::size_t size) noexcept {
     SecureZeroMemory(buffer.data(), (std::min)(buffer.size(), size));
+}
+
+/** Appends one join only after its exact ActivityClient binding has committed and published. */
+void record_committed_join(Session& session, const ConnectionFields& fields) noexcept {
+    if (!fields.joinsActivity || !fields.joinIngress.prepared) {
+        return;
+    }
+    server::activity::host::ClientMessageInput input{};
+    input.binding = session.activity.session;
+    input.sourceGeneration = session.activity.bindingGeneration;
+    input.payloadFingerprint = fields.joinIngress.payloadFingerprint;
+    input.messageType = 3;
+    input.payloadBytes = fields.joinIngress.payloadBytes;
+    input.peerHeardMask = fields.joinIngress.peerHeardMask;
+    input.consumedBits = fields.joinIngress.consumedBits;
+    input.hasPayloadFingerprint = fields.joinIngress.hasPayloadFingerprint;
+    const std::uint64_t payloadBits =
+        static_cast<std::uint64_t>(input.payloadBytes) * middleware::encoding::kBitsPerByte;
+    input.status = payloadBits > input.consumedBits
+                       ? server::activity::host::ClientMessageStatus::prefixOnly
+                       : server::activity::host::ClientMessageStatus::decoded;
+    static_cast<void>(server::activity::host::record_client_message(input));
+}
+
+/** Queues one safe msg-22 after-image only after State and connection publication commit. */
+void submit_committed_client_state(const activity_message::ActivityPlan& plan,
+                                   const transactions::Publication& publication) noexcept {
+    // A committed msg 22 that changed nothing material is the client's settle report, sent once
+    // spawn-in completes. It carries no region, spawn or teleport delta, so the surface reads all
+    // three as absent, but it still arrives: the script needs it to time the opening line.
+    if (!plan.clientState.pending || !publication.clientState.committed) {
+        return;
+    }
+    server::activity::host::ClientStateChangeInput input{};
+    input.binding = plan.clientState.binding;
+    input.state = publication.clientState;
+    input.sourceGeneration = plan.clientState.sourceGeneration;
+    input.clientMessageSequence = plan.clientState.clientMessageSequence;
+    input.payloadBytes = plan.clientState.payloadBytes;
+    if (!server::activity::host::submit_client_state_change(input)) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::warn,
+                         "ev=activity stage=client_state_ingress result=refused");
+    }
+}
+
+/** Queues exact entity-slot demand only after its grant transaction commits. */
+void submit_committed_entity_slots_requested(const activity_message::ActivityPlan& plan) noexcept {
+    if (!plan.entitySlotsRequested.pending) {
+        return;
+    }
+    server::activity::host::EntitySlotsRequestedInput input{};
+    input.binding = plan.entitySlotsRequested.binding;
+    input.sourceGeneration = plan.entitySlotsRequested.sourceGeneration;
+    input.clientMessageSequence = plan.entitySlotsRequested.clientMessageSequence;
+    input.requestedCount = plan.entitySlotsRequested.requestedCount;
+    if (!server::activity::host::submit_entity_slots_requested(input)) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::warn,
+                         "ev=activity stage=entity_slots_requested result=refused");
+    }
+}
+
+/** Applies one query answer only after its authenticated service frame commits. */
+void submit_committed_authority_answer(Session& session,
+                                       const activity_message::ActivityPlan& plan) noexcept {
+    if (!plan.authorityQuery.pending
+        || plan.mutationDomain != activity_message::MutationDomain::authorityQuery) {
+        return;
+    }
+    const authority_query::AnswerStatus status =
+        authority_query::submit(session.activityAuthorityQuery,
+                                plan.authorityQuery.sourceGeneration,
+                                GetTickCount64(),
+                                plan.authorityQuery.answer);
+    if (status != authority_query::AnswerStatus::bubbleAccepted
+        && status != authority_query::AnswerStatus::complete) {
+        std::array<char, core::log::kLineCapacity> line{};
+        const int count =
+            std::snprintf(line.data(),
+                          line.size(),
+                          "ev=activity stage=authority_query result=refused status=%u",
+                          static_cast<unsigned>(status));
+        if (count > 0) {
+            core::log::write(core::log::Channel::server,
+                             core::log::Level::warn,
+                             {line.data(), static_cast<std::size_t>(count)});
+        }
+    }
+}
+
+/** Applies one reset acknowledgement only after its authenticated service frame commits. */
+void submit_committed_authority_reset(Session& session,
+                                      const activity_message::ActivityPlan& plan) noexcept {
+    if (!plan.authorityReset.pending
+        || plan.mutationDomain != activity_message::MutationDomain::authorityReset) {
+        return;
+    }
+    const authority_reset::AcknowledgementStatus status =
+        authority_reset::submit(session.activityAuthorityReset,
+                                plan.authorityReset.sourceGeneration,
+                                GetTickCount64(),
+                                plan.authorityReset.answer);
+    if (status != authority_reset::AcknowledgementStatus::complete) {
+        std::array<char, core::log::kLineCapacity> line{};
+        const int count =
+            std::snprintf(line.data(),
+                          line.size(),
+                          "ev=activity stage=authority_reset result=refused status=%u",
+                          static_cast<unsigned>(status));
+        if (count > 0) {
+            core::log::write(core::log::Channel::server,
+                             core::log::Level::warn,
+                             {line.data(), static_cast<std::size_t>(count)});
+        }
+    }
 }
 
 } // namespace
@@ -54,8 +174,7 @@ bool consume(Session& session,
     }
 
     std::size_t plaintextSize = 0;
-    const auto& bapState = state::bap();
-    if (!middleware::secure_channel::open_frame(bapState.sessionKey,
+    if (!middleware::secure_channel::open_frame(session.sessionKey,
                                                 session.receiveNonce,
                                                 outer.payload,
                                                 scratch.plaintext,
@@ -86,7 +205,7 @@ bool consume(Session& session,
         middleware::bap::parse_request_payload(std::span(scratch.plaintext).first(plaintextSize),
                                                middleware::bap::FrameType::encrypted,
                                                frame)
-        && routing::resolve(frame.messageId, route);
+        && routing::resolve(frame.serviceId, route);
     if (!handled) {
         core::log::write(core::log::Channel::server,
                          core::log::Level::warn,
@@ -99,15 +218,16 @@ bool consume(Session& session,
         && !body::process(route,
                           session.queuez,
                           session.activity,
+                          session.activityRosterDecode,
                           session.matchmakingContext,
                           frame.body,
                           scratch.responseBody,
                           responseBodySize,
                           outcome)) {
-        diagnostics::report_failure(frame.messageId, "body");
+        diagnostics::report_failure(frame.serviceId, "body");
         // A reply-mode service answers with an empty body instead of not at all. The Client
-        // matches only the head of its pending ring, so one unanswered request jams that ring for
-        // good and every later reply is rejected, which is worse than a thin reply.
+        // matches only the head of its pending ring. One unanswered request jams that ring for
+        // good, and every later reply is rejected, which is worse than a thin reply.
         clear_prefix(scratch.responseBody, responseBodySize);
         responseBodySize = 0;
         outcome = {};
@@ -117,12 +237,12 @@ bool consume(Session& session,
         handled = reply::encode(scratch,
                                 route,
                                 frame.taskId,
-                                bapState.sessionKey,
+                                session.sessionKey,
                                 session.sendNonce,
                                 std::span(scratch.responseBody).first(responseBodySize),
                                 framedSize);
         if (!handled) {
-            diagnostics::report_failure(frame.messageId, "encode");
+            diagnostics::report_failure(frame.serviceId, "encode");
         }
     }
     // Stage every requested frame and check for caller room before committing State or the nonce.
@@ -135,7 +255,7 @@ bool consume(Session& session,
         handled = queuez::stage_service_outcome(scratch,
                                                 session.queuez,
                                                 outcome,
-                                                bapState.sessionKey,
+                                                session.sessionKey,
                                                 nextSendNonce,
                                                 scratch.framed,
                                                 framedSize,
@@ -145,24 +265,24 @@ bool consume(Session& session,
             publishesQueuez = true;
         }
         if (!handled) {
-            diagnostics::report_failure(frame.messageId, "stage");
+            diagnostics::report_failure(frame.serviceId, "stage");
         }
     }
     const auto* activityPlan = transaction_if<activity_message::ActivityPlan>(outcome);
     if (handled && activityPlan != nullptr) {
         handled = route.responseMode == ResponseMode::uncorrelatedPush;
         if (!handled) {
-            diagnostics::report_failure(frame.messageId, "route");
+            diagnostics::report_failure(frame.serviceId, "route");
         } else if (!activity_transaction::stage_notifications(session,
                                                               scratch,
                                                               *activityPlan,
-                                                              bapState.sessionKey,
+                                                              session.sessionKey,
                                                               nextSendNonce,
                                                               scratch.framed,
                                                               framedSize)) {
             // The transaction still commits. A push that cannot be built is one lost message, and
             // dropping the commit with it would strand the client's reported state for the session.
-            diagnostics::report_failure(frame.messageId, "notify");
+            diagnostics::report_failure(frame.serviceId, "notify");
         }
     }
     const bool mutatesAccount =
@@ -170,6 +290,7 @@ bool consume(Session& session,
         || transaction_if<EquipmentSwapTransaction>(outcome) != nullptr
         || transaction_if<SocketPlugTransaction>(outcome) != nullptr
         || transaction_if<ItemStateTransaction>(outcome) != nullptr
+        || transaction_if<CurrentActivityTransaction>(outcome) != nullptr
         || transaction_if<ItemAcquisitionTransaction>(outcome) != nullptr
         || transaction_if<ProfileItemAcquisitionTransaction>(outcome) != nullptr
         || transaction_if<ItemDismantleTransaction>(outcome) != nullptr;
@@ -201,9 +322,13 @@ bool consume(Session& session,
     const ConnectionFields connection = connection_fields(outcome);
     if (handled && processesBody) {
         // State changes become visible only after every requested frame and caller byte fit.
-        handled = framedSize <= response.size() && transactions::commit(outcome, publication);
+        // A refused commit sends nothing, so the frame's own reason is the only record of why.
+        const bool fits = framedSize <= response.size();
+        const char* commitReason = "none";
+        handled = fits && transactions::commit(outcome, publication, commitReason);
         if (!handled) {
-            diagnostics::report_failure(frame.messageId, "commit");
+            diagnostics::report_failure(
+                frame.serviceId, "commit", fits ? commitReason : "frame_capacity");
         }
         if (handled) {
             std::copy_n(scratch.framed.begin(), framedSize, response.begin());
@@ -215,12 +340,23 @@ bool consume(Session& session,
             }
             arm_repushes(session, queuezPublication);
             publish_connection_fields(session, publication, connection);
+            record_committed_join(session, connection);
             // The caller copy is done, so what the staged roster body owes is settled here.
             push::activity::commit_staged_roster(session);
             commit_staged_advertisement(session);
-            // Any delivered activity notification resets the client's silence timer. Delay the
-            // fallback keepalive so this same request does not append a redundant second push.
-            if (activityPlan != nullptr && framedSize != 0) {
+            if (activityPlan != nullptr) {
+                submit_committed_client_state(*activityPlan, publication);
+                submit_committed_entity_slots_requested(*activityPlan);
+                submit_committed_authority_reset(session, *activityPlan);
+                submit_committed_authority_answer(session, *activityPlan);
+            }
+            // Any delivered activity notification resets the client's silence timer, so the
+            // fallback keepalive is delayed. A roster-only answer is excluded: it owes neither the
+            // global state nor the membership, and at once a second it would starve the keepalive.
+            const bool defersKeepalive =
+                activityPlan != nullptr && framedSize != 0
+                && activityPlan->delivery != activity_message::Delivery::rosterNotification;
+            if (defersKeepalive) {
                 session.activityKeepaliveDueTick = GetTickCount64() + kActivityKeepaliveIntervalMs;
             }
             session.accountMutationPublished = mutatesAccount;

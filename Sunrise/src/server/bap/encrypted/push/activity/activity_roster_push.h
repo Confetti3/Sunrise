@@ -8,6 +8,9 @@
 
 namespace sunrise::server::bap::encrypted::push::activity {
 
+struct EffectiveRegion;
+struct RefreshReport;
+
 /**
  * Appends one `sensor_auth_update` svc9 notification carrying the destination's roster.
  * Nothing is staged before the client's own patch epoch has arrived, because a body carrying a
@@ -18,16 +21,23 @@ namespace sunrise::server::bap::encrypted::push::activity {
  * @param nonce Local send nonce advanced only after the complete notification exists.
  * @param response Lock-owned complete-frame staging storage.
  * @param written Existing staged byte count, updated only after the notification exists.
- * @param burst True for a send on the loading cadence, which must not move the state byte.
+ * @param epoch Epoch from the message being answered, or null to use the connection's own.
+ * @param exactRegion Prepared transaction region to use before its State commit, or null.
+ * @param solicited True when this answers a client request, which forbids repeat suppression.
+ * @param refresh The message-18 refresh this answers, read before its commit, or null.
  * @return True when the roster is built and the type-5 frame encodes atomically.
  */
-[[nodiscard]] bool append_roster_notification(Session& session,
-                                              Scratch& scratch,
-                                              std::span<const std::byte, state::kAesKeySize> key,
-                                              std::array<std::byte, state::kBapNonceSize>& nonce,
-                                              std::span<std::byte> response,
-                                              std::size_t& written,
-                                              bool burst) noexcept;
+[[nodiscard]] bool append_roster_notification(
+    Session& session,
+    Scratch& scratch,
+    std::span<const std::byte, state::kAesKeySize> key,
+    std::array<std::byte, state::kBapNonceSize>& nonce,
+    std::span<std::byte> response,
+    std::size_t& written,
+    const middleware::bap::activity_message::patch_epoch::PatchEpoch* epoch = nullptr,
+    const EffectiveRegion* exactRegion = nullptr,
+    bool solicited = false,
+    const RefreshReport* refresh = nullptr) noexcept;
 
 /**
  * Settles a staged roster body that reached the caller.

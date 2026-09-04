@@ -16,12 +16,12 @@ inline constexpr std::size_t kEntityBatchCapacity = 1;
 inline constexpr std::uint16_t kMaximumEntitySlot = 0x1FFF;
 /** A token incarnation is the high four bits of the 17-bit wire token. */
 inline constexpr std::uint8_t kMaximumEntityIncarnation = 0x0F;
-/** An absent or non-byte raw bubble uses the 16-bit reset value. */
-inline constexpr std::uint16_t kNoRawBubble = 0xFFFF;
-/** Callback state is bounded to 256 bytes per baseline or update. */
-inline constexpr std::size_t kTypePayloadStateCapacity = 256;
+/** An absent or non-byte entity cell uses the 16-bit reset value. */
+inline constexpr std::uint16_t kNoEntityCell = 0xFFFF;
 /** One callback body is capped at 16,384 bits by host policy. */
 inline constexpr std::size_t kMaximumTypePayloadBits = 16'384;
+/** Callback state can retain one complete bounded body plus its typed mirror header. */
+inline constexpr std::size_t kTypePayloadStateCapacity = kMaximumTypePayloadBits / 8U + 16U;
 
 /** Record flags transported by the five explicit envelope bits. */
 enum EntityRecordFlag : std::uint16_t {
@@ -65,9 +65,9 @@ struct EntityRecord {
     EntityToken anchor{};
     TypePayload baseline{};
     TypePayload update{};
-    std::uint16_t rawBubble{kNoRawBubble};
+    std::uint16_t cell{kNoEntityCell};
     std::uint16_t flags{};
-    std::uint8_t lifecycleRevision{};
+    std::uint8_t allocationSequence{};
     EntityType type{EntityType::sobject};
     bool anchorPresent{};
     bool trailingState{};
@@ -75,8 +75,10 @@ struct EntityRecord {
 
 /** One bounded channel-2 batch. */
 struct EntityBatch {
+    std::array<EntityToken, kEntityBatchCapacity> auxiliaryTokens{};
     EntityRecord record{};
-    std::uint16_t defaultRawBubble{kNoRawBubble};
+    std::uint16_t currentCell{kNoEntityCell};
+    std::uint8_t auxiliaryCount{};
     bool recordPresent{};
 };
 
@@ -85,19 +87,21 @@ using ResolveEntityType = bool (*)(const void* context,
                                    const EntityToken& token,
                                    EntityType& output) noexcept;
 
-/** Reads one callback-owned baseline or update body. */
+/** Reads one callback-owned body with its same-record baseline when available. */
 using ReadTypePayload = bool (*)(const void* context,
                                  const EntityToken& token,
                                  EntityType type,
                                  TypePayloadPart part,
+                                 const TypePayload* baseline,
                                  encoding::bits::Reader& reader,
                                  TypePayload& output) noexcept;
 
-/** Writes one callback-owned baseline or update body. */
+/** Writes one callback-owned body with its same-record baseline when available. */
 using WriteTypePayload = bool (*)(const void* context,
                                   const EntityToken& token,
                                   EntityType type,
                                   TypePayloadPart part,
+                                  const TypePayload* baseline,
                                   const TypePayload& payload,
                                   encoding::bits::Writer& writer) noexcept;
 

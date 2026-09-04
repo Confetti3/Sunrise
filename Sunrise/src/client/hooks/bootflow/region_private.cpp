@@ -129,9 +129,8 @@ __declspec(noinline) bool __fastcall reader(std::uint32_t sliceSet) noexcept {
     if (caller != g_returnSite.load(std::memory_order_acquire)) {
         return true;
     }
-    // No public host serves a forced destination, so that run waits forever. It must load solo.
-    const bool forced =
-        core::settings::get().client.regionPrivate || state::activity::forced::override_active();
+    const core::settings::Settings& settings = core::settings::get();
+    const bool forced = settings.client.regionPrivate || state::activity::forced::override_active();
     report(sliceSet, forced);
     return !forced;
 }

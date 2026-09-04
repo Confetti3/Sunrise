@@ -35,6 +35,8 @@ struct Listener {
     bool winsockOwned{};
     SOCKET acceptor{INVALID_SOCKET};
     std::uint64_t nextPollTick{};
+    /** Set while every slot is taken, so the refusal is reported once and not every poll. */
+    bool slotsFull{};
     std::array<Peer, client::network::kBapConnectionCount> peers{};
 };
 

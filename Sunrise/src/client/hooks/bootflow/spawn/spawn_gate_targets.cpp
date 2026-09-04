@@ -1,3 +1,4 @@
+#include <atomic>
 #include <cstddef>
 
 #include "../../../patterns/image_scan.h"
@@ -12,6 +13,13 @@ constexpr std::byte kCallOpcode{0xE8};
 /** Length of a near call, and the offset of its displacement. */
 constexpr std::size_t kCallLength = 5;
 constexpr std::size_t kCallOperand = 1;
+/** Largest index accepted by the client's own slice-set-to-bubble mapper. */
+constexpr std::int32_t kMaximumSliceSet = 0x1FF;
+
+std::atomic<NoArgPointer> g_sliceSetManager{nullptr};
+std::atomic<PointerPredicate> g_worldPresent{nullptr};
+std::atomic<SliceSetIndexGetter> g_currentSliceSet{nullptr};
+std::atomic<PointerPredicate> g_sliceSetAddressable{nullptr};
 
 /**
  * Byte offsets of each predicate's call, from the gate's own base, in gate order.
@@ -73,6 +81,10 @@ struct Site {
 /** Finds the gate's own predicates from the call operands inside it. */
 bool resolve(const std::byte* gate) noexcept {
     g_ready.store(false, std::memory_order_release);
+    g_sliceSetManager.store(nullptr, std::memory_order_release);
+    g_worldPresent.store(nullptr, std::memory_order_release);
+    g_currentSliceSet.store(nullptr, std::memory_order_release);
+    g_sliceSetAddressable.store(nullptr, std::memory_order_release);
     if (gate == nullptr) {
         return false;
     }
@@ -98,6 +110,10 @@ bool resolve(const std::byte* gate) noexcept {
         return false;
     }
     g_calls = calls;
+    g_sliceSetManager.store(calls.sliceSetManager, std::memory_order_release);
+    g_worldPresent.store(calls.worldPresent, std::memory_order_release);
+    g_currentSliceSet.store(calls.currentSliceSet, std::memory_order_release);
+    g_sliceSetAddressable.store(calls.sliceSetAddressable, std::memory_order_release);
     g_ready.store(true, std::memory_order_release);
     return true;
 }
@@ -105,7 +121,30 @@ bool resolve(const std::byte* gate) noexcept {
 /** Clears the predicates it found. */
 void forget() noexcept {
     g_ready.store(false, std::memory_order_release);
+    g_sliceSetAddressable.store(nullptr, std::memory_order_release);
+    g_currentSliceSet.store(nullptr, std::memory_order_release);
+    g_worldPresent.store(nullptr, std::memory_order_release);
+    g_sliceSetManager.store(nullptr, std::memory_order_release);
     g_calls = {};
+}
+
+/** Reads the client's current local slice-set index through the spawn gate's own calls. */
+std::int32_t sample_current_slice_set() noexcept {
+    const NoArgPointer managerGetter = g_sliceSetManager.load(std::memory_order_acquire);
+    const PointerPredicate worldPresent = g_worldPresent.load(std::memory_order_acquire);
+    const SliceSetIndexGetter current = g_currentSliceSet.load(std::memory_order_acquire);
+    const PointerPredicate addressable = g_sliceSetAddressable.load(std::memory_order_acquire);
+    if (managerGetter == nullptr || worldPresent == nullptr || current == nullptr
+        || addressable == nullptr) {
+        return -2;
+    }
+    void* const manager = managerGetter();
+    if (!worldPresent(manager)) {
+        return -1;
+    }
+    std::int32_t index = -1;
+    void* const sliceSet = current(manager, &index);
+    return addressable(sliceSet) && index >= 0 && index <= kMaximumSliceSet ? index : -1;
 }
 
 } // namespace sunrise::client::hooks::bootflow::spawn

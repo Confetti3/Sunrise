@@ -59,6 +59,9 @@ bool read_player_add(bits::Reader& reader, PlayerAddRequest& output) noexcept {
     }
     candidate.sequence = static_cast<std::uint32_t>(sequence);
     candidate.kind = static_cast<std::uint8_t>(kind);
+    // The identity fields above are the whole request. A block this reader cannot walk leaves the
+    // soids absent rather than refusing the add.
+    (void)read_player_block_soids(reader, candidate.soids);
     output = candidate;
     return true;
 }

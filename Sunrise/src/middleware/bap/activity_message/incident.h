@@ -43,6 +43,13 @@ inline constexpr std::uint32_t kPayloadMaximum = 500;
 inline constexpr std::size_t kMinimumBodyBits = kTargetWidth + kExtraCountWidth
                                                 + kSelectorPresenceWidth + kOptionalPresenceWidth
                                                 + kPayloadLengthWidth;
+/** Largest body after every explicit target and optional byte field is present. */
+inline constexpr std::size_t kMaximumBodyBits =
+    kTargetWidth + kExtraCountWidth + kExtraTargetMaximum * kTargetWidth + kSelectorPresenceWidth
+    + kSelectorLengthWidth + kSelectorMaximum * 8 + kOptionalPresenceWidth + kOptionalFieldWidth
+    + kPayloadLengthWidth + kPayloadMaximum * 8;
+/** Fixed byte capacity needed by the largest padded incident body. */
+inline constexpr std::size_t kMaximumBodyBytes = (kMaximumBodyBits + 7) / 8;
 
 /** Why one incident did not pass validation. */
 enum class Verdict : std::uint8_t {
@@ -61,7 +68,7 @@ enum class Verdict : std::uint8_t {
     selectorTooLong,
 };
 
-/** One validated incident, framed to the end of its payload. */
+/** One outer-valid incident, framed to the end of its payload. */
 struct Incident {
     std::array<std::byte, kSelectorMaximum> selector{};
     std::array<std::byte, kPayloadMaximum> payload{};
@@ -86,6 +93,9 @@ struct Incident {
 /** @return A short stable name for one verdict, for the log line. */
 [[nodiscard]] const char* verdict_name(Verdict verdict) noexcept;
 
+/** @return True when every outer wire field is bounded; payload semantics are not checked. */
+[[nodiscard]] bool outer_valid(const Incident& incident) noexcept;
+
 /**
  * Validates one incident body from its first target to the end of its payload.
  * Every target index is range and poison checked before anything else, because an out-of-range
@@ -97,8 +107,8 @@ struct Incident {
 [[nodiscard]] Verdict validate(std::span<const std::byte> payload, Incident& parsed) noexcept;
 
 /**
- * Writes one bounded incident body after a complete semantic preflight.
- * TODO: no sender yet. The outbound gameplay-event route has to open before this is called.
+ * Writes one bounded incident body after outer-field preflight.
+ * The caller still owns activity identity, output ordering, nonce commit and transport staging.
  */
 [[nodiscard]] bool write(encoding::bits::Writer& writer, const Incident& incident) noexcept;
 

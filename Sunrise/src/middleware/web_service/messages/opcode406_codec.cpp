@@ -1,5 +1,4 @@
 #include <cstddef>
-#include <limits>
 
 #include "../../encoding/bit_reader.h"
 #include "opcode406.h"
@@ -43,20 +42,14 @@ bool parse_request(const Message& message, Request& request) noexcept {
 
     // Whatever the read reached is kept, so a refused request still describes itself.
     request.instanceSoid = instanceSoid;
-    if (definitionIndex <= (std::numeric_limits<std::uint16_t>::max)()) {
-        request.definitionIndex = static_cast<std::uint16_t>(definitionIndex);
-    }
+    request.definitionIndex = static_cast<std::uint16_t>(definitionIndex);
     if (encodedFlags >= kValueBias) {
         request.flags = static_cast<std::uint32_t>(encodedFlags - kValueBias);
     }
 
-    if (!read || instancePresent == 0 || instanceSoid == 0 || definitionPresent == 0
-        || definitionIndex > (std::numeric_limits<std::uint16_t>::max)()
-        || encodedFlags < kValueBias || padding != 0
-        || encodedFlags - kValueBias > kSupportedStateBits) {
-        return false;
-    }
-    return true;
+    return read && instancePresent != 0 && instanceSoid != 0 && definitionPresent != 0
+           && encodedFlags >= kValueBias && padding == 0
+           && encodedFlags - kValueBias <= kSupportedStateBits;
 }
 
 } // namespace sunrise::middleware::web_service::messages::opcode406

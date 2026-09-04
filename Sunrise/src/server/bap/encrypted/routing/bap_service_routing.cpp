@@ -105,6 +105,12 @@ bool resolve(std::uint16_t request, ServiceRoute& route) noexcept {
                  BodyCodec::empty,
                  "ev=bap svc=48 rsp=49 result=ok"};
         return true;
+    case middleware::bap::RequestService::request50:
+        route = {ResponseMode::reply,
+                 middleware::bap::ResponseService::response51,
+                 BodyCodec::empty,
+                 "ev=bap svc=50 rsp=51 result=ok"};
+        return true;
     case middleware::bap::RequestService::matchmaking:
         route = {ResponseMode::reply,
                  middleware::bap::ResponseService::matchmaking,

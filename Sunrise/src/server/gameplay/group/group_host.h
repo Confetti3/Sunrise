@@ -13,15 +13,12 @@ namespace sunrise::server::gameplay::group {
  * Consumes one group-session message.
  * False leaves the reader part way through the body, so the caller must stop.
  * @param from Peer endpoint in host order.
- * @param sessionId Fallback for a message that names no session, or zero when the link carries
- *                  several. Every session-scoped message names its own and uses that instead.
  * @param id Registry message id.
  * @param reader Reader positioned at the message body.
  * @param now Monotonic tick count in milliseconds.
  * @return True when the body was decoded and the container may continue.
  */
 [[nodiscard]] bool consume(const state::gameplay::Endpoint& from,
-                           std::uint64_t sessionId,
                            std::uint8_t id,
                            middleware::encoding::bits::Reader& reader,
                            std::uint64_t now) noexcept;
@@ -32,11 +29,13 @@ namespace sunrise::server::gameplay::group {
  * it only while the state replica behind its hash is byte exact.
  * @param peer Endpoint of the admitted peer, in host order.
  * @param peerJoinId Join id the peer's join request carried. Its entry has to echo it.
+ * @param peerMachineId Machine id from the peer's own row of the request, or zero when absent.
  * @param sessionId Group-session id the peer named, which its parameter updates have to echo.
  * @return True when the snapshot was queued on the peer's reliable channel.
  */
 [[nodiscard]] bool publish_membership(const state::gameplay::Endpoint& peer,
                                       std::uint64_t peerJoinId,
+                                      std::uint64_t peerMachineId,
                                       std::uint64_t sessionId) noexcept;
 
 /** One admitted peer's group session and how far its join has got. */
@@ -49,8 +48,6 @@ struct AdmittedRow {
     bool activityHostPublished{};
     /** Set once the peer has asked this host to add a player. */
     bool hasPlayer{};
-    /** Set once a snapshot naming the peer's player is on that channel. */
-    bool playerPublished{};
     /** Join id the peer chose for itself. It is the only member identity this table carries. */
     std::uint64_t joinId{};
 };
@@ -59,9 +56,8 @@ struct AdmittedRow {
 void snapshot_admitted(std::span<AdmittedRow> output, std::size_t& count) noexcept;
 
 /**
- * Retries any publish the reliable queue refused, on a timer.
- * The queue is fullest while the join promotion and the `activity-host` parameter are owed, so
- * both track what was queued and not what was asked for.
+ * Sends the `activity-host` parameter a full reliable queue refused, and retires a stale record.
+ * Every other publish answers a message the peer sends again, so nothing else is owed from here.
  * @param now Monotonic tick count in milliseconds.
  */
 void service(std::uint64_t now) noexcept;
@@ -81,6 +77,15 @@ void service(std::uint64_t now) noexcept;
  * @return True only once a compatible view is bound.
  */
 [[nodiscard]] bool view_accepted(std::uint64_t sessionId) noexcept;
+
+/**
+ * Checks that one endpoint owns the admitted row for a group session.
+ * @param endpoint Peer endpoint in host order.
+ * @param sessionId Group session named by the peer message.
+ * @return True only when that exact endpoint owns the row.
+ */
+[[nodiscard]] bool admitted_owner(const state::gameplay::Endpoint& endpoint,
+                                  std::uint64_t sessionId) noexcept;
 
 /**
  * Frees every admitted record at one endpoint.

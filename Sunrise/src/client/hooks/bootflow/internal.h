@@ -55,16 +55,6 @@ void uninstall_composition_check() noexcept;
 void uninstall_orbit_handoff() noexcept;
 
 /**
- * Attaches the join-request readiness force, which moves the activity session to status 6.
- * Two of the gate's five terms are client flags with no host input.
- * @return True when the target is found and the detour attaches.
- */
-[[nodiscard]] bool install_join_request_ready() noexcept;
-
-/** Detaches the join-request readiness force. */
-void uninstall_join_request_ready() noexcept;
-
-/**
  * Attaches the owner activity slot force. It pins the participation record to the replicated
  * snapshot at `comp + 496` instead of the local one at `comp + 1256`.
  * @return True when the target is found and the detour attaches.

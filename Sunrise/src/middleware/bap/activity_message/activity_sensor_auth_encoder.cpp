@@ -1,5 +1,5 @@
-#include <algorithm>
-
+#include "../../encoding/bit_reader.h"
+#include "scriptable_auth_body.h"
 #include "sensor_auth_update.h"
 
 namespace sunrise::middleware::bap::activity_message::sensor_auth_update {
@@ -12,6 +12,11 @@ constexpr std::uint8_t kSlotTypeParticipation = 13;
 /** The participation region rides a signed field, so this is the widest index it accepts. */
 constexpr std::uint32_t kMaximumRegion = 0x7FFFFFFF;
 
+/** @return True when the packed counts and body width close one complete type-43 shape. */
+/**
+ * @return True when an SDK-compiled body has one exact, non-truncated physical extent.
+ * This arm pins no slot type and no schema, so it refuses every slot type with a faulting lane.
+ */
 /**
  * Checks the per-bubble sub-blocks against what the client's own arrays hold.
  * An empty sub-block would publish a zero count and a zero mask, which registers nothing and
@@ -36,6 +41,70 @@ constexpr std::uint32_t kMaximumRegion = 0x7FFFFFFF;
                 return false;
             }
         }
+        for (std::size_t key = 0; key < block.keys.size(); ++key) {
+            for (std::size_t earlier = 0; earlier < key; ++earlier) {
+                if (block.keys[earlier] == block.keys[key]) {
+                    return false;
+                }
+            }
+        }
+    }
+    return true;
+}
+
+/** Adds one active group's records without crossing the client's fixed record pool. */
+[[nodiscard]] bool add_client_records(std::size_t slots, std::size_t& total) noexcept {
+    if (total > kClientRecordCapacity || slots > kClientRecordCapacity - total) {
+        return false;
+    }
+    total += slots;
+    return true;
+}
+
+/**
+ * Checks every possible manager set: the ungated top-level groups plus one bubble sub-block.
+ * Inactive bubble groups share snapshot storage but never share ClientRef manager capacity.
+ */
+[[nodiscard]] bool valid_client_sets(const Roster& roster) noexcept {
+    if (roster.topLevelGroupCount > kClientGroupCapacity) {
+        return false;
+    }
+    std::size_t topLevelRecords = 0;
+    for (std::size_t index = 0; index < roster.topLevelGroupCount; ++index) {
+        if (!add_client_records(roster.groups[index].slotTypes.size(), topLevelRecords)) {
+            return false;
+        }
+    }
+    std::array<bool, kPublishedGroupCapacity> referenced{};
+    for (const BubbleSubBlock& block : roster.bubbleSubBlocks) {
+        if (block.keys.size() > kClientGroupCapacity - roster.topLevelGroupCount) {
+            return false;
+        }
+        std::size_t activeRecords = topLevelRecords;
+        for (const std::uint32_t key : block.keys) {
+            std::size_t matched = roster.groupCount;
+            for (std::size_t index = roster.topLevelGroupCount; index < roster.groupCount;
+                 ++index) {
+                const Group& group = roster.groups[index];
+                if (group.key != key) {
+                    continue;
+                }
+                if (matched != roster.groupCount) {
+                    return false;
+                }
+                matched = index;
+            }
+            if (matched == roster.groupCount
+                || !add_client_records(roster.groups[matched].slotTypes.size(), activeRecords)) {
+                return false;
+            }
+            referenced[matched] = true;
+        }
+    }
+    for (std::size_t index = roster.topLevelGroupCount; index < roster.groupCount; ++index) {
+        if (!referenced[index]) {
+            return false;
+        }
     }
     return true;
 }
@@ -46,8 +115,7 @@ constexpr std::uint32_t kMaximumRegion = 0x7FFFFFFF;
  * @return True when every scalar fits its field.
  */
 [[nodiscard]] bool valid(const Snapshot& snapshot) noexcept {
-    if (std::find(kLifetimeStates.begin(), kLifetimeStates.end(), snapshot.lifetime)
-        == kLifetimeStates.end()) {
+    if (snapshot.lifetime > kMaximumLifetimeState) {
         return false;
     }
     if (snapshot.hasRegion && snapshot.region > kMaximumRegion) {
@@ -58,6 +126,9 @@ constexpr std::uint32_t kMaximumRegion = 0x7FFFFFFF;
             || snapshot.spawnSetHash == kAbsentSpawnSetHash)) {
         return false;
     }
+    if (snapshot.stateSequence > kMaximumStateSequence) {
+        return false;
+    }
     // The grant is a change, not a value: the client compares it against a mirror that starts at
     // zero, so a token of zero grants nothing.
     if (snapshot.hasGrant
@@ -65,15 +136,24 @@ constexpr std::uint32_t kMaximumRegion = 0x7FFFFFFF;
             || snapshot.grant.token < kMinimumGrantToken)) {
         return false;
     }
-    if (snapshot.roster.groupCount > kGroupCapacity
-        || snapshot.roster.topLevelGroupCount > snapshot.roster.groupCount) {
+    if (snapshot.roster.groupCount > kPublishedGroupCapacity
+        || snapshot.roster.topLevelGroupCount > snapshot.roster.groupCount
+        || snapshot.roster.topLevelGroupCount > kTopLevelGroupCapacity
+        || snapshot.authOverrides.size() > kAuthOverrideCapacity
+        || !valid_sub_blocks(snapshot.roster.bubbleSubBlocks)) {
         return false;
     }
     for (std::size_t group = 0; group < snapshot.roster.groupCount; ++group) {
         const Group& row = snapshot.roster.groups[group];
         if (row.slotTypes.size() != row.slotFlags.size()
-            || row.slotTypes.size() != row.slotIndices.size() || row.slotTypes.empty()) {
+            || row.slotTypes.size() != row.slotIndices.size() || row.slotTypes.empty()
+            || (row.hasStateSequence && row.stateSequence > kMaximumStateSequence)) {
             return false;
+        }
+        for (std::size_t earlier = 0; earlier < group; ++earlier) {
+            if (snapshot.roster.groups[earlier].key == row.key) {
+                return false;
+            }
         }
         // An index past the field's range wraps into another slot's, which seeds the wrong
         // object rather than refusing.
@@ -83,7 +163,42 @@ constexpr std::uint32_t kMaximumRegion = 0x7FFFFFFF;
             }
         }
     }
-    return valid_sub_blocks(snapshot.roster.bubbleSubBlocks);
+    for (std::size_t index = 0; index < snapshot.authOverrides.size(); ++index) {
+        const AuthOverride& value = snapshot.authOverrides[index];
+        const std::size_t requiredBytes = (value.bitCount + 7U) / 8U;
+        // A body's shape is not re-derived here: its own encoder owns it, and a second copy of
+        // that sum drifted once and refused every squad body Sunrise sent. Only the row's own
+        // consistency is checked, which no encoder owns.
+        if (!value.present || value.byteCount != requiredBytes
+            || requiredBytes > value.body.size()) {
+            return false;
+        }
+        for (std::size_t earlier = 0; earlier < index; ++earlier) {
+            const AuthOverride& prior = snapshot.authOverrides[earlier];
+            if (prior.objectTag == value.objectTag && prior.key == value.key
+                && prior.slotType == value.slotType && prior.slotIndex == value.slotIndex) {
+                return false;
+            }
+        }
+        std::size_t matches = 0;
+        for (std::size_t group = 0; group < snapshot.roster.groupCount; ++group) {
+            const Group& row = snapshot.roster.groups[group];
+            if (row.objectTag != value.objectTag || row.key != value.key) {
+                continue;
+            }
+            for (std::size_t slot = 0; slot < row.slotTypes.size(); ++slot) {
+                if (row.slotTypes[slot] == value.slotType
+                    && row.slotIndices[slot] == value.slotIndex
+                    && (row.slotFlags[slot] & kSlotAuthFlag) != 0) {
+                    ++matches;
+                }
+            }
+        }
+        if (matches != 1) {
+            return false;
+        }
+    }
+    return valid_client_sets(snapshot.roster);
 }
 
 /**
@@ -111,10 +226,12 @@ constexpr std::uint32_t kMaximumRegion = 0x7FFFFFFF;
             keyPlaced = keyPlaced || carriesPlayerKey;
             encoded = write_object_block(writer,
                                          snapshot,
+                                         row.objectTag,
                                          row.key,
                                          slotType,
                                          row.slotIndices[slot],
                                          row.slotFlags[slot],
+                                         row.missionSeedOnly,
                                          carriesPlayerKey);
         }
         encoded = encoded && writer.write(0, kPresenceWidth);

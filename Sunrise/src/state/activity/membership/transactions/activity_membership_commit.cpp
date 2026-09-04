@@ -56,26 +56,33 @@ namespace {
 }
 
 /**
- * Checks one read-only refresh plan against current State.
+ * Checks one refresh plan against current State and keeps the bubble it named.
  * @param record Target joined session record.
  * @param prepared Refresh plan, consumed here.
  * @return True when the request guard and snapshot still match.
  */
-[[nodiscard]] bool commit_refresh(const SessionRecord& record,
-                                  const PendingMutation& prepared) noexcept {
+[[nodiscard]] bool commit_refresh(SessionRecord& record, const PendingMutation& prepared) noexcept {
     if (prepared.refreshRequestGuard
         != transactions::refresh_guard(prepared.requestedRevision, prepared.bubbleIndex)) {
         return false;
     }
-    if (!record.membership.hasIdentity) {
-        return !prepared.hasSnapshot;
-    }
-    if (!prepared.hasSnapshot) {
+    if (record.membership.hasIdentity) {
+        if (!prepared.hasSnapshot) {
+            return false;
+        }
+        const Snapshot expected = transactions::make_snapshot(
+            record.membership, record.membership.identity, record.membership.revision);
+        if (!transactions::equal(prepared.snapshot, expected)) {
+            return false;
+        }
+    } else if (prepared.hasSnapshot) {
         return false;
     }
-    const Snapshot expected = transactions::make_snapshot(
-        record.membership, record.membership.identity, record.membership.revision);
-    return transactions::equal(prepared.snapshot, expected);
+    // The bubble is the client saying which slice set it holds. It is not a published field, so
+    // no revision moves.
+    record.membership.bubble = prepared.bubbleIndex;
+    record.membership.bubbleRevision = prepared.requestedRevision;
+    return true;
 }
 
 /** Applies one prepared revision advance to the exact current membership snapshot. */
@@ -119,8 +126,11 @@ namespace {
 
 } // namespace
 
-/** Commits one identity, authoritative, refresh, or acknowledgement operation. */
-bool commit(PendingMutation& mutation) noexcept {
+/** Commits one identity, client-state, refresh, or acknowledgement operation. */
+bool commit(PendingMutation& mutation, CommittedClientState* clientState) noexcept {
+    if (clientState != nullptr) {
+        *clientState = {};
+    }
     const PendingMutation prepared = mutation;
     mutation = {};
     if (!prepared.prepared || prepared.kind == MutationKind::none
@@ -143,7 +153,11 @@ bool commit(PendingMutation& mutation) noexcept {
     if (committed && prepared.kind == MutationKind::identity) {
         committed = commit_identity(state, record, prepared);
     } else if (committed && prepared.kind == MutationKind::authoritative) {
-        committed = transactions::commit_authoritative(state, record, prepared);
+        CommittedClientState after{};
+        committed = transactions::commit_authoritative(state, record, prepared, after);
+        if (committed && clientState != nullptr) {
+            *clientState = after;
+        }
     } else if (committed && prepared.kind == MutationKind::refresh) {
         committed = commit_refresh(record, prepared);
     } else if (committed && prepared.kind == MutationKind::republish) {

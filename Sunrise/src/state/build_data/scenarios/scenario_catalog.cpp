@@ -15,35 +15,6 @@ Table<RosterGroup, kRosterGroupCapacity> g_groups;
     return {definition.name.data(), definition.nameLength};
 }
 
-/** @param group Candidate roster group. @return True when every field is canonical. */
-[[nodiscard]] bool canonical(const RosterGroup& group) noexcept {
-    if (group.registryKey == 0 || group.slotCount == 0 || group.slotCount > kRosterSlotCapacity) {
-        return false;
-    }
-    for (std::size_t slot = 0; slot < kRosterSlotCapacity; ++slot) {
-        const bool declared = slot < group.slotCount;
-        if (declared
-            && (group.slotTypes[slot] == 0 || group.slotTypes[slot] > kMaximumSlotType
-                || (group.slotFlags[slot] & ~kSlotFlagMask) != 0
-                || group.slotIndices[slot] >= kRosterSlotCapacity)) {
-            return false;
-        }
-        // Indices are the slots' own, so they ascend but may skip. A repeat would seed one object
-        // twice and leave another unseeded, which holds the whole apply back.
-        if (declared && slot != 0 && group.slotIndices[slot] <= group.slotIndices[slot - 1]) {
-            return false;
-        }
-        // Storage past the declared count must stay zero, or two caches of the same packages
-        // could differ byte for byte while meaning the same thing.
-        if (!declared
-            && (group.slotTypes[slot] != 0 || group.slotFlags[slot] != 0
-                || group.slotIndices[slot] != 0)) {
-            return false;
-        }
-    }
-    return true;
-}
-
 /**
  * @param definition Candidate row.
  * @param groupCount Published roster group count.
@@ -123,14 +94,17 @@ bool valid(std::span<const Definition> definitions, std::span<const RosterGroup>
         return false;
     }
     for (std::size_t row = 0; row < groups.size(); ++row) {
-        if (!canonical(groups[row])) {
+        if (!valid_roster_group(groups[row])) {
             return false;
         }
     }
+    bool publishesRoster = definitions.empty();
     for (std::size_t row = 0; row < definitions.size(); ++row) {
         if (!canonical(definitions[row], groups.size())) {
             return false;
         }
+        publishesRoster = publishesRoster || definitions[row].rosterGroupCount != 0
+                          || definitions[row].bubbleGroupCount != 0;
         // A duplicate name would make the destination lookup depend on row order.
         for (std::size_t earlier = 0; earlier < row; ++earlier) {
             if (name_of(definitions[earlier]) == name_of(definitions[row])) {
@@ -138,7 +112,7 @@ bool valid(std::span<const Definition> definitions, std::span<const RosterGroup>
             }
         }
     }
-    return true;
+    return publishesRoster;
 }
 
 /** Replaces the extracted destination layouts and their roster groups in one step. */

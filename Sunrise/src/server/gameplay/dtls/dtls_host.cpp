@@ -1,4 +1,4 @@
-﻿#include "dtls_host.h"
+#include "dtls_host.h"
 
 #include <Windows.h>
 
@@ -73,10 +73,21 @@ std::atomic<unsigned> g_recordReported{0};
 
 std::array<Association, kAssociationCapacity> g_associations{};
 
-/** @return True when both endpoints name the same address and port. */
-[[nodiscard]] bool same_endpoint(const state::gameplay::Endpoint& left,
-                                 const state::gameplay::Endpoint& right) noexcept {
-    return left.address == right.address && left.port == right.port;
+/** @return True while the record report budget has room. Each call spends one. */
+[[nodiscard]] bool record_report_due() noexcept {
+    return g_recordReported.fetch_add(1, std::memory_order_relaxed) < kMaxRecordReports;
+}
+
+/** @return The association for one endpoint whose handshake is still open, or null. */
+[[nodiscard]] Association* find_handshake(const state::gameplay::Endpoint& from,
+                                          const wire::SecurityId& securityId) noexcept {
+    for (Association& association : g_associations) {
+        if (association.stage != Stage::absent && association.endpoint == from
+            && association.securityId == securityId) {
+            return &association;
+        }
+    }
+    return nullptr;
 }
 
 /**
@@ -90,14 +101,14 @@ std::array<Association, kAssociationCapacity> g_associations{};
 [[nodiscard]] Association* acquire(const state::gameplay::Endpoint& from,
                                    const wire::SecurityId& securityId,
                                    std::uint64_t now) noexcept {
+    // The peer restarts its own handshake on every retry, so its own id reuses the slot.
+    Association* const held = find_handshake(from, securityId);
+    if (held != nullptr) {
+        return held;
+    }
     Association* free = nullptr;
     Association* oldest = nullptr;
     for (Association& association : g_associations) {
-        if (association.stage != Stage::absent && same_endpoint(association.endpoint, from)
-            && association.securityId == securityId) {
-            // The peer restarts its own handshake on every retry, so its own id reuses the slot.
-            return &association;
-        }
         if (free == nullptr
             && (association.stage == Stage::absent
                 || (association.stage == Stage::cookieWait
@@ -122,7 +133,7 @@ std::array<Association, kAssociationCapacity> g_associations{};
 [[nodiscard]] Association* find_addressed(const state::gameplay::Endpoint& from,
                                           std::uint16_t tag) noexcept {
     for (Association& association : g_associations) {
-        if (association.stage == Stage::established && same_endpoint(association.endpoint, from)
+        if (association.stage == Stage::established && association.endpoint == from
             && association.responderTag == tag) {
             return &association;
         }
@@ -139,7 +150,7 @@ std::array<Association, kAssociationCapacity> g_associations{};
 [[nodiscard]] Association* find_sending(const state::gameplay::Endpoint& to) noexcept {
     Association* chosen = nullptr;
     for (Association& association : g_associations) {
-        if (association.stage != Stage::established || !same_endpoint(association.endpoint, to)) {
+        if (association.stage != Stage::established || association.endpoint != to) {
             continue;
         }
         // Both stamps start at zero, so a fresh association wins only until a record arrives.
@@ -151,25 +162,13 @@ std::array<Association, kAssociationCapacity> g_associations{};
     return chosen;
 }
 
-/** @return The association for one endpoint whose handshake is still open, or null. */
-[[nodiscard]] Association* find_handshake(const state::gameplay::Endpoint& from,
-                                          const wire::SecurityId& securityId) noexcept {
-    for (Association& association : g_associations) {
-        if (association.stage != Stage::absent && same_endpoint(association.endpoint, from)
-            && association.securityId == securityId) {
-            return &association;
-        }
-    }
-    return nullptr;
-}
-
 /**
  * Draws one nonzero 16-bit tag.
  * @param output Receives the tag only on success.
  * @return True when Windows produced the bytes.
  */
 [[nodiscard]] bool generate_tag(std::uint16_t& output) noexcept {
-    /** Bits in one byte. */
+    /** The two random bytes are folded low byte first. */
     constexpr unsigned kByteBits = 8;
     std::array<std::byte, sizeof(std::uint16_t)> bytes{};
     if (!middleware::crypto::random::fill(bytes)) {
@@ -326,7 +325,7 @@ void on_record(const state::gameplay::Endpoint& from,
     if (!association->authKnown) {
         if (!middleware::gameplay::dtls::identify_auth(
                 association->record.keys, datagram, association->record.authAlgorithm)) {
-            if (g_recordReported.fetch_add(1, std::memory_order_relaxed) < kMaxRecordReports) {
+            if (record_report_due()) {
                 report(core::log::Level::warn,
                        "ev=gameplay stage=dtls result=drop reason=auth_unknown bytes=%zu",
                        datagram.size());
@@ -343,7 +342,7 @@ void on_record(const state::gameplay::Endpoint& from,
     std::size_t size = 0;
     std::uint32_t sequence = 0;
     if (!middleware::gameplay::dtls::open(association->record, datagram, payload, size, sequence)) {
-        if (g_recordReported.fetch_add(1, std::memory_order_relaxed) < kMaxRecordReports) {
+        if (record_report_due()) {
             report(core::log::Level::warn,
                    "ev=gameplay stage=dtls result=drop reason=record bytes=%zu",
                    datagram.size());
@@ -352,7 +351,7 @@ void on_record(const state::gameplay::Endpoint& from,
     }
     const wire::ReplayDecision replay = wire::update(association->receiveHighWater, sequence);
     if (replay != wire::ReplayDecision::accepted) {
-        if (g_recordReported.fetch_add(1, std::memory_order_relaxed) < kMaxRecordReports) {
+        if (record_report_due()) {
             report(core::log::Level::warn,
                    "ev=gameplay stage=dtls result=drop reason=%s seq=%u",
                    replay == wire::ReplayDecision::duplicate ? "replay_duplicate" : "replay_old",
@@ -363,7 +362,7 @@ void on_record(const state::gameplay::Endpoint& from,
     association->touched = now;
     ++g_openClock;
     association->heard = g_openClock;
-    if (g_recordReported.fetch_add(1, std::memory_order_relaxed) < kMaxRecordReports) {
+    if (record_report_due()) {
         report(core::log::Level::info,
                "ev=gameplay stage=dtls result=ok step=record seq=%u bytes=%zu",
                sequence,

@@ -1,7 +1,9 @@
 /**
  * Boot-time repair of a settings file written against an older layout version. A member whose
  * value form changed cannot be read by the current parser, so the file would be refused and the
- * boot would end. Such a member is replaced with the bundled default before the parse.
+ * boot would end. Such a member is replaced with the bundled default before the parse. A member
+ * that only changed name is renamed in place, so its authored value survives. A member this build
+ * no longer reads is deleted, so the file stops carrying a key nothing acts on.
  */
 
 #include "settings_upgrade.h"
@@ -30,7 +32,7 @@ struct ReplacedMember {
  * Members replaced with the bundled default, each with the version that changed it.
  * A member is listed because its value form changed, or because its default changed.
  */
-constexpr std::array<ReplacedMember, 6> kReplacedMembers{{
+constexpr std::array<ReplacedMember, 9> kReplacedMembers{{
     {"\"key_bindings\"", 3},
     {"\"region_private\"", 5},
     {"\"topology\"", 5},
@@ -39,9 +41,48 @@ constexpr std::array<ReplacedMember, 6> kReplacedMembers{{
     // Version 8 turned the flat payout list into rows filtered by rarity, gear class and
     // masterwork state.
     {"\"dismantle_rewards\"", 8},
+    // Version 13 turned these three on. A file that never carried them takes the new default; one
+    // that carried the old value is corrected here.
+    {"\"lua_declarations\"", 13},
+    {"\"suppress_peer_relay\"", 13},
+    {"\"activity_public_membership\"", 13},
 }};
-/** One splice per replaced member, plus the version member itself. */
-constexpr std::size_t kSpliceCapacity = kReplacedMembers.size() + 1;
+
+/** One renamed member, and the layout version that renamed it. */
+struct RenamedMember {
+    /** Quoted old member name, so a value string cannot match it. */
+    std::string_view from;
+    /** Quoted new member name written in its place. */
+    std::string_view to;
+    /** Renamed only while the file is older than this version. */
+    std::uint32_t version;
+};
+
+/**
+ * Members renamed with their values kept, each with the version that renamed it.
+ * Only the key text is replaced, so an authored value survives the rename.
+ */
+constexpr std::array<RenamedMember, 1> kRenamedMembers{{
+    // Version 11 named the field for what it holds: the activity the client asked from.
+    {"\"previous_activity_index\"", "\"source_activity_index\"", 11},
+}};
+
+/** One removed member, and the layout version that removed it. */
+struct RemovedMember {
+    /** Quoted member name, so a value string cannot match it. */
+    std::string_view name;
+    /** Removed only while the file is older than this version. */
+    std::uint32_t version;
+};
+
+/** Members this build no longer reads, each with the version that removed it. */
+constexpr std::array<RemovedMember, 1> kRemovedMembers{{
+    {"\"force_join_request_ready\"", 12},
+}};
+
+/** One splice per replaced, renamed and removed member, plus the version member itself. */
+constexpr std::size_t kSpliceCapacity =
+    kReplacedMembers.size() + kRenamedMembers.size() + kRemovedMembers.size() + 1;
 /** Room for the version member and its digits when the file predates versioning. */
 constexpr std::size_t kVersionTextCapacity = 32;
 
@@ -152,6 +193,67 @@ struct Splice {
 }
 
 /**
+ * Finds one member's own name inside a document.
+ * @param text Document text.
+ * @param member Quoted member name.
+ * @param start Receives the opening quote.
+ * @param end Receives the byte after the closing quote.
+ * @return True when the member is present as a key.
+ */
+[[nodiscard]] bool name_span(std::string_view text,
+                             std::string_view member,
+                             std::size_t& start,
+                             std::size_t& end) noexcept {
+    const std::size_t found = text.find(member);
+    if (found == std::string_view::npos) {
+        return false;
+    }
+    const std::size_t after = text.find_first_not_of(" \t\r\n", found + member.size());
+    if (after == std::string_view::npos || text[after] != ':') {
+        return false;
+    }
+    start = found;
+    end = found + member.size();
+    return true;
+}
+
+/**
+ * Finds everything one member occupies, including the comma that joins it to a neighbour.
+ * The comma after the value goes with the member. When the member is last, the comma before it
+ * goes instead. Either way the object stays valid once the member is gone.
+ * @param text Document text.
+ * @param member Quoted member name.
+ * @param start Receives the first byte to drop.
+ * @param end Receives the byte after the last byte to drop.
+ * @return True when the member is present as a key with a value.
+ */
+[[nodiscard]] bool member_span(std::string_view text,
+                               std::string_view member,
+                               std::size_t& start,
+                               std::size_t& end) noexcept {
+    std::size_t nameStart = 0;
+    std::size_t nameEnd = 0;
+    if (!name_span(text, member, nameStart, nameEnd) || !value_span(text, member, start, end)) {
+        return false;
+    }
+    const std::string_view blanks = " \t\r\n";
+    start = nameStart;
+    while (start > 0 && blanks.find(text[start - 1]) != std::string_view::npos) {
+        --start;
+    }
+    const std::size_t next = text.find_first_not_of(blanks, end);
+    if (next != std::string_view::npos && text[next] == ',') {
+        end = next + 1;
+        return true;
+    }
+    // A last member takes the comma before it, or the object keeps a trailing one.
+    if (start > 0 && text[start - 1] == ',') {
+        --start;
+    }
+    return true;
+}
+
+/**
  * Reads the layout version a document was written against.
  * @param document Document text.
  * @return The version, or zero when the member is absent or unreadable.
@@ -231,6 +333,22 @@ bool apply(std::string_view document,
         }
         splices[count++] = {
             start, end, bundled.substr(replacementStart, replacementEnd - replacementStart)};
+    }
+
+    for (const RenamedMember& member : kRenamedMembers) {
+        // A file at or past that version already carries the new name.
+        if (from >= member.version || !name_span(document, member.from, start, end)) {
+            continue;
+        }
+        splices[count++] = {start, end, member.to};
+    }
+
+    for (const RemovedMember& member : kRemovedMembers) {
+        // A file at or past that version was written without the member.
+        if (from >= member.version || !member_span(document, member.name, start, end)) {
+            continue;
+        }
+        splices[count++] = {start, end, {}};
     }
 
     for (std::size_t index = 1; index < count; ++index) {

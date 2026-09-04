@@ -74,6 +74,18 @@ void report_subclass_selection_response(const middleware::web_service::Message& 
                                         std::span<const std::byte> response) noexcept;
 
 /**
+ * Re-encodes a prepared reply as a refusal after its Queuez staging failed.
+ * The reply was already encoded as a success, and nothing is published now, so it must say so.
+ * @param message Parsed request whose correlation fields are echoed.
+ * @param response Svc-11 response-body storage owned by the caller.
+ * @param written Gets the encoded response-body size.
+ * @return True when the refusal fits.
+ */
+[[nodiscard]] bool encode_staging_refusal(const middleware::web_service::Message& message,
+                                          std::span<std::byte> response,
+                                          std::size_t& written) noexcept;
+
+/**
  * Answers one whole supported Web Service request body.
  * @param request Whole decrypted svc-10 body.
  * @param response Svc-11 response-body storage owned by the caller.

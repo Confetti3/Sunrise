@@ -1,11 +1,14 @@
-﻿#include <Windows.h>
+#include <Windows.h>
 
 #include <algorithm>
 #include <array>
 #include <cstdio>
 
 #include "../../../../core/logging/log.h"
+#include "../../../../middleware/secure_channel/runtime.h"
 #include "../../../../state/account/account_state.h"
+#include "../../../../state/activity/destination/definition.h"
+#include "../../../../state/activity/runtime.h"
 #include "../../../../state/runtime/runtime.h"
 #include "../internal.h"
 #include "../push/activity/activity_keepalive_push.h"
@@ -48,7 +51,7 @@ void report_repush(const char* stage, std::size_t bytes) noexcept {
     queuez::SessionState currentQueuez{};
     if (!push::append_account_resync_notification(scratch,
                                                   session.queuez,
-                                                  state::bap().sessionKey,
+                                                  session.sessionKey,
                                                   nextSendNonce,
                                                   scratch.framed,
                                                   framedSize,
@@ -62,7 +65,7 @@ void report_repush(const char* stage, std::size_t bytes) noexcept {
         queuez::SessionState appearanceAfter{};
         if (!push::append_account_resync_appearance_notification(scratch,
                                                                  currentQueuez,
-                                                                 state::bap().sessionKey,
+                                                                 session.sessionKey,
                                                                  nextSendNonce,
                                                                  scratch.framed,
                                                                  framedSize,
@@ -78,7 +81,7 @@ void report_repush(const char* stage, std::size_t bytes) noexcept {
         queuez::SessionState rosterAfter{};
         if (!push::append_account_resync_roster_notification(scratch,
                                                              currentQueuez,
-                                                             state::bap().sessionKey,
+                                                             session.sessionKey,
                                                              nextSendNonce,
                                                              scratch.framed,
                                                              framedSize,
@@ -146,7 +149,7 @@ void report_repush(const char* stage, std::size_t bytes) noexcept {
     push::append_queuez_notification(scratch,
                                      session.queuez,
                                      subscription,
-                                     state::bap().sessionKey,
+                                     session.sessionKey,
                                      nextSendNonce,
                                      scratch.framed,
                                      framedSize,
@@ -205,7 +208,7 @@ void report_repush(const char* stage, std::size_t bytes) noexcept {
         queuez::SessionState appearanceAfter{};
         if (push::append_account_resync_appearance_notification(scratch,
                                                                 current,
-                                                                state::bap().sessionKey,
+                                                                session.sessionKey,
                                                                 nextSendNonce,
                                                                 scratch.framed,
                                                                 framedSize,
@@ -218,7 +221,7 @@ void report_repush(const char* stage, std::size_t bytes) noexcept {
         queuez::SessionState rosterAfter{};
         if (push::append_account_resync_roster_notification(scratch,
                                                             current,
-                                                            state::bap().sessionKey,
+                                                            session.sessionKey,
                                                             nextSendNonce,
                                                             scratch.framed,
                                                             framedSize,
@@ -295,7 +298,7 @@ bool consume_deferred(Session& session,
     push::append_queuez_notification(scratch,
                                      session.queuez,
                                      subscription,
-                                     state::bap().sessionKey,
+                                     session.sessionKey,
                                      nextSendNonce,
                                      scratch.framed,
                                      framedSize,

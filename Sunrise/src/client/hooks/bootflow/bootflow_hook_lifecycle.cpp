@@ -22,17 +22,16 @@ bool install() noexcept {
     const bool skip = install_profile_setup_skip();
     const bool composition = install_composition_check();
     const bool handoff = install_orbit_handoff();
-    const bool joinReady = install_join_request_ready();
     const bool ownerSlot = install_owner_activity_slot();
     const bool regionPrivate = install_region_private();
     const bool worldStep = install_world_step();
     const bool spawn = install_spawn_hold();
     const bool fade = install_fade_release();
-    const bool anyFix = hold || sliceSet || skip || composition || handoff || joinReady || ownerSlot
+    const bool anyFix = hold || sliceSet || skip || composition || handoff || ownerSlot
                         || regionPrivate || worldStep || spawn || fade;
     g_installed.store(anyFix, std::memory_order_release);
-    return hold && sliceSet && skip && composition && handoff && joinReady && ownerSlot
-           && regionPrivate && worldStep && spawn && fade;
+    return hold && sliceSet && skip && composition && handoff && ownerSlot && regionPrivate
+           && worldStep && spawn && fade;
 }
 
 /** Detaches every boot-step fix, in the reverse order of install. */
@@ -42,7 +41,6 @@ void uninstall() noexcept {
     uninstall_world_step();
     uninstall_region_private();
     uninstall_owner_activity_slot();
-    uninstall_join_request_ready();
     uninstall_orbit_handoff();
     uninstall_composition_check();
     uninstall_profile_setup_skip();

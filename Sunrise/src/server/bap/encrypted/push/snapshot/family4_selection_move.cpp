@@ -77,7 +77,7 @@ void report_equipment_object(const queuez::EquipmentSwap& swap,
         swap.characterDefinitionId,
         static_cast<unsigned long long>(mutation.characterSoid),
         selected.loadout.itemCount,
-        object.nextInventorySerial,
+        selected.loadout.nextInventorySerial,
         static_cast<unsigned long long>(mutation.requestedInstanceSoid),
         requestedRow,
         static_cast<unsigned long long>(requestedRowSoid),
@@ -136,7 +136,7 @@ bool prepare_selection_move(Scratch& scratch,
             staged.objects[objectCount++] = middleware::queuez::Object{
                 select.characterDefinitionId,
                 select.previousCharacterSoid,
-                middleware::queuez::Encoding::oodle,
+                middleware::queuez::Encoding::none,
                 {},
             };
         }
@@ -283,6 +283,73 @@ bool prepare_equipment_swap(Scratch& scratch,
     if (!commit(staged, prepared)) {
         clear_after(scratch, reservation);
         return report_failure("equip_commit");
+    }
+    return true;
+}
+
+/** Builds the single-character upsert from an uncommitted current-activity after-image. */
+bool prepare_current_activity_character(Scratch& scratch,
+                                        const queuez::EquipmentSwap& update,
+                                        const state::PendingCurrentActivity& mutation,
+                                        Prepared& prepared) noexcept {
+    const Reservation reservation = reserve_prior(scratch, prepared);
+    if (reservation.rawWriteOffset > scratch.plaintext.size()
+        || reservation.compressedWriteOffset > scratch.sealed.size()) {
+        return report_failure("current_activity_reservation");
+    }
+    state::AccountState account = state::account_snapshot();
+    if (!mutation.prepared || mutation.characterSoid == 0
+        || mutation.characterSoid != update.characterSoid
+        || mutation.characterIndex >= account.characterCount
+        || account.characters[mutation.characterIndex].soid != mutation.characterSoid) {
+        return report_failure("current_activity_mutation");
+    }
+    account.characters[mutation.characterIndex] = mutation.afterCharacter;
+    Resolved selected{};
+    const std::optional<std::size_t> selectedIndex = find_character_index(account);
+    if (!state::account::valid(account) || !selectedIndex.has_value()
+        || *selectedIndex != mutation.characterIndex
+        || !resolve(account, mutation.characterIndex, selected)
+        || selected.characterObjectId != update.characterDefinitionId) {
+        return report_failure("current_activity_selection");
+    }
+
+    const auto rawStorage = std::span(scratch.plaintext).subspan(reservation.rawWriteOffset);
+    if (family4_datagen::character::layout::kObjectSize > rawStorage.size()) {
+        return report_failure("current_activity_character_storage");
+    }
+    const auto characterBytes = rawStorage.first(family4_datagen::character::layout::kObjectSize);
+    if (!family4_datagen::character::encode(account.characters[mutation.characterIndex],
+                                            selected.loadout,
+                                            selected.lightEvaluation,
+                                            characterBytes)) {
+        return report_failure("current_activity_character_object");
+    }
+
+    Prepared staged{};
+    staged.rawClearSize =
+        (std::max)(reservation.rawClearSize,
+                   reservation.rawWriteOffset + family4_datagen::character::layout::kObjectSize);
+    std::size_t compressedExtent = reservation.compressedWriteOffset;
+    if (!append_object(scratch,
+                       characterBytes,
+                       update.characterDefinitionId,
+                       update.characterSoid,
+                       staged.objects.front(),
+                       compressedExtent)) {
+        return report_failure("current_activity_character_object");
+    }
+    staged.compressedClearSize = (std::max)(reservation.compressedClearSize, compressedExtent);
+    staged.family = middleware::queuez::Family{
+        kAccountFamilyType,
+        update.after.family4RootSoid,
+        update.after.family4Version,
+        0,
+        std::span(staged.objects).first(1),
+    };
+    if (!commit(staged, prepared)) {
+        clear_after(scratch, reservation);
+        return report_failure("current_activity_commit");
     }
     return true;
 }

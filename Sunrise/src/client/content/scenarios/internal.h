@@ -52,7 +52,7 @@ struct RosterStorage {
     std::size_t slotCount{};
     /** Set when the object declared more descriptors than storage holds, which refuses it. */
     bool slotsOverflowed{};
-    /** Group objects whose descriptor walk yielded no publishable slot. */
+    /** Group objects whose complete descriptor walk could not be proved or yielded no slot. */
     std::size_t unresolvedGroups{};
     /** Destinations walked so far. The walk resumes here on the next call. */
     std::size_t cursor{};
@@ -63,7 +63,7 @@ struct RosterStorage {
 /** Tag-read budget bounds one process-freeze interval and keeps worker shutdown responsive. */
 inline constexpr std::size_t kRosterReadBudget = 150;
 
-/** Live scenario tags found by the class sweep. The measured live count is 468. */
+/** Live scenario tags found by the class sweep. The live count is 468. */
 inline constexpr std::size_t kLiveTagCapacity = 1'024;
 /**
  * How long the collection keeps retrying the destinations that have not read yet.
@@ -176,11 +176,11 @@ void record_slot(RosterStorage& storage,
 /**
  * Fills one candidate group from the descriptors the walk found, in slot-index order.
  * One slot is one descriptor, indexed by the descriptor rather than by its position.
- * A group short of one descriptor is dropped, never published short.
+ * Declared slots with no descriptor are omitted only after the package walk completed.
  * @param storage Working storage holding the descriptors.
  * @param declaredSlotCount Slots the object's own slot array declares.
  * @param group Receives the slot types, flags and indices.
- * @return True when every declared slot has a descriptor and nothing overflowed.
+ * @return True when the nonempty descriptor subset is unique, in range, and did not overflow.
  */
 [[nodiscard]] bool fill_slots(RosterStorage& storage,
                               std::size_t declaredSlotCount,

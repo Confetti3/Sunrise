@@ -16,9 +16,7 @@
 #include "../../../../client/player/player_position.h"
 #include "../../../../middleware/content/packages/tables/region_reader.h"
 #include "../../../../middleware/content/packages/tables/spawn_reader.h"
-#include "../../../../state/activity/destination/activity_destination_snapshot.h"
-#include "../../../../state/activity/membership/activity_membership_query.h"
-#include "../../../../state/activity/runtime.h"
+#include "../../../../server/bap/runtime.h"
 #include "../../../../state/build_data/runtime.h"
 #include "../overlay.h"
 
@@ -101,7 +99,10 @@ name_of(const activity::destination::DestinationSelection& selection) noexcept {
 }
 
 /** Fills the bubble line from the destination layout the region belongs to. */
-void build_bubble(const layouts::Definition& layout, std::int32_t region, Value& output) noexcept {
+void build_bubble(const layouts::Definition& layout,
+                  std::int32_t region,
+                  bool hostRegion,
+                  Value& output) noexcept {
     const auto bubble = static_cast<std::size_t>(region) / tables::kSliceSetIndexFactor;
     if (region < 0 || bubble >= layout.bubbleCount) {
         assign(kUnknown, output);
@@ -111,23 +112,28 @@ void build_bubble(const layouts::Definition& layout, std::int32_t region, Value&
     const std::string_view named = resolve_name(layout.bubbleHashes[bubble], storage);
     (void)std::snprintf(output.data(),
                         output.size(),
-                        "%zu  0x%08X%s%.*s",
+                        "%zu  0x%08X%s%.*s%s",
                         bubble,
                         layout.bubbleHashes[bubble],
                         named.empty() ? "" : "  ",
                         static_cast<int>(named.size()),
-                        named.data());
+                        named.data(),
+                        hostRegion ? "  host region" : "");
 }
 
 /** Fills the slice-set line, which is the region index and the state inside its bubble. */
-void build_slice_set(std::int32_t region, Value& output) noexcept {
+void build_slice_set(std::int32_t region, bool hostRegion, Value& output) noexcept {
     if (region < 0) {
         assign(kUnknown, output);
         return;
     }
     const auto index = static_cast<std::uint32_t>(region);
-    (void)std::snprintf(
-        output.data(), output.size(), "%u  state %u", index, index % tables::kSliceSetIndexFactor);
+    (void)std::snprintf(output.data(),
+                        output.size(),
+                        "%u  state %u%s",
+                        index,
+                        index % tables::kSliceSetIndexFactor,
+                        hostRegion ? "  host region" : "");
 }
 
 /**
@@ -171,32 +177,52 @@ void build_spawn(std::string_view stem, Value& output) noexcept {
 /** @return Every line's text, read from published State in one pass. */
 [[nodiscard]] Status read_status() noexcept {
     Status status{};
-    const std::uint64_t sessionId =
-        activity::membership::live_region_session(activity::kAbsentSessionId);
+    const client::hooks::bootflow::CurrentSliceSet localSliceSet =
+        client::hooks::bootflow::current_slice_set();
+    server::bap::CurrentActivityLinkView link{};
+    const bool hasLink = server::bap::current_activity_link_view(
+        localSliceSet.present ? localSliceSet.index : -1, link);
     // The client's own step, published every frame. The world phase only moves on the spawn gate,
     // which stops being polled once the player is in, so it stays `arrived` in orbit.
-    status.inWorld = client::hooks::bootflow::in_world() && sessionId != activity::kAbsentSessionId;
+    status.inWorld = client::hooks::bootflow::in_world();
     if (!status.inWorld) {
         g_spawn = {};
         // The next destination has its own map, so a position from this one must not carry over.
         client::player::position::reset();
         return status;
     }
-    activity::destination::DestinationSelection selection{};
-    (void)activity::destination::snapshot(sessionId, selection);
+    if (!hasLink) {
+        assign(kUnknown, status.activity);
+        assign(kUnknown, status.bubble);
+        assign(kUnknown, status.spawn);
+        if (localSliceSet.present) {
+            build_slice_set(localSliceSet.index, false, status.sliceSet);
+        } else {
+            assign(localSliceSet.available ? "switching" : kUnknown, status.sliceSet);
+        }
+        return status;
+    }
+    const activity::destination::DestinationSelection& selection = link.binding.destination;
     const std::string_view name = name_of(selection);
     assign(name.empty() ? std::string_view(kUnknown) : name, status.activity);
 
-    const std::int32_t region = activity::membership::reported_region(sessionId);
+    if (localSliceSet.available && !localSliceSet.present) {
+        assign("switching", status.bubble);
+        assign("switching", status.sliceSet);
+        assign(kUnknown, status.spawn);
+        return status;
+    }
+    const bool hostRegion = !localSliceSet.available;
+    const std::int32_t region = localSliceSet.present ? localSliceSet.index : link.effectiveRegion;
     layouts::Definition layout{};
     if (!state::build_data::find_scenario_layout(name, layout)) {
         assign(kUnknown, status.bubble);
         assign(kUnknown, status.spawn);
-        build_slice_set(region, status.sliceSet);
+        build_slice_set(region, hostRegion, status.sliceSet);
         return status;
     }
-    build_bubble(layout, region, status.bubble);
-    build_slice_set(region, status.sliceSet);
+    build_bubble(layout, region, hostRegion, status.bubble);
+    build_slice_set(region, hostRegion, status.sliceSet);
     build_spawn({layout.spawnStem.data(), layout.spawnStemLength}, status.spawn);
     return status;
 }

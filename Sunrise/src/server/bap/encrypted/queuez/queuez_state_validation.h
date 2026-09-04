@@ -89,6 +89,18 @@ namespace sunrise::server::bap::encrypted::queuez {
                                         EquipmentSwap& swap) noexcept;
 
 /**
+ * Stages the resident character upsert a current-activity change carries.
+ * The object is the same character re-encoded; the manifest and every other resident stay.
+ * @param before Validated queuez state for this connection.
+ * @param characterSoid Selected character, which must be resident.
+ * @param swap Receives the +1 after-image and the character's definition and key.
+ * @return True when the character is resident and the version ladder can advance.
+ */
+[[nodiscard]] bool stage_current_activity_character(const SessionState& before,
+                                                    std::uint64_t characterSoid,
+                                                    EquipmentSwap& swap) noexcept;
+
+/**
  * Stages one same-character Family-0 appearance-record increment after an equipment swap.
  * Family zero already owns the record, so the character key is preserved and only its version
  * ladder advances.
@@ -194,8 +206,9 @@ namespace sunrise::server::bap::encrypted::queuez {
                                         bool updatesAccount,
                                         ItemDismantle& dismantle) noexcept;
 
-/** Clears state for the active root. Zero or another root leaves the state unchanged. */
+/** Clears one named family. Another family, root or an inactive record changes nothing. */
 void stage_unsubscription(const SessionState& before,
+                          std::uint32_t familyType,
                           std::uint64_t familyRootSoid,
                           SessionState& after) noexcept;
 

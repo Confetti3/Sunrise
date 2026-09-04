@@ -5,7 +5,9 @@
 #include <array>
 #include <limits>
 
+#include "../../../middleware/bap/activity_message/replicate_membership.h"
 #include "../../../state/activity/runtime.h"
+#include "../endpoint/gameplay_endpoint.h"
 #include "../gameplay_log.h"
 
 namespace sunrise::server::gameplay::group {
@@ -21,8 +23,13 @@ struct HostSession {
     bool occupied{};
 };
 
-/** Regions that may hold an activity-host session at once. */
-constexpr std::size_t kHostSessionCapacity = 8;
+// The table must outsize the directory a body carries, because the previous body's rows are still
+// retained while the next one is built. A table sized to the directory refuses every new region.
+static_assert(kHostSessionCapacity
+              > middleware::bap::activity_message::replicate_membership::kCitizenCapacity);
+// Every ready row holds one activity session, and the private session and the destination sources
+// need slots of their own. A session table sized to the host table evicts the private record.
+static_assert(state::activity::kSessionCapacity > kHostSessionCapacity);
 /** Guards host rows and their deferred-retirement queue. Never held across a State call. */
 SRWLOCK g_hostSessionLock{SRWLOCK_INIT};
 std::array<HostSession, kHostSessionCapacity> g_hostSessions{};
@@ -30,21 +37,6 @@ std::array<HostSessionBinding, kHostSessionCapacity> g_retired{};
 std::size_t g_retiredCount = 0;
 std::uint64_t g_useStamp = 0;
 std::uint64_t g_generation = 0;
-
-/** @return True when two bindings name the same immutable State record generation. */
-[[nodiscard]] bool same_generation(const state::activity::SessionBinding& left,
-                                   const state::activity::SessionBinding& right) noexcept {
-    return left.sessionId == right.sessionId && left.createdRevision == right.createdRevision;
-}
-
-/** @return Next nonzero row generation, or zero after monotonic generation exhaustion. */
-[[nodiscard]] std::uint64_t next_generation_locked() noexcept {
-    if (g_generation == (std::numeric_limits<std::uint64_t>::max)()) {
-        return 0;
-    }
-    ++g_generation;
-    return g_generation;
-}
 
 /** Moves one unreferenced occupied row to deferred retirement. The caller holds the lock. */
 [[nodiscard]] bool retire_locked(HostSession& row) noexcept {
@@ -133,7 +125,7 @@ HostSessionState request_host_session(std::uint64_t groupSessionId,
             break;
         }
     }
-    if (matching != nullptr && same_generation(matching->binding.source, source)
+    if (matching != nullptr && same_binding(matching->binding.source, source)
         && matching->binding.regionIndex == regionIndex) {
         matching->lastUse = ++g_useStamp;
         output = matching->binding;
@@ -158,12 +150,21 @@ HostSessionState request_host_session(std::uint64_t groupSessionId,
             }
         }
 
-        const std::uint64_t generation = target == nullptr ? 0 : next_generation_locked();
-        if (target != nullptr && generation != 0 && retire_locked(*target)) {
+        // The peer's reason-4 and reason-5 checks read the descriptor a new claim replaces, so
+        // the same group's old target is kept as `previous-activity`. Another group's row is not.
+        const state::activity::SessionBinding previous =
+            matching != nullptr ? matching->binding.target : state::activity::SessionBinding{};
+        if (target != nullptr && retire_locked(*target)) {
+            target->binding.previous = previous;
             target->binding.source = source;
             target->binding.groupSessionId = groupSessionId;
-            target->binding.generation = generation;
+            // Rows are found by a nonzero generation, so the counter starts at one.
+            target->binding.generation = ++g_generation;
             target->binding.regionIndex = regionIndex;
+            // The row index picks the port, so a row keeps one port for its whole life and no two
+            // live rows share one. That is what keeps their client channels apart.
+            target->binding.port =
+                endpoint::host_port(static_cast<std::size_t>(target - g_hostSessions.data()));
             target->state = HostSessionState::pending;
             target->lastUse = ++g_useStamp;
             target->occupied = true;
@@ -201,6 +202,34 @@ bool host_session_for_activity(std::uint64_t hostSessionId, HostSessionBinding& 
            && find_ready(
                [hostSessionId](const HostSessionBinding& binding) {
                    return binding.target.sessionId == hostSessionId;
+               },
+               output);
+}
+
+/** Copies a ready row by its exact source generation and active region. */
+bool host_session_for_source_region(const state::activity::SessionBinding& source,
+                                    std::int32_t regionIndex,
+                                    HostSessionBinding& output) noexcept {
+    output = {};
+    return regionIndex >= 0 && state::activity::binding_matches(source)
+           && find_ready(
+               [&source, regionIndex](const HostSessionBinding& binding) {
+                   return same_binding(binding.source, source)
+                          && binding.regionIndex == regionIndex;
+               },
+               output);
+}
+
+/** Copies a ready row by its exact source generation and group-session key. */
+bool host_session_for_source_group(const state::activity::SessionBinding& source,
+                                   std::uint64_t groupSessionId,
+                                   HostSessionBinding& output) noexcept {
+    output = {};
+    return groupSessionId != 0 && state::activity::binding_matches(source)
+           && find_ready(
+               [&source, groupSessionId](const HostSessionBinding& binding) {
+                   return same_binding(binding.source, source)
+                          && binding.groupSessionId == groupSessionId;
                },
                output);
 }
@@ -252,7 +281,8 @@ void snapshot_host_sessions(std::span<HostSessionRow> output, std::size_t& count
         output[count] = {row.binding.groupSessionId,
                          row.binding.target.sessionId,
                          row.binding.regionIndex,
-                         row.binding.generation};
+                         row.binding.generation,
+                         row.binding.port};
         ++count;
     }
     ReleaseSRWLockShared(&g_hostSessionLock);
@@ -277,14 +307,22 @@ void allocate_claimed_host_sessions() noexcept {
 
         std::uint64_t sessionId = state::activity::kAbsentSessionId;
         state::activity::PendingAllocation allocation{};
+        // The commit compares one process-wide State revision, so a frame landing between the
+        // prepare and the commit refuses this allocation. The next tick retries it.
         if (!state::activity::prepare_session(pending.source.destination, sessionId, allocation)
             || !state::activity::commit(allocation)) {
+            core::log::write(core::log::Channel::server,
+                             core::log::Level::warn,
+                             "ev=group stage=allocate result=retry");
             return;
         }
 
         state::activity::SessionBinding target{};
         if (!state::activity::snapshot_binding(sessionId, target)
             || !state::activity::retain_binding(target)) {
+            core::log::write(core::log::Channel::server,
+                             core::log::Level::warn,
+                             "ev=group stage=retain result=fail");
             return;
         }
 
@@ -314,10 +352,11 @@ void allocate_claimed_host_sessions() noexcept {
         }
         report(core::log::Level::info,
                "ev=gameplay stage=activityhost result=allocated session=0x%llX group=0x%016llX "
-               "generation=%llu held=%zu",
+               "generation=%llu port=%u held=%zu",
                static_cast<unsigned long long>(target.sessionId),
                static_cast<unsigned long long>(pending.groupSessionId),
                static_cast<unsigned long long>(pending.generation),
+               static_cast<unsigned>(pending.port),
                occupied);
     }
 }

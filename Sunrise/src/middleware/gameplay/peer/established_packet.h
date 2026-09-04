@@ -46,10 +46,24 @@ struct AckState {
     bool ringInitialized{};
     /** Entry `i` is the packet `i + 1` before the head. The head itself carries no entry. */
     std::array<bool, kAckHistory> received{};
+    /** Exact ternary status for each named history entry. */
+    enum class Status : std::uint8_t {
+        unresolved,
+        received,
+        receivedOutOfOrder,
+    };
+    std::array<Status, kAckHistory> status{};
     /** Entries the wire form actually named. The rest of the array is unreported, not clear. */
     std::uint8_t reportedCount{};
     /** Half the measured delay, or the 1,023 sentinel. */
     std::uint16_t delay{};
+};
+
+/** Result of applying one peer acknowledgement to an outbound packet. */
+enum class AckOutcome : std::uint8_t {
+    unresolved,
+    received,
+    receivedOutOfOrder,
 };
 
 /** One reliable-queue record taken off the wire. */
@@ -120,6 +134,10 @@ struct FillerTrailer {
  * @return True when the peer has that packet.
  */
 [[nodiscard]] bool acknowledgement_covers(const AckState& ack, std::uint16_t sentSequence) noexcept;
+
+/** Returns the exact outcome needed by external packet contributions. */
+[[nodiscard]] AckOutcome acknowledgement_outcome(const AckState& ack,
+                                                 std::uint16_t sentSequence) noexcept;
 
 /**
  * Writes one reliable queue that carries no records.
