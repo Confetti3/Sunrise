@@ -19,7 +19,7 @@ void clear() noexcept {
 
 /** Publishes one extracted constants row. */
 bool replace(const InvestmentConstants& value) noexcept {
-    if (!value.extracted) {
+    if (!valid(value)) {
         return false;
     }
     const Lock::Exclusive guard(g_lock);

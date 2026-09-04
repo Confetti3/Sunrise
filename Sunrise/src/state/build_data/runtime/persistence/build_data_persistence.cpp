@@ -49,6 +49,7 @@ template <typename Value, std::size_t Capacity>
 [[nodiscard]] cache::records::InvestmentConstants
 to_record(const constants::InvestmentConstants& value) noexcept {
     return {value.lightStatRow,
+            value.weaponPowerStatRow,
             value.characterStatRows,
             value.extracted ? std::uint8_t{1} : std::uint8_t{0}};
 }

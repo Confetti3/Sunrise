@@ -201,10 +201,12 @@ bool canonicalize(MutableDomains domains, const DomainCounts& counts) noexcept {
 
 /** Checks the structure rules, the sort order, and every cross-domain item reference. */
 bool valid_domains(Domains domains) noexcept {
-    if (domains.constants.extracted != 1U || domains.named.empty() || domains.items.empty()
-        || domains.collectibles.empty() || domains.materialRequirementSets.empty()
-        || domains.socketPlugRules.empty() || domains.socketPlugPools.empty()
-        || domains.inventoryBuckets.empty() || domains.socketEntryLists.empty()
+    if (domains.constants.extracted != 1U
+        || domains.constants.weaponPowerStatRow >= constants::kStatRowCount || domains.named.empty()
+        || domains.items.empty() || domains.collectibles.empty()
+        || domains.materialRequirementSets.empty() || domains.socketPlugRules.empty()
+        || domains.socketPlugPools.empty() || domains.inventoryBuckets.empty()
+        || domains.socketEntryLists.empty()
         || !std::all_of(domains.named.begin(), domains.named.end(), valid_name)
         || !strictly_ordered(domains.named, named_less) || !items::valid(domains.items)
         || !collectibles::valid(domains.collectibles)

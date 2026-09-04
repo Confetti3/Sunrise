@@ -96,6 +96,7 @@ bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
     const constants::InvestmentConstants cachedConstants{
         domains.constants.extracted != 0,
         domains.constants.lightStatRow,
+        domains.constants.weaponPowerStatRow,
         domains.constants.characterStatRows,
     };
     if (status != cache::LoadStatus::loaded || !constants::replace(cachedConstants)

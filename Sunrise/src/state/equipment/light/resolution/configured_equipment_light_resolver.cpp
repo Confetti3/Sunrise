@@ -36,15 +36,6 @@ using NativeSlotMap = std::array<std::optional<std::size_t>, build_details::kEqu
 }
 
 /**
- * Converts one item level into its power score.
- * @param level Authored item level, where zero marks an unpowered item.
- * @return 10 power per level, raised to the floor, or zero for an unpowered item.
- */
-[[nodiscard]] constexpr std::int32_t item_power(std::int32_t level) noexcept {
-    return level > 0 ? (std::max)(kMinimumItemPower, kPowerPerLevel * level) : 0;
-}
-
-/**
  * Finds one authored item's native slot and computes its score.
  * @param item Already-checked authored equipment item.
  * @param nativeSlot Receives the installed native equipment slot.
@@ -63,7 +54,11 @@ resolve_item(const authored::Item& item, std::size_t& nativeSlot, ItemScore& ite
         return false;
     }
     nativeSlot = static_cast<std::size_t>(*detail.equipmentSlot);
-    itemScore = ItemScore{definition.definitionIndex, item_power(item.level)};
+    std::int32_t power = 0;
+    if (!item_power(item.level, power)) {
+        return false;
+    }
+    itemScore = ItemScore{definition.definitionIndex, power};
     return true;
 }
 
