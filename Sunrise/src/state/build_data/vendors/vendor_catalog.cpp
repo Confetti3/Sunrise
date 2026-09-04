@@ -271,7 +271,7 @@ bool sale_row(const Definition& definition, std::size_t row, SaleRow& output) no
     if (row >= definition.saleCount) {
         return false;
     }
-    const Lock::Shared guard(g_lock);
+    const std::shared_lock guard(g_lock);
     const auto bank = g_saleRows.rows();
     const std::size_t at = static_cast<std::size_t>(definition.saleRowOffset) + row;
     if (at >= bank.size()) {
@@ -299,7 +299,7 @@ bool installed_row(const Definition& definition, std::size_t row, InstalledRow& 
     if (row >= definition.installedCount) {
         return false;
     }
-    const Lock::Shared guard(g_lock);
+    const std::shared_lock guard(g_lock);
     const auto bank = g_installedRows.rows();
     const std::size_t at = static_cast<std::size_t>(definition.installedRowOffset) + row;
     if (at >= bank.size()) {

@@ -111,7 +111,7 @@ bool find_granting(std::uint16_t itemDefinitionIndex, std::uint16_t& collectible
     if (itemDefinitionIndex == kUnavailableItemDefinitionIndex) {
         return false;
     }
-    const Lock::Shared guard(g_lock);
+    const std::shared_lock guard(g_lock);
     for (const Definition& definition : g_definitions.rows()) {
         if (definition.itemDefinitionIndex == itemDefinitionIndex) {
             collectibleIndex = definition.collectibleIndex;
