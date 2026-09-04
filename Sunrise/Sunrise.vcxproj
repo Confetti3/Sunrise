@@ -1993,6 +1993,8 @@
     <ClInclude Include="src\state\progression\seasonal_experience.h" />
     <ClInclude Include="src\state\record_claims\objective_slot_table.h" />
     <ClInclude Include="src\state\record_claims\parent_bar_table.h" />
+    <ClInclude Include="src\client\hooks\network\investment\lore_visibility_patch.h" />
+    <ClCompile Include="src\client\hooks\network\investment\investment_lore_visibility.cpp" />
     <ClInclude Include="src\state\record_claims\record_claims.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

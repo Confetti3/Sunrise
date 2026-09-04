@@ -33,6 +33,10 @@ void arm_socket_menu_routing() noexcept;
 /** Restores owned category fields and plug-set descriptors without recycling published storage. */
 void restore_socket_menu_routing() noexcept;
 
+/** Reveals the specified lore entries without altering any account progress. */
+void apply_lore_visibility() noexcept;
+void restore_lore_visibility() noexcept;
+
 /**
  * Arms one derived-state rebuild after replicated investment state changes.
  */

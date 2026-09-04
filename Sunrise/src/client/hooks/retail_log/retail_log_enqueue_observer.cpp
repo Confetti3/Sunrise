@@ -75,6 +75,7 @@ void capture_line(std::int32_t siteId, const char* text) noexcept {
         // This must happen before the native logger returns to investment initialization. A later
         // callback tick races the socket-menu caches that consume these descriptors.
         network::investment::apply_socket_menu_routing();
+        network::investment::apply_lore_visibility();
     }
     if (!core::log::accepts(core::log::Channel::client, core::log::Level::info)) {
         return;

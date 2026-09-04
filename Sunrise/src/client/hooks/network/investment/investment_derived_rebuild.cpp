@@ -208,6 +208,7 @@ bool install() noexcept {
 
 /** @return True when every investment rebuild detour is absent. */
 bool uninstall() noexcept {
+    restore_lore_visibility();
     restore_socket_menu_routing();
     if (!uninstall_family5_rearm()) {
         core::log::write(core::log::Channel::client,

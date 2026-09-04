@@ -1,4 +1,4 @@
-# Portable socket regression
+# Portable regressions
 
 Run without Wine or the game:
 
@@ -17,3 +17,7 @@ so the test detects the shallow-copy bug. There are no account records or absolu
 The test uses the production relocation header. It checks membership/order, payload preservation,
 relocation to another allocation, and rejection of bad pointers, substituted conditions, duplicates,
 unexpected shapes, insufficient storage, and misalignment. Assertions remain enabled in Release.
+
+`lore_visibility_test` checks all 36 targeted native expression shapes, rejects changed or
+already-patched inputs, and evaluates the repaired conditions with fresh, partial, and completed
+unlock reads. Only visibility fields are targeted. See `docs/lore-visibility.md` for the evidence.
