@@ -1973,5 +1973,27 @@
     <ClInclude Include="src\server\gameplay\group\group_migration_receipts.h" />
     <ClInclude Include="src\core\runtime\server_clock.h" />
   </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\client\hooks\network\investment\investment_socket_menu_routing.cpp" />
+    <ClInclude Include="src\client\hooks\network\investment\socket_row_relocation.h" />
+    <ClInclude Include="src\middleware\content\packages\tables\unlock_expression.h" />
+    <ClInclude Include="src\middleware\web_service\messages\opcode1801.h" />
+    <ClInclude Include="src\middleware\web_service\messages\opcode1821.h" />
+    <ClInclude Include="src\middleware\web_service\messages\opcode2400.h" />
+    <ClInclude Include="src\state\build_data\nodes\definition.h" />
+    <ClInclude Include="src\state\build_data\nodes\node_catalog.h" />
+    <ClInclude Include="src\state\build_data\records\definition.h" />
+    <ClInclude Include="src\state\build_data\records\record_catalog.h" />
+    <ClInclude Include="src\state\build_data\records\rewards\definition.h" />
+    <ClInclude Include="src\state\build_data\records\rewards\reward_catalog.h" />
+    <ClInclude Include="src\state\build_data\records\rewards\reward_persistence.h" />
+    <ClInclude Include="src\state\build_data\sobjects\sobject_catalog.h" />
+    <ClInclude Include="src\state\lore\lore_grant.h" />
+    <ClInclude Include="src\state\progression\season_pass_reward_catalog.h" />
+    <ClInclude Include="src\state\progression\seasonal_experience.h" />
+    <ClInclude Include="src\state\record_claims\objective_slot_table.h" />
+    <ClInclude Include="src\state\record_claims\parent_bar_table.h" />
+    <ClInclude Include="src\state\record_claims\record_claims.h" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

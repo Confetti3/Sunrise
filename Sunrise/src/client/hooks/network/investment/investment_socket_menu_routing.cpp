@@ -58,6 +58,12 @@ constexpr std::size_t kMaximumMemberCount = 4096;
 constexpr std::uintptr_t kMaximumLowAddress = UINT32_MAX;
 constexpr std::size_t kLowArenaSize = 64U * 1024U;
 constexpr std::size_t kArenaAlignment = 16U;
+constexpr std::size_t kPlugBlockOffset = 0x184;
+constexpr std::size_t kPlugCategoryOffset = 4;
+constexpr std::size_t kPlugBlockSize = 64;
+constexpr unsigned kCategoryAttemptLimit = 120;
+constexpr ULONGLONG kCategoryRetryIntervalMs = 250;
+constexpr ULONGLONG kCategoryRetryWindowMs = 30000;
 
 struct ArrayDescriptor {
     std::uint64_t count{};
@@ -110,8 +116,6 @@ enum class Failure : std::uint8_t {
     targets,
     source,
     ambiguous,
-    shape,
-    membership,
     allocation,
     write,
     verification,
@@ -125,7 +129,7 @@ std::size_t g_appliedCount{};
 Failure g_lastFailure{Failure::none};
 std::byte* g_lowArena{};
 std::size_t g_lowArenaUsed{};
-std::array<std::array<relocation::Row, 56>, 2> g_expected{};
+std::array<std::array<relocation::Row, relocation::kMaximumMembers>, 2> g_expected{};
 std::array<std::size_t, 2> g_expectedCounts{};
 content_investment::Source g_categorySource{};
 std::array<std::uint16_t, 4> g_categoryRoutes{};
@@ -145,10 +149,6 @@ const char* g_categoryFailure = "none";
         return "source";
     case Failure::ambiguous:
         return "ambiguous";
-    case Failure::shape:
-        return "shape";
-    case Failure::membership:
-        return "membership";
     case Failure::allocation:
         return "allocation";
     case Failure::write:
@@ -167,12 +167,12 @@ void report_failure(Failure failure, std::uint64_t detail = 0) noexcept {
     }
     g_lastFailure = failure;
     std::array<char, core::log::kLineCapacity> line{};
-    const int written = std::snprintf(
-        line.data(),
-        line.size(),
-        "ev=investment stage=arrivals_leg_sets result=deferred reason=%s detail=%llu",
-        failure_name(failure),
-        static_cast<unsigned long long>(detail));
+    const int written =
+        std::snprintf(line.data(),
+                      line.size(),
+                      "ev=investment stage=arrivals_leg_sets result=deferred reason=%s detail=%llu",
+                      failure_name(failure),
+                      static_cast<unsigned long long>(detail));
     if (written > 0) {
         core::log::write(
             core::log::Channel::client,
@@ -185,8 +185,7 @@ void report_failure(Failure failure, std::uint64_t detail = 0) noexcept {
     return !output.empty() && memory::read_current_process(nullptr, address, output);
 }
 
-template <typename Value>
-[[nodiscard]] bool read(std::uintptr_t address, Value& value) noexcept {
+template <typename Value> [[nodiscard]] bool read(std::uintptr_t address, Value& value) noexcept {
     return read_bytes(address, std::span(reinterpret_cast<std::byte*>(&value), sizeof value));
 }
 
@@ -202,19 +201,17 @@ template <typename Value>
     std::memcpy(destination, bytes.data(), bytes.size());
     DWORD ignored = 0;
     const bool restored = VirtualProtect(destination, bytes.size(), previous, &ignored) != FALSE;
-    FlushInstructionCache(GetCurrentProcess(), destination, bytes.size());
     return restored;
 }
 
 template <typename Value>
 [[nodiscard]] bool write(std::uintptr_t address, const Value& value) noexcept {
-    return write_bytes(
-        address, std::span(reinterpret_cast<const std::byte*>(&value), sizeof value));
+    return write_bytes(address,
+                       std::span(reinterpret_cast<const std::byte*>(&value), sizeof value));
 }
 
-[[nodiscard]] bool add_relative(std::uintptr_t base,
-                                std::int64_t relative,
-                                std::uintptr_t& output) noexcept {
+[[nodiscard]] bool
+add_relative(std::uintptr_t base, std::int64_t relative, std::uintptr_t& output) noexcept {
     if (relative >= 0) {
         const auto distance = static_cast<std::uint64_t>(relative);
         if (distance > (std::numeric_limits<std::uintptr_t>::max)() - base) {
@@ -250,9 +247,8 @@ template <typename Value>
     std::uint64_t repeatedCount = 0;
     std::uint32_t elementClass = 0;
     if (!read(header - kArrayMarkerSize, marker) || !read(header, repeatedCount)
-        || !read(header + sizeof(std::uint64_t), elementClass)
-        || repeatedCount != encoded.count || (marker >> 16U) != 0x8080U
-        || (elementClass >> 16U) != 0x8080U
+        || !read(header + sizeof(std::uint64_t), elementClass) || repeatedCount != encoded.count
+        || (marker >> 16U) != 0x8080U || (elementClass >> 16U) != 0x8080U
         || encoded.count
                > ((std::numeric_limits<std::uintptr_t>::max)() - header - kArrayHeaderSize)
                      / stride) {
@@ -267,9 +263,8 @@ template <typename Value>
     return true;
 }
 
-[[nodiscard]] bool member_index(const ArrayView& array,
-                                std::size_t position,
-                                std::uint32_t& index) noexcept {
+[[nodiscard]] bool
+member_index(const ArrayView& array, std::size_t position, std::uint32_t& index) noexcept {
     return position < array.count
            && read(array.data + static_cast<std::uintptr_t>(position) * kPlugMemberStride, index);
 }
@@ -312,8 +307,7 @@ template <typename Value>
     const auto& targets = targets::game::content::get();
     content_investment::Source source{};
     source.investmentGlobalsTag = candidate.tag;
-    source.handles.tablesSlot =
-        reinterpret_cast<std::uintptr_t>(targets.contentHandleTablesSlot);
+    source.handles.tablesSlot = reinterpret_cast<std::uintptr_t>(targets.contentHandleTablesSlot);
     source.handles.read = &memory::read_current_process;
 
     std::uintptr_t globals = 0;
@@ -355,22 +349,18 @@ template <typename Value>
     }
 
     ArrayView sets{};
-    if (!resolve_array(plugSetTable + kTableArrayDescriptorOffset,
-                       kMaximumSetCount,
-                       kPlugSetRowStride,
-                       sets)
+    if (!resolve_array(
+            plugSetTable + kTableArrayDescriptorOffset, kMaximumSetCount, kPlugSetRowStride, sets)
         || sets.count <= kLegSetIndex) {
         return false;
     }
-    const std::uintptr_t generalDescriptor = sets.data
-                                             + kGeneralSetIndex * kPlugSetRowStride
-                                             + kPlugSetMemberDescriptorOffset;
-    const std::uintptr_t legDescriptor = sets.data + kLegSetIndex * kPlugSetRowStride
-                                         + kPlugSetMemberDescriptorOffset;
+    const std::uintptr_t generalDescriptor =
+        sets.data + kGeneralSetIndex * kPlugSetRowStride + kPlugSetMemberDescriptorOffset;
+    const std::uintptr_t legDescriptor =
+        sets.data + kLegSetIndex * kPlugSetRowStride + kPlugSetMemberDescriptorOffset;
     ArrayView general{};
     ArrayView legs{};
-    if (!resolve_array(
-            generalDescriptor, kMaximumMemberCount, kPlugMemberStride, general)
+    if (!resolve_array(generalDescriptor, kMaximumMemberCount, kPlugMemberStride, general)
         || !resolve_array(legDescriptor, kMaximumMemberCount, kPlugMemberStride, legs)
         || !native_membership(general, legs, routes, reference)) {
         return false;
@@ -395,8 +385,7 @@ template <typename Value>
     }
     std::array<state::content::Definition, kBootstrapCandidateCapacity> candidates{};
     std::size_t candidateCount = 0;
-    if (!state::content::lookup_hash(
-            kInvestmentGlobalsNameHash, candidates, candidateCount)
+    if (!state::content::lookup_hash(kInvestmentGlobalsNameHash, candidates, candidateCount)
         && candidateCount == 0) {
         return false;
     }
@@ -433,8 +422,8 @@ template <typename Value>
     SYSTEM_INFO system{};
     GetSystemInfo(&system);
     const std::uintptr_t granularity = system.dwAllocationGranularity;
-    std::uintptr_t cursor = align_up(
-        reinterpret_cast<std::uintptr_t>(system.lpMinimumApplicationAddress), granularity);
+    std::uintptr_t cursor =
+        align_up(reinterpret_cast<std::uintptr_t>(system.lpMinimumApplicationAddress), granularity);
     while (cursor != 0 && cursor <= kMaximumLowAddress
            && kLowArenaSize <= kMaximumLowAddress - cursor + 1U) {
         MEMORY_BASIC_INFORMATION information{};
@@ -451,8 +440,8 @@ template <typename Value>
             const std::uintptr_t candidate = align_up((std::max)(cursor, base), granularity);
             const std::uintptr_t offset = candidate >= base ? candidate - base : 0;
             if (candidate != 0 && candidate <= kMaximumLowAddress
-                && kLowArenaSize <= kMaximumLowAddress - candidate + 1U
-                && candidate >= base && offset <= information.RegionSize
+                && kLowArenaSize <= kMaximumLowAddress - candidate + 1U && candidate >= base
+                && offset <= information.RegionSize
                 && kLowArenaSize <= information.RegionSize - offset) {
                 void* const allocated = VirtualAlloc(reinterpret_cast<void*>(candidate),
                                                      kLowArenaSize,
@@ -473,8 +462,7 @@ template <typename Value>
 
 /** Carves one immutable array payload from the arena reserved at DLL process attach. */
 [[nodiscard]] Allocation allocate_array(std::size_t size) noexcept {
-    const std::size_t aligned = static_cast<std::size_t>(
-        align_up(g_lowArenaUsed, kArenaAlignment));
+    const std::size_t aligned = static_cast<std::size_t>(align_up(g_lowArenaUsed, kArenaAlignment));
     if (g_lowArena == nullptr || aligned > kLowArenaSize || size > kLowArenaSize - aligned) {
         return {};
     }
@@ -487,35 +475,35 @@ void release(Allocation& allocation) noexcept {
     allocation = {};
 }
 
-[[nodiscard]] bool snapshot_row(const ArrayView& source,
-                                std::size_t position,
-                                relocation::Row& output) noexcept {
+[[nodiscard]] bool
+snapshot_row(const ArrayView& source, std::size_t position, relocation::Row& output) noexcept {
     output = {};
     const auto address = source.data + position * kPlugMemberStride;
     if (position >= source.count || address % 8 != 0
-        || source.elementClass != relocation::kMemberClass
-        || !read_bytes(address, output.bytes)) return false;
+        || source.elementClass != relocation::kMemberClass || !read_bytes(address, output.bytes))
+        return false;
     const auto count = relocation::get<std::uint64_t>(output.bytes.data() + 8);
     if (count != 0) {
         std::uintptr_t header = 0;
         if (count != 1
-            || !add_relative(address + 16,
-                             relocation::get<std::int64_t>(output.bytes.data() + 16), header)
-            || header < 4 || header % 8 != 0
-            || !read_bytes(header - 4, output.condition)) return false;
+            || !add_relative(
+                address + 16, relocation::get<std::int64_t>(output.bytes.data() + 16), header)
+            || header < 4 || header % 8 != 0 || !read_bytes(header - 4, output.condition))
+            return false;
     }
     return relocation::valid(output);
 }
 
 [[nodiscard]] bool verify_owned(std::size_t set, const Allocation& allocation) noexcept {
-    return allocation && relocation::verify(
-        std::span(g_expected[set].data(), g_expectedCounts[set]),
-        std::span<const std::byte>(allocation.base, allocation.size));
+    return allocation
+           && relocation::verify(std::span(g_expected[set].data(), g_expectedCounts[set]),
+                                 std::span<const std::byte>(allocation.base, allocation.size));
 }
 
 /** Validates the exact plug blocks observed in this build before changing four category fields. */
 bool stage_categories(const content_investment::Source& source,
-                      std::span<const std::uint16_t> routes, std::uint16_t reference,
+                      std::span<const std::uint16_t> routes,
+                      std::uint16_t reference,
                       std::array<CategoryPatch, 4>& output) noexcept {
     std::uintptr_t globals = 0, root = 0, table = 0;
     g_categoryFailure = "table";
@@ -524,32 +512,37 @@ bool stage_categories(const content_investment::Source& source,
         || !read(globals + content_investment::layout::kGlobalsRootTagOffset, tag)
         || !content_handles::resolve(source.handles, tag, root)
         || !read(root + content_investment::layout::kItemTableTagOffset, tag)
-        || !content_handles::resolve(source.handles, tag, table)) return false;
-    const auto block = [&](std::uint16_t index, std::uint32_t hash,
-                           std::uintptr_t& address, std::array<std::byte, 64>& bytes) noexcept {
+        || !content_handles::resolve(source.handles, tag, table))
+        return false;
+    const auto block = [&](std::uint16_t index,
+                           std::uint32_t hash,
+                           std::uintptr_t& address,
+                           std::array<std::byte, kPlugBlockSize>& bytes) noexcept {
         item_layout::ItemIndexRow row{};
         g_categoryFailure = "definition";
         std::uintptr_t definition = 0;
         if (!read(table + item_layout::kTableFirstRowOffset + index * sizeof row, row)
             || row.definitionHash != hash
-            || !content_handles::resolve(source.handles, row.targetHandle, definition)) return false;
-        address = definition + 0x188;
+            || !content_handles::resolve(source.handles, row.targetHandle, definition))
+            return false;
+        address = definition + kPlugBlockOffset + kPlugCategoryOffset;
         g_categoryFailure = "block";
-        return read_bytes(definition + 0x184, bytes)
+        return read_bytes(definition + kPlugBlockOffset, bytes)
                && relocation::get<std::uint32_t>(bytes.data()) == 0x808077E3U;
     };
-    std::array<std::byte, 64> referenceBlock{};
+    std::array<std::byte, kPlugBlockSize> referenceBlock{};
     std::uintptr_t referenceAddress = 0;
     if (!block(reference, kLegArmorReferenceHash, referenceAddress, referenceBlock)) return false;
     g_categoryFailure = "reference_category";
     if (relocation::get<std::uint32_t>(referenceBlock.data() + 4) != kLegCategory) return false;
     for (std::size_t i = 0; i < routes.size(); ++i) {
-        std::array<std::byte, 64> bytes{};
+        std::array<std::byte, kPlugBlockSize> bytes{};
         if (!block(routes[i], kArrivalsLegModHashes[i], output[i].address, bytes)) return false;
         output[i].original = relocation::get<std::uint32_t>(bytes.data() + 4);
         g_categoryFailure = "category_or_metadata";
         if ((output[i].original != kGeneralCategory && output[i].original != kLegCategory)
-            || std::memcmp(bytes.data() + 8, referenceBlock.data() + 8, 56) != 0) return false;
+            || std::memcmp(bytes.data() + 8, referenceBlock.data() + 8, 56) != 0)
+            return false;
     }
     return true;
 }
@@ -563,21 +556,39 @@ bool categories_current() noexcept {
     return true;
 }
 
+/** Restore only fields still owned by this patch; retain ownership if any restore fails. */
+bool restore_categories() noexcept {
+    bool restored = true;
+    for (std::size_t i = 0; i < g_categoryCount; ++i) {
+        const auto& category = g_categories[i];
+        std::uint32_t current = 0;
+        if (!read(category.address, current)
+            || (current != category.original
+                && (current != kLegCategory || !write(category.address, category.original)))) {
+            restored = false;
+        }
+    }
+    if (restored) g_categoryCount = 0;
+    return restored;
+}
+
 /** Bounded retry for item definitions that become available after set-table initialization. */
 void apply_pending_categories() noexcept {
     if (g_categoryAttempts == 0) return;
     const auto now = GetTickCount64();
     if (now < g_categoryNext) return;
-    g_categoryNext = now + 250;
+    g_categoryNext = now + kCategoryRetryIntervalMs;
     --g_categoryAttempts;
     std::array<CategoryPatch, 4> categories{};
     if (!stage_categories(g_categorySource, g_categoryRoutes, g_categoryReference, categories)) {
         if (now >= g_categoryDeadline) g_categoryAttempts = 0;
-        if (g_categoryAttempts == 119 || g_categoryAttempts == 0) {
+        if (g_categoryAttempts == kCategoryAttemptLimit - 1 || g_categoryAttempts == 0) {
             std::array<char, 200> line{};
-            std::snprintf(line.data(), line.size(),
+            std::snprintf(line.data(),
+                          line.size(),
                           "ev=investment stage=arrivals_leg_categories result=%s reason=%s",
-                          g_categoryAttempts == 0 ? "failed" : "pending", g_categoryFailure);
+                          g_categoryAttempts == 0 ? "failed" : "pending",
+                          g_categoryFailure);
             core::log::write(core::log::Channel::client, core::log::Level::warn, line.data());
         }
         return;
@@ -587,33 +598,29 @@ void apply_pending_categories() noexcept {
     g_categoryCount = categories.size();
     bool written = true;
     for (const auto& category : categories) {
-        if (!write(category.address, kLegCategory)) { written = false; break; }
+        if (!write(category.address, kLegCategory)) {
+            written = false;
+            break;
+        }
     }
     if (written && categories_current()) {
-        core::log::write(core::log::Channel::client, core::log::Level::info,
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::info,
                          "ev=investment stage=arrivals_leg_categories result=applied verified=4");
         return;
     }
-    bool restored = true;
-    for (const auto& category : categories) {
-        std::uint32_t current = 0;
-        if (!read(category.address, current)
-            || (current != category.original
-                && (current != kLegCategory || !write(category.address, category.original)))) {
-            restored = false;
-        }
-    }
-    if (restored) g_categoryCount = 0;
-    core::log::write(core::log::Channel::client, core::log::Level::warn,
-                     "ev=investment stage=arrivals_leg_categories result=failed reason=write_or_verify");
+    (void)restore_categories();
+    core::log::write(
+        core::log::Channel::client,
+        core::log::Level::warn,
+        "ev=investment stage=arrivals_leg_categories result=failed reason=write_or_verify");
 }
 
 [[nodiscard]] bool encode_descriptor(std::uintptr_t descriptor,
                                      const Allocation& allocation,
                                      std::uint64_t count,
                                      ArrayDescriptor& output) noexcept {
-    const std::uintptr_t header =
-        reinterpret_cast<std::uintptr_t>(allocation.base) + 8;
+    const std::uintptr_t header = reinterpret_cast<std::uintptr_t>(allocation.base) + 8;
     const std::uintptr_t relativeBase = descriptor + sizeof(std::uint64_t);
     if (header >= relativeBase) {
         const std::uintptr_t distance = header - relativeBase;
@@ -637,7 +644,7 @@ void apply_pending_categories() noexcept {
                                  Allocation& allocation,
                                  ArrayDescriptor& descriptor) noexcept {
     const std::uint64_t newCount = source.count - routes.size();
-    if (newCount != 15) return false;
+    if (newCount != kGeneralMemberCount - kArrivalsLegModHashes.size()) return false;
     std::size_t written = 0;
     for (std::size_t position = 0; position < source.count; ++position) {
         std::uint32_t index = 0;
@@ -674,7 +681,7 @@ void apply_pending_categories() noexcept {
                               Allocation& allocation,
                               ArrayDescriptor& descriptor) noexcept {
     const std::uint64_t newCount = source.count + routes.size();
-    if (newCount != 56) return false;
+    if (newCount != kLegMemberCount + kArrivalsLegModHashes.size()) return false;
     std::size_t referencePosition = source.count;
     for (std::size_t position = 0; position < source.count; ++position) {
         if (!snapshot_row(source, position, g_expected[1][position])) {
@@ -700,15 +707,16 @@ void apply_pending_categories() noexcept {
             std::uint32_t index = 0;
             if (!member_index(general, position, index)) return false;
             if (index != routes[route]) continue;
-            if (found || !snapshot_row(general, position,
-                                       g_expected[1][source.count + route])) return false;
+            if (found || !snapshot_row(general, position, g_expected[1][source.count + route]))
+                return false;
             found = true;
         }
         if (!found) return false;
     }
     g_expectedCounts[1] = static_cast<std::size_t>(newCount);
     // Keep the native Empty Mod Socket first, followed by the four artifact mods.
-    std::rotate(g_expected[1].begin() + 1, g_expected[1].begin() + source.count,
+    std::rotate(g_expected[1].begin() + 1,
+                g_expected[1].begin() + source.count,
                 g_expected[1].begin() + newCount);
     allocation = allocate_array(relocation::capacity(g_expectedCounts[1]));
     return allocation
@@ -758,14 +766,8 @@ void apply_pending_categories() noexcept {
     }
     ArrayView general{};
     ArrayView legs{};
-    return resolve_array(g_applied[0].descriptor,
-                         kMaximumMemberCount,
-                         kPlugMemberStride,
-                         general)
-           && resolve_array(g_applied[1].descriptor,
-                            kMaximumMemberCount,
-                            kPlugMemberStride,
-                            legs)
+    return resolve_array(g_applied[0].descriptor, kMaximumMemberCount, kPlugMemberStride, general)
+           && resolve_array(g_applied[1].descriptor, kMaximumMemberCount, kPlugMemberStride, legs)
            && patched_membership(general, legs, routes, reference)
            && verify_owned(0, g_allocations[0]) && verify_owned(1, g_allocations[1]);
 }
@@ -773,16 +775,7 @@ void apply_pending_categories() noexcept {
 /** Restores descriptors only when they still name this module's allocations. */
 bool restore_applied() noexcept {
     g_categoryAttempts = 0;
-    bool restoredAll = true;
-    for (std::size_t i = 0; i < g_categoryCount; ++i) {
-        const auto& category = g_categories[i];
-        std::uint32_t value = 0;
-        if (!read(category.address, value)
-            || (value != category.original
-                && (value != kLegCategory || !write(category.address, category.original)))) {
-            restoredAll = false;
-        }
-    }
+    bool restoredAll = restore_categories();
     for (std::size_t index = g_appliedCount; index > 0; --index) {
         const AppliedSet& applied = g_applied[index - 1];
         ArrayDescriptor current{};
@@ -790,8 +783,7 @@ bool restore_applied() noexcept {
             restoredAll = false;
         } else if (current == applied.original) {
             continue;
-        } else if (current != applied.replacement
-                   || !write(applied.descriptor, applied.original)) {
+        } else if (current != applied.replacement || !write(applied.descriptor, applied.original)) {
             restoredAll = false;
         }
     }
@@ -799,8 +791,6 @@ bool restore_applied() noexcept {
         for (Allocation& allocation : g_allocations) {
             release(allocation);
         }
-    }
-    if (restoredAll) {
         g_applied = {};
         g_appliedCount = 0;
         g_categoryCount = 0;
@@ -840,8 +830,8 @@ void apply_socket_menu_routing() noexcept {
         referenceIndex = definition.definitionIndex;
     }
     for (std::size_t route = 0; mapped && route < kArrivalsLegModHashes.size(); ++route) {
-        mapped = state::build_data::find_item_definition_hash(
-            kArrivalsLegModHashes[route], definition);
+        mapped =
+            state::build_data::find_item_definition_hash(kArrivalsLegModHashes[route], definition);
         if (mapped) {
             routeIndices[route] = definition.definitionIndex;
         }
@@ -877,9 +867,12 @@ void apply_socket_menu_routing() noexcept {
     std::array<Allocation, 2> allocations{};
     std::array<ArrayDescriptor, 2> replacements{};
     if (!build_general(located.general, routeIndices, allocations[0], replacements[0])
-        || !build_legs(
-            located.legs, located.general, routeIndices, referenceIndex,
-            allocations[1], replacements[1])) {
+        || !build_legs(located.legs,
+                       located.general,
+                       routeIndices,
+                       referenceIndex,
+                       allocations[1],
+                       replacements[1])) {
         release(allocations[0]);
         release(allocations[1]);
         report_failure(Failure::allocation);
@@ -902,8 +895,7 @@ void apply_socket_menu_routing() noexcept {
                   {located.legs.descriptor, originalLegs, replacements[1]}}};
     g_appliedCount = g_applied.size();
     const bool generalWritten = write(located.general.descriptor, replacements[0]);
-    const bool legsWritten = generalWritten
-                             && write(located.legs.descriptor, replacements[1]);
+    const bool legsWritten = generalWritten && write(located.legs.descriptor, replacements[1]);
     if (!legsWritten) {
         restore_applied();
         report_failure(Failure::write);
@@ -922,9 +914,9 @@ void apply_socket_menu_routing() noexcept {
     g_categorySource = located.source;
     g_categoryRoutes = routeIndices;
     g_categoryReference = referenceIndex;
-    g_categoryAttempts = 120;
+    g_categoryAttempts = kCategoryAttemptLimit;
     g_categoryNext = 0;
-    g_categoryDeadline = GetTickCount64() + 30000;
+    g_categoryDeadline = GetTickCount64() + kCategoryRetryWindowMs;
     apply_pending_categories();
     g_armed.store(false, std::memory_order_release);
     std::array<char, core::log::kLineCapacity> line{};

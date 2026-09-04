@@ -140,8 +140,7 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
     if (reason == DLL_PROCESS_ATTACH) {
         g_module = instance;
         DisableThreadLibraryCalls(instance);
-        // The retail investment consumer stores array payload addresses in its 32-bit content
-        // domain. Reserve its tiny replacement arena before boot content consumes that space.
+        // Preserve the tested low-address placement; reserve before boot content fills that space.
         sunrise::client::hooks::network::investment::reserve_socket_menu_routing_storage();
     } else if (reason == DLL_PROCESS_DETACH) {
         g_module = nullptr;

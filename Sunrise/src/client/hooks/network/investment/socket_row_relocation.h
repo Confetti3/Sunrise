@@ -12,22 +12,23 @@ inline constexpr std::uint32_t kMarker = 0x80809FBDU;
 inline constexpr std::uint32_t kMemberClass = 0x80802E03U;
 inline constexpr std::uint32_t kConditionClass = 0x80807D31U;
 inline constexpr std::size_t kDataOffset = 24;
+inline constexpr std::size_t kMaximumMembers = 56;
+inline constexpr std::size_t kMemberSize = 32;
+inline constexpr std::size_t kConditionSize = 32;
 
 /** A captured member and its own opaque, single-record condition allocation. */
 struct Row {
-    std::array<std::byte, 32> bytes{};
-    std::array<std::byte, 32> condition{};
+    std::array<std::byte, kMemberSize> bytes{};
+    std::array<std::byte, kConditionSize> condition{};
 };
 
-template <typename T>
-T get(const std::byte* p) noexcept {
+template <typename T> T get(const std::byte* p) noexcept {
     T value{};
     std::memcpy(&value, p, sizeof value);
     return value;
 }
 
-template <typename T>
-void put(std::byte* p, T value) noexcept {
+template <typename T> void put(std::byte* p, T value) noexcept {
     std::memcpy(p, &value, sizeof value);
 }
 
@@ -43,12 +44,12 @@ inline bool valid(const Row& row) noexcept {
 }
 
 inline std::size_t capacity(std::size_t count) noexcept {
-    return kDataOffset + count * 64 + 8;
+    return kDataOffset + count * (kMemberSize + kConditionSize) + 8;
 }
 
 /** Builds aligned, self-contained arrays; the original pointer bits are never reused. */
 inline bool build(std::span<const Row> rows, std::span<std::byte> output) noexcept {
-    if (rows.empty() || rows.size() > 56 || output.size() < capacity(rows.size())
+    if (rows.empty() || rows.size() > kMaximumMembers || output.size() < capacity(rows.size())
         || reinterpret_cast<std::uintptr_t>(output.data()) % 8 != 0) {
         return false;
     }
@@ -83,7 +84,8 @@ inline bool build(std::span<const Row> rows, std::span<std::byte> output) noexce
 
 /** Independently follows every relocated reference and compares all original payload bytes. */
 inline bool verify(std::span<const Row> rows, std::span<const std::byte> blob) noexcept {
-    if (rows.empty() || rows.size() > 56 || blob.size() < kDataOffset + rows.size() * 32
+    if (rows.empty() || rows.size() > kMaximumMembers
+        || blob.size() < kDataOffset + rows.size() * 32
         || reinterpret_cast<std::uintptr_t>(blob.data()) % 8 != 0
         || get<std::uint32_t>(blob.data() + 4) != kMarker
         || get<std::uint64_t>(blob.data() + 8) != rows.size()
