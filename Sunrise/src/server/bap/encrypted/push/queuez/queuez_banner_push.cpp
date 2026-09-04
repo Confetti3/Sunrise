@@ -73,8 +73,10 @@ void report_fail(const char* stage, const char* reason) noexcept {
         || prepared.family.type != queuez::kBannerFamilyType
         || prepared.family.rootSoid != refresh.after.family4RootSoid
         || prepared.family.version != refresh.after.family0Version || prepared.family.flags != 0
+        // The replacement begins with upstream's codec-free delete, not a raw upsert.
+        // Rejecting that marker drops the entire appearance refresh (including titles).
         || (replacement
-            && prepared.family.objects.front().encoding != middleware::queuez::Encoding::raw)
+            && prepared.family.objects.front().encoding != middleware::queuez::Encoding::none)
         || prepared.family.objects[characterIndex].id
                != middleware::datagen::kBannerCharacterObjectId
         || prepared.family.objects[characterIndex].version != refresh.characterSoid
