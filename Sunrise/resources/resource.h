@@ -8,11 +8,12 @@
 #define IDR_DETOURS_LICENSE 103
 /** The next module-local RCDATA identifier holds the animated logo sprite sheet, as a PNG. */
 #define IDR_LOGO_SHEET 104
-
+/** The next module-local RCDATA identifier embeds the required PUC-Lua MIT notice. */
+#define IDR_LUA_LICENSE 105
 /** The four numeric fields of the version resource, in FILEVERSION order. */
 #define SUNRISE_VER_MAJOR 0
-#define SUNRISE_VER_MINOR 3
-#define SUNRISE_VER_PATCH 2
+#define SUNRISE_VER_MINOR 4
+#define SUNRISE_VER_PATCH 0
 #define SUNRISE_VER_BUILD 0
 /** The same version as display text. Windows shows this string, not the four fields. */
-#define SUNRISE_VER_STRING "0.3.2.0"
+#define SUNRISE_VER_STRING "0.4.0.0"

@@ -13,12 +13,20 @@
 
 namespace sunrise::core::settings {
 
+/** Boot policy for the optional full-estate activity SDK generator. */
+struct ActivitySdkGenerationSettings final {
+    /** Allows generation work to be requested. Off unless the settings file opts in. */
+    bool enabled{false};
+    /** Writes the sdk/lua declaration tree. On by default, and only runs when generation does. */
+    bool luaDeclarations{true};
+};
+
 /**
  * Layout version of the settings file this build writes and expects.
- * Raise it when a key is renamed, removed, changes meaning, or must take a new default.
- * Adding a key needs no raise, because a missing key already takes its default.
+ * Raise it when a key is renamed, removed, changes meaning, or must take a new default. Adding a
+ * key needs no raise, because a missing key already takes its default.
  */
-inline constexpr std::uint32_t kSettingsVersion = 8;
+inline constexpr std::uint32_t kSettingsVersion = 13;
 
 /** Parsed read-only process settings. */
 struct Settings {
@@ -29,6 +37,8 @@ struct Settings {
     std::uint32_t version{};
     /** Core-owned sink and channel policy. */
     log::Settings logging;
+    /** Core-owned boot gate for activity SDK generation. */
+    ActivitySdkGenerationSettings activitySdkGeneration;
     /** Options used only by the Client layer. */
     client::Settings client;
     /** Options used only by the Server layer. */

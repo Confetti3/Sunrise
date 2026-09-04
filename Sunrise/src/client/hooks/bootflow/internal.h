@@ -55,16 +55,6 @@ void uninstall_composition_check() noexcept;
 void uninstall_orbit_handoff() noexcept;
 
 /**
- * Attaches the join-request readiness force, which moves the activity session to status 6.
- * Two of the gate's five terms are client flags with no host input.
- * @return True when the target is found and the detour attaches.
- */
-[[nodiscard]] bool install_join_request_ready() noexcept;
-
-/** Detaches the join-request readiness force. */
-void uninstall_join_request_ready() noexcept;
-
-/**
  * Attaches the owner activity slot force. It pins the participation record to the replicated
  * snapshot at `comp + 496` instead of the local one at `comp + 1256`.
  * @return True when the target is found and the detour attaches.
@@ -108,24 +98,5 @@ void observe_world_step() noexcept;
 
 /** Detaches the spawn hold. */
 void uninstall_spawn_hold() noexcept;
-
-/**
- * Finds the world-transition fade release and its manager object.
- * Nothing is detoured: both are called, so a miss leaves the feature off, not the client changed.
- * @return True when both targets were found.
- */
-[[nodiscard]] bool install_fade_release() noexcept;
-
-/** Clears the fade release it found. */
-void uninstall_fade_release() noexcept;
-
-/**
- * Releases the world-transition fade channel.
- * The spawn gate owns the timing. Does nothing unless `client.fade_release` is set.
- */
-void release_world_fade() noexcept;
-
-/** Re-arms the one line the release logs, so the next load reports its own. */
-void rearm_fade_release() noexcept;
 
 } // namespace sunrise::client::hooks::bootflow

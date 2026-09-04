@@ -10,6 +10,8 @@
 #include "../scaling/dpi/ui_dpi_scaling.h"
 #include "overlay.h"
 #include "overlays/ui_hud_logo_overlay.h"
+#include "overlays/ui_hud_mission_script_overlay.h"
+#include "overlays/ui_hud_sensor_events_overlay.h"
 #include "overlays/ui_hud_session_overlay.h"
 #include "overlays/ui_hud_status_overlay.h"
 #include "store/hud_settings_store.h"
@@ -46,10 +48,20 @@ constexpr std::size_t kSwitchCount = kOverlayCount + kStatusLineCount;
 /** Every overlay, in Overlay order. The menu lists them and the corner stacks them in it. */
 constexpr std::array<Entry, kOverlayCount> kOverlays{
     Entry{"Sunrise Card", "sunrise_card", "##sunrise_hud_card", &overlays::logo::draw, true},
-    // Both start off: they report what the server is doing, which no ordinary run needs on screen.
+    // Diagnostic overlays start off because an ordinary run does not need them on screen.
     Entry{
         "Current Status", "current_status", "##sunrise_hud_status", &overlays::status::draw, false},
     Entry{"Session", "session", "##sunrise_hud_session", &overlays::session::draw, false},
+    Entry{"Client Activity Messages",
+          "sensor_events",
+          "##sunrise_hud_sensor_events",
+          &overlays::sensor_events::draw,
+          false},
+    Entry{"Mission Script",
+          "mission_script",
+          "##sunrise_hud_mission_script",
+          &overlays::mission_script::draw,
+          false},
 };
 
 /** One status line's identity and starting switch state. */

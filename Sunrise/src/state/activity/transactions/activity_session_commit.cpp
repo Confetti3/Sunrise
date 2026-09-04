@@ -1,9 +1,22 @@
+#include <Windows.h>
+
 #include "../../runtime/storage/internal.h"
 #include "../destination/activity_destination_validation.h"
 #include "../runtime.h"
 #include "internal.h"
 
 namespace sunrise::state::activity {
+namespace {
+
+/** The wire time origin counts whole seconds and the system tick counts milliseconds. */
+constexpr std::uint64_t kMillisecondsPerSecond = 1'000;
+
+/** @return The whole-second origin this activity session hands to every one of its members. */
+[[nodiscard]] std::uint64_t session_time_origin() noexcept {
+    return GetTickCount64() / kMillisecondsPerSecond;
+}
+
+} // namespace
 
 /** Commits one prepared activity-session allocation when its revisions still match. */
 bool commit(PendingAllocation& allocation) noexcept {
@@ -47,6 +60,7 @@ bool commit(PendingAllocation& allocation) noexcept {
     record.destination = prepared.destination;
     record.sessionId = prepared.sessionId;
     record.createdRevision = state.stateRevision;
+    record.timeOrigin = session_time_origin();
     record.recordRevision = state.stateRevision;
     record.occupied = true;
     if (!prepared.recreated) {

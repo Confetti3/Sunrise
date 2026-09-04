@@ -12,6 +12,10 @@ enum class Overlay : std::uint8_t {
     currentStatus,
     /** The instances of the session the player is in. */
     session,
+    /** Recent owned client messages at the Activity Host boundary. */
+    sensorEvents,
+    /** What the mission script VM is doing, per attached activity. */
+    missionScript,
     count,
 };
 

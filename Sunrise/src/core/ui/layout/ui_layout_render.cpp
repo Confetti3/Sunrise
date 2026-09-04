@@ -8,6 +8,7 @@
 #include "../components/card/ui_card_component.h"
 #include "../components/logo/ui_logo_component.h"
 #include "../components/section/ui_section_component.h"
+#include "../modules/registry/ui_module_registry.h"
 #include "../scaling/dpi/ui_dpi_scaling.h"
 #include "navigation/ui_layout_navigation.h"
 #include "ui_layout_lifecycle.h"
@@ -33,7 +34,7 @@ constexpr float kNavigationWidth = 180.0F;
 constexpr float kAutomaticWidth = 0.0F;
 /** A half-axis pivot centers the window on both viewport axes. */
 constexpr ImVec2 kCenterPivot{0.5F, 0.5F};
-/** The main surface is fixed, has no title bar, and is left out of saved Dear ImGui state. */
+/** The main surface has no title bar and is left out of saved Dear ImGui state. */
 constexpr ImGuiWindowFlags kMainWindowFlags =
     ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings
     | ImGuiWindowFlags_NoTitleBar;
@@ -107,6 +108,17 @@ void draw_content(const navigation::Selection& selected) noexcept {
     selected.descriptor.frame_callback()();
 }
 
+/** Draws optional module-owned companion windows after the main surface. */
+void draw_companion_windows() noexcept {
+    const modules::registry::RegistrySnapshot registrySnapshot = modules::registry::snapshot();
+    for (const modules::Descriptor& descriptor : registrySnapshot.entries()) {
+        const modules::FrameCallback callback = descriptor.companion_frame_callback();
+        if (callback != nullptr) {
+            callback();
+        }
+    }
+}
+
 /** Draws the animated logo, then the name and version, on one title row. */
 void draw_title() noexcept {
     const float extent = scaling::dpi::pixels(kTitleLogoExtent);
@@ -160,7 +172,15 @@ bool render(bool visible) noexcept {
     }
 
     const float scale = kOpeningScale + ((kOpenScale - kOpeningScale) * progress);
-    ImGui::SetNextWindowPos(viewport->GetCenter(), ImGuiCond_Always, kCenterPivot);
+    const ImVec2 center = viewport->GetCenter();
+    if (visible && progress < 1.0F) {
+        // The opening zoom grows around the viewport centre. Only the settled window is movable.
+        ImGui::SetNextWindowPos(center, ImGuiCond_Always, kCenterPivot);
+    } else {
+        const ImVec2 centeredPosition{center.x - (size.x * kCenterPivot.x),
+                                      center.y - (size.y * kCenterPivot.y)};
+        ImGui::SetNextWindowPos(centeredPosition, ImGuiCond_FirstUseEver);
+    }
     ImGui::SetNextWindowSize({size.x * scale, size.y * scale}, ImGuiCond_Always);
     // One style alpha fades the surface and everything drawn inside it together.
     ImGui::PushStyleVar(ImGuiStyleVar_Alpha, progress);
@@ -189,6 +209,7 @@ bool render(bool visible) noexcept {
         }
     }
     ImGui::End();
+    draw_companion_windows();
     ImGui::PopStyleVar();
     return true;
 }

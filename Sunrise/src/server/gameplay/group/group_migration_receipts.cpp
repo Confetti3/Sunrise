@@ -1,8 +1,15 @@
 #include "group_migration_receipts.h"
 
+#include <array>
+
+#include "../../../middleware/gameplay/descriptor/join_descriptor.h"
 #include "../../../middleware/gameplay/group/migration_messages.h"
 #include "../../../middleware/gameplay/group/notice_messages.h"
+#include "../endpoint/gameplay_endpoint.h"
 #include "../gameplay_log.h"
+#include "../peer/peer_transport.h"
+#include "group_host.h"
+#include "group_host_sessions.h"
 
 namespace sunrise::server::gameplay::group::migration {
 
@@ -10,6 +17,50 @@ namespace {
 
 namespace wire = middleware::gameplay::group;
 namespace bits = middleware::encoding::bits;
+namespace descriptor = middleware::gameplay::descriptor;
+
+/**
+ * Reasserts the stable logical host after its admitted peer starts an election.
+ * @param from Peer endpoint that owns the private group.
+ * @param election Fully framed election prefix.
+ */
+void answer_private_election(const state::gameplay::Endpoint& from,
+                             const wire::Election& election) noexcept {
+    const endpoint::Identity identity = endpoint::identity();
+    if (election.sessionId != identity.machineId
+        || !group::admitted_owner(from, election.sessionId)) {
+        return;
+    }
+    HostSessionBinding host{};
+    const state::gameplay::Endpoint advertised = endpoint::advertised();
+    descriptor::JoinEndpoint endpointValue{};
+    endpointValue.machineId = election.sessionId;
+    endpointValue.address = advertised.address;
+    endpointValue.onlineSessionId = identity.onlineSessionId;
+    if (!host_session_for_group(election.sessionId, host)) {
+        report(core::log::Level::warn,
+               "ev=gameplay stage=migration result=reestablish_fail reason=no_host");
+        return;
+    }
+    endpointValue.port = host.port != 0 ? host.port : advertised.port;
+    std::array<std::byte, descriptor::kDescriptorSize> body{};
+    if (!descriptor::build(endpointValue, body)) {
+        report(core::log::Level::warn,
+               "ev=gameplay stage=migration result=reestablish_fail reason=descriptor");
+        return;
+    }
+    const bool sent = peer::send_out_of_band(
+        from,
+        static_cast<std::uint8_t>(wire::MigrationMessageId::hostReestablish),
+        wire::kHostReestablishSize,
+        [&body, &election](bits::Writer& writer) noexcept {
+            return wire::write_host_reestablish(writer, election.sessionId, body);
+        });
+    report(sent ? core::log::Level::info : core::log::Level::warn,
+           "ev=gameplay stage=migration result=%s session=0x%016llX",
+           sent ? "reestablish" : "reestablish_fail",
+           static_cast<unsigned long long>(election.sessionId));
+}
 
 /** @return True when the id names a migration body carrying nothing but a group session. */
 [[nodiscard]] bool session_only(std::uint8_t id) noexcept {
@@ -107,8 +158,10 @@ namespace bits = middleware::encoding::bits;
 
 } // namespace
 
-/** Reads one host-migration or election message and records what it said. */
-bool consume(std::uint8_t id, bits::Reader& reader) noexcept {
+/** Reads one host-migration or election message and preserves the private logical host. */
+bool consume(const state::gameplay::Endpoint& from,
+             std::uint8_t id,
+             bits::Reader& reader) noexcept {
     if (id == static_cast<std::uint8_t>(wire::MigrationMessageId::hostHandoff)
         || id == static_cast<std::uint8_t>(wire::MigrationMessageId::peerHandoff)) {
         return consume_handoff(id, reader);
@@ -164,7 +217,7 @@ bool consume(std::uint8_t id, bits::Reader& reader) noexcept {
     }
     if (id == static_cast<std::uint8_t>(wire::MigrationMessageId::election)) {
         wire::Election body{};
-        if (!wire::read_election(reader, body)) {
+        if (!wire::read_election(reader, body) || !reader.skip(body.tailBits)) {
             return false;
         }
         report(core::log::Level::warn,
@@ -173,9 +226,8 @@ bool consume(std::uint8_t id, bits::Reader& reader) noexcept {
                static_cast<unsigned long long>(body.sessionId),
                static_cast<unsigned>(body.candidateCount),
                body.tailBits);
-        // The candidate value width is unrecovered, so the bitsets behind the addresses were not
-        // located and no later message in this container can be found.
-        return false;
+        answer_private_election(from, body);
+        return true;
     }
     if (id == static_cast<std::uint8_t>(wire::MigrationMessageId::electionRefuse)) {
         wire::ElectionRefuse body{};

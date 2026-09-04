@@ -10,6 +10,7 @@
 
 #include "../../../core/logging/log.h"
 #include "../../targets/game/assert_handler.h"
+#include "../net_tick_probe/net_tick_probe.h"
 
 namespace sunrise::client::hooks::assert_handler {
 namespace {
@@ -81,6 +82,9 @@ void report(int code, const char* text) noexcept {
     if (!admit(text, seen, repeats)) {
         return;
     }
+    // A repeating assert is the one thing still running when the game's networking tick stops, so
+    // the latch that gates that tick is read from here. The probe throttles itself.
+    net_tick_probe::sample();
     std::array<char, kLineCapacity> line{};
     const int written = std::snprintf(line.data(),
                                       line.size(),

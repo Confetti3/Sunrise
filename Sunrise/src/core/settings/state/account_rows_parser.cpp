@@ -10,6 +10,9 @@ namespace {
 constexpr std::uint64_t kMaximumCharacterLevel = (std::numeric_limits<std::uint8_t>::max)();
 /** A destination definition hash is one unsigned 32-bit field. */
 constexpr std::uint64_t kMaximumDestinationHash = (std::numeric_limits<std::uint32_t>::max)();
+/** The travelling-activity index is one unsigned 16-bit field in the family-4 character. */
+constexpr std::uint64_t kMaximumTravellingActivityIndex =
+    (std::numeric_limits<std::uint16_t>::max)();
 
 /** Sets the tier bit one rarity name stands for. */
 [[nodiscard]] bool dismantle_tier_bit(std::string_view name, std::uint8_t& mask) noexcept {
@@ -38,7 +41,7 @@ constexpr std::uint64_t kMaximumDestinationHash = (std::numeric_limits<std::uint
 
 } // namespace
 
-/** Parses materials credited by gear dismantles, with optional rarity and class filters. */
+/** Parses the materials credited by gear dismantles, with optional rarity and class filters. */
 bool Parser::dismantle_rewards(state::AccountState& output) noexcept {
     output.dismantleRewards = {};
     output.dismantleRewardCount = 0;
@@ -371,6 +374,12 @@ bool Parser::character(state::CharacterState& output) noexcept {
                 return false;
             }
             output.lastOrbitedDestination = static_cast<std::uint32_t>(value);
+        } else if (key == "current_activity_index") {
+            std::uint64_t value = 0;
+            if (!unsigned_value(value) || value > kMaximumTravellingActivityIndex) {
+                return false;
+            }
+            output.currentActivityIndex = static_cast<std::uint16_t>(value);
         } else if (key == "content_bypass") {
             if (!boolean(output.contentBypass)) {
                 return false;

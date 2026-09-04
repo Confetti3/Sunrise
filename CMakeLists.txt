@@ -15,7 +15,13 @@ file(GLOB_RECURSE VENDOR_SOURCES CONFIGURE_DEPENDS
     "Sunrise/vendor/detours/*.h"
     "Sunrise/vendor/imgui/*.cpp"
     "Sunrise/vendor/imgui/*.h"
+    "Sunrise/vendor/lua/*.c"
+    "Sunrise/vendor/lua/*.h"
 )
+file(GLOB_RECURSE LUA_SOURCES CONFIGURE_DEPENDS
+    "Sunrise/vendor/lua/*.c"
+)
+set_source_files_properties(${LUA_SOURCES} PROPERTIES LANGUAGE CXX)
 file(GLOB_RECURSE RESOURCE_FILES CONFIGURE_DEPENDS
     "Sunrise/resources/*.rc"
     "Sunrise/resources/*.h"
@@ -52,6 +58,7 @@ target_include_directories(steam_api64 SYSTEM PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/Sunrise/vendor/detours"
     "${CMAKE_CURRENT_SOURCE_DIR}/Sunrise/vendor/imgui"
     "${CMAKE_CURRENT_SOURCE_DIR}/Sunrise/vendor/imgui/backends"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Sunrise/vendor/lua"
 )
 
 if(DEFINED XWIN_DIR)
@@ -76,6 +83,8 @@ target_compile_definitions(steam_api64 PRIVATE
 )
 
 if(MSVC OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(steam_api64 PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/EHsc>)
+
     # Clang warnings are more strict the MSVC I guess, this only works on real clang
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         list(APPEND STRICT_WARNING_FLAGS

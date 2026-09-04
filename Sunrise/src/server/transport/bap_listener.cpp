@@ -7,6 +7,7 @@
 
 #include "../../core/logging/log.h"
 #include "../../core/settings/settings.h"
+#include "../activity/host_runtime.h"
 #include "internal.h"
 
 namespace sunrise::server::transport {
@@ -229,7 +230,24 @@ void service(std::uint64_t now) noexcept {
     FD_ZERO(&writable);
     std::array<bool, client::network::kBapConnectionCount> wasPending{};
     const std::size_t accepting = free_slot();
-    if (accepting != g_listener.peers.size()) {
+    // With no free slot the acceptor is left out of the set, so a connect waits in the backlog
+    // with no handshake and no other symptom. Report the edge.
+    const bool full = accepting == g_listener.peers.size();
+    if (full != g_listener.slotsFull) {
+        g_listener.slotsFull = full;
+        std::array<char, core::log::kLineCapacity> line{};
+        const int written = std::snprintf(line.data(),
+                                          line.size(),
+                                          "ev=transport stage=accept result=%s slots=%zu",
+                                          full ? "full" : "free",
+                                          g_listener.peers.size());
+        if (written > 0) {
+            core::log::write(core::log::Channel::server,
+                             full ? core::log::Level::warn : core::log::Level::info,
+                             {line.data(), static_cast<std::size_t>(written)});
+        }
+    }
+    if (!full) {
         FD_SET(g_listener.acceptor, &readable);
     }
     for (std::size_t slot = 0; slot < g_listener.peers.size(); ++slot) {
@@ -251,11 +269,14 @@ void service(std::uint64_t now) noexcept {
         return;
     }
 
-    const bool pollDue = g_listener.nextPollTick == 0 || now >= g_listener.nextPollTick;
-    if (pollDue) {
+    const bool timedPoll = g_listener.nextPollTick == 0 || now >= g_listener.nextPollTick;
+    if (timedPoll) {
         g_listener.nextPollTick = now + static_cast<std::uint64_t>(kServiceIntervalMs);
     }
-    if (accepting != g_listener.peers.size() && FD_ISSET(g_listener.acceptor, &readable)) {
+    // The poll is what lets a committed answer out. Holding one for the rest of the
+    // interval costs every queued mission action a full interval of its own.
+    const bool pollDue = timedPoll || activity::host::any_output_pending();
+    if (!full && FD_ISSET(g_listener.acceptor, &readable)) {
         accept_peer(accepting);
     }
     for (std::size_t slot = 0; slot < g_listener.peers.size(); ++slot) {
@@ -282,6 +303,7 @@ void shutdown() noexcept {
         close_peer(slot);
     }
     g_listener.nextPollTick = 0;
+    g_listener.slotsFull = false;
     if (g_listener.winsockOwned) {
         WSACleanup();
         g_listener.winsockOwned = false;

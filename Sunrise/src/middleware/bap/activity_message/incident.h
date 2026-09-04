@@ -5,6 +5,8 @@
 #include <cstdint>
 #include <span>
 
+#include "../../encoding/bit_writer.h"
+
 namespace sunrise::middleware::bap::activity_message::incident {
 
 /** Activity message type 19 carries one incident. Both sides can send it. */
@@ -22,9 +24,22 @@ inline constexpr std::uint8_t kSelectorPresenceWidth = 1;
 inline constexpr std::uint8_t kSelectorLengthWidth = 9;
 inline constexpr std::uint32_t kSelectorMaximum = 260;
 inline constexpr std::uint8_t kOptionalPresenceWidth = 1;
+inline constexpr std::uint8_t kOptionalFieldWidth = 64;
 inline constexpr std::uint8_t kOptionalWordWidth = 32;
 inline constexpr std::uint8_t kPayloadLengthWidth = 9;
 inline constexpr std::uint32_t kPayloadMaximum = 500;
+/** The smallest body is the five fixed fields with every count zero. */
+inline constexpr std::size_t kMinimumBodyBits = kTargetWidth + kExtraCountWidth
+                                                + kSelectorPresenceWidth + kOptionalPresenceWidth
+                                                + kPayloadLengthWidth;
+/** Largest body after every explicit target and optional byte field is present. */
+inline constexpr std::size_t kMaximumBodyBits =
+    kTargetWidth + kExtraCountWidth + kExtraTargetMaximum * kTargetWidth + kSelectorPresenceWidth
+    + kSelectorLengthWidth + kSelectorMaximum * 8 + kOptionalPresenceWidth + kOptionalFieldWidth
+    + kPayloadLengthWidth + kPayloadMaximum * 8;
+/** Fixed byte capacity needed by the largest padded incident body. */
+inline constexpr std::size_t kMaximumBodyBytes = (kMaximumBodyBits + 7) / 8;
+
 /** Why one incident did not pass validation. */
 enum class Verdict : std::uint8_t {
     accepted,
@@ -36,23 +51,45 @@ enum class Verdict : std::uint8_t {
     selectorTooLong,
 };
 
-/** One validated incident, framed to the end of its payload. */
+/** One outer-valid incident, framed to the end of its payload. */
 struct Incident {
+    std::array<std::byte, kSelectorMaximum> selector{};
+    std::array<std::byte, kPayloadMaximum> payload{};
     std::uint32_t primaryTarget{};
-    std::array<std::uint16_t, kExtraTargetMaximum> extraTargets{};
+    std::uint32_t extraTargets[kExtraTargetMaximum]{};
     std::uint32_t extraTargetCount{};
     std::uint32_t selectorLength{};
     std::uint32_t payloadLength{};
-    /** Bits the body used. Below the payload bit count means trailing padding. */
+    std::uint32_t optionalWordA{};
+    std::uint32_t optionalWordB{};
+    /** Bits the body used. Below the payload's own bit count means trailing padding. */
     std::uint32_t consumedBits{};
+    bool hasCompressedSelector{};
     /** Set when the two optional words are present. */
     bool hasOptionalBlock{};
+    bool hasPayload{};
 };
 
 /** @return A short stable name for one verdict, for the log line. */
 [[nodiscard]] const char* verdict_name(Verdict verdict) noexcept;
 
-/** Validates framing and every target before the Client can consume the incident. */
+/** @return True when every outer wire field is bounded; payload semantics are not checked. */
+[[nodiscard]] bool outer_valid(const Incident& incident) noexcept;
+
+/**
+ * Validates one incident body from its first target to the end of its payload.
+ * Every target index is range and poison checked before anything else, because an out-of-range
+ * index is a crash in the consumer rather than a decode error.
+ * @param payload Activity message payload after the envelope.
+ * @param parsed Cleared first. Receives every field reached before the verdict.
+ * @return accepted, or the first rule the body broke.
+ */
 [[nodiscard]] Verdict validate(std::span<const std::byte> payload, Incident& parsed) noexcept;
+
+/**
+ * Writes one bounded incident body after outer-field preflight.
+ * The caller still owns activity identity, output ordering, nonce commit and transport staging.
+ */
+[[nodiscard]] bool write(encoding::bits::Writer& writer, const Incident& incident) noexcept;
 
 } // namespace sunrise::middleware::bap::activity_message::incident

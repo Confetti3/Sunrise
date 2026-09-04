@@ -3,6 +3,7 @@
 #include <intrin.h>
 
 #include "client/hooks/egress/runtime.h"
+#include "client/hooks/network/investment/internal.h"
 #include "core/runtime/core_runtime.h"
 #include "steam/runtime/internal.h"
 #include "steam/runtime/runtime.h"
@@ -139,6 +140,9 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
     if (reason == DLL_PROCESS_ATTACH) {
         g_module = instance;
         DisableThreadLibraryCalls(instance);
+        // The retail investment consumer stores array payload addresses in its 32-bit content
+        // domain. Reserve its tiny replacement arena before boot content consumes that space.
+        sunrise::client::hooks::network::investment::reserve_socket_menu_routing_storage();
     } else if (reason == DLL_PROCESS_DETACH) {
         g_module = nullptr;
     }

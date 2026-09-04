@@ -21,6 +21,18 @@ using patterns::signature_length;
 /** @return True while the family-five commit rearm is attached. */
 [[nodiscard]] bool family5_rearm_is_installed() noexcept;
 
+/** Moves four mislabeled Arrivals members between their validated native reusable plug sets. */
+void apply_socket_menu_routing() noexcept;
+
+/** Reserves low-address storage before retail content occupies the compatible address domain. */
+void reserve_socket_menu_routing_storage() noexcept;
+
+/** Arms socket-menu correction at native content-table patch completion. */
+void arm_socket_menu_routing() noexcept;
+
+/** Restores native plug-set descriptors changed by the Arrivals membership correction. */
+void restore_socket_menu_routing() noexcept;
+
 /**
  * Arms one derived-state rebuild after replicated investment state changes.
  */

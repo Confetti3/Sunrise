@@ -19,10 +19,9 @@ enum class EmptyProfileResult : std::uint8_t {
 /** Common state and bounded fields retained by the empty profile. */
 struct EmptyProfile {
     CommonState common{};
-    std::uint8_t defaultBubble{};
+    std::uint8_t currentCell{};
     bool commonPresent{};
-    bool defaultBubblePresent{};
-    bool channel3TrailingList{};
+    bool currentCellPresent{};
 };
 
 /** Reads common state and four empty channels without changing output on failure. */

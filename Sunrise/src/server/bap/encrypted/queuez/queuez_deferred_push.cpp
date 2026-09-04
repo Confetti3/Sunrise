@@ -1,12 +1,14 @@
-﻿#include <Windows.h>
+#include <Windows.h>
 
 #include <algorithm>
 
 #include "../../../../core/logging/log.h"
 #include "../../../../middleware/secure_channel/runtime.h"
 #include "../../../../state/account/account_state.h"
-#include "../../../../state/progression/seasonal_experience.h"
+#include "../../../../state/activity/destination/definition.h"
+#include "../../../../state/activity/runtime.h"
 #include "../../../../state/runtime/runtime.h"
+#include "../../../../state/progression/seasonal_experience.h"
 #include "../internal.h"
 #include "../push/activity/activity_keepalive_push.h"
 #include "queuez_state_validation.h"
@@ -89,7 +91,7 @@ selected_character(const state::AccountState& account) noexcept {
                                                     pending,
                                                     std::nullopt,
                                                     active_acquisition_presentation_rows(session),
-                                                    state::bap().sessionKey,
+                                                    session.sessionKey,
                                                     nextSendNonce,
                                                     scratch.framed,
                                                     framedSize)
@@ -154,7 +156,7 @@ selected_character(const state::AccountState& account) noexcept {
                                                             acquisition,
                                                             pending,
                                                             std::nullopt,
-                                                            state::bap().sessionKey,
+                                                            session.sessionKey,
                                                             nextSendNonce,
                                                             scratch.framed,
                                                             framedSize)
@@ -214,7 +216,7 @@ selected_character(const state::AccountState& account) noexcept {
             session.pendingSeasonalExperienceAmount,
             static_cast<std::int32_t>(session.pendingSeasonalExperienceMutationSerial - 1U),
             active_acquisition_presentation_rows(session),
-            state::bap().sessionKey,
+            session.sessionKey,
             nextSendNonce,
             scratch.framed,
             framedSize,
@@ -254,7 +256,7 @@ selected_character(const state::AccountState& account) noexcept {
     if (!push::append_account_resync_notification(scratch,
                                                   session.queuez,
                                                   active_acquisition_presentation_rows(session),
-                                                  state::bap().sessionKey,
+                                                  session.sessionKey,
                                                   nextSendNonce,
                                                   scratch.framed,
                                                   framedSize,
@@ -264,11 +266,12 @@ selected_character(const state::AccountState& account) noexcept {
                          "ev=queuez stage=peer_resync result=fail reason=family4");
         return false;
     }
+    bool auxiliaryRefreshFailed = false;
     if (currentQueuez.family0Active) {
         queuez::SessionState appearanceAfter{};
         if (!push::append_account_resync_appearance_notification(scratch,
                                                                  currentQueuez,
-                                                                 state::bap().sessionKey,
+                                                                 session.sessionKey,
                                                                  nextSendNonce,
                                                                  scratch.framed,
                                                                  framedSize,
@@ -276,15 +279,16 @@ selected_character(const state::AccountState& account) noexcept {
             core::log::write(core::log::Channel::server,
                              core::log::Level::warn,
                              "ev=queuez stage=peer_resync result=fail reason=family0");
-            return false;
+            auxiliaryRefreshFailed = true;
+        } else {
+            currentQueuez = appearanceAfter;
         }
-        currentQueuez = appearanceAfter;
     }
     if (currentQueuez.family3Active) {
         queuez::SessionState rosterAfter{};
         if (!push::append_account_resync_roster_notification(scratch,
                                                              currentQueuez,
-                                                             state::bap().sessionKey,
+                                                             session.sessionKey,
                                                              nextSendNonce,
                                                              scratch.framed,
                                                              framedSize,
@@ -292,9 +296,10 @@ selected_character(const state::AccountState& account) noexcept {
             core::log::write(core::log::Channel::server,
                              core::log::Level::warn,
                              "ev=queuez stage=peer_resync result=fail reason=family3");
-            return false;
+            auxiliaryRefreshFailed = true;
+        } else {
+            currentQueuez = rosterAfter;
         }
-        currentQueuez = rosterAfter;
     }
     if (framedSize == 0 || framedSize > response.size() || !queuez::valid(currentQueuez)) {
         core::log::write(core::log::Channel::server,
@@ -307,6 +312,13 @@ selected_character(const state::AccountState& account) noexcept {
     session.sendNonce = nextSendNonce;
     session.queuez = currentQueuez;
     session.accountResyncArmed = false;
+    if (auxiliaryRefreshFailed) {
+        // Family 4 is the authoritative account update and has already produced a complete frame.
+        // Appearance/roster are independent derived views: retry them through their own deferred
+        // lane instead of withholding claims, lore, rewards, and objective progress behind them.
+        session.abilityRefreshDueTick = GetTickCount64();
+        session.abilityRefreshArmed = true;
+    }
     return true;
 }
 
@@ -339,7 +351,7 @@ selected_character(const state::AccountState& account) noexcept {
     push::append_queuez_notification(scratch,
                                      session.queuez,
                                      subscription,
-                                     state::bap().sessionKey,
+                                     session.sessionKey,
                                      nextSendNonce,
                                      scratch.framed,
                                      framedSize,
@@ -386,7 +398,7 @@ selected_character(const state::AccountState& account) noexcept {
         queuez::SessionState appearanceAfter{};
         if (push::append_account_resync_appearance_notification(scratch,
                                                                 current,
-                                                                state::bap().sessionKey,
+                                                                session.sessionKey,
                                                                 nextSendNonce,
                                                                 scratch.framed,
                                                                 framedSize,
@@ -399,7 +411,7 @@ selected_character(const state::AccountState& account) noexcept {
         queuez::SessionState rosterAfter{};
         if (push::append_account_resync_roster_notification(scratch,
                                                             current,
-                                                            state::bap().sessionKey,
+                                                            session.sessionKey,
                                                             nextSendNonce,
                                                             scratch.framed,
                                                             framedSize,
@@ -455,7 +467,7 @@ selected_character(const state::AccountState& account) noexcept {
                                                         update,
                                                         refresh,
                                                         active_acquisition_presentation_rows(session),
-                                                        state::bap().sessionKey,
+                                                        session.sessionKey,
                                                         nextSendNonce,
                                                         scratch.framed,
                                                         framedSize)
@@ -501,7 +513,7 @@ selected_character(const state::AccountState& account) noexcept {
         || !push::append_artifact_item_refresh_notification(scratch,
                                                             update,
                                                             instanceSoid,
-                                                            state::bap().sessionKey,
+                                                            session.sessionKey,
                                                             nextSendNonce,
                                                             scratch.framed,
                                                             framedSize)
@@ -597,7 +609,7 @@ bool consume_deferred(Session& session,
     push::append_queuez_notification(scratch,
                                      session.queuez,
                                      subscription,
-                                     state::bap().sessionKey,
+                                     session.sessionKey,
                                      nextSendNonce,
                                      scratch.framed,
                                      framedSize,

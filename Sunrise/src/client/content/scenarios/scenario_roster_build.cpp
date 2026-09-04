@@ -86,7 +86,7 @@ void note_candidate(Walk& walk,
  * @param scratch Lock-owned block storage.
  * @param storage Working storage for this pass.
  * @param walk Accumulator for one destination.
- * @param sliceSetIndex Slice-set index the entry reported.
+ * @param sliceSetIndex Slice-set index of the current authored state.
  * @return True when the registry walked without running out of fixed storage.
  */
 [[nodiscard]] bool walk_registry(const reader::Source& source,

@@ -68,6 +68,9 @@ struct Reading {
 /** Clears the predicates it found. */
 void forget() noexcept;
 
+/** @return The addressable local slice-set index, -1 while absent, or -2 when unresolved. */
+[[nodiscard]] std::int32_t sample_current_slice_set() noexcept;
+
 /**
  * Re-runs the gate's conditions in order and reports the first that refuses.
  * Calls only the gate's own read-only accessors, with its argument, on its thread and inside its

@@ -89,8 +89,8 @@ struct InputName {
 };
 
 /**
- * The Client's own input names and codes, read from its name table at `0x7FF7438A3400`. The names
- * are its strings. The last four rows are its own aliases, and the JSON escape for the backslash.
+ * The Client's own input names and codes, read from its name table. The names are its strings.
+ * The last four rows are its own aliases, and the JSON escape for the backslash.
  */
 constexpr std::array<InputName, 121> kInputNames{{
     {"escape", 0},

@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
+#include <span>
 
 #include "definition.h"
 #include "entity_slots/runtime.h"
@@ -88,6 +90,46 @@ bool release_session(std::uint64_t sessionId) noexcept;
  */
 [[nodiscard]] bool snapshot_binding(std::uint64_t sessionId, SessionBinding& output) noexcept;
 
+/**
+ * Copies the binding of every committed session.
+ * A per-session service needs the whole set, including private activities that have no gameplay
+ * peer from which to discover their identity.
+ * @param output Caller-owned storage, which bounds how many are copied.
+ * @param count Receives the number written.
+ * @return True when every committed session fit the storage.
+ */
+[[nodiscard]] bool snapshot_sessions(std::span<SessionBinding> output, std::size_t& count) noexcept;
+
+/** One committed session's identity and join state, without its mission or membership body. */
+struct SessionRosterRow final {
+    SessionBinding binding{};
+    std::uint64_t memberKey{};
+    /** The identity message 12 publishes at member record `+16`, or zero before one. */
+    std::uint64_t joinIdentity{};
+    std::uint64_t joinedRevision{};
+    bool joined{};
+};
+
+/**
+ * Copies the join state of every committed session under one read lock.
+ * It never exposes a record's mission or membership body.
+ * @param output Caller-owned storage, which bounds how many are copied.
+ * @param count Receives the number written.
+ * @return True when every committed session fit the storage.
+ */
+[[nodiscard]] bool snapshot_session_roster(std::span<SessionRosterRow> output,
+                                           std::size_t& count) noexcept;
+
+/**
+ * Copies only exact generations currently retained by a live owner.
+ * Cached unretained rows remain available for allocator reuse but are not live host instances.
+ * @param output Caller-owned storage.
+ * @param count Receives the number written.
+ * @return True when every retained generation fit.
+ */
+[[nodiscard]] bool snapshot_retained_bindings(std::span<SessionBinding> output,
+                                              std::size_t& count) noexcept;
+
 /** @return True when the exact bound record generation is still committed. */
 [[nodiscard]] bool binding_matches(const SessionBinding& binding) noexcept;
 
@@ -119,6 +161,12 @@ void note_world_phase(WorldPhase phase) noexcept;
 
 /** @return How far the client has got through the current destination load. */
 [[nodiscard]] WorldPhase world_phase() noexcept;
+
+/**
+ * @return Monotonic generation incremented on every edge into arrived.
+ * An arrival that begins and ends between two server ticks still moves this.
+ */
+[[nodiscard]] std::uint64_t world_arrival_revision() noexcept;
 
 /** @return Milliseconds since the running load started, or zero when none is running. */
 [[nodiscard]] std::uint64_t world_transition_age() noexcept;

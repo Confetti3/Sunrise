@@ -3,16 +3,18 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 
 #include "../../encoding/bit_reader.h"
+#include "../../encoding/bit_writer.h"
 #include "../descriptor/join_descriptor.h"
 
 namespace sunrise::middleware::gameplay::group {
 
 /**
  * Registry ids of the host-migration and election messages. Transport authority, not gameplay.
- * A valid inbound body is still read: an unread one leaves the peer''s election state and this
- * host''s disagreeing, and an echoed one can leave two hosts believing they won.
+ * A valid inbound body is still read. An unread one leaves the peer's election state and this
+ * host's disagreeing, and an echoed one can leave two hosts believing they won.
  */
 enum class MigrationMessageId : std::uint8_t {
     hostHandoff = 19,
@@ -72,8 +74,8 @@ struct HostTransition {
 
 /**
  * Body of a host reestablishment.
- * The key material and online session id are read as opaque regions and never kept: they are the
- * peer's own session material and this host has no use for either.
+ * The key material and online session id are read as opaque regions and never kept.
+ * They are the peer's own session material, and this host has no use for either.
  */
 struct HostReestablish {
     std::uint64_t sessionId{};
@@ -91,8 +93,8 @@ struct HostDecline {
 };
 
 /**
- * The recovered prefix of an election.
- * The per-candidate value width is not recovered, so the fields behind the candidate addresses
+ * The known prefix of an election.
+ * The per-candidate value width is not known, so the fields behind the candidate addresses
  * are one bounded tail rather than a sequence this parser can locate.
  */
 struct Election {
@@ -121,6 +123,18 @@ struct ElectionRefuse {
 /** Reads a host-reestablish body. @return True when every field was present. */
 [[nodiscard]] bool read_host_reestablish(encoding::bits::Reader& reader,
                                          HostReestablish& output) noexcept;
+
+/**
+ * Writes the stable host descriptor that terminates a private-session election.
+ * @param writer Writer positioned at the body.
+ * @param sessionId Private group session retained by the logical host.
+ * @param descriptor Complete direct-path descriptor for that host.
+ * @return True when the complete body fit.
+ */
+[[nodiscard]] bool
+write_host_reestablish(encoding::bits::Writer& writer,
+                       std::uint64_t sessionId,
+                       std::span<const std::byte, descriptor::kDescriptorSize> descriptor) noexcept;
 
 /** Reads a session-only migration body, shared by ids 23 and 25. */
 [[nodiscard]] bool read_migration_session(encoding::bits::Reader& reader,

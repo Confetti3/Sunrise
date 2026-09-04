@@ -1,9 +1,7 @@
-/**
- * Fixed peer-ledger bodies: reservation release, peer leave, connectivity failure, and a
- * speculative migration proposal. Each one names a peer key that has to resolve inside the bound
- * session before anything acts on it, so every parser returns the key rather than a decision.
- */
+/** Fixed peer-ledger bodies return structural data, never a membership or migration decision. */
 
+#include <algorithm>
+#include <array>
 #include <bit>
 
 #include "../../encoding/bit_reader.h"
@@ -22,19 +20,18 @@ struct LedgerLayout final {
     static constexpr std::size_t scalarA = 0;
     /** The second opaque scalar follows the first. */
     static constexpr std::size_t scalarB = scalarA + encoding::kU32Size;
-    /** Eight key bytes, low byte first, in the same order the join request writes its member key.
-     */
+    /** Eight key bytes, low byte first, in the order the join request writes its member key. */
     static constexpr std::size_t peerKey = scalarB + encoding::kU32Size;
     /** Only the leave body carries this trailing scalar. */
     static constexpr std::size_t scalarC = peerKey + encoding::kU64Size;
 };
 
-/** Layout of the migration proposal. */
+/** Layout of the migration report. */
 struct MigrationLayout final {
-    /** The biased opaque scalar starts the body. */
-    static constexpr std::size_t scalar = 0;
+    /** The biased bubble index starts the body. */
+    static constexpr std::size_t bubble = 0;
     /** Eight key bytes, low byte first, follow the scalar. */
-    static constexpr std::size_t peerKey = scalar + encoding::kU32Size;
+    static constexpr std::size_t memberKey = bubble + encoding::kU32Size;
 };
 
 /**
@@ -53,6 +50,20 @@ void read_shared_prefix(std::span<const std::byte> input,
     peerKey = encoding::read_u64_le(input.subspan<LedgerLayout::peerKey, encoding::kU64Size>());
 }
 
+/** Reads one struct-order eight-byte identity from an unaligned bit reader. */
+[[nodiscard]] bool read_peer_key(encoding::bits::Reader& reader, std::uint64_t& value) noexcept {
+    value = 0;
+    for (std::size_t index = 0; index < encoding::kU64Size; ++index) {
+        std::uint64_t byte = 0;
+        if (!reader.read(encoding::kBitsPerByte, byte)) {
+            value = 0;
+            return false;
+        }
+        value |= byte << (index * encoding::kBitsPerByte);
+    }
+    return true;
+}
+
 } // namespace
 
 /** Parses a reservation release. */
@@ -61,7 +72,7 @@ bool parse_release(std::span<const std::byte> input,
                    std::size_t& consumedBits) noexcept {
     release = {};
     consumedBits = 0;
-    if (input.size() < kReleaseSize) {
+    if (input.size() != kReleaseSize) {
         return false;
     }
     read_shared_prefix(input, release.scalarA, release.scalarB, release.peerKey);
@@ -75,11 +86,11 @@ bool parse_leave(std::span<const std::byte> input,
                  std::size_t& consumedBits) noexcept {
     leave = {};
     consumedBits = 0;
-    if (input.size() < kLeaveSize) {
+    if (input.size() != kLeaveSize) {
         return false;
     }
-    read_shared_prefix(input, leave.scalarA, leave.scalarB, leave.peerKey);
-    leave.scalarC =
+    read_shared_prefix(input, leave.field0, leave.membershipRevision, leave.ownMemberKey);
+    leave.leaveReasonHash =
         encoding::read_u32_be(input.subspan<LedgerLayout::scalarC, encoding::kU32Size>());
     consumedBits = kLeaveSize * encoding::kBitsPerByte;
     return true;
@@ -91,21 +102,46 @@ bool parse_connectivity_failure(std::span<const std::byte> input,
                                 std::size_t& consumedBits) noexcept {
     failure = {};
     consumedBits = 0;
-    if (input.size() < kConnectivityFailureSize) {
+    if (input.size() != kConnectivityFailureSize) {
         return false;
     }
-    // The key is raw bits here rather than a byte field, so the reason that follows it is not
-    // byte aligned and the whole body has to be walked as a bitstream.
     encoding::bits::Reader reader(input);
-    std::uint64_t key = 0;
+    ConnectivityFailure parsed{};
     std::uint64_t reason = 0;
-    if (!reader.read(encoding::kU64Size * encoding::kBitsPerByte, key)
-        || !reader.read(kFailureReasonWidth, reason)) {
+    if (!read_peer_key(reader, parsed.peerKey) || !reader.read(kFailureReasonWidth, reason)) {
         return false;
     }
-    failure.peerKey = key;
-    failure.rawReason = static_cast<std::uint8_t>(reason);
-    consumedBits = input.size() * encoding::kBitsPerByte - reader.remaining_bits();
+    parsed.failureReason = static_cast<std::int8_t>(reason) - kFailureReasonBias;
+    std::uint64_t padding = 0;
+    if (!reader.read(static_cast<std::uint8_t>(reader.remaining_bits()), padding) || padding != 0
+        || reader.remaining_bits() != 0) {
+        return false;
+    }
+    failure = parsed;
+    consumedBits = kConnectivityFailureBits;
+    return true;
+}
+
+/** Encodes one connectivity failure for the symmetric service-9 client reader. */
+bool encode_connectivity_failure(const ConnectivityFailure& failure,
+                                 std::span<std::byte> output,
+                                 std::size_t& written) noexcept {
+    written = 0;
+    if (failure.failureReason < kMinimumFailureReason
+        || failure.failureReason > kMaximumFailureReason
+        || output.size() < kConnectivityFailureSize) {
+        return false;
+    }
+    std::array<std::byte, kConnectivityFailureSize> body{};
+    for (std::size_t index = 0; index < encoding::kU64Size; ++index) {
+        body[index] =
+            static_cast<std::byte>((failure.peerKey >> (index * encoding::kBitsPerByte)) & 0xFFU);
+    }
+    const auto storedReason = static_cast<std::uint8_t>(failure.failureReason + kFailureReasonBias);
+    body.back() =
+        static_cast<std::byte>(storedReason << (encoding::kBitsPerByte - kFailureReasonWidth));
+    std::copy(body.begin(), body.end(), output.begin());
+    written = body.size();
     return true;
 }
 
@@ -115,14 +151,18 @@ bool parse_migration(std::span<const std::byte> input,
                      std::size_t& consumedBits) noexcept {
     proposal = {};
     consumedBits = 0;
-    if (input.size() < kMigrationSize) {
+    if (input.size() != kMigrationSize) {
         return false;
     }
     const std::uint32_t raw =
-        encoding::read_u32_be(input.subspan<MigrationLayout::scalar, encoding::kU32Size>());
-    proposal.scalar = std::bit_cast<std::int32_t>(raw - kMigrationScalarBias);
-    proposal.peerKey =
-        encoding::read_u64_le(input.subspan<MigrationLayout::peerKey, encoding::kU64Size>());
+        encoding::read_u32_be(input.subspan<MigrationLayout::bubble, encoding::kU32Size>());
+    const std::int32_t bubble = std::bit_cast<std::int32_t>(raw - kMigrationScalarBias);
+    if (bubble < kMinimumMigrationBubble || bubble > kMaximumMigrationBubble) {
+        return false;
+    }
+    proposal.bubbleIndex = bubble;
+    proposal.memberKey =
+        encoding::read_u64_le(input.subspan<MigrationLayout::memberKey, encoding::kU64Size>());
     consumedBits = kMigrationSize * encoding::kBitsPerByte;
     return true;
 }

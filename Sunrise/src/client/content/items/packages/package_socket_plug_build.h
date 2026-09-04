@@ -66,6 +66,9 @@ private:
     std::vector<PoolLookup> lookup_{};
     std::array<std::size_t, kCategoryCount> categoryCounts_{};
     std::array<socket_plugs::Member, 3> trackerMembers_{};
+    socket_plugs::Member arrivalsLegReference_{UINT16_MAX};
+    std::array<socket_plugs::Member, 4> arrivalsLegMembers_{
+        UINT16_MAX, UINT16_MAX, UINT16_MAX, UINT16_MAX};
     std::size_t trackerCount_{};
     std::size_t ruleCount_{};
     std::size_t poolCount_{};
@@ -75,6 +78,8 @@ private:
 
     /** Expands native category families, canonicalizes, and interns the current candidate. */
     [[nodiscard]] bool intern(std::uint32_t& poolIndex) noexcept;
+    /** Replaces the four Worthy-era general memberships with the reference Arrivals leg set. */
+    [[nodiscard]] bool route_arrivals_leg_mods() noexcept;
     /** Releases every transient allocation and count. */
     void release() noexcept;
 };
@@ -84,5 +89,9 @@ private:
  * @return 1..3 for a supported expansion family, or zero otherwise.
  */
 [[nodiscard]] std::uint8_t special_plug_category(std::uint32_t categoryHash) noexcept;
+
+/** Applies installed-season plug-category corrections absent from the Worthy package rows. */
+[[nodiscard]] std::uint32_t corrected_plug_category(std::uint32_t definitionHash,
+                                                    std::uint32_t categoryHash) noexcept;
 
 } // namespace sunrise::client::content::items::packages

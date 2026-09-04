@@ -5,10 +5,70 @@
 #include <cstdint>
 #include <span>
 
+#include "../../../middleware/encoding/bit_reader.h"
 #include "../../../middleware/encoding/bit_writer.h"
+#include "../../../middleware/gameplay/external/external_entity_codec.h"
+#include "../../../middleware/gameplay/external/simulation_event_codec.h"
+#include "../../../middleware/gameplay/group/view_message.h"
+#include "../../../middleware/gameplay/peer/established_packet.h"
 #include "../../../state/gameplay/definition.h"
 
 namespace sunrise::server::gameplay::peer {
+
+/**
+ * Installs the process-lifetime channel-0 codec before gameplay starts.
+ * TODO: no caller yet. The session-less channel-0 owner waits on the `gameplay_external_body` gate.
+ */
+void install_lane0_codec(
+    const middleware::gameplay::external::Lane0Codec& codec,
+    void (*outcome)(const void*,
+                    std::uint64_t,
+                    middleware::gameplay::peer::AckOutcome) noexcept = nullptr) noexcept;
+
+/** Session-aware channel-0 callbacks owned by one gameplay policy runtime. */
+struct Lane0Transport final {
+    const void* context{};
+    middleware::gameplay::external::SimulationEventPayloadCodec payloadCodec{};
+    bool (*accepted)(const void*,
+                     std::uint64_t,
+                     const middleware::gameplay::external::SimulationEventBatch&) noexcept {};
+    bool (*write)(const void*,
+                  std::uint64_t,
+                  std::uint64_t,
+                  middleware::encoding::bits::Writer&) noexcept {};
+    void (*outcome)(const void*,
+                    std::uint64_t,
+                    std::uint64_t,
+                    middleware::gameplay::peer::AckOutcome) noexcept {};
+    void (*reset)(const void*, std::uint64_t) noexcept {};
+};
+
+/** Installs one process-lifetime, session-aware channel-0 transport. */
+void install_lane0_transport(const Lane0Transport& transport) noexcept;
+
+/** Session-aware channel-2 decode and commit callbacks. */
+struct EntityTransport final {
+    const void* context{};
+    bool (*read)(const void*,
+                 std::uint64_t,
+                 middleware::encoding::bits::Reader&,
+                 middleware::gameplay::external::EntityBatch&) noexcept {};
+    bool (*accepted)(const void*,
+                     std::uint64_t,
+                     const middleware::gameplay::external::EntityBatch&) noexcept {};
+    void (*reset)(const void*, std::uint64_t) noexcept {};
+};
+
+/** Installs one process-lifetime, session-aware channel-2 transport. */
+void install_entity_transport(const EntityTransport& transport) noexcept;
+
+/** Installs the process-lifetime channel-2 codec and accepted-record sink. */
+void install_entity_codec(
+    const middleware::gameplay::external::TypePayloadCodec& codec,
+    bool (*accepted)(const void*,
+                     std::uint64_t,
+                     const middleware::gameplay::external::EntityBatch&) noexcept = nullptr,
+    const void* acceptedContext = nullptr) noexcept;
 
 /**
  * Consumes one decrypted transport payload.
@@ -37,6 +97,13 @@ void deliver(const state::gameplay::Endpoint& from,
                                     std::span<const std::byte> body,
                                     std::size_t bodyBits) noexcept;
 
+/** Queues one sessionless reliable message on the exact peer endpoint. */
+[[nodiscard]] bool enqueue_reliable(const state::gameplay::Endpoint& endpoint,
+                                    std::uint8_t id,
+                                    std::uint32_t declaredSize,
+                                    std::span<const std::byte> body,
+                                    std::size_t bodyBits) noexcept;
+
 /**
  * Reports the NetAddr one peer sent in its own connect request.
  * The membership update must name an address the peer recognises as its own.
@@ -48,8 +115,8 @@ void deliver(const state::gameplay::Endpoint& from,
 remote_address(std::uint64_t sessionId,
                std::array<std::byte, state::gameplay::kNetAddrBlobSize>& output) noexcept;
 
-/** One out-of-band body is staged here before its container is built. */
-inline constexpr std::size_t kOutOfBandBodyCapacity = 128;
+/** Host-reestablish is the widest out-of-band body currently emitted. */
+inline constexpr std::size_t kOutOfBandBodyCapacity = 136;
 
 /**
  * Sends one already-encoded out-of-band body in its own container.
@@ -98,6 +165,44 @@ template <typename Body>
 void bind_view(const state::gameplay::Endpoint& from,
                const state::gameplay::ViewSignature& signature) noexcept;
 
+/** Result of retaining one inbound view stage. */
+enum class ViewStageResult : std::uint8_t {
+    accepted,
+    noPeer,
+    refused,
+};
+
+/** Retains one ordered inbound view stage and returns the exact response owed. */
+[[nodiscard]] ViewStageResult
+receive_view_stage(const state::gameplay::Endpoint& from,
+                   const middleware::gameplay::group::ViewEstablishment& input,
+                   middleware::gameplay::group::ViewEstablishment& response,
+                   std::uint64_t& generation) noexcept;
+
+/** Commits a view response after its reliable enqueue succeeds. */
+[[nodiscard]] bool commit_view_response(const state::gameplay::Endpoint& from,
+                                        std::uint64_t generation) noexcept;
+
+/** Opens common reconciliation for one exact ActivityClient generation. */
+[[nodiscard]] bool
+open_external_common(std::uint64_t groupSessionId,
+                     const state::activity::SessionBinding& activity,
+                     const middleware::bap::activity_message::patch_epoch::PatchEpoch& patchEpoch,
+                     std::uint64_t activityClientGeneration,
+                     std::uint8_t replicationEpoch) noexcept;
+
+/** Opens provisional common state on the endpoint before its group join names the session. */
+[[nodiscard]] bool
+open_external_common(const state::gameplay::Endpoint& endpoint,
+                     std::uint64_t groupSessionId,
+                     const state::activity::SessionBinding& activity,
+                     const middleware::bap::activity_message::patch_epoch::PatchEpoch& patchEpoch,
+                     std::uint64_t activityClientGeneration,
+                     std::uint8_t replicationEpoch) noexcept;
+
+/** Reports whether all native gates permit one outbound external body. */
+[[nodiscard]] bool external_outbound_eligible(std::uint64_t groupSessionId) noexcept;
+
 /** @return True once that session's link holds a bound view and has finished connecting. */
 [[nodiscard]] bool view_bound(std::uint64_t sessionId) noexcept;
 
@@ -112,10 +217,11 @@ void bind_view(const state::gameplay::Endpoint& from,
 struct LinkIdentity final {
     std::uint32_t localConnectionSequence{};
     std::uint32_t remoteConnectionSequence{};
+    std::uint64_t viewGeneration{};
 };
 
 /**
- * Copies the connect sequences of the link carrying one group session.
+ * Copies the connect sequences of the link carrying one joined or authenticated external group.
  * The client rebuilds its channel under the same session id, so anything holding a reference
  * across that rebuild needs these to tell the two links apart.
  * @param sessionId Group session the link carries.

@@ -66,9 +66,8 @@ namespace socket_lists = build_data::socket_entry_lists;
     // destination bucket does. A bundled pick can mix members across slots, so every member of the
     // clicked entry's bundle is checked, not just the one clicked.
     CharacterState after = before;
-    // The picks belong to the equipped subclass item itself, not the character, so each owned
-    // subclass remembers its own selection independently instead of sharing one set across all
-    // of them.
+    // The picks belong to the equipped subclass item itself, not the character. So each owned
+    // subclass remembers its own selection, instead of sharing one set across all of them.
     auto& afterSubclassSlot = after.equipment.slots[kSubclassSlot];
     if (!afterSubclassSlot.has_value()) {
         return false;
@@ -246,6 +245,62 @@ bool set_selected_title(std::uint16_t recordIndex,
     if (!account::valid(candidate)) {
         characterSoid = 0;
         changed = false;
+        ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
+        return false;
+    }
+    runtime::storage::g_state.account = candidate;
+    ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
+    return true;
+}
+
+/** Prepares the selected character's current activity without changing account State. */
+bool prepare_current_activity(std::uint16_t activityIndex,
+                              PendingCurrentActivity& mutation) noexcept {
+    mutation = {};
+    const AccountState snapshot = account_snapshot();
+    if (!account::valid(snapshot)) {
+        return false;
+    }
+    for (std::size_t index = 0; index < snapshot.characterCount; ++index) {
+        const CharacterState& character = snapshot.characters[index];
+        if (!character.selected) {
+            continue;
+        }
+        if (character.currentActivityIndex == activityIndex) {
+            return false;
+        }
+        mutation.beforeCharacter = character;
+        mutation.afterCharacter = character;
+        mutation.afterCharacter.currentActivityIndex = activityIndex;
+        mutation.characterSoid = character.soid;
+        mutation.characterIndex = index;
+        mutation.activityIndex = activityIndex;
+        mutation.prepared = true;
+        return true;
+    }
+    return false;
+}
+
+/** Commits one prepared current-activity change behind an exact character staleness guard. */
+bool commit_current_activity(PendingCurrentActivity& mutation) noexcept {
+    const PendingCurrentActivity prepared = mutation;
+    mutation = {};
+    if (!prepared.prepared || prepared.characterSoid == 0
+        || prepared.characterIndex >= kCharacterCapacity
+        || prepared.beforeCharacter.soid != prepared.characterSoid
+        || prepared.afterCharacter.soid != prepared.characterSoid) {
+        return false;
+    }
+    AcquireSRWLockExclusive(&runtime::storage::g_stateLock);
+    AccountState candidate = runtime::storage::g_state.account;
+    if (prepared.characterIndex >= candidate.characterCount
+        || !same_character(candidate.characters[prepared.characterIndex],
+                           prepared.beforeCharacter)) {
+        ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
+        return false;
+    }
+    candidate.characters[prepared.characterIndex] = prepared.afterCharacter;
+    if (!account::valid(candidate)) {
         ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
         return false;
     }

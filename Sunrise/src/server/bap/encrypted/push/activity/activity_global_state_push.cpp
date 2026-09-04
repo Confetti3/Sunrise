@@ -63,14 +63,21 @@ resolve_state(const state::activity::SessionBinding& binding,
     // The descriptor view points into caller storage that outlives the encode.
     output.descriptorBits = std::span<const std::byte>(selection.descriptorBits);
     output.descriptorBitLength = selection.descriptorBitLength;
+    output.descriptorNameBit = selection.descriptorNameBit;
+    output.hasDescriptorName = selection.hasDescriptorName;
     output.reason = selection.reason;
-    output.fromActivityIndex = selection.previousActivityIndex;
+    // The parser stores the accepted selection's field 1 here. That field is the requested
+    // activity, so it is copied out unchanged rather than being derived from the resolved one.
+    output.requestedActivityIndex = selection.sourceActivityIndex;
     output.activityIndex = selection.activityIndex;
+    // One origin per session, taken when the session record was created. Reading a clock here
+    // would give each member and each message a different periodic phase.
+    output.timeBase = binding.timeOrigin;
     output.spawnSetHash =
         state::activity::destination::attachable_spawn_set_hash(selection, fallback.spawnSetHash);
 
     // The extracted layout wins where the packages carry one. The count and the output array must
-    // come from the same source: a count from one and states from another is how uniform values
+    // come from the same source. A count from one and states from another is how uniform values
     // reach the wire and look as though they worked.
     const std::string_view name(output.name.data(), output.nameLength);
     ::sunrise::state::build_data::scenarios::Definition layout{};

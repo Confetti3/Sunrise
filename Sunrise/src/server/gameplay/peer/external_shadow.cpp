@@ -30,9 +30,8 @@ namespace shadow = state::gameplay::external;
 /** Copies the empty-channel fields carried on every observation. */
 void copy_channel_state(const middleware::gameplay::external::EmptyProfile& decoded,
                         shadow::ExternalShadow& output) noexcept {
-    output.defaultBubble = decoded.defaultBubble;
-    output.defaultBubblePresent = decoded.defaultBubblePresent;
-    output.channel3TrailingList = decoded.channel3TrailingList;
+    output.currentCell = decoded.currentCell;
+    output.currentCellPresent = decoded.currentCellPresent;
 }
 
 } // namespace

@@ -41,9 +41,8 @@ constexpr std::uint32_t kSpawnOverrideIndexBias = 1;
 constexpr std::size_t kSpawnKeyCount = 32;
 
 /**
- * Writes the participation body, which binds the player and latches the region. Zero-fill is not
- * safe here. Every biased field must carry its bias, or a stored zero decodes to the smallest
- * signed value.
+ * Writes the participation body, which binds the player and latches the region.
+ * Every biased field must carry its bias; a zero-filled field decodes to the smallest signed value.
  * @param writer Body writer.
  * @param snapshot Message input.
  * @return True when the body fits.
@@ -79,9 +78,12 @@ constexpr std::size_t kSpawnKeyCount = 32;
  * @return True when the body fits.
  */
 [[nodiscard]] bool write_lifetime(bits::Writer& writer, const Snapshot& snapshot) noexcept {
-    bool encoded = writer.write(std::uint32_t{snapshot.lifetime} + 1, 4) && writer.write(1, 3)
-                   && writer.write(0, kPresenceWidth) && writer.write(kSignedZero, 32)
-                   && writer.write(0, 32) && writer.write(kSignedZero, 32) && writer.write(1, 6)
+    // Field `.4` names an authored spawn entry. No host model owns one, so it carries the empty
+    // name hash; zero is a hash that no row matches.
+    bool encoded = writer.write(std::uint32_t{snapshot.lifetime} + kLifetimeBias, kLifetimeWidth)
+                   && writer.write(1, 3) && writer.write(0, kPresenceWidth)
+                   && writer.write(kSignedZero, 32) && writer.write(kEmptyNameHash, 32)
+                   && writer.write(kSignedZero, 32) && writer.write(1, 6)
                    && writer.write(kWaitingSwitchKey, 32) && writer.write(1, kPresenceWidth)
                    && writer.write(kWaitingSwitchClass, 32) && writer.write(kSignedZero, 32)
                    && writer.write(kSignedZero, 32);

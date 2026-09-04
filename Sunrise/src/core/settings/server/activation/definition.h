@@ -33,17 +33,19 @@ struct Settings {
      */
     bool serverDefaultEntity{false};
     /**
-     * The physics-host bridge: one world opened, ticked and closed per admitted gameplay peer.
-     * Off by default because the bridge runs on the game's own render thread, so its cost is a
-     * frame stall. It produces no wire output either way.
-     */
-    bool physicsHostSession{false};
-    /**
      * Membership on a public-target link, so the client binds a world container to it.
-     * Off by default. Sending it hands the client's player create and destroy source to that
+     * On by default. Sending it hands the client's player create and destroy source to that
      * link's membership block, and a body that does not carry the local player destroys it.
      */
-    bool activityPublicMembership{false};
+    bool activityPublicMembership{true};
+    /**
+     * Registers the client feature name that stops a channel closing when its last owner leaves.
+     * Diagnostic only, and off by default. It answers whether that close is on the path to the
+     * fast-travel freeze; it is not a fix and comes out once the question is settled.
+     */
+    bool preventOwnerlessChannelClose{false};
+    /** Enables server Activity Host mission scripts. Off leaves compiled host policy in control. */
+    bool missionScripting{false};
 };
 
 } // namespace sunrise::core::settings::server::activation

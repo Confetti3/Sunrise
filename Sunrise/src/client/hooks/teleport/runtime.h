@@ -14,6 +14,15 @@ inline constexpr std::size_t kVerticalLane = 2;
 /** One world-space vector as the game stores it. */
 using Vector = std::array<float, kVectorLanes>;
 
+/** Read-only camera pose published by the existing camera-frame hook. */
+struct CameraPose final {
+    Vector position{};
+    Vector forward{};
+    Vector up{};
+    float horizontalFov{};
+    float aspect{};
+};
+
 /** Writes the local player's controlled-object handle, or the invalid sentinel. */
 using ControlledHandle = std::uint32_t* (*)(std::uint32_t*);
 /** Returns the camera pose block array. The pointer in its global is obfuscated, so we call it. */
@@ -38,11 +47,8 @@ void clear_targets() noexcept;
 /** Detaches both teleport hooks. */
 void uninstall() noexcept;
 
-/**
- * Publishes the camera forward vector for the physics tick that follows.
- * @param playerIndex Player the camera pose block belongs to.
- */
-void capture_forward(std::uint32_t playerIndex) noexcept;
+/** Publishes the camera pose for the frame and the forward vector for the next physics tick. */
+void capture_camera_pose(std::uint32_t playerIndex) noexcept;
 
 /** Latches one teleport request if the bound key went down this frame. */
 void poll_request() noexcept;
@@ -82,10 +88,13 @@ void apply_pending(void* component) noexcept;
  * @param component Candidate physics component.
  * @return True when it drives the object the local player controls.
  *
- * Exposed because the physics sync is the only tick that sees every component, and a feature that
- * has to act on the player's own tick needs the same test this module already performs.
+ * Exposed because the physics sync is the only tick that sees every component. A feature acting
+ * on the player's own tick needs the same test this module already runs.
  */
 [[nodiscard]] bool owns_local_player(void* component) noexcept;
+
+/** @return True when the game currently publishes a controlled local-player object handle. */
+[[nodiscard]] bool controlled_player_present() noexcept;
 
 /**
  * Reads the world position of the body a physics component drives.
@@ -132,5 +141,8 @@ void apply_pending(void* component) noexcept;
  * @return True once the camera hook has published one.
  */
 [[nodiscard]] bool camera_forward(Vector& forward) noexcept;
+
+/** Copies the last complete pose published by the camera-frame hook. */
+[[nodiscard]] bool camera_pose(CameraPose& pose) noexcept;
 
 } // namespace sunrise::client::hooks::teleport

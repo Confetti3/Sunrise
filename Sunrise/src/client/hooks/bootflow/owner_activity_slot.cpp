@@ -14,8 +14,8 @@ namespace sunrise::client::hooks::bootflow {
 namespace {
 
 /**
- * `World_CheckActivityBubbles`* @ `0x7FF74208DB80`. Matched from its prologue through the activity
- * object load and the handle shift, which is unique in the image.
+ * `World_CheckActivityBubbles`*. Matched from its prologue through the activity object load
+ * and the handle shift, which is unique in the image.
  */
 constexpr std::string_view kCheckSignatureText =
     "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 41 56 41 57 48 83 EC ? 48 8B 79 10 41 8B C0 "
@@ -70,8 +70,8 @@ void report(std::int32_t slot) noexcept {
 
 /**
  * Passes a non-zero owner activity slot into the roster container.
- * Argument 6 is the only writer of the slot, at `0x7FF74208DC13`. Every other argument is passed
- * on untouched, including argument 5, whose own arm has nothing to do with the record.
+ * Argument 6 is the only writer of the slot. Every other argument is passed on untouched,
+ * including argument 5, whose own arm has nothing to do with the record.
  * @return The check's own result, or the not-armed result when the trampoline is gone.
  */
 __declspec(noinline) std::uint8_t __fastcall check(void* container,

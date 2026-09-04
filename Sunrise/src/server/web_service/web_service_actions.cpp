@@ -886,9 +886,15 @@ void claim_record(const middleware::web_service::Message& message, Outcome& outc
         return;
     }
     if (definition.completionFlagIndex == records::kUnavailableFlagIndex) {
-        // The record carries no completion flag, or its slot has no row in the account bank.
+        // Interval Triumphs intentionally carry no completion flag. Their repeated redemption
+        // count is projected through the second reserved objective-value slot instead.
+        if (state::record_claims::claim_interval(request.recordIndex,
+                                                 definition.definitionHash)) {
+            outcome.hasRecordClaim = true;
+            return;
+        }
         report_record_claim(message,
-                            "no_completion_flag",
+                            "interval_or_flag_unavailable",
                             request.recordIndex,
                             records::kUnavailableFlagIndex,
                             definition.scoreValue);

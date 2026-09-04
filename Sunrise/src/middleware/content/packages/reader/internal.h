@@ -55,6 +55,20 @@ struct Header {
                                std::uint32_t& patchIndex) noexcept;
 
 /**
+ * Resolves one package through storage owned by this reader.
+ * The first package read reaches the shared directory catalog; later reads are lock-free.
+ * @param scratch Reader-local location storage.
+ * @param directory Installed packages directory, immutable while this Scratch is in use.
+ * @param packageId Package id from the tag handle.
+ * @param output Receives the cached location on success.
+ * @return True when at least one matching package exists.
+ */
+[[nodiscard]] bool resolve_latest(Scratch& scratch,
+                                  std::wstring_view directory,
+                                  std::uint16_t packageId,
+                                  const PackageLocation*& output) noexcept;
+
+/**
  * Builds the full path of one patch of a package stem.
  * @param stem Stem produced by find_latest.
  * @param patchIndex Requested patch index.

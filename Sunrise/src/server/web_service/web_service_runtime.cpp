@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 
@@ -16,11 +17,13 @@
 #include "../../middleware/web_service/messages/opcode503.h"
 #include "../../middleware/web_service/messages/opcode504.h"
 #include "../../middleware/web_service/messages/opcode601/opcode601_codec.h"
+#include "../../middleware/web_service/messages/opcode702.h"
 #include "../../middleware/web_service/messages/opcode801.h"
 #include "../../middleware/web_service/messages/opcode901/opcode901_codec.h"
 #include "../../middleware/web_service/messages/opcode903.h"
 #include "../../middleware/web_service/web_service_envelope.h"
 #include "../../state/account/account_state.h"
+#include "../../state/activity/membership/activity_membership_query.h"
 #include "../../state/progression/seasonal_experience.h"
 #include "../../state/runtime/runtime.h"
 #include "opcode_routes.h"
@@ -68,6 +71,40 @@ constexpr std::int32_t kArtifactResetGlimmerCost = 20'000;
 [[nodiscard]] std::int64_t server_clock_seconds() noexcept {
     const auto sinceEpoch = std::chrono::system_clock::now().time_since_epoch();
     return std::chrono::duration_cast<std::chrono::seconds>(sinceEpoch).count();
+}
+
+/** Issues a strictly increasing family-5 clock, including multiple requests in one second. */
+[[nodiscard]] std::uint64_t next_family5_clock() noexcept {
+    static std::atomic<std::uint64_t> issued{0};
+    const auto wall = static_cast<std::uint64_t>(server_clock_seconds());
+    std::uint64_t previous = issued.load(std::memory_order_relaxed);
+    std::uint64_t next = 0;
+    do {
+        next = wall > previous ? wall : previous + 1;
+    } while (!issued.compare_exchange_weak(previous, next, std::memory_order_relaxed));
+    return next;
+}
+
+/** Records the authoritative world state carried by the client's character write-back. */
+void note_character_writeback(const middleware::web_service::Message& message) noexcept {
+    namespace writeback = middleware::web_service::messages::opcode702;
+    writeback::Request request{};
+    const bool parsed = writeback::parse_request(message, request);
+    std::array<char, core::log::kLineCapacity> line{};
+    const int written = std::snprintf(line.data(),
+                                      line.size(),
+                                      "ev=activity stage=writeback result=%s world_state=%u",
+                                      parsed ? "ok" : "unparsed",
+                                      static_cast<unsigned>(request.worldState));
+    if (written > 0) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::info,
+                         {line.data(), static_cast<std::size_t>(written)});
+    }
+    if (parsed) {
+        state::activity::membership::note_client_writeback(request.worldState
+                                                           == writeback::kInWorld);
+    }
 }
 
 /**
@@ -252,10 +289,13 @@ bool consume(std::span<const std::byte> request,
             core::log::Channel::server, core::log::Level::warn, "ev=ws stage=parse result=fail");
         return false;
     }
+    if (message.opcode == middleware::web_service::messages::opcode702::kOpcode) {
+        note_character_writeback(message);
+    }
     if (message.opcode == middleware::web_service::messages::opcode205::kOpcode) {
         const auto investment = state::investment_snapshot();
         return middleware::web_service::messages::opcode205::encode_response(
-                   message, investment, response, written)
+                   message, investment, next_family5_clock(), response, written)
                || encode_echo(message, response, written);
     }
 
@@ -271,7 +311,7 @@ bool consume(std::span<const std::byte> request,
         const auto investment = state::investment_snapshot();
         if (!parsed
             || !middleware::web_service::messages::opcode503::encode_response(
-                message, bootstrap, investment, response, written)) {
+                message, bootstrap, investment, next_family5_clock(), response, written)) {
             return encode_echo(message, response, written);
         }
         if (bootstrap.hasPrimarySoid && !state::set_primary_soid(bootstrap.primarySoid)) {

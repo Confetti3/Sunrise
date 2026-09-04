@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "../../encoding/bit_reader.h"
+#include "player_block.h"
 
 namespace sunrise::middleware::gameplay::group {
 
@@ -34,8 +35,8 @@ struct PeerPropertiesHeader {
 };
 
 /**
- * Leading fields of a player-add message.
- * The 232-byte player block and its 20-byte tail after them are not decoded.
+ * Leading fields of a player-add message, and the soid pair its player block carries.
+ * The rest of the 232-byte block and the 20-byte tail after it are not decoded.
  */
 struct PlayerAddRequest {
     std::uint64_t sessionId{};
@@ -43,6 +44,8 @@ struct PlayerAddRequest {
     std::uint32_t sequence{};
     /** Player kind, 0 through 3. */
     std::uint8_t kind{};
+    /** The block's account and character soids. A host must republish them or no player is made. */
+    PlayerBlockSoids soids{};
 };
 
 /**
@@ -54,9 +57,7 @@ struct PlayerAddRequest {
 [[nodiscard]] bool read_peer_properties_header(encoding::bits::Reader& reader,
                                                PeerPropertiesHeader& output) noexcept;
 
-/**
- * A player-remove message. It names no player: the identity comes from the bound peer state.
- */
+/** A player-remove message. It names no player: the identity comes from the bound peer state. */
 struct PlayerRemoveRequest {
     std::uint64_t sessionId{};
 };

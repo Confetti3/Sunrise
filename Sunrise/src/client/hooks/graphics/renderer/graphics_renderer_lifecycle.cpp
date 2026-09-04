@@ -12,6 +12,7 @@
 #include "../input/input.h"
 #include "graphics_renderer_report.h"
 #include "state.h"
+#include "world_lines.h"
 
 namespace sunrise::client::hooks::graphics::renderer {
 namespace {
@@ -248,6 +249,7 @@ void release_render_target(Resources& resources) noexcept {
 
 /** @param resources SDK resources freed in an order that respects their dependencies. */
 void release_resources(Resources& resources) noexcept {
+    world_lines::release();
     release_render_target(resources);
     textures::release_logo_sheet(resources.logoSheet);
     release_com(resources.context);

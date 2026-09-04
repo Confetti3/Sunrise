@@ -8,9 +8,6 @@ namespace {
 
 namespace tables = middleware::content::packages::tables;
 
-/** How many hops the chain from a handle to a descriptor blob may take. */
-constexpr std::size_t kChainDepthLimit = 8;
-
 /**
  * Records one descriptor as a slot of the object being resolved.
  * @param context Roster storage.
@@ -22,37 +19,45 @@ bool collect_slot(void* context, const tables::SlotDescriptor& descriptor) noexc
     return true;
 }
 
+/** Package state held across one injected descriptor-chain read. */
+struct ChainReadContext {
+    const reader::Source* source{};
+    reader::Scratch* scratch{};
+    RosterStorage* storage{};
+};
+
+/** Reads one descriptor-chain tag into the roster pass's borrowed blob storage. */
+[[nodiscard]] bool read_chain_tag(void* context,
+                                  std::uint32_t tag,
+                                  std::span<const std::byte>& blob,
+                                  std::uint32_t& classId) noexcept {
+    auto& chain = *static_cast<ChainReadContext*>(context);
+    ++chain.storage->reads;
+    if (!reader::read_tag(*chain.source, *chain.scratch, tag, chain.storage->chain, classId)) {
+        blob = {};
+        return false;
+    }
+    blob = std::span<const std::byte>{chain.storage->chain};
+    return true;
+}
+
 /**
- * Follows one placed handle to its descriptor blob and records what it declares.
+ * Follows every branch of one placed handle and records what its descriptor blobs declare.
  * @param source Package directory and borrowed block keys.
  * @param scratch Lock-owned block storage.
  * @param storage Working storage for this pass.
  * @param handle Tag from a placed object's per-bubble sub-block.
  * @param registryKey Registry key the descriptors must name.
+ * @return True only when the bounded chain and complete descriptor scan finished.
  */
-void follow_handle(const reader::Source& source,
-                   reader::Scratch& scratch,
-                   RosterStorage& storage,
-                   std::uint32_t handle,
-                   std::uint32_t registryKey) noexcept {
-    std::uint32_t tag = handle;
-    for (std::size_t depth = 0; depth < kChainDepthLimit; ++depth) {
-        std::uint32_t classId = 0;
-        ++storage.reads;
-        if (!reader::read_tag(source, scratch, tag, storage.chain, classId)) {
-            return;
-        }
-        if (classId == tables::kPlacedObjectClass) {
-            (void)tables::visit_slot_descriptors(
-                storage.chain, tag, registryKey, &collect_slot, &storage);
-            return;
-        }
-        std::uint32_t next = 0;
-        if (!tables::next_descriptor_tag(storage.chain, classId, next)) {
-            return;
-        }
-        tag = next;
-    }
+[[nodiscard]] bool follow_handle(const reader::Source& source,
+                                 reader::Scratch& scratch,
+                                 RosterStorage& storage,
+                                 std::uint32_t handle,
+                                 std::uint32_t registryKey) noexcept {
+    ChainReadContext context{&source, &scratch, &storage};
+    return tables::walk_slot_descriptor_chain(
+        handle, registryKey, &read_chain_tag, &context, &collect_slot, &storage);
 }
 
 /**
@@ -64,29 +69,33 @@ void follow_handle(const reader::Source& source,
  * @param storage Working storage receiving the descriptors.
  * @param objectBlob Whole placed-object bytes.
  * @param registryKey Registry key the descriptors must name.
+ * @return True only when every declared placed handle was read and walked completely.
  */
-void collect_descriptors(const reader::Source& source,
-                         reader::Scratch& scratch,
-                         RosterStorage& storage,
-                         std::span<const std::byte> objectBlob,
-                         std::uint32_t registryKey) noexcept {
+[[nodiscard]] bool collect_descriptors(const reader::Source& source,
+                                       reader::Scratch& scratch,
+                                       RosterStorage& storage,
+                                       std::span<const std::byte> objectBlob,
+                                       std::uint32_t registryKey) noexcept {
     tables::Array bubbles{};
     if (!tables::object_bubbles(objectBlob, bubbles)) {
-        return;
+        return false;
     }
     for (std::uint64_t index = 0; index < bubbles.count; ++index) {
         tables::ObjectBubble bubble{};
         if (!tables::object_bubble_at(objectBlob, bubbles, index, bubble)) {
-            return;
+            return false;
         }
         for (std::uint64_t slot = 0; slot < bubble.handleCount; ++slot) {
             std::uint32_t handle = 0;
             if (!tables::object_placed_handle_at(objectBlob, bubble, slot, handle)) {
-                return;
+                return false;
             }
-            follow_handle(source, scratch, storage, handle, registryKey);
+            if (!follow_handle(source, scratch, storage, handle, registryKey)) {
+                return false;
+            }
         }
     }
+    return true;
 }
 
 /** @param storage Working storage. @param tag Object tag. @return Its memo slot, or capacity. */
@@ -143,11 +152,10 @@ bool resolve_object(const reader::Source& source,
     }
     storage.slotCount = 0;
     storage.slotsOverflowed = false;
-    collect_descriptors(source, scratch, storage, storage.object, candidate.registryKey);
-    if (!fill_slots(storage, declared.count, candidate)) {
-        // The client registers a record per slot the object declares and refuses its whole apply
-        // while any record in the current bubble is unseeded, so a group missing one descriptor is
-        // dropped rather than published short.
+    if (!collect_descriptors(source, scratch, storage, storage.object, candidate.registryKey)
+        || !fill_slots(storage, declared.count, candidate)) {
+        // A completed walk may prove that some declared slots have no descriptor. A failed walk
+        // cannot distinguish that absence from unread content, so it refuses the whole group.
         ++storage.unresolvedGroups;
         return true;
     }

@@ -81,7 +81,7 @@ bool prepare_banner(Scratch& scratch,
         staged.objects[objectCount] = middleware::queuez::Object{
             middleware::datagen::kBannerCharacterObjectId,
             previousCharacter,
-            middleware::queuez::Encoding::raw,
+            middleware::queuez::Encoding::none,
             {},
         };
         ++objectCount;
@@ -125,7 +125,7 @@ bool prepare_banner(Scratch& scratch,
     return commit(staged, prepared);
 }
 
-/** Builds a Family-0 character upsert from an uncommitted equipment after-image. */
+/** Builds one in-place Family-0 record upsert from an uncommitted equipment after-image. */
 bool prepare_character_appearance_refresh(Scratch& scratch,
                                           const queuez::CharacterAppearanceRefresh& refresh,
                                           const state::CharacterState& afterCharacter,
@@ -162,7 +162,9 @@ bool prepare_character_appearance_refresh(Scratch& scratch,
         return report_failure("equip_appearance_resolve");
     }
 
-    // Emblem consumers bind through the anchor, so emblem moves must touch it too.
+    // The banner-facing emblem consumers bind through the Family-0 anchor, not the character
+    // record, so an emblem move must touch the unchanged anchor as well. That dirties those
+    // consumers without releasing either resident key.
     constexpr std::uint8_t kEmblemEquipmentSlot = 13;
     const bool refreshAnchor = nativeEquipmentSlot == kEmblemEquipmentSlot;
     const std::size_t anchorSize = refreshAnchor ? character_record::kFamily0AnchorSize : 0U;
@@ -189,7 +191,7 @@ bool prepare_character_appearance_refresh(Scratch& scratch,
         staged.objects[objectCount++] = middleware::queuez::Object{
             middleware::datagen::kBannerCharacterObjectId,
             refresh.characterSoid,
-            middleware::queuez::Encoding::raw,
+            middleware::queuez::Encoding::none,
             {},
         };
     }
@@ -202,7 +204,9 @@ bool prepare_character_appearance_refresh(Scratch& scratch,
         clear_after(scratch, reservation);
         return report_failure("equip_appearance_object");
     }
-    // Publish the record before the anchor so observers resolve the new emblem.
+    // On an incremental refresh the record is already resident. Publish its new body first and
+    // touch the anchor second, so an anchor-driven banner observer resolves the new emblem rather
+    // than the prior record during the same family update.
     if (refreshAnchor
         && !append_object(scratch,
                           anchor,

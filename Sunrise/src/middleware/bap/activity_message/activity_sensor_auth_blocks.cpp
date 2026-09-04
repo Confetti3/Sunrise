@@ -1,3 +1,5 @@
+#include <algorithm>
+
 #include "sensor_auth_update.h"
 
 namespace sunrise::middleware::bap::activity_message::sensor_auth_update {
@@ -7,6 +9,41 @@ namespace bits = encoding::bits;
 
 /** The widest chunk the bit writer accepts in one call. */
 constexpr std::uint8_t kChunkWidth = 32;
+
+/** The type-17 lifetime slot. The spawn gate reads whichever type-17 registers first, so every
+ *  one must carry its state, even on a mission-seed placeholder group. */
+constexpr std::uint8_t kSlotTypeLifetime = 17;
+
+/** @return The override when this is its one exact object slot. */
+[[nodiscard]] const AuthOverride* matching_override(const Snapshot& snapshot,
+                                                    std::uint32_t objectTag,
+                                                    std::uint32_t key,
+                                                    std::uint8_t slotType,
+                                                    std::uint16_t slotIndex) noexcept {
+    for (const AuthOverride& value : snapshot.authOverrides) {
+        if (value.present && value.objectTag == objectTag && value.key == key
+            && value.slotType == slotType && value.slotIndex == slotIndex) {
+            return &value;
+        }
+    }
+    return nullptr;
+}
+
+/** Writes one MSB-first packed body without copying its padded final bits. */
+[[nodiscard]] bool write_packed(bits::Writer& writer, const AuthOverride& value) noexcept {
+    bool encoded = true;
+    std::size_t remaining = value.bitCount;
+    for (std::size_t index = 0; encoded && remaining != 0; ++index) {
+        const std::uint8_t width = static_cast<std::uint8_t>((std::min)(remaining, std::size_t{8}));
+        std::uint8_t byte = std::to_integer<std::uint8_t>(value.body[index]);
+        if (width < 8) {
+            byte = static_cast<std::uint8_t>(byte >> (8 - width));
+        }
+        encoded = writer.write(byte, width);
+        remaining -= width;
+    }
+    return encoded;
+}
 
 } // namespace
 
@@ -47,21 +84,38 @@ bool write_bubble_block(bits::Writer& writer, const Grant& grant) noexcept {
 namespace {
 
 /**
- * Writes one sub-block's key presence mask, low bit first.
+ * Writes one fixed key presence mask, low bit first.
  * A key whose bit is clear is dropped in silence, so the mask has to match the key count exactly.
  * @param writer Body writer.
- * @param keyCount Keys the sub-block carries.
- * @return True when all three words fit.
+ * @param keyCount Keys the matching list carries.
+ * @param wordCount Words in the schema's fixed mask.
+ * @return True when the whole mask fits.
  */
-[[nodiscard]] bool write_key_mask(bits::Writer& writer, std::size_t keyCount) noexcept {
+[[nodiscard]] bool
+write_key_mask(bits::Writer& writer, std::size_t keyCount, std::size_t wordCount) noexcept {
+    if (keyCount > wordCount * kChunkWidth) {
+        return false;
+    }
     bool encoded = true;
-    for (std::size_t word = 0; encoded && word < kBubbleMaskWords; ++word) {
+    for (std::size_t word = 0; encoded && word < wordCount; ++word) {
         const std::size_t low = word * kChunkWidth;
         const std::size_t set = keyCount > low ? keyCount - low : 0;
         const std::size_t bits = set > kChunkWidth ? kChunkWidth : set;
         encoded = writer.write((std::uint64_t{1} << bits) - 1, kChunkWidth);
     }
     return encoded;
+}
+
+/** @return The revision owned by one roster key, or the snapshot-wide compatibility value. */
+[[nodiscard]] std::uint8_t
+group_state_sequence(const Roster& roster, std::uint32_t key, std::uint8_t fallback) noexcept {
+    for (std::size_t index = 0; index < roster.groupCount; ++index) {
+        const Group& group = roster.groups[index];
+        if (group.key == key) {
+            return group.hasStateSequence ? group.stateSequence : fallback;
+        }
+    }
+    return fallback;
 }
 
 /**
@@ -75,6 +129,7 @@ namespace {
  */
 [[nodiscard]] bool write_bubble_sub_block(bits::Writer& writer,
                                           const BubbleSubBlock& block,
+                                          const Roster& roster,
                                           std::uint8_t stateSequence) noexcept {
     const std::size_t keyCount = block.keys.size();
     const auto count = static_cast<std::uint32_t>(keyCount);
@@ -85,10 +140,12 @@ namespace {
     for (std::size_t index = 0; encoded && index < keyCount; ++index) {
         encoded = writer.write(block.keys[index], kKeyWidth);
     }
-    encoded = encoded && writer.write(1, kPresenceWidth) && write_key_mask(writer, keyCount)
+    encoded = encoded && writer.write(1, kPresenceWidth)
+              && write_key_mask(writer, keyCount, kBubbleMaskWords)
               && writer.write(1, kPresenceWidth) && writer.write(count, kBubbleCountWidth);
     for (std::size_t index = 0; encoded && index < keyCount; ++index) {
-        encoded = writer.write(kStateByteBias + stateSequence, 8);
+        encoded = writer.write(
+            kStateByteBias + group_state_sequence(roster, block.keys[index], stateSequence), 8);
     }
     return encoded;
 }
@@ -101,11 +158,12 @@ namespace {
  * @return True when every sub-block fits.
  */
 [[nodiscard]] bool write_bubble_sub_blocks(bits::Writer& writer,
-                                           std::span<const BubbleSubBlock> subBlocks,
+                                           const Roster& roster,
                                            std::uint8_t stateSequence) noexcept {
+    const std::span<const BubbleSubBlock> subBlocks = roster.bubbleSubBlocks;
     bool encoded = writer.write(static_cast<std::uint32_t>(subBlocks.size()), kBubbleCountWidth);
     for (std::size_t index = 0; encoded && index < subBlocks.size(); ++index) {
-        encoded = write_bubble_sub_block(writer, subBlocks[index], stateSequence);
+        encoded = write_bubble_sub_block(writer, subBlocks[index], roster, stateSequence);
     }
     return encoded;
 }
@@ -129,22 +187,21 @@ bool write_roster_delta(bits::Writer& writer,
     encoded = encoded && writer.write(1, kPresenceWidth)
               && writer.bit_count() == root + delta_mask_bit(keyCount);
     // A key whose mask bit is clear is dropped in silence, so the mask must match the key count.
-    const std::uint32_t mask =
-        keyCount == 0 ? 0U : static_cast<std::uint32_t>((std::uint64_t{1} << keyCount) - 1);
-    encoded = encoded && writer.write(mask, kChunkWidth)
-              && pad_bits(writer, kChunkWidth * (kDeltaMaskWords - 1))
+    encoded = encoded && write_key_mask(writer, keyCount, kDeltaMaskWords)
               && writer.write(1, kPresenceWidth)
               && writer.bit_count() == root + delta_state_count_bit(keyCount)
               && writer.write(static_cast<std::uint32_t>(keyCount), kDeltaCountWidth);
     for (std::size_t group = 0; encoded && group < keyCount; ++group) {
-        encoded = writer.write(kStateByteBias + stateSequence, 8);
+        const Group& row = roster.groups[group];
+        encoded = writer.write(
+            kStateByteBias + (row.hasStateSequence ? row.stateSequence : stateSequence), 8);
     }
     // Field 1 is the per-bubble sub-block half. Absent, it is one zero bit and 32 KB of the
     // client's roster struct stays untouched.
     const std::span<const BubbleSubBlock> subBlocks = roster.bubbleSubBlocks;
     encoded = encoded && writer.write(subBlocks.empty() ? 0U : 1U, kPresenceWidth);
     if (encoded && !subBlocks.empty()) {
-        encoded = write_bubble_sub_blocks(writer, subBlocks, stateSequence);
+        encoded = write_bubble_sub_blocks(writer, roster, stateSequence);
     }
     return encoded && writer.bit_count() == root + delta_bits(keyCount, subBlocks);
 }
@@ -152,14 +209,26 @@ bool write_roster_delta(bits::Writer& writer,
 /** Writes one per-object state block. */
 bool write_object_block(bits::Writer& writer,
                         const Snapshot& snapshot,
+                        std::uint32_t objectTag,
                         std::uint32_t key,
                         std::uint8_t slotType,
                         std::uint16_t slotIndex,
                         std::uint8_t flags,
+                        bool missionSeedOnly,
                         bool carriesPlayerKey) noexcept {
     const bool emitAuth = (flags & kSlotAuthFlag) != 0;
     const bool emitSense = (flags & kSlotSenseFlag) != 0;
-    const std::size_t body = emitAuth ? auth_body_bits(snapshot, slotType, carriesPlayerKey) : 0;
+    const AuthOverride* const override =
+        emitAuth ? matching_override(snapshot, objectTag, key, slotType, slotIndex) : nullptr;
+    // A mission-seed group is a placeholder with no default body. The spawn gate reads two of
+    // them: the player key (this type-13) and the lifetime state (every type-17, because the
+    // gate reads whichever registers first). Zeroing those strands the spawn.
+    const bool spawnBearing = carriesPlayerKey || slotType == kSlotTypeLifetime;
+    const std::size_t body = override != nullptr
+                                 ? override->bitCount
+                                 : (emitAuth && (!missionSeedOnly || spawnBearing)
+                                        ? auth_body_bits(snapshot, slotType, carriesPlayerKey)
+                                        : 0);
     const std::size_t remainder = (emitAuth ? 2U : 0U) + (emitSense ? 1U : 0U) + body;
     bool encoded = writer.write(1, kPresenceWidth) && writer.write(key, kKeyWidth)
                    && writer.write(std::uint32_t{slotType} + kSlotTypeBias, kSlotTypeWidth)
@@ -171,7 +240,9 @@ bool write_object_block(bits::Writer& writer,
         encoded =
             writer.write(1, kPresenceWidth) && writer.write(body > 0 ? 1U : 0U, kPresenceWidth);
         if (encoded && body > 0) {
-            encoded = write_auth_body(writer, snapshot, slotType, carriesPlayerKey);
+            encoded = override != nullptr
+                          ? write_packed(writer, *override)
+                          : write_auth_body(writer, snapshot, slotType, carriesPlayerKey);
         }
     }
     // A sense-present bit of one costs 35 more bits, not one, so it is always sent absent.

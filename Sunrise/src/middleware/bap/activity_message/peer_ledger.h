@@ -21,15 +21,27 @@ inline constexpr std::size_t kReleaseSize = 16;
 inline constexpr std::size_t kLeaveSize = 20;
 /** Connectivity failure is 66 meaningful bits, padded to 9 bytes. */
 inline constexpr std::size_t kConnectivityFailureSize = 9;
+/** Connectivity failure has 66 meaningful schema bits. */
+inline constexpr std::size_t kConnectivityFailureBits = 66;
 /** Migration carries a biased value and a peer key in exactly 12 bytes. */
 inline constexpr std::size_t kMigrationSize = 12;
 
-/** The reason selector is two bits wide. Its schema bias is not recovered, so it stays raw. */
+/** The connectivity reason selector is two bits wide. */
 inline constexpr std::uint8_t kFailureReasonWidth = 2;
+/** Stored connectivity reasons are one above their logical value. */
+inline constexpr std::int8_t kFailureReasonBias = 1;
+/** The two-bit biased connectivity reason begins at -1. */
+inline constexpr std::int8_t kMinimumFailureReason = -1;
+/** The two-bit biased connectivity reason ends at 2. */
+inline constexpr std::int8_t kMaximumFailureReason = 2;
+/** A valid speculative migration can report no bubble with index -1. */
+inline constexpr std::int32_t kMinimumMigrationBubble = -1;
+/** This build has 64 bubble indices, ending at 63. */
+inline constexpr std::int32_t kMaximumMigrationBubble = 63;
 
 /**
  * One returned peer reservation.
- * The reservation context is recovered; what the two scalars mean individually is not, so they
+ * The reservation context is known; what the two scalars mean on their own is not, so they
  * keep their wire order and no meaning is assigned to either.
  */
 struct ReservationRelease {
@@ -39,34 +51,35 @@ struct ReservationRelease {
     std::uint64_t peerKey{};
 };
 
-/** One peer leave notice. It is the release body plus one trailing scalar. */
+/** One peer leave notice from the client's own membership row. */
 struct PeerLeave {
-    std::uint32_t scalarA{};
-    std::uint32_t scalarB{};
-    std::uint64_t peerKey{};
-    std::uint32_t scalarC{};
+    /** The sender never writes this first field, so it remains unnamed. */
+    std::uint32_t field0{};
+    std::uint32_t membershipRevision{};
+    std::uint64_t ownMemberKey{};
+    std::uint32_t leaveReasonHash{};
 };
 
 /** One reported failure to reach a peer. */
 struct ConnectivityFailure {
     std::uint64_t peerKey{};
-    /** Raw two-bit selector. The schema bias is unrecovered, so this is not a decoded reason. */
-    std::uint8_t rawReason{};
+    /** The exact logical selector is known; individual values remain unnamed. */
+    std::int8_t failureReason{};
 };
 
-/** One proposed host migration. Accepting one needs the group migration state machine. */
+/** One speculative region-residency migration report. */
 struct MigrationProposal {
-    /** Biased signed scalar whose meaning is not recovered. */
-    std::int32_t scalar{};
-    std::uint64_t peerKey{};
+    std::int32_t bubbleIndex{};
+    /** A group member's machine key. Which member is unresolved. */
+    std::uint64_t memberKey{};
 };
 
 /**
  * Parses a reservation release.
  * @param input Activity payload after the envelope.
  * @param release Cleared first, then filled.
- * @param consumedBits Receives the bits the body used, whether or not it parsed.
- * @return True when the whole fixed body was present.
+ * @param consumedBits Cleared first, then receives 128 on success.
+ * @return True only when the exact fixed body was present.
  */
 [[nodiscard]] bool parse_release(std::span<const std::byte> input,
                                  ReservationRelease& release,
@@ -77,7 +90,7 @@ struct MigrationProposal {
  * @param input Activity payload after the envelope.
  * @param leave Cleared first, then filled.
  * @param consumedBits Receives the bits the body used, whether or not it parsed.
- * @return True when the whole fixed body was present.
+ * @return True only when the exact fixed body was present.
  */
 [[nodiscard]] bool
 parse_leave(std::span<const std::byte> input, PeerLeave& leave, std::size_t& consumedBits) noexcept;
@@ -87,18 +100,29 @@ parse_leave(std::span<const std::byte> input, PeerLeave& leave, std::size_t& con
  * @param input Activity payload after the envelope.
  * @param failure Cleared first, then filled.
  * @param consumedBits Receives the bits the body used, whether or not it parsed.
- * @return True when the whole fixed body was present.
+ * @return True only for the exact body and zero byte padding.
  */
 [[nodiscard]] bool parse_connectivity_failure(std::span<const std::byte> input,
                                               ConnectivityFailure& failure,
                                               std::size_t& consumedBits) noexcept;
 
 /**
+ * Encodes one connectivity failure for the symmetric service-9 client reader.
+ * @param failure Exact peer key and logical reason in range -1..2.
+ * @param output Caller-owned capacity. It changes only after full validation.
+ * @param written Cleared first, then receives nine on success.
+ * @return True when the reason was valid and the fixed body fitted.
+ */
+[[nodiscard]] bool encode_connectivity_failure(const ConnectivityFailure& failure,
+                                               std::span<std::byte> output,
+                                               std::size_t& written) noexcept;
+
+/**
  * Parses a speculative migration proposal.
  * @param input Activity payload after the envelope.
  * @param proposal Cleared first, then filled.
  * @param consumedBits Receives the bits the body used, whether or not it parsed.
- * @return True when the whole fixed body was present.
+ * @return True only for the exact body and a bubble in range -1..63.
  */
 [[nodiscard]] bool parse_migration(std::span<const std::byte> input,
                                    MigrationProposal& proposal,

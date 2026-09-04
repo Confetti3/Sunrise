@@ -6,9 +6,20 @@
 namespace sunrise::middleware::content::packages::reader::table_cache {
 namespace {
 
+/** @return The key a held slot was stored under. */
+[[nodiscard]] std::uint64_t table_key_of(const TableSlot& slot) noexcept {
+    return slot.key;
+}
+
 /** @param header Parsed package header. @return True when both tables fit a slot. */
 [[nodiscard]] bool holdable(const Header& header) noexcept {
     return header.entryCount <= kEntryCapacity && header.blockCount <= kBlockCapacity;
+}
+
+/** @return The key naming one held package, which no two patches share. */
+[[nodiscard]] std::uint64_t table_key(const Header& header) noexcept {
+    return (static_cast<std::uint64_t>(header.packageId) << 32U)
+           | static_cast<std::uint64_t>(header.patchId);
 }
 
 /**
@@ -23,22 +34,30 @@ acquire(Scratch& scratch, const Path& path, const Header& header) noexcept {
     if (!holdable(header)) {
         return nullptr;
     }
-    for (TableSlot& slot : scratch.tables) {
-        if (slot.occupied && std::wcscmp(slot.path.chars.data(), path.chars.data()) == 0) {
-            slot.used = ++scratch.slotCounter;
-            return &slot;
+    if (scratch.tables.empty() && !prepare_tables(scratch, kTableSlots)) {
+        return nullptr;
+    }
+    const std::uint64_t key = table_key(header);
+    const auto found = scratch.tableIndex.find(key);
+    if (found != scratch.tableIndex.end() && found->second < scratch.tables.size()) {
+        TableSlot& held = scratch.tables[found->second];
+        if (held.occupied && held.key == key) {
+            held.used = ++scratch.slotCounter;
+            return &held;
         }
     }
-    TableSlot* target = &scratch.tables[0];
-    for (TableSlot& slot : scratch.tables) {
-        if (!slot.occupied) {
-            target = &slot;
-            break;
-        }
-        if (slot.used < target->used) {
-            target = &slot;
+    // Replacement rotates, so holding hundreds of packages costs the same per lookup as two.
+    if (scratch.tableCursor >= scratch.tables.size()) {
+        scratch.tableCursor = 0;
+    }
+    TableSlot* const target = &scratch.tables[scratch.tableCursor];
+    if (target->occupied) {
+        const auto prior = scratch.tableIndex.find(table_key_of(*target));
+        if (prior != scratch.tableIndex.end() && prior->second == scratch.tableCursor) {
+            scratch.tableIndex.erase(prior);
         }
     }
+    ++scratch.tableCursor;
     const auto entryBytes = std::as_writable_bytes(
         std::span(target->entries).first(static_cast<std::size_t>(header.entryCount)));
     const auto blockBytes = std::as_writable_bytes(
@@ -49,10 +68,17 @@ acquire(Scratch& scratch, const Path& path, const Header& header) noexcept {
         return nullptr;
     }
     target->path = path;
+    target->key = key;
     target->entryCount = header.entryCount;
     target->blockCount = header.blockCount;
     target->used = ++scratch.slotCounter;
     target->occupied = true;
+    try {
+        scratch.tableIndex[key] = static_cast<std::size_t>(target - scratch.tables.data());
+    } catch (...) {
+        target->occupied = false;
+        return nullptr;
+    }
     return target;
 }
 

@@ -6,6 +6,40 @@
 
 namespace sunrise::state::activity::transactions {
 
+/** @return True when every immutable destination field is identical. */
+inline bool same_destination(const destination::DestinationSelection& left,
+                             const destination::DestinationSelection& right) noexcept {
+    return left.packageName == right.packageName
+           && left.packageNameLength == right.packageNameLength && left.reason == right.reason
+           && left.sourceActivityIndex == right.sourceActivityIndex
+           && left.activityIndex == right.activityIndex && left.elementIndex == right.elementIndex
+           && left.selectionNonce == right.selectionNonce
+           && left.arrivalBubbleHash == right.arrivalBubbleHash
+           && left.spawnSetHash == right.spawnSetHash
+           && left.hasElementIndex == right.hasElementIndex
+           && left.hasSelectionNonce == right.hasSelectionNonce
+           && left.hasArrivalBubbleHash == right.hasArrivalBubbleHash
+           && left.hasSpawnSetHash == right.hasSpawnSetHash
+           && left.arrivalBubbleOverride == right.arrivalBubbleOverride
+           && left.hasArrivalBubbleOverride == right.hasArrivalBubbleOverride
+           && left.sliceSetOverride == right.sliceSetOverride
+           && left.hasSliceSetOverride == right.hasSliceSetOverride
+           && left.spawnSetOverride == right.spawnSetOverride
+           && left.hasSpawnSetOverride == right.hasSpawnSetOverride
+           && left.descriptorBits == right.descriptorBits
+           && left.descriptorBitLength == right.descriptorBitLength
+           && left.descriptorNameBit == right.descriptorNameBit
+           && left.hasDescriptorName == right.hasDescriptorName;
+}
+
+/** @return True when one record is the exact generation named by a binding. */
+inline bool record_matches(const SessionRecord& record, const SessionBinding& binding) noexcept {
+    return record.occupied && binding.sessionId != kAbsentSessionId
+           && binding.createdRevision != kInvalidRevision && record.sessionId == binding.sessionId
+           && record.createdRevision == binding.createdRevision
+           && same_destination(record.destination, binding.destination);
+}
+
 /** @return Matching slot, or the fixed-table absent value when the session is not there. */
 inline std::size_t find_session(const ActivityState& state, std::uint64_t sessionId) noexcept {
     for (std::size_t index = 0; index < state.sessions.size(); ++index) {

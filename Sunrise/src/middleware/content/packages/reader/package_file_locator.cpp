@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cwchar>
 #include <string_view>
+#include <utility>
 
 #include "handle_cache.h"
 #include "internal.h"
@@ -151,6 +152,49 @@ bool find_latest(std::wstring_view directory,
     }
     locator_cache::mark_complete(directoryKey);
     return locator_cache::find(directoryKey, packageId, stem, patchIndex);
+}
+
+/** Resolves one package once per reader and source directory. */
+bool resolve_latest(Scratch& scratch,
+                    std::wstring_view directory,
+                    std::uint16_t packageId,
+                    const PackageLocation*& output) noexcept {
+    output = nullptr;
+    // The key is compared by content. A borrowed pointer identity could alias a freed and
+    // reallocated directory string and serve stale locations.
+    const bool sameDirectory =
+        directory.size() != 0 && directory.size() == scratch.packageDirectoryLength
+        && std::equal(directory.begin(), directory.end(), scratch.packageDirectory.chars.begin());
+    if (!sameDirectory) {
+        scratch.packageLocations.clear();
+        scratch.packageDirectory = {};
+        scratch.packageDirectoryLength = 0;
+        if (directory.size() < scratch.packageDirectory.chars.size()) {
+            std::copy(directory.begin(), directory.end(), scratch.packageDirectory.chars.begin());
+            scratch.packageDirectoryLength = directory.size();
+        }
+        scratch.packageLocationFallback = {};
+    }
+    const auto held = scratch.packageLocations.find(packageId);
+    if (held != scratch.packageLocations.end()) {
+        ++scratch.packageLocationHits;
+        output = held->second.found ? &held->second : nullptr;
+        return held->second.found;
+    }
+
+    ++scratch.packageLocationMisses;
+    PackageLocation pending{};
+    pending.found = find_latest(directory, packageId, pending.stem, pending.patchIndex)
+                    && build_path(pending.stem, pending.patchIndex, pending.latestPath);
+    try {
+        const auto inserted = scratch.packageLocations.emplace(packageId, pending);
+        output = inserted.first->second.found ? &inserted.first->second : nullptr;
+        return inserted.first->second.found;
+    } catch (...) {
+        scratch.packageLocationFallback = std::move(pending);
+        output = scratch.packageLocationFallback.found ? &scratch.packageLocationFallback : nullptr;
+        return scratch.packageLocationFallback.found;
+    }
 }
 
 /** Builds the full path of one patch of a package stem. */

@@ -33,6 +33,42 @@ constexpr std::size_t kEntrySize = 2 * sizeof(std::uint16_t);
 constexpr std::uint32_t kMaximumEntries = static_cast<std::uint32_t>(kIndexCapacity);
 constexpr std::wstring_view kWriteStageSuffix = L".tmp";
 
+/**
+ * Interval records have no completion flag. Their second reserved objective-value slot carries
+ * intervalsRedeemedCount, while each successful redemption contributes that interval's score.
+ * These are the versioned interval records in the installed Shadowkeep-through-Arrivals data.
+ */
+struct IntervalDefinition {
+    std::uint16_t recordIndex;
+    std::uint16_t redeemedCountSlot;
+    std::uint32_t definitionHash;
+    std::array<std::uint16_t, 7> scores;
+    std::uint8_t intervalCount;
+};
+
+constexpr std::array<IntervalDefinition, 16> kIntervalDefinitions{{
+    {1933U, 5260U, 1686327621U, {10U, 15U, 25U}, 3U},
+    {1934U, 5262U, 684525211U, {10U, 15U, 25U, 50U}, 4U},
+    {1958U, 5303U, 2972583416U, {10U, 15U, 25U}, 3U},
+    {1959U, 5305U, 3791036271U, {10U, 15U, 25U, 50U}, 4U},
+    {1960U, 5307U, 2703117203U, {5U, 5U, 10U, 30U}, 4U},
+    {1961U, 5309U, 1339925682U, {5U, 5U, 10U, 30U}, 4U},
+    {1962U, 5311U, 3115239680U, {5U, 5U, 10U, 30U}, 4U},
+    {1963U, 5313U, 1286790825U, {5U, 5U, 10U, 30U}, 4U},
+    {1976U, 5329U, 1839524615U, {5U, 5U, 10U, 30U}, 4U},
+    {1980U, 5334U, 3558002660U, {5U, 10U, 15U, 25U}, 4U},
+    {1981U, 5336U, 3393252660U, {5U, 10U, 15U, 50U}, 4U},
+    {2029U, 5394U, 230421321U, {10U, 15U, 25U}, 3U},
+    {2030U, 5396U, 2122679994U, {10U, 15U, 25U, 50U}, 4U},
+    {2108U, 5486U, 2801882959U, {10U, 15U, 25U}, 3U},
+    {2109U, 5488U, 3196543652U, {10U, 15U, 25U, 50U}, 4U},
+    {2112U, 5492U, 1012728572U, {10U, 15U, 25U, 25U, 25U, 25U, 50U}, 7U},
+}};
+
+constexpr std::wstring_view kIntervalFileSuffix = L"\\cache\\record_intervals.bin";
+constexpr std::array<char, 8> kIntervalMagic{'S', 'N', 'R', 'S', 'I', 'N', 'T', '1'};
+constexpr std::size_t kIntervalEntrySize = 4;
+
 /** Books where the shared counter itself grants chapters. */
 constexpr std::array<std::uint16_t, 4> kCounterGrantedLoreNodes{
     823U, // Stolen Intelligence
@@ -61,12 +97,16 @@ std::array<std::int32_t, kIndexCapacity> g_progress{};
 std::array<std::uint16_t, kIndexCapacity> g_scoreByIndex{};
 std::size_t g_count{};
 std::uint32_t g_score{};
+std::array<std::uint8_t, kIntervalDefinitions.size()> g_intervalClaims{};
+std::uint32_t g_intervalScore{};
 core::path::Buffer g_path{};
 bool g_pathReady{};
 core::path::Buffer g_claimablePath{};
 bool g_claimablePathReady{};
 core::path::Buffer g_progressPath{};
 bool g_progressPathReady{};
+core::path::Buffer g_intervalPath{};
+bool g_intervalPathReady{};
 bool g_persistenceRequired{};
 bool g_counterGrantedChaptersReady{};
 
@@ -83,6 +123,8 @@ void clear_locked() noexcept {
     g_scoreByIndex.fill(0);
     g_count = 0;
     g_score = 0;
+    g_intervalClaims.fill(0);
+    g_intervalScore = 0;
 }
 
 /** Objective storage reserved by records whose installed definition exposes no objective rows. */
@@ -146,13 +188,78 @@ write_reserved_objective(const ReservedObjective& objective,
     return !pending_matches(flagIndex, pending) && claimable_locked(flagIndex);
 }
 
+template <typename Value> void append_value(std::vector<char>& document, const Value& value);
+[[nodiscard]] bool write_document(const core::path::Buffer& path,
+                                  std::span<const char> document,
+                                  const char* stage,
+                                  std::size_t detail) noexcept;
+[[nodiscard]] bool read_entries(const core::path::Buffer& path,
+                                std::span<const char, 8> magic,
+                                std::size_t entrySize,
+                                const char* stage,
+                                std::vector<char>& payload,
+                                std::uint32_t& entries) noexcept;
+
 [[nodiscard]] std::uint32_t total_score_locked(const PendingClaim* pending) noexcept {
-    return g_score
+    return g_score + g_intervalScore
            + static_cast<std::uint32_t>(pending != nullptr && !claimed_locked(pending->flagIndex)
                                                 && static_cast<std::size_t>(pending->flagIndex)
                                                        < kIndexCapacity
                                             ? pending->scoreValue
                                             : 0U);
+}
+
+[[nodiscard]] bool store_intervals_locked() noexcept {
+    if (!g_intervalPathReady) {
+        return !g_persistenceRequired;
+    }
+    std::vector<char> document{kIntervalMagic.begin(), kIntervalMagic.end()};
+    const std::size_t countOffset = document.size();
+    document.resize(countOffset + sizeof(std::uint32_t));
+    std::uint32_t count = 0;
+    for (std::size_t index = 0; index < g_intervalClaims.size(); ++index) {
+        if (g_intervalClaims[index] == 0) {
+            continue;
+        }
+        append_value(document, kIntervalDefinitions[index].recordIndex);
+        append_value(document, g_intervalClaims[index]);
+        constexpr std::uint8_t kPadding = 0;
+        append_value(document, kPadding);
+        ++count;
+    }
+    std::memcpy(document.data() + countOffset, &count, sizeof count);
+    return write_document(g_intervalPath, document, "store_intervals", count);
+}
+
+void load_intervals_locked() noexcept {
+    std::vector<char> payload;
+    std::uint32_t entries = 0;
+    if (!read_entries(g_intervalPath,
+                      kIntervalMagic,
+                      kIntervalEntrySize,
+                      "load_intervals",
+                      payload,
+                      entries)) {
+        return;
+    }
+    for (std::uint32_t entry = 0; entry < entries; ++entry) {
+        std::uint16_t recordIndex = 0;
+        std::uint8_t redeemed = 0;
+        const std::size_t at = static_cast<std::size_t>(entry) * kIntervalEntrySize;
+        std::memcpy(&recordIndex, payload.data() + at, sizeof recordIndex);
+        std::memcpy(&redeemed, payload.data() + at + sizeof recordIndex, sizeof redeemed);
+        for (std::size_t index = 0; index < kIntervalDefinitions.size(); ++index) {
+            const IntervalDefinition& definition = kIntervalDefinitions[index];
+            if (definition.recordIndex != recordIndex || redeemed > definition.intervalCount) {
+                continue;
+            }
+            g_intervalClaims[index] = redeemed;
+            for (std::uint8_t interval = 0; interval < redeemed; ++interval) {
+                g_intervalScore += definition.scores[interval];
+            }
+            break;
+        }
+    }
 }
 
 void report_failure(const char* stage, const char* result, std::size_t detail) noexcept {
@@ -437,9 +544,11 @@ bool initialize(void* module) noexcept {
     g_path = {};
     g_claimablePath = {};
     g_progressPath = {};
+    g_intervalPath = {};
     g_pathReady = false;
     g_claimablePathReady = false;
     g_progressPathReady = false;
+    g_intervalPathReady = false;
     g_persistenceRequired = module != nullptr;
     if (!g_persistenceRequired) {
         return true;
@@ -467,6 +576,13 @@ bool initialize(void* module) noexcept {
         load_progress_locked();
     } else {
         report_failure("initialize", "progress_path_fail", 0);
+    }
+    if (core::path::artifact_directory(module, g_intervalPath)
+        && core::path::append(g_intervalPath, kIntervalFileSuffix)) {
+        g_intervalPathReady = true;
+        load_intervals_locked();
+    } else {
+        report_failure("initialize", "interval_path_fail", 0);
     }
     return true;
 }
@@ -509,6 +625,32 @@ bool claim(std::uint16_t flagIndex, std::uint16_t scoreValue) noexcept {
     (void)store_locked();
     (void)store_claimable_locked();
     (void)store_progress_locked();
+    return false;
+}
+
+bool claim_interval(std::uint16_t recordIndex, std::uint32_t definitionHash) noexcept {
+    const std::lock_guard<std::mutex> guard(g_lock);
+    for (std::size_t index = 0; index < kIntervalDefinitions.size(); ++index) {
+        const IntervalDefinition& definition = kIntervalDefinitions[index];
+        if (definition.recordIndex != recordIndex || definition.definitionHash != definitionHash) {
+            continue;
+        }
+        std::uint8_t& redeemed = g_intervalClaims[index];
+        if (redeemed >= definition.intervalCount) {
+            return false;
+        }
+        const std::uint8_t previous = redeemed;
+        const std::uint32_t previousScore = g_intervalScore;
+        g_intervalScore += definition.scores[redeemed];
+        ++redeemed;
+        if (store_intervals_locked()) {
+            return true;
+        }
+        redeemed = previous;
+        g_intervalScore = previousScore;
+        (void)store_intervals_locked();
+        return false;
+    }
     return false;
 }
 
@@ -593,6 +735,49 @@ struct NodeProgress {
     std::size_t written;
     const PendingClaim* pending;
 };
+
+/** One authored reward milestone at the head of a presentation node's child list. */
+struct RewardMilestone {
+    std::uint16_t completionFlagIndex{};
+    std::uint16_t objectiveSlot{};
+    std::int32_t completionValue{};
+};
+
+/**
+ * Resolves the shape shared by node-level reward milestones: a zero-score reward record with one
+ * positive objective. The node walk below additionally requires a descending consecutive cluster,
+ * which distinguishes milestone bands from unrelated reward-bearing child records.
+ */
+[[nodiscard]] bool resolve_reward_milestone(std::uint16_t recordIndex,
+                                            RewardMilestone& milestone) noexcept {
+    milestone = {};
+    build_data::records::Definition record{};
+    if (!build_data::find_record_definition(recordIndex, record)
+        || record.scoreValue != 0
+        || record.completionFlagIndex == build_data::records::kUnavailableFlagIndex) {
+        return false;
+    }
+    const auto entry = objective_slot_table::find_record(record.completionFlagIndex);
+    if (!entry || entry.objectiveCount != 1
+        || entry.firstObjective >= objective_slot_table::kObjectiveCount) {
+        return false;
+    }
+    const auto objective = objective_slot_table::objective(entry.firstObjective);
+    if (objective.completionValue <= 0) {
+        return false;
+    }
+    std::array<build_data::records::rewards::ResolvedReward,
+               build_data::records::rewards::kRewardPerRecordCapacity>
+        rewards{};
+    std::size_t rewardCount = 0;
+    if (!build_data::find_generated_record_rewards(
+            record.definitionHash, rewards, rewardCount)
+        || rewardCount == 0) {
+        return false;
+    }
+    milestone = {record.completionFlagIndex, objective.slot, objective.completionValue};
+    return true;
+}
 
 /** Caches counter-granted chapter flags once the immutable node catalog is ready. */
 [[nodiscard]] const std::array<std::uint64_t, kWordCount>&
@@ -762,6 +947,75 @@ static std::size_t apply_node_progress_locked(std::span<std::int32_t> objectiveV
 }
 
 /**
+ * Publishes the count read by authored node-level reward milestones.
+ *
+ * These records are a descending reward band at the head of a node's children (for example the
+ * MMXIX 15/10/5/1 shirt, ship, sparrow and emblem rows). Their cards can derive presentation from
+ * completed siblings, but their action binding still reads the authoritative objective bank. A
+ * zero bank therefore looks claimable while remaining inert. The installed node ordering,
+ * reward table, objective slots and thresholds identify the band without season-specific ids.
+ */
+static std::size_t
+apply_reward_milestone_progress_locked(std::span<std::int32_t> objectiveValues,
+                                       const PendingClaim* pending) noexcept {
+    struct Projection {
+        std::span<std::int32_t> values;
+        const PendingClaim* pending;
+        std::size_t written{};
+    } projection{objectiveValues, pending};
+
+    build_data::nodes::for_each(
+        &projection, [](void* context, const build_data::nodes::Definition& node) noexcept {
+            auto* state = static_cast<Projection*>(context);
+            std::array<RewardMilestone, build_data::nodes::kChildCapacity> milestones{};
+            std::size_t milestoneCount = 0;
+            for (; milestoneCount < node.childCount; ++milestoneCount) {
+                RewardMilestone milestone{};
+                if (!resolve_reward_milestone(node.children[milestoneCount], milestone)) {
+                    break;
+                }
+                if (milestoneCount != 0) {
+                    const RewardMilestone& previous = milestones[milestoneCount - 1];
+                    if (milestone.completionValue >= previous.completionValue
+                        || static_cast<std::uint32_t>(milestone.objectiveSlot) + 1U
+                               != previous.objectiveSlot) {
+                        break;
+                    }
+                }
+                milestones[milestoneCount] = milestone;
+            }
+            // A single reward record can have an ordinary objective. Two or more descending,
+            // consecutive rows are the authored milestone-band signature.
+            if (milestoneCount < 2) {
+                return;
+            }
+
+            std::int32_t completedChildren = 0;
+            for (std::size_t child = milestoneCount; child < node.childCount; ++child) {
+                build_data::records::Definition record{};
+                if (build_data::find_record_definition(node.children[child], record)
+                    && record.completionFlagIndex
+                           != build_data::records::kUnavailableFlagIndex
+                    && claimed_locked(record.completionFlagIndex, state->pending)) {
+                    ++completedChildren;
+                }
+            }
+            for (std::size_t index = 0; index < milestoneCount; ++index) {
+                const RewardMilestone& milestone = milestones[index];
+                if (claimed_locked(milestone.completionFlagIndex, state->pending)
+                    || static_cast<std::size_t>(milestone.objectiveSlot)
+                           >= state->values.size()) {
+                    continue;
+                }
+                state->values[milestone.objectiveSlot] =
+                    (std::min)(completedChildren, milestone.completionValue);
+                ++state->written;
+            }
+        });
+    return projection.written;
+}
+
+/**
  * Publishes partial and complete-but-unclaimed objective values. Completion flags remain clear
  * until claim, and multi-objective rows occupy consecutive mapped slots.
  */
@@ -843,7 +1097,15 @@ void apply_account_projection(std::span<std::uint8_t> accountFlags,
         objectiveValues[build_data::records::kTriumphScoreValueIndex] +=
             static_cast<std::int32_t>(total_score_locked(pending));
     }
+    for (std::size_t index = 0; index < kIntervalDefinitions.size(); ++index) {
+        const std::size_t slot = kIntervalDefinitions[index].redeemedCountSlot;
+        if (slot < objectiveValues.size()) {
+            objectiveValues[slot] =
+                (std::max)(objectiveValues[slot], static_cast<std::int32_t>(g_intervalClaims[index]));
+        }
+    }
     (void)apply_node_progress_locked(objectiveValues, pending);
+    (void)apply_reward_milestone_progress_locked(objectiveValues, pending);
     (void)apply_chapter_visibility_gates_locked(objectiveValues, pending);
     (void)apply_claimable_objectives_locked(objectiveValues, pending);
 }

@@ -13,6 +13,9 @@
 #include "../../../../core/ui/runtime/ui_visibility_runtime.h"
 #include "../../../../core/ui/scaling/dpi/ui_dpi_scaling.h"
 #include "../../../../core/ui/theme/sunrise_ui_theme.h"
+#include "../../../ui/activity/authored_placement_marker.h"
+#include "../../../ui/activity/authored_spatial_overlay.h"
+#include "../../teleport/runtime.h"
 #include "../input/input.h"
 #include "graphics_renderer_report.h"
 #include "state.h"
@@ -119,9 +122,7 @@ void draw_data(ImDrawData* drawData) noexcept {
 
 } // namespace
 
-/**
- * Runs one Dear ImGui frame. Draw data is sent only while the Core UI is visible.
- */
+/** Runs one Dear ImGui frame. Draw data is sent only while the Core UI is visible. */
 void render_frame_locked() noexcept {
     if (!fully_active_locked()) {
         return;
@@ -147,7 +148,24 @@ void render_frame_locked() noexcept {
     const bool surfaceDrawn = core::ui::layout::render(visibility.visible);
     const bool busyDrawn = core::ui::busy::draw();
     const bool noticeDrawn = core::ui::notice::draw();
-    if (!hudDrawn && !surfaceDrawn && !busyDrawn && !noticeDrawn) {
+    sunrise::client::ui::activity::authored_placement_marker::RenderSet markerSource{};
+    sunrise::client::hooks::teleport::CameraPose markerCamera{};
+    const bool markerSourceReady =
+        visibility.enabled
+        && sunrise::client::ui::activity::authored_placement_marker::render_set(markerSource)
+        && sunrise::client::hooks::teleport::camera_pose(markerCamera);
+    const bool spatialMarkerDrawn =
+        markerSourceReady
+        && sunrise::client::ui::activity::authored_spatial_overlay::draw(g_resources.device,
+                                                                         g_resources.context,
+                                                                         g_resources.renderTarget,
+                                                                         markerSource,
+                                                                         markerCamera);
+    const bool markerDrawn = markerSourceReady
+                             && sunrise::client::ui::activity::authored_placement_marker::draw(
+                                 markerSource, markerCamera, !spatialMarkerDrawn);
+    if (!hudDrawn && !surfaceDrawn && !busyDrawn && !noticeDrawn && !spatialMarkerDrawn
+        && !markerDrawn) {
         // A frame nobody claimed still drains backend state, and sends no draw data.
         ImGui::EndFrame();
         return;

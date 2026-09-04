@@ -66,8 +66,17 @@ bool resolve(std::uint16_t request, ServiceRoute& route) noexcept {
     case Request::request48:
         route = {ResponseMode::reply, Response::response49, BodyCodec::empty};
         return true;
-    case Request::matchmaking:
-        route = {ResponseMode::reply, Response::matchmaking, BodyCodec::matchmakingResponse};
+    case middleware::bap::RequestService::request50:
+        route = {ResponseMode::reply,
+                 middleware::bap::ResponseService::response51,
+                 BodyCodec::empty,
+                 "ev=bap svc=50 rsp=51 result=ok"};
+        return true;
+    case middleware::bap::RequestService::matchmaking:
+        route = {ResponseMode::reply,
+                 middleware::bap::ResponseService::matchmaking,
+                 BodyCodec::matchmakingResponse,
+                 "ev=bap svc=42 rsp=43 result=ok"};
         return true;
     case Request::clan:
         route = {ResponseMode::reply, Response::clan, BodyCodec::empty};

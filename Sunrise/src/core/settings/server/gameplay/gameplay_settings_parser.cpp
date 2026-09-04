@@ -51,6 +51,7 @@ bool Parser::gameplay_settings(gameplay::Settings& output) noexcept {
     bool hasPort = false;
     bool hasReserve = false;
     bool hasJoinGrant = false;
+    bool hasHoldLaunchCinematic = false;
     for (;;) {
         std::string_view key;
         if (!string(key) || !consume(':')) {
@@ -106,6 +107,11 @@ bool Parser::gameplay_settings(gameplay::Settings& output) noexcept {
             }
             candidate.clientJoinGrantCount = static_cast<std::uint16_t>(value);
             hasJoinGrant = true;
+        } else if (key == "hold_launch_cinematic") {
+            if (hasHoldLaunchCinematic || !boolean(candidate.holdLaunchCinematic)) {
+                return false;
+            }
+            hasHoldLaunchCinematic = true;
         } else if (!skip_value(0)) {
             return false;
         }

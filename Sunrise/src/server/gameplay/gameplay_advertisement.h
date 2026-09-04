@@ -4,6 +4,7 @@
 
 #include "../../middleware/bap/activity_message/replicate_membership.h"
 #include "../../state/activity/definition.h"
+#include "group/group_host_sessions.h"
 
 namespace sunrise::server::gameplay {
 
@@ -44,9 +45,58 @@ void build_advertisement(
     middleware::bap::activity_message::replicate_membership::CitizenAdvertisement& output,
     std::uint64_t& hostGeneration) noexcept;
 
+/**
+ * Builds one further directory entry from the same source, without reporting an outcome.
+ * Only the region a body publishes is logged, not every region the body lists.
+ * @param source Exact source record whose destination the target must copy.
+ * @param regionIndex Concrete region this entry names.
+ * @param localMemberSlot Member slot of the joining client.
+ * @param output Cleared, then filled when the whole channel can be advertised.
+ * @param hostGeneration Cleared, then receives the retained row generation on success.
+ */
+void build_directory_entry(
+    const state::activity::SessionBinding& source,
+    std::int32_t regionIndex,
+    std::uint8_t localMemberSlot,
+    middleware::bap::activity_message::replicate_membership::CitizenAdvertisement& output,
+    std::uint64_t& hostGeneration) noexcept;
+
 /** Claims a missing host row and reports whether its advertisement is ready. */
 [[nodiscard]] AdvertisementState advertisement_state(const state::activity::SessionBinding& source,
                                                      std::int32_t regionIndex) noexcept;
+
+/**
+ * Claims the region's host row and completes a pending allocation at once.
+ * A join answer needs the row ready in the same frame, not one service slice later.
+ * @param source Exact source record whose destination the target must copy.
+ * @param regionIndex Concrete region the join burst advertises.
+ */
+void complete_host_session(const state::activity::SessionBinding& source,
+                           std::int32_t regionIndex) noexcept;
+
+/** Starts the private activity's stable logical Bubble Host and completes its allocation. */
+[[nodiscard]] bool complete_private_host_session(const state::activity::SessionBinding& source,
+                                                 std::int32_t initialRegion) noexcept;
+
+/**
+ * Claims the private activity's Bubble Host row without allocating it.
+ * The allocation advances the activity state revision, which retires any plan already prepared
+ * for this frame, so a staged push claims here and lets the pump service fill the row.
+ */
+[[nodiscard]] bool claim_private_host_session(const state::activity::SessionBinding& source,
+                                              std::int32_t initialRegion) noexcept;
+
+/** Copies the private activity's stable logical Bubble Host row. */
+[[nodiscard]] bool private_host_session(const state::activity::SessionBinding& source,
+                                        group::HostSessionBinding& output) noexcept;
+
+/** Builds the private logical host's remote-member descriptor for its current region. */
+void build_private_host_advertisement(
+    const state::activity::SessionBinding& source,
+    std::int32_t regionIndex,
+    std::uint8_t localMemberSlot,
+    middleware::bap::activity_message::replicate_membership::CitizenAdvertisement& output,
+    std::uint64_t& hostGeneration) noexcept;
 
 /**
  * Source-less publisher. It clears output and claims no host row, so the channel stays silent.

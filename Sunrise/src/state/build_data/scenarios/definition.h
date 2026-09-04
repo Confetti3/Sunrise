@@ -36,8 +36,8 @@ inline constexpr std::size_t kRosterSlotCapacity = 1280;
 inline constexpr std::size_t kDestinationGroupCapacity = 4;
 /**
  * Roster groups one destination publishes per bubble.
- * A group qualifies only when it is in some of the destination's slice sets and not all, so this
- * is a small set: the widest measured destination reaches one of its six keys that way.
+ * A group qualifies only when it is in some of the destination's slice sets and not all.
+ * So the set is small: the widest measured destination reaches one of its six keys that way.
  */
 inline constexpr std::size_t kDestinationBubbleGroupCapacity = 4;
 /** A per-bubble group's bubble mask, one bit per bubble, as it is stored on disk. */
@@ -73,6 +73,29 @@ struct RosterGroup {
     /** Each slot's own index, from its descriptor. Ascending, and not always contiguous. */
     std::array<std::uint16_t, kRosterSlotCapacity> slotIndices{};
 };
+
+/** @return True when one roster group is canonical and safe for the msg-5 encoder. */
+[[nodiscard]] inline bool valid_roster_group(const RosterGroup& group) noexcept {
+    if (group.registryKey == 0 || group.slotCount == 0 || group.slotCount > kRosterSlotCapacity) {
+        return false;
+    }
+    for (std::size_t slot = 0; slot < kRosterSlotCapacity; ++slot) {
+        const bool declared = slot < group.slotCount;
+        if (declared
+            && (group.slotTypes[slot] == 0 || group.slotTypes[slot] > kMaximumSlotType
+                || (group.slotFlags[slot] & ~kSlotFlagMask) != 0
+                || group.slotIndices[slot] >= kRosterSlotCapacity
+                || (slot != 0 && group.slotIndices[slot] <= group.slotIndices[slot - 1]))) {
+            return false;
+        }
+        if (!declared
+            && (group.slotTypes[slot] != 0 || group.slotFlags[slot] != 0
+                || group.slotIndices[slot] != 0)) {
+            return false;
+        }
+    }
+    return true;
+}
 
 /** One destination's bubble layout, reduced to what the activity messages publish. */
 struct Definition {

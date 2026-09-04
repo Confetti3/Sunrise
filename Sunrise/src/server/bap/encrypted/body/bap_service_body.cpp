@@ -1,4 +1,6 @@
 #include <atomic>
+#include <array>
+#include <cstdio>
 #include <limits>
 
 #include "../../../../core/logging/log.h"
@@ -11,7 +13,9 @@
 #include "../../../../middleware/bap/user_message/user_message_response.h"
 #include "../../../../middleware/encoding/byte_order.h"
 #include "../../../../middleware/web_service/messages/opcode505/opcode505_codec.h"
+#include "../../../../state/activity/membership/activity_membership_query.h"
 #include "../../../../state/runtime/runtime.h"
+#include "../../../gameplay/group/group_host_sessions.h"
 #include "../../../web_service/web_service_runtime.h"
 #include "../activity_host_manager/activity_host_manager_route.h"
 #include "../activity_message/activity_message_route.h"
@@ -21,12 +25,6 @@
 
 namespace sunrise::server::bap::encrypted::body {
 namespace {
-
-/** The svc-23 request identity sits after its entry count and both type bytes. */
-constexpr std::size_t kTranslationIdentityOffset = 4;
-/** A request shorter than this carries no identity to read. */
-constexpr std::size_t kTranslationRequestSize =
-    kTranslationIdentityOffset + middleware::encoding::kU64Size;
 
 /** Process-wide identity paired with the single account SOID. */
 std::atomic<std::uint64_t> g_translatedIdentity{0};
@@ -42,15 +40,7 @@ std::atomic<std::uint64_t> g_translatedIdentity{0};
 }
 
 /** Accepts only the first account-translation identity and its retries. */
-[[nodiscard]] bool pairs_identity(std::span<const std::byte> requestBody) noexcept {
-    if (requestBody.size() < kTranslationRequestSize) {
-        return false;
-    }
-    const std::uint64_t identity = middleware::encoding::read_u64_be(
-        requestBody.subspan<kTranslationIdentityOffset, middleware::encoding::kU64Size>());
-    if (identity == 0) {
-        return false;
-    }
+[[nodiscard]] bool pairs_identity(std::uint64_t identity) noexcept {
     std::uint64_t claimed = 0;
     // A repeat of the same identity still pairs: the peer re-asks until the flag sticks.
     return g_translatedIdentity.compare_exchange_strong(
@@ -75,6 +65,7 @@ std::atomic<std::uint64_t> g_translatedIdentity{0};
 bool process(const ServiceRoute& route,
              const queuez::SessionState& queuezState,
              const ActivityClientBinding& activity,
+             const RosterDecodeMap& rosterDecode,
              state::matchmaking::ContextHandle matchmakingContext,
              std::span<const std::byte> requestBody,
              std::span<std::byte> output,
@@ -87,13 +78,41 @@ bool process(const ServiceRoute& route,
         return true;
     case BodyCodec::accountTranslationResponse: {
         const state::AccountState account = state::account_snapshot();
-        // A zero SOID refuses an unpaired request without withholding its reply.
-        const bool pairs = pairs_identity(requestBody);
-        const std::uint64_t soid = pairs ? account.primarySoid : 0;
-        if (!pairs) {
+        std::uint64_t identity = 0;
+        server::gameplay::group::HostSessionBinding host{};
+        const bool parsed =
+            middleware::bap::account_translation::request_identity(requestBody, identity);
+        // The primary host asks with identity zero and receives the live region session. Remote
+        // activity rows ask by activity-session id. Only other nonzero identities pair to account.
+        const std::uint64_t liveSession =
+            state::activity::membership::live_region_session(state::activity::kAbsentSessionId);
+        const bool zeroHandle =
+            parsed && identity == 0 && liveSession != state::activity::kAbsentSessionId;
+        const bool logicalHost =
+            parsed && identity != 0
+            && server::gameplay::group::host_session_for_activity(identity, host)
+            && host.target.sessionId == identity;
+        const bool accountIdentity =
+            parsed && identity != 0 && !logicalHost && pairs_identity(identity);
+        const std::uint64_t soid = zeroHandle        ? liveSession
+                                   : logicalHost     ? host.target.sessionId
+                                   : accountIdentity ? account.primarySoid
+                                                     : 0;
+        std::array<char, core::log::kLineCapacity> line{};
+        const int count = std::snprintf(line.data(),
+                                        line.size(),
+                                        "ev=queuez stage=translate result=%s identity=0x%016llX "
+                                        "soid=0x%016llX",
+                                        zeroHandle        ? "paired kind=zero_handle"
+                                        : logicalHost     ? "paired kind=logical_host"
+                                        : accountIdentity ? "paired kind=account"
+                                                          : "unpaired",
+                                        static_cast<unsigned long long>(identity),
+                                        static_cast<unsigned long long>(soid));
+        if (count > 0) {
             core::log::write(core::log::Channel::server,
-                             core::log::Level::warn,
-                             "ev=queuez stage=translate result=unpaired");
+                             core::log::Level::info,
+                             {line.data(), static_cast<std::size_t>(count)});
         }
         return middleware::bap::account_translation::encode_response(
             requestBody, soid, output, written);
@@ -119,7 +138,7 @@ bool process(const ServiceRoute& route,
         }
         bool hasTransaction = false;
         const bool processed =
-            activity_message::process(activity, requestBody, *plan, hasTransaction);
+            activity_message::process(activity, rosterDecode, requestBody, *plan, hasTransaction);
         if (!processed || !hasTransaction) {
             clear_transaction(outcome);
         }
@@ -150,10 +169,30 @@ bool process(const ServiceRoute& route,
             return false;
         }
         bool hasMutation = false;
+        state::PendingCurrentActivity currentActivity{};
         const bool encoded = matchmaking::encode_response(
-            matchmakingContext, requestBody, output, written, *mutation, hasMutation);
-        if (!encoded || !hasMutation) {
+            matchmakingContext,
+            requestBody,
+            output,
+            written,
+            *mutation,
+            hasMutation,
+            currentActivity);
+        if (!hasMutation) {
             clear_transaction(outcome);
+        }
+        if (encoded && !hasMutation && currentActivity.prepared) {
+            auto* transaction = emplace_transaction<CurrentActivityTransaction>(outcome);
+            if (transaction == nullptr
+                || !queuez::stage_current_activity_character(
+                    queuezState, currentActivity.characterSoid, transaction->update)) {
+                core::log::write(core::log::Channel::server,
+                                 core::log::Level::warn,
+                                 "ev=current_activity stage=queuez_preflight result=fail");
+                clear_transaction(outcome);
+            } else {
+                transaction->pending = currentActivity;
+            }
         }
         return encoded;
     }

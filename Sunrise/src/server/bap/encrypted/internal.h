@@ -69,6 +69,12 @@ struct ArtifactPurchaseTransaction {
     queuez::EquipmentSwap update{};
 };
 
+/** Current-activity mutation and the exact QueueZ character after-image sent with its reply. */
+struct CurrentActivityTransaction {
+    state::PendingCurrentActivity pending{};
+    queuez::EquipmentSwap update{};
+};
+
 /** Character acquisition and its exact QueueZ after-image. */
 struct ItemAcquisitionTransaction {
     std::unique_ptr<state::PendingItemAcquisition> pending{};
@@ -127,6 +133,7 @@ struct ServiceOutcome {
                                      std::unique_ptr<SocketPlugTransaction>,
                                      std::unique_ptr<ItemStateTransaction>,
                                      std::unique_ptr<ArtifactPurchaseTransaction>,
+                                     std::unique_ptr<CurrentActivityTransaction>,
                                      std::unique_ptr<ItemAcquisitionTransaction>,
                                      std::unique_ptr<ProfileItemAcquisitionTransaction>,
                                      std::unique_ptr<ItemDismantleTransaction>,
@@ -185,6 +192,7 @@ struct ServiceRoute {
     ResponseMode responseMode{};
     middleware::bap::ResponseService response{};
     BodyCodec bodyCodec{};
+    std::string_view successEvent{};
 };
 
 /** Owns encrypted service-to-response routing. */
@@ -198,6 +206,11 @@ namespace routing {
 namespace diagnostics {
 
 void report_failure(std::uint16_t service, std::string_view stage) noexcept;
+
+/** Reports one refusal that names which branch refused. */
+void report_failure(std::uint16_t service,
+                    std::string_view stage,
+                    std::string_view reason) noexcept;
 
 } // namespace diagnostics
 
@@ -233,6 +246,7 @@ namespace body {
  * @param route Service route data found earlier.
  * @param queuezState Queuez versions and residents set up by this BAP peer.
  * @param activity Exact ActivityClient generation owned by this BAP session.
+ * @param rosterDecode Last complete msg-5 identity map delivered on this connection.
  * @param matchmakingContext State-owned logical context for this BAP session.
  * @param requestBody Borrowed decrypted request body.
  * @param output Caller-owned response-body storage.
@@ -243,6 +257,7 @@ namespace body {
 [[nodiscard]] bool process(const ServiceRoute& route,
                            const queuez::SessionState& queuezState,
                            const ActivityClientBinding& activity,
+                           const RosterDecodeMap& rosterDecode,
                            state::matchmaking::ContextHandle matchmakingContext,
                            std::span<const std::byte> requestBody,
                            std::span<std::byte> output,
@@ -410,6 +425,16 @@ append_select_character_notification(Scratch& scratch,
     std::span<std::byte> response,
     std::size_t& written) noexcept;
 
+/** Appends the Family-4 character upsert carrying the character's new current activity. */
+[[nodiscard]] bool
+append_current_activity_notification(Scratch& scratch,
+                                     const queuez::EquipmentSwap& swap,
+                                     const state::PendingCurrentActivity& mutation,
+                                     std::span<const std::byte, state::kAesKeySize> key,
+                                     std::span<const std::byte, state::kBapNonceSize> nonce,
+                                     std::span<std::byte> response,
+                                     std::size_t& written) noexcept;
+
 /** Appends the opcode-406 Family-4 character upsert carrying changed inventory-row flags. */
 [[nodiscard]] bool append_item_state_notification(
     Scratch& scratch,
@@ -453,8 +478,7 @@ append_select_character_notification(Scratch& scratch,
 
 /**
  * Appends the same-character Family-0 appearance upsert paired with one equipment swap.
- * The
- * update owns its nonce advance only after the complete notification fits.
+ * The update owns its nonce advance only after the complete notification fits.
  */
 [[nodiscard]] bool
 append_equipment_appearance_refresh_notification(Scratch& scratch,

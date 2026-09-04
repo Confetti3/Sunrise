@@ -26,6 +26,10 @@ struct PendingClaim {
 /** Persists a first claim; duplicates return false and cannot replay rewards. */
 [[nodiscard]] bool claim(std::uint16_t flagIndex, std::uint16_t scoreValue) noexcept;
 
+/** Redeems the next completed milestone of a flagless interval Triumph. */
+[[nodiscard]] bool claim_interval(std::uint16_t recordIndex,
+                                  std::uint32_t definitionHash) noexcept;
+
 /** Persists a first complete-but-unclaimed record. */
 [[nodiscard]] bool mark_claimable(std::uint16_t flagIndex) noexcept;
 

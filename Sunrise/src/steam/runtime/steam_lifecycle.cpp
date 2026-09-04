@@ -10,9 +10,9 @@
 #include "../../core/runtime/core_runtime.h"
 #include "../../core/runtime/host_environment.h"
 #include "callbacks/callback_registry.h"
-#include "context/steam_context_state.h"
 #include "internal.h"
 #include "runtime.h"
+#include "steam_context_state.h"
 
 namespace sunrise::steam {
 namespace {
@@ -28,7 +28,7 @@ bool g_graphicsActivationAttempted{};
 bool g_platformActivationAttempted{};
 
 /**
- * Finds the loaded image that owns a caught return address. It takes no reference on the module.
+ * Finds the loaded image that owns a caught return address. It takes no module reference.
  * @return The owning module, or null when it is not the Steam networking image.
  */
 [[nodiscard]] HMODULE networking_caller_module(const void* callerAddress) noexcept {
@@ -64,8 +64,8 @@ bool initialize(void* module) noexcept {
         ReleaseSRWLockExclusive(&g_lifecycleLock);
         return false;
     }
-    // Base generation (_0) packages register during bootload, before the first callback pump can
-    // run the ordinary main-image hook sweep. Package trust must therefore attach at Steam init.
+    // Base generation (_0) packages register during bootload, before the first callback pump, so
+    // package trust must attach at Steam init rather than in the main-image hook sweep.
     if (!client::hooks::package_trust::install()) {
         core::log::write(core::log::Channel::client,
                          core::log::Level::error,
@@ -74,7 +74,7 @@ bool initialize(void* module) noexcept {
         ReleaseSRWLockExclusive(&g_lifecycleLock);
         return false;
     }
-    context::advance_generation();
+    advance_context_generation();
     g_initialized.store(true, std::memory_order_release);
     core::log::write(core::log::Channel::client, core::log::Level::info, "ev=steam_init result=ok");
     // The guard attaches above, before Core logging exists, so its outcome is reported here.
@@ -106,7 +106,7 @@ bool shutdown() noexcept {
     g_mainActivationResult = false;
     g_graphicsActivationAttempted = false;
     g_platformActivationAttempted = false;
-    context::advance_generation();
+    advance_context_generation();
     ReleaseSRWLockExclusive(&g_lifecycleLock);
     return true;
 }
@@ -137,8 +137,7 @@ bool main_activation_pending() noexcept {
     AcquireSRWLockShared(&g_lifecycleLock);
     const bool pending = !g_mainActivationDone;
     ReleaseSRWLockShared(&g_lifecycleLock);
-    // This Core test matches the one the activation makes. Without it, a failed Core raises an
-    // overlay that no sweep ever ends.
+    // Matches the activation's Core test. A failed Core must not raise an endless overlay.
     return pending && core::is_initialized();
 }
 

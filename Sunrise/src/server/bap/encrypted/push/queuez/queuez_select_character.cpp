@@ -1,8 +1,12 @@
+#include <array>
+#include <cstdio>
 #include <optional>
 
+#include "../../../../../core/logging/log.h"
 #include "../../../../../middleware/datagen/definitions.h"
 #include "../../queuez/queuez_state_validation.h"
 #include "../snapshot/internal.h"
+#include "queuez_push_reporting.h"
 #include "queuez_update_frame.h"
 
 namespace sunrise::server::bap::encrypted::push {
@@ -55,6 +59,50 @@ bool append_equipment_swap_notification(
                               response,
                               written)) {
         return false;
+    }
+    return true;
+}
+
+/** Appends the character upsert carrying the character's new current activity. */
+bool append_current_activity_notification(Scratch& scratch,
+                                          const queuez::EquipmentSwap& swap,
+                                          const state::PendingCurrentActivity& mutation,
+                                          std::span<const std::byte, state::kAesKeySize> key,
+                                          std::span<const std::byte, state::kBapNonceSize> nonce,
+                                          std::span<std::byte> response,
+                                          std::size_t& written) noexcept {
+    snapshot::Prepared prepared{};
+    if (!snapshot::prepare_current_activity_character(scratch, swap, mutation, prepared)) {
+        return false;
+    }
+    const std::size_t objectCount = prepared.family.objects.size();
+    const std::size_t beforeBytes = written;
+    if (objectCount != 1 || prepared.family.objects.front().id != swap.characterDefinitionId
+        || prepared.family.objects.front().version != swap.characterSoid
+        || prepared.family.objects.front().payload.empty()
+        || !queuez_frame::append(scratch,
+                                 prepared.family,
+                                 prepared.rawClearSize,
+                                 prepared.compressedClearSize,
+                                 key,
+                                 nonce,
+                                 response,
+                                 written)) {
+        return false;
+    }
+    std::array<char, core::log::kLineCapacity> line{};
+    const int count =
+        std::snprintf(line.data(),
+                      line.size(),
+                      "ev=current_activity stage=character_object result=ok family_version=%d "
+                      "character=0x%llX activity=%u",
+                      prepared.family.version,
+                      static_cast<unsigned long long>(swap.characterSoid),
+                      static_cast<unsigned>(mutation.activityIndex));
+    if (count > 0) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::info,
+                         {line.data(), static_cast<std::size_t>(count)});
     }
     return true;
 }
