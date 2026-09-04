@@ -237,9 +237,10 @@ bool consume(std::span<const std::byte> request,
     note_reports(message);
 
     if (message.opcode == messages::opcode205::kOpcode) {
-        const auto investment = state::investment_snapshot();
-        return messages::opcode205::encode_response(
-                   message, investment, next_family5_clock(), response, written)
+        state::InvestmentState investment{};
+        return (state::investment_snapshot(investment)
+                && messages::opcode205::encode_response(
+                    message, investment, next_family5_clock(), response, written))
                || encode_echo(message, response, written);
     }
 
@@ -251,8 +252,8 @@ bool consume(std::span<const std::byte> request,
         if (!bootstrap.hasPrimarySoid) {
             bootstrap.primarySoid = state::account_snapshot().primarySoid;
         }
-        const auto investment = state::investment_snapshot();
-        if (!parsed
+        state::InvestmentState investment{};
+        if (!parsed || !state::investment_snapshot(investment)
             || !messages::opcode503::encode_response(
                 message, bootstrap, investment, next_family5_clock(), response, written)) {
             return encode_echo(message, response, written);
