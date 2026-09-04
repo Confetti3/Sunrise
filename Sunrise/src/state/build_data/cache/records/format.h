@@ -29,7 +29,7 @@ inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', '
  * Bump it when a stored shape changes, and when the extraction filling it changes what it writes.
  * A cached row survives a code change, so a corrected walk keeps publishing the old rows.
  */
-inline constexpr std::uint32_t kCacheFormatVersion = 45;
+inline constexpr std::uint32_t kCacheFormatVersion = 46;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */
@@ -47,12 +47,13 @@ struct Prefix {
 /**
  * Stat rows named by the installed investment constants blob.
  * The client searches the character's stat table by these rows, so they decide which rows the
- * generated table may carry. They are 7 bytes of scalars, so they ride in the header.
+ * generated tables may carry. They ride in the fixed cache header.
  */
 struct InvestmentConstants {
     /** Stat row the banner's power number is searched by. Row 0 is a real row, so there is no
      * unset value; an unextracted blob leaves `extracted` clear instead. */
     std::uint8_t lightStatRow{};
+    std::uint8_t weaponPowerStatRow{};
     std::array<std::uint8_t, constants::kCharacterStatRowCount> characterStatRows{};
     /** One when the constants blob was read, zero when the domain has never been extracted. */
     std::uint8_t extracted{};
@@ -420,7 +421,7 @@ struct RosterGroupRecord {
 
 static_assert(sizeof(Prefix) == kCacheMagic.size() + sizeof(std::uint32_t));
 static_assert(sizeof(InvestmentConstants)
-              == constants::kCharacterStatRowCount + 2 * sizeof(std::uint8_t));
+              == constants::kCharacterStatRowCount + 3 * sizeof(std::uint8_t));
 static_assert(sizeof(Header)
               == kCacheMagic.size() + 26 * sizeof(std::uint32_t) + 2 * sizeof(std::uint64_t)
                      + sizeof(InvestmentConstants));
