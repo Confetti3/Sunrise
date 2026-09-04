@@ -7,6 +7,12 @@
 
 #include "state.h"
 
+namespace sunrise::state::account::settings {
+
+struct SettingsDelta;
+
+} // namespace sunrise::state::account::settings
+
 namespace sunrise::state {
 
 /**
@@ -241,6 +247,21 @@ struct PendingCurrentActivity {
     std::uint64_t characterSoid{};
     std::size_t characterIndex{};
     std::uint16_t activityIndex{};
+    bool prepared{};
+};
+
+/** Result of validating one sparse settings writeback against authoritative State. */
+enum class SettingsUpdateDisposition : std::uint8_t {
+    rejected,
+    acceptedNoChange,
+    preparedMutation,
+};
+
+/** Complete checked settings before/after images held until the BAP transaction commits. */
+struct PendingSettingsUpdate {
+    account::settings::AccountSettings beforeSettings{};
+    account::settings::AccountSettings afterSettings{};
+    std::uint64_t accountSoid{};
     bool prepared{};
 };
 
@@ -488,6 +509,23 @@ commit_profile_item_acquisition(PendingProfileItemAcquisition& mutation) noexcep
 
 /** Commits one prepared current-activity change behind an exact character staleness guard. */
 [[nodiscard]] bool commit_current_activity(PendingCurrentActivity& mutation) noexcept;
+
+/**
+ * Merges and validates a sparse WS-701 settings update without publishing it.
+ * @param delta Supported fields decoded from one reflected settings request.
+ * @param mutation Receives a complete before/after pair only when State would change.
+ * @return Rejection, an accepted no-op, or a prepared mutation.
+ */
+[[nodiscard]] SettingsUpdateDisposition
+prepare_settings_update(const account::settings::SettingsDelta& delta,
+                        PendingSettingsUpdate& mutation) noexcept;
+
+/**
+ * Publishes one prepared settings after-image behind account-key and settings staleness guards.
+ * @param mutation Prepared update, always cleared before this function returns.
+ * @return True when the after-image was already current or was committed successfully.
+ */
+[[nodiscard]] bool commit_settings_update(PendingSettingsUpdate& mutation) noexcept;
 
 /** @return A copy of the active account state, read under the lock. */
 [[nodiscard]] AccountState account_snapshot() noexcept;
