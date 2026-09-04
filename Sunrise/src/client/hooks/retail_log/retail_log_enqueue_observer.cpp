@@ -1,5 +1,7 @@
 #include "retail_log_enqueue_observer.h"
 
+#include <intrin.h>
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -83,6 +85,53 @@ void capture_line(std::int32_t siteId, const char* text) noexcept {
     core::log::write(core::log::Channel::client, core::log::Level::info, {line.data(), length});
 }
 
+/** Text whose emitting call site is worth locating in the image. */
+constexpr std::string_view kTracedText = "failed to create";
+/** Call sites named per run, so a repeating line cannot flood the sink. */
+constexpr std::size_t kMaxCallSiteReports = 64;
+
+/** Reports already spent. */
+volatile LONG g_callSiteReports{};
+
+/**
+ * Names the image offset of the code that emitted one line.
+ * The packed executable cannot be disassembled on disk, so a dump of the mapped image is the only
+ * readable copy, and an offset from the load base is what addresses it. The retail text itself
+ * carries no address, and the site id is assigned by the game's own registration rather than by
+ * position, so nothing else here says which function produced a line. `_ReturnAddress` inside the
+ * funnel is the emitting call site, which is exactly the function to disassemble.
+ * @param returnAddress Return address captured in the funnel.
+ * @param text Already-formatted native line.
+ */
+void report_call_site(const void* returnAddress, const char* text) noexcept {
+    if (returnAddress == nullptr
+        || !core::log::accepts(core::log::Channel::client, core::log::Level::debug)) {
+        return;
+    }
+    const auto base = reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+    const auto site = reinterpret_cast<std::uintptr_t>(returnAddress);
+    if (base == 0 || site < base) {
+        return;
+    }
+    if (InterlockedIncrement(&g_callSiteReports) > static_cast<LONG>(kMaxCallSiteReports)) {
+        return;
+    }
+    std::array<char, kEventCapacity> line{};
+    const int written = std::snprintf(line.data(),
+                                      line.size(),
+                                      "ev=retail_site stage=caller rva=0x%llX va=0x%llX text=%s",
+                                      static_cast<unsigned long long>(site - base),
+                                      static_cast<unsigned long long>(site),
+                                      text);
+    if (written > 0) {
+        const auto length = static_cast<std::size_t>(written) < line.size()
+                                ? static_cast<std::size_t>(written)
+                                : line.size() - 1;
+        core::log::write(core::log::Channel::client, core::log::Level::debug,
+                         {line.data(), length});
+    }
+}
+
 /**
  * Mirrors the single funnel every retail log line passes through.
  * @param siteId Registered site id.
@@ -99,6 +148,10 @@ __declspec(noinline) void __fastcall enqueue_body(std::int32_t siteId, const cha
     if (outer) {
         if (siteId != kUnregisteredSite && text != nullptr) {
             capture_line(siteId, text);
+            // Cheap guard first: the search only runs on the handful of lines that match.
+            if (std::string_view(text).find(kTracedText) != std::string_view::npos) {
+                report_call_site(_ReturnAddress(), text);
+            }
         }
         assert_verbosity();
         g_inObserver = false;

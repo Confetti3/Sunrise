@@ -50,7 +50,8 @@
       "transport_address": "127.0.0.1",
       "port": 30976,
       "server_reserve_count": 256,
-      "client_join_grant_count": 8192
+      "client_join_grant_count": 8192,
+      "client_lease_high_water": 0
     },
     "activation": {
       "default_client_activation": true,

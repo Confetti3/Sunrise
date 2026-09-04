@@ -97,7 +97,7 @@ void report_lease(const slots::PendingMutation& mutation, bool committed) noexce
         std::snprintf(line.data(),
                       line.size(),
                       "ev=activity stage=entity_slots result=%s kind=%s soid=0x%llX "
-                      "requested=%zu picked=%zu held=%zu reserved=%zu known=%u",
+                      "requested=%zu picked=%zu held=%zu reserved=%zu returned=%zu known=%u",
                       committed ? "ok" : "fail",
                       kind < kLeaseKinds.size() ? kLeaseKinds[kind] : "bad",
                       static_cast<unsigned long long>(mutation.sessionId),
@@ -105,6 +105,10 @@ void report_lease(const slots::PendingMutation& mutation, bool committed) noexce
                       slots::slot_count(mutation.mask),
                       held,
                       reserved,
+                      // Only a release carries one, so every other kind reports zero. A release
+                      // whose returned set and picked set disagree means the two ledgers have
+                      // diverged, which nothing else on this path would show.
+                      slots::slot_count(mutation.returnedMask),
                       known ? 1U : 0U);
     if (written > 0) {
         core::log::write(core::log::Channel::server,

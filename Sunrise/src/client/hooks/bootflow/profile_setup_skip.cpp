@@ -90,32 +90,38 @@ __declspec(noinline) char __fastcall update(std::byte* step) noexcept {
 } // namespace
 
 /**
- * Attaches the profile-setup skip.
- * @return True when the target is found and the detour attaches.
+ * Stages the profile-setup skip.
+ * @param spec Receives the target and replacement.
+ * @return staged when the target is found, unavailable on a miss.
  */
-bool install_profile_setup_skip() noexcept {
+StageResult stage_profile_setup_skip(hooking::detour::Spec& spec) noexcept {
     if (g_handle.attached) {
-        return true;
+        return StageResult::attached;
     }
     std::byte* const target = scan_main_image_unique(kUpdateSignature, "profile_setup_update");
     if (target == nullptr) {
         core::log::write(core::log::Channel::client,
                          core::log::Level::warn,
                          "ev=bootflow stage=profile_setup result=fail reason=target");
-        return false;
+        return StageResult::unavailable;
     }
-    const hooking::detour::Spec spec{target, reinterpret_cast<void*>(&update)};
-    if (!hooking::detour::install(spec, g_handle)) {
+    spec = hooking::detour::Spec{target, reinterpret_cast<void*>(&update)};
+    return StageResult::staged;
+}
+
+/** Takes the profile-setup skip's attached handle, or a detached one. */
+void publish_profile_setup_skip(const hooking::detour::Handle& handle) noexcept {
+    if (!handle.attached) {
         core::log::write(core::log::Channel::client,
                          core::log::Level::warn,
                          "ev=bootflow stage=profile_setup result=fail reason=attach");
-        return false;
+        return;
     }
+    g_handle = handle;
     g_original.store(reinterpret_cast<Update>(g_handle.original), std::memory_order_release);
     core::log::write(core::log::Channel::client,
                      core::log::Level::info,
                      "ev=bootflow stage=profile_setup result=ok");
-    return true;
 }
 
 /** Detaches the profile-setup skip. */

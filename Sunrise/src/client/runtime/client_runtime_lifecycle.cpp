@@ -38,6 +38,8 @@ bool initialize(void* module) noexcept {
         core::settings::get().activitySdkGeneration;
     content::activity::sdk_generation::initialize(module,
                                                   {generation.enabled, generation.luaDeclarations});
+    // Kept for activation, which resolves the artifact directory from Sunrise's own module.
+    runtime::g_sunriseModule = module;
     // Loaded before the pages register, so each page draws saved values on its first frame.
     movement::initialize(module);
     player::initialize(module);

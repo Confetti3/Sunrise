@@ -56,6 +56,28 @@ struct Settings {
     bool holdSpawn{true};
     /** How long the spawn waits for a load. `hold_spawn` decides whether it waits at all. */
     std::uint64_t spawnHoldMs{kDefaultSpawnHoldMs};
+    /**
+     * Writes the game's decrypted mapped image to `Sunrise\dumps` during activation.
+     * The packed executable on disk cannot be disassembled, so this is the only way to read the
+     * code that decodes the activity wire format. Off by default: the file is the whole image and
+     * writing it costs a second or two of every boot that enables it.
+     */
+    bool dumpGameImage{false};
+    /**
+     * Stock the client's entity free-slot bitmap when it is left entirely unstocked.
+     * The client fills that bitmap itself only when a role global reads zero; here it reads 3, so
+     * the fill never runs and every entity creation fails from the first frame. On, Sunrise writes
+     * the same bytes the client would have. Off restores the previous behaviour with no rebuild.
+     */
+    bool stockEntityPool{true};
+    /**
+     * Also refill the entity pool once it has drained, not only when it was never stocked.
+     * The pool empties from 7935 free to zero inside a minute, and a drained pool makes an
+     * encounter bubble kick to orbit again. Refilling anyway gets past that, but it re-frees
+     * indices that are still owned, so one index can reach two entities — that crashed a respawn.
+     * Off by default: the kick is recoverable, the corruption is not.
+     */
+    bool restockDrainedEntityPool{false};
 };
 
 } // namespace sunrise::core::settings::client
