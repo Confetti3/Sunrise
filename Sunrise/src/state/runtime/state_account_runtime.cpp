@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <utility>
 
+#include "../../core/logging/log.h"
 #include "../../middleware/datagen/family4/loadout/loadout_resolver.h"
 #include "../build_data/runtime.h"
 #include "runtime.h"

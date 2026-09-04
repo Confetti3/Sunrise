@@ -133,18 +133,14 @@ void note_character_writeback(const middleware::web_service::Message& message) n
     namespace purchase_codec = middleware::web_service::messages::opcode901;
     purchase_codec::Request purchase;
     const bool parsed = purchase_codec::parse_request(message, purchase);
-    // The clock verdict is logged, never acted on. Nothing can pass while the route refuses.
-    const auto policy = purchase_codec::check_clock(purchase, server_clock_seconds());
     std::array<char, kPurchaseLineCapacity> line{};
     const int length =
-        parsed ? std::snprintf(
-                     line.data(),
-                     line.size(),
-                     "ev=ws901 stage=purchase result=refuse vendor=%d sale=%d present=%u policy=%s",
-                     static_cast<int>(purchase.vendorIndex),
-                     static_cast<int>(purchase.saleIndex),
-                     purchase.hasClock ? 1U : 0U,
-                     purchase_codec::clock_policy_name(policy))
+        parsed ? std::snprintf(line.data(),
+                               line.size(),
+                               "ev=ws901 stage=purchase result=refuse vendor=%d sale=%d present=%u",
+                               static_cast<int>(purchase.vendorIndex),
+                               static_cast<int>(purchase.saleIndex),
+                               purchase.hasClock ? 1U : 0U)
                : std::snprintf(line.data(),
                                line.size(),
                                "ev=ws901 stage=purchase result=refuse reason=parse");
@@ -208,11 +204,9 @@ void note_character_writeback(const middleware::web_service::Message& message) n
     const int length =
         std::snprintf(line.data(),
                       line.size(),
-                      "ev=ws901 stage=artifact result=ok vendor=%d sale=%d policy=%s",
+                      "ev=ws901 stage=artifact result=ok vendor=%d sale=%d",
                       static_cast<int>(purchase.vendorIndex),
-                      static_cast<int>(purchase.saleIndex),
-                      purchase_codec::clock_policy_name(
-                          purchase_codec::check_clock(purchase, server_clock_seconds())));
+                      static_cast<int>(purchase.saleIndex));
     if (length > 0) {
         core::log::write(core::log::Channel::server,
                          core::log::Level::info,

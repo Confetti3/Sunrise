@@ -259,8 +259,6 @@ bool prepare_seasonal_experience_presentation(
     constexpr std::uint16_t kChangeSequence = 0;
     constexpr std::uint16_t kChangeNextWriteSlot = 1;
     constexpr std::uint16_t kChangeNextSequence = 1;
-    constexpr std::uint8_t kChangeKind = 1;
-    constexpr std::uint16_t kChangeFlags = 0;
 
     if (amount <= 0 || mutationSerial < 0 || !queuez::valid(before) || !before.family4Active
         || before.family4RootSoid == 0 || before.family4ResidentCount == 0
@@ -600,8 +598,6 @@ bool prepare_record_reward_grant(
     Prepared& prepared) noexcept {
     namespace account_layout = family4_datagen::account::layout;
     namespace character_layout = family4_datagen::character::layout;
-    constexpr std::uint8_t kChangeKind = 1;
-    constexpr std::uint16_t kChangeFlags = 0;
     if (!mutation.prepared || mutation.rewardCount == 0
         || mutation.rewardCount > mutation.rewards.size() || !queuez::valid(before)
         || !queuez::valid(update.after) || !before.family4Active || before.family4ResidentCount == 0
