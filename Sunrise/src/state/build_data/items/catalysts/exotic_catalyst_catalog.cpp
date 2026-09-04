@@ -2,16 +2,19 @@
 
 #include <algorithm>
 #include <atomic>
+#include <mutex>
+#include <shared_mutex>
 
 #include "../../../account/inventory/item_state.h"
 #include "../../../unlocks/definition.h"
 #include "../../table.h"
+#include "core/threading/srw_lock.h"
 #include "../details/definition.h"
 
 namespace sunrise::state::build_data::items::catalysts {
 namespace {
 
-Lock g_lock;
+core::threading::SrwLock g_lock;
 Table<Definition, kDefinitionCapacity> g_definitions;
 std::atomic<bool> g_completionEnabled{true};
 
@@ -130,7 +133,7 @@ std::atomic<bool> g_completionEnabled{true};
 } // namespace
 
 void clear() noexcept {
-    const Lock::Exclusive guard(g_lock);
+    const std::lock_guard guard(g_lock);
     g_definitions.clear();
 }
 
@@ -185,12 +188,12 @@ bool replace(std::span<const Definition> definitions) noexcept {
     if (!valid(definitions)) {
         return false;
     }
-    const Lock::Exclusive guard(g_lock);
+    const std::lock_guard guard(g_lock);
     return g_definitions.replace(definitions);
 }
 
 Result resolve(std::uint16_t itemDefinitionIndex) noexcept {
-    const Lock::Shared guard(g_lock);
+    const std::shared_lock guard(g_lock);
     const Definition* definition = find(g_definitions.rows(), itemDefinitionIndex);
     if (definition == nullptr) {
         return {};
@@ -215,7 +218,7 @@ Result resolve(std::uint16_t itemDefinitionIndex) noexcept {
 std::uint16_t resolve_effect(std::uint16_t itemDefinitionIndex,
                              std::uint8_t socketLane,
                              std::uint16_t plugDefinitionIndex) noexcept {
-    const Lock::Shared guard(g_lock);
+    const std::shared_lock guard(g_lock);
     const Definition* definition = find(g_definitions.rows(), itemDefinitionIndex);
     if (definition == nullptr || definition->availability != Availability::released
         || definition->socketLane != socketLane
@@ -228,7 +231,7 @@ std::uint16_t resolve_effect(std::uint16_t itemDefinitionIndex,
 }
 
 bool owns_lane(std::uint16_t itemDefinitionIndex, std::uint8_t socketLane) noexcept {
-    const Lock::Shared guard(g_lock);
+    const std::shared_lock guard(g_lock);
     const Definition* definition = find(g_definitions.rows(), itemDefinitionIndex);
     return definition != nullptr && definition->socketLane == socketLane;
 }
@@ -265,7 +268,7 @@ bool append_investment_overrides(state::Family5State& family) noexcept {
     }
 
     state::Family5State candidate = family;
-    const Lock::Shared guard(g_lock);
+    const std::shared_lock guard(g_lock);
     for (const Definition& definition : g_definitions.rows()) {
         if (definition.availability != Availability::released) {
             continue;
@@ -293,7 +296,7 @@ bool append_objective_completions(std::span<std::int32_t> values) noexcept {
     if (!completion_enabled()) {
         return true;
     }
-    const Lock::Shared guard(g_lock);
+    const std::shared_lock guard(g_lock);
     for (const Definition& definition : g_definitions.rows()) {
         if (definition.availability == Availability::released
             && definition.objective.definitionIndex != kUnavailableObjectiveIndex
@@ -314,12 +317,12 @@ bool append_objective_completions(std::span<std::int32_t> values) noexcept {
 
 bool snapshot(std::span<Definition> output, std::size_t& outputCount) noexcept {
     outputCount = 0;
-    const Lock::Shared guard(g_lock);
+    const std::shared_lock guard(g_lock);
     return g_definitions.snapshot(output, outputCount);
 }
 
 std::size_t count() noexcept {
-    const Lock::Shared guard(g_lock);
+    const std::shared_lock guard(g_lock);
     return g_definitions.count();
 }
 
