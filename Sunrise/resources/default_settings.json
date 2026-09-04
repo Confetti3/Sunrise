@@ -36,6 +36,7 @@
       "config_guid": "d2legacy-0000-0000-0000-000000000001"
     },
     "suppress_peer_relay": true,
+    "custom_bootflow_textures": true,
     "fade_release": true,
     "skip_profile_setup": false,
     "region_private": false,
