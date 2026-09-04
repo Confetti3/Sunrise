@@ -363,6 +363,14 @@ void publish_sign_in_time(std::uint64_t seconds) noexcept;
 [[nodiscard]] bool set_primary_soid(std::uint64_t primarySoid) noexcept;
 
 /**
+ * Permanently closes the process-local one-time profile-setup gate for the active account.
+ *
+ * The transition is monotonic: repeated profile-setting writes after completion are harmless.
+ * @return False only when no complete active account can be updated.
+ */
+[[nodiscard]] bool complete_profile_setup() noexcept;
+
+/**
  * Moves the selection to one authored character.
  * The Client names its pick only in the select-character request, so this is where a player's
  * choice enters State.
