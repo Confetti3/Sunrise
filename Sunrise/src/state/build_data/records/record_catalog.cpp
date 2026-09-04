@@ -1,12 +1,15 @@
 #include "record_catalog.h"
 
+#include <shared_mutex>
+
 #include "../../record_claims/record_claims.h"
 #include "../table.h"
+#include "core/threading/srw_lock.h"
 
 namespace sunrise::state::build_data::records {
 namespace {
 
-Lock g_lock;
+core::threading::SrwLock g_lock;
 Table<Definition, kDefinitionCapacity> g_definitions;
 
 } // namespace
@@ -14,7 +17,7 @@ Table<Definition, kDefinitionCapacity> g_definitions;
 /** Clears every generated record definition under the catalog lock. */
 void clear() noexcept {
     {
-        const Lock::Exclusive guard(g_lock);
+        const std::lock_guard guard(g_lock);
         g_definitions.clear();
     }
     record_claims::invalidate_build_data_cache();
@@ -40,7 +43,7 @@ bool replace(std::span<const Definition> definitions) noexcept {
     }
     bool replaced = false;
     {
-        const Lock::Exclusive guard(g_lock);
+        const std::lock_guard guard(g_lock);
         replaced = g_definitions.replace(definitions);
     }
     if (replaced) {
@@ -51,7 +54,7 @@ bool replace(std::span<const Definition> definitions) noexcept {
 
 /** Finds one record by the native row a claim names. */
 bool find(std::uint16_t definitionIndex, Definition& definition) noexcept {
-    const Lock::Shared guard(g_lock);
+    const std::shared_lock guard(g_lock);
     const std::span<const Definition> rows = g_definitions.rows();
     if (definitionIndex >= rows.size()) {
         return false;
@@ -62,13 +65,13 @@ bool find(std::uint16_t definitionIndex, Definition& definition) noexcept {
 
 /** Copies every row in native record order. */
 bool snapshot(std::span<Definition> output, std::size_t& count) noexcept {
-    const Lock::Shared guard(g_lock);
+    const std::shared_lock guard(g_lock);
     return g_definitions.snapshot(output, count);
 }
 
 /** @return Number of generated record definitions, read under the lock. */
 std::size_t count() noexcept {
-    const Lock::Shared guard(g_lock);
+    const std::shared_lock guard(g_lock);
     return g_definitions.count();
 }
 

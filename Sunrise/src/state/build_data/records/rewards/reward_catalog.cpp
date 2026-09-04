@@ -1,11 +1,14 @@
 #include "reward_catalog.h"
 
+#include <shared_mutex>
+
 #include "../../table.h"
+#include "core/threading/srw_lock.h"
 
 namespace sunrise::state::build_data::records::rewards {
 namespace {
 
-Lock g_lock;
+core::threading::SrwLock g_lock;
 Table<RewardRow, kRewardCapacity> g_rows;
 
 } // namespace
@@ -20,13 +23,13 @@ bool replace(std::span<const RewardRow> rows) noexcept {
     if (!valid(rows)) {
         return false;
     }
-    const Lock::Exclusive guard(g_lock);
+    const std::lock_guard guard(g_lock);
     return g_rows.replace(rows);
 }
 
 /** Visits every reward row naming one record, holding the catalog lock for the whole walk. */
 void visit_for_record(std::uint32_t recordHash, RowVisitor visitor, void* context) noexcept {
-    const Lock::Shared guard(g_lock);
+    const std::shared_lock guard(g_lock);
     for (const RewardRow& row : g_rows.rows()) {
         if (row.recordHash != recordHash) {
             continue;

@@ -1,18 +1,21 @@
 #include "sobject_catalog.h"
 
+#include <shared_mutex>
+
 #include "../table.h"
+#include "core/threading/srw_lock.h"
 
 namespace sunrise::state::build_data::sobjects {
 namespace {
 
-Lock g_lock;
+core::threading::SrwLock g_lock;
 Table<Definition, kDefinitionCapacity> g_definitions;
 
 } // namespace
 
 /** Clears the table while no reader can observe a partial replacement. */
 void clear() noexcept {
-    const Lock::Exclusive guard(g_lock);
+    const std::lock_guard guard(g_lock);
     g_definitions.clear();
 }
 
@@ -32,19 +35,19 @@ bool replace(std::span<const Definition> definitions) noexcept {
     if (!valid(definitions)) {
         return false;
     }
-    const Lock::Exclusive guard(g_lock);
+    const std::lock_guard guard(g_lock);
     return g_definitions.replace(definitions);
 }
 
 /** Copies every row in incident-target order. */
 bool snapshot(std::span<Definition> output, std::size_t& count) noexcept {
-    const Lock::Shared guard(g_lock);
+    const std::shared_lock guard(g_lock);
     return g_definitions.snapshot(output, count);
 }
 
 /** Finds one row by the target index an incident carries. */
 bool find(std::uint16_t targetIndex, Definition& definition) noexcept {
-    const Lock::Shared guard(g_lock);
+    const std::shared_lock guard(g_lock);
     const std::span<const Definition> rows = g_definitions.rows();
     if (targetIndex >= rows.size()) {
         return false;
@@ -55,7 +58,7 @@ bool find(std::uint16_t targetIndex, Definition& definition) noexcept {
 
 /** @return Number of installed rows, read under the lock. */
 std::size_t count() noexcept {
-    const Lock::Shared guard(g_lock);
+    const std::shared_lock guard(g_lock);
     return g_definitions.count();
 }
 

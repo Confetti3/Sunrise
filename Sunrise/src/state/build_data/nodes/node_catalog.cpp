@@ -1,14 +1,17 @@
 #include "node_catalog.h"
 
+#include <shared_mutex>
+
 #include "../../record_claims/objective_slot_table.h"
 #include "../../record_claims/record_claims.h"
 #include "../../unlocks/definition.h"
 #include "../table.h"
+#include "core/threading/srw_lock.h"
 
 namespace sunrise::state::build_data::nodes {
 namespace {
 
-Lock g_lock;
+core::threading::SrwLock g_lock;
 Table<Definition, kDefinitionCapacity> g_definitions;
 
 } // namespace
@@ -16,7 +19,7 @@ Table<Definition, kDefinitionCapacity> g_definitions;
 /** Clears every generated node definition under the catalog lock. */
 void clear() noexcept {
     {
-        const Lock::Exclusive guard(g_lock);
+        const std::lock_guard guard(g_lock);
         g_definitions.clear();
     }
     record_claims::invalidate_build_data_cache();
@@ -43,7 +46,7 @@ bool replace(std::span<const Definition> definitions) noexcept {
     }
     bool replaced = false;
     {
-        const Lock::Exclusive guard(g_lock);
+        const std::lock_guard guard(g_lock);
         replaced = g_definitions.replace(definitions);
     }
     if (replaced) {
@@ -54,19 +57,19 @@ bool replace(std::span<const Definition> definitions) noexcept {
 
 /** Copies every row in native node order. */
 bool snapshot(std::span<Definition> output, std::size_t& count) noexcept {
-    const Lock::Shared guard(g_lock);
+    const std::shared_lock guard(g_lock);
     return g_definitions.snapshot(output, count);
 }
 
 /** @return Number of generated node definitions, read under the lock. */
 std::size_t count() noexcept {
-    const Lock::Shared guard(g_lock);
+    const std::shared_lock guard(g_lock);
     return g_definitions.count();
 }
 
 /** Calls back for every node, under the shared lock. */
 void for_each(void* context, void (*visit)(void*, const Definition&) noexcept) noexcept {
-    const Lock::Shared guard(g_lock);
+    const std::shared_lock guard(g_lock);
     for (const Definition& node : g_definitions.rows()) {
         visit(context, node);
     }
@@ -74,7 +77,7 @@ void for_each(void* context, void (*visit)(void*, const Definition&) noexcept) n
 
 /** Sets the visibility gate of every lore book category. */
 std::size_t apply_visibility(std::span<std::uint8_t> accountFlags) noexcept {
-    const Lock::Shared guard(g_lock);
+    const std::shared_lock guard(g_lock);
     std::size_t set = 0;
     for (const Definition& node : g_definitions.rows()) {
         if (node.definitionIndex < kLoreNodeFirst || node.definitionIndex > kLoreNodeLast
@@ -90,7 +93,7 @@ std::size_t apply_visibility(std::span<std::uint8_t> accountFlags) noexcept {
 
 /** Opens lore categories whose gates read an otherwise-empty value slot. */
 std::size_t apply_category_gates(std::span<std::int32_t> objectiveValues) noexcept {
-    const Lock::Shared guard(g_lock);
+    const std::shared_lock guard(g_lock);
     std::size_t set = 0;
     for (const Definition& node : g_definitions.rows()) {
         if (node.definitionIndex < kLoreNodeFirst || node.definitionIndex > kLoreNodeLast) {
@@ -121,7 +124,7 @@ std::size_t apply_category_gates(std::span<std::int32_t> objectiveValues) noexce
 
 /** Sets the character scoped visibility gates of the lore book categories. */
 std::size_t apply_character_visibility(std::span<std::byte> characterFlags) noexcept {
-    const Lock::Shared guard(g_lock);
+    const std::shared_lock guard(g_lock);
     std::size_t set = 0;
     for (const Definition& node : g_definitions.rows()) {
         if (node.definitionIndex < kLoreNodeFirst || node.definitionIndex > kLoreNodeLast
