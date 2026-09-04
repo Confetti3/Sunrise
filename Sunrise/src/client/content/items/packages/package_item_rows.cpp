@@ -90,6 +90,8 @@ bool build_item_rows(const reader::Source& source,
                                                item)) {
             continue;
         }
+        const std::uint32_t plugCategoryHash =
+            corrected_plug_category(item.definitionHash, item.plugCategoryHash);
         storage.rows[rowCount++] =
             state::build_data::items::Definition{item.definitionHash,
                                                  item.definitionIndex,
@@ -97,12 +99,12 @@ bool build_item_rows(const reader::Source& source,
                                                  item.insertionMaterialRequirementSetIndex,
                                                  item.enabledMaterialRequirementSetIndex,
                                                  item.tier,
-                                                 item.plugCategoryHash,
+                                                 plugCategoryHash,
                                                  item.rollSetIndex,
                                                  item.linkedPlugIndex};
         if (needSocketRows) {
             storage.specialPlugCategories[item.definitionIndex] =
-                special_plug_category(item.plugCategoryHash);
+                special_plug_category(plugCategoryHash);
         }
         if (needDetailRows) {
             request(item.definitionIndex, storage.detailRequests);

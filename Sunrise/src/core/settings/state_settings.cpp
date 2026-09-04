@@ -174,6 +174,9 @@ bool Parser::unlocks(state::unlocks::Table& output) noexcept {
             parsed = progression_values(output.accountProgressions);
         } else if (key == "character_progressions") {
             parsed = progression_values(output.characterProgressions);
+        } else if (key == "reveal_all_lore_books") {
+            bool ignored = false;
+            parsed = boolean(ignored);
         } else {
             parsed = skip_value(0);
         }
@@ -264,6 +267,7 @@ bool Parser::account(state::AccountState& output) noexcept {
     bool hasProfileSetupCompleted = false;
     bool hasSettings = false;
     bool hasDismantleRewards = false;
+    bool hasRecordRewards = false;
     if (consume('}')) {
         return false;
     }
@@ -296,6 +300,11 @@ bool Parser::account(state::AccountState& output) noexcept {
                 return false;
             }
             hasDismantleRewards = true;
+        } else if (key == "record_rewards") {
+            if (hasRecordRewards || !record_rewards(output)) {
+                return false;
+            }
+            hasRecordRewards = true;
         } else if (!skip_value(0)) {
             return false;
         }

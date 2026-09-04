@@ -16,8 +16,11 @@
 #include "../../items/item_catalog.h"
 #include "../../items/socket_plugs/definition.h"
 #include "../../material_requirements/material_requirement_catalog.h"
+#include "../../nodes/definition.h"
 #include "../../progressions/definition.h"
+#include "../../records/definition.h"
 #include "../../scenarios/definition.h"
+#include "../../sobjects/sobject_catalog.h"
 #include "../../spawn_sets/definition.h"
 #include "../../vendors/definition.h"
 
@@ -29,8 +32,11 @@ inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', '
  * Current build-data cache format. An older cache is rebuilt rather than read.
  * Bump it when a stored shape changes, and when the extraction filling it changes what it writes.
  * A cached row survives a code change, so a corrected walk keeps publishing the old rows.
+ *
+ * 48: nodes and SObjects joined the unified cache, replacing their incomplete sidecar lifecycle.
  */
-inline constexpr std::uint32_t kCacheFormatVersion = 48;
+// Upstream's format 45 and the PR's independent format 48 changes are both present.
+inline constexpr std::uint32_t kCacheFormatVersion = 59;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */
@@ -81,6 +87,9 @@ struct Header {
     std::uint32_t socketEntryTableCount{};
     std::uint32_t abilityBucketCount{};
     std::uint32_t progressionCount{};
+    std::uint32_t recordCount{};
+    std::uint32_t nodeCount{};
+    std::uint32_t sobjectCount{};
     std::uint32_t scenarioCount{};
     std::uint32_t rosterGroupCount{};
     std::uint32_t spawnStemCount{};
@@ -258,6 +267,47 @@ struct ProgressionRecord {
     std::uint8_t scope{};
     /** Must be zero, so the packed progression row always matches. */
     std::uint8_t reserved{};
+};
+
+/** Disk form of one record and the account flag bank row its claim sets.
+ *
+ * Carries every runtime field. It did not always: loreRow, categoryValueIndex and definitionHash
+ * were added to records::Definition after this row was laid out, and the positional decode then
+ * filled completionFlagIndex from the disk scoreValue - claims resolved to the score (50/100) as
+ * their flag, which looked like claiming doing nothing at all. The row is now the full shape and
+ * the codec assigns by name; kCacheFormatVersion bump rejects rows written before that.
+ */
+struct RecordDefinitionRecord {
+    std::uint16_t definitionIndex{};
+    std::uint32_t definitionHash{};
+    std::uint16_t completionFlagIndex{};
+    std::uint16_t loreRow{};
+    std::uint16_t scoreValue{};
+    std::uint16_t categoryValueIndex{};
+    std::uint8_t hasTitle{};
+    std::uint8_t reserved{};
+};
+
+/** Disk form of one presentation node and its owned record rows. */
+struct NodeDefinitionRecord {
+    std::uint16_t definitionIndex{};
+    std::uint16_t valueIndex{nodes::kUnavailableValueIndex};
+    std::int16_t valueSlot{-1};
+    std::int16_t characterValueSlot{-1};
+    std::uint16_t parentValueIndex{nodes::kUnavailableValueIndex};
+    std::uint16_t parentCharacterValueIndex{nodes::kUnavailableValueIndex};
+    std::uint16_t visibilityFlagIndex{nodes::kUnavailableFlagIndex};
+    std::uint16_t visibilityCharacterFlagIndex{nodes::kUnavailableFlagIndex};
+    std::uint16_t characterValueIndex{nodes::kUnavailableValueIndex};
+    std::uint8_t childCount{};
+    std::array<std::uint16_t, nodes::kChildCapacity> children{};
+};
+
+/** Disk form of one incident-target definition. */
+struct SObjectDefinitionRecord {
+    std::uint32_t nameHash{};
+    std::uint32_t lane4{};
+    std::int32_t typeCode{sobjects::kAbsentTypeCode};
 };
 
 /** Disk form of one dense socket-entry-list definition. */
@@ -446,7 +496,7 @@ static_assert(sizeof(Prefix) == kCacheMagic.size() + sizeof(std::uint32_t));
 static_assert(sizeof(InvestmentConstants)
               == constants::kCharacterStatRowCount + 3 * sizeof(std::uint8_t));
 static_assert(sizeof(Header)
-              == kCacheMagic.size() + 27 * sizeof(std::uint32_t) + 2 * sizeof(std::uint64_t)
+              == kCacheMagic.size() + 30 * sizeof(std::uint32_t) + 2 * sizeof(std::uint64_t)
                      + sizeof(InvestmentConstants));
 static_assert(sizeof(SpawnPointRecord)
               == spawn_sets::kPositionComponents * sizeof(float) + sizeof(std::uint32_t)
@@ -483,6 +533,13 @@ static_assert(sizeof(RosterGroupRecord)
                      + 2 * scenarios::kRosterSlotCapacity * sizeof(std::uint8_t)
                      + scenarios::kRosterSlotCapacity * sizeof(std::uint16_t));
 static_assert(sizeof(ProgressionRecord) == sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t));
+static_assert(sizeof(RecordDefinitionRecord)
+              == sizeof(std::uint16_t) + sizeof(std::uint32_t) + 4 * sizeof(std::uint16_t)
+                     + 2 * sizeof(std::uint8_t));
+static_assert(sizeof(NodeDefinitionRecord)
+              == 9 * sizeof(std::uint16_t) + sizeof(std::uint8_t)
+                     + nodes::kChildCapacity * sizeof(std::uint16_t));
+static_assert(sizeof(SObjectDefinitionRecord) == 2 * sizeof(std::uint32_t) + sizeof(std::int32_t));
 static_assert(sizeof(AbilityBucketRecord)
               == sizeof(std::uint16_t) + 6 * sizeof(std::uint8_t)
                      + 2 * abilities::kBucketCapacity * sizeof(std::uint8_t)

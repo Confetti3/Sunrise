@@ -22,6 +22,17 @@ constexpr std::array<std::uint32_t, 3> kTrackerPlugHashes{
     2'302'094'943U,
     38'912'240U,
 };
+/** Enhanced Sword Scavenger already carries the correct Arrivals leg-armour socket relation. */
+constexpr std::uint32_t kArrivalsLegReferenceHash = 3'213'968'579U;
+/** Plug category declared by Enhanced Sword Scavenger and required by leg-armour sockets. */
+constexpr std::uint32_t kArrivalsLegCategoryHash = 0x7DDE0206U;
+/** Arrivals artifact records whose leg-armour label conflicts with their shipped general pool. */
+constexpr std::array<std::uint32_t, 4> kArrivalsLegModHashes{
+    3'465'659'109U, // Flourishing Blade
+    3'465'659'111U, // Automatic Prize
+    3'465'659'104U, // Dimensional Tithes
+    3'465'659'105U, // Ascendant Bounty
+};
 /** Native ordinary socket type whose choices are the synthetic tracker set. */
 constexpr std::uint16_t kTrackerSocketType = 518;
 /** FNV-1a constants make pool fingerprints stable and cheap. */
@@ -157,6 +168,15 @@ std::uint8_t special_plug_category(std::uint32_t categoryHash) noexcept {
     return 0;
 }
 
+/** Makes the four mislabeled artifact definitions agree with their leg-armour presentation. */
+std::uint32_t corrected_plug_category(std::uint32_t definitionHash,
+                                      std::uint32_t categoryHash) noexcept {
+    return std::find(kArrivalsLegModHashes.begin(), kArrivalsLegModHashes.end(), definitionHash)
+                   != kArrivalsLegModHashes.end()
+               ? kArrivalsLegCategoryHash
+               : categoryHash;
+}
+
 /** Allocates the bounded build state and indexes expansion/tracker plug definitions. */
 bool SocketPlugBuild::prepare(
     std::span<const std::uint8_t> specialCategories,
@@ -191,6 +211,20 @@ bool SocketPlugBuild::prepare(
             }
             trackerMembers_[trackerCount_++] = static_cast<std::uint16_t>(item);
         }
+        if (itemDefinitions[item].definitionHash == kArrivalsLegReferenceHash) {
+            arrivalsLegReference_ = static_cast<std::uint16_t>(item);
+        }
+        for (std::size_t mod = 0; mod < kArrivalsLegModHashes.size(); ++mod) {
+            if (itemDefinitions[item].definitionHash == kArrivalsLegModHashes[mod]) {
+                arrivalsLegMembers_[mod] = static_cast<std::uint16_t>(item);
+            }
+        }
+    }
+    if (arrivalsLegReference_ == UINT16_MAX
+        || std::find(arrivalsLegMembers_.begin(), arrivalsLegMembers_.end(), UINT16_MAX)
+               != arrivalsLegMembers_.end()) {
+        release();
+        return false;
     }
     return true;
 }
@@ -204,6 +238,33 @@ bool SocketPlugBuild::add(std::uint32_t itemDefinitionIndex,
         return false;
     }
     candidates_[candidateCount_++] = static_cast<std::uint16_t>(itemDefinitionIndex);
+    return true;
+}
+
+/** Mirrors Enhanced Sword Scavenger's exact lane admission onto the four reclassified mods. */
+bool SocketPlugBuild::route_arrivals_leg_mods() noexcept {
+    const bool legLane = std::find(candidates_.data(),
+                                   candidates_.data() + candidateCount_,
+                                   arrivalsLegReference_)
+                         != candidates_.data() + candidateCount_;
+    const auto isReclassified = [this](socket_plugs::Member member) noexcept {
+        return std::find(arrivalsLegMembers_.begin(), arrivalsLegMembers_.end(), member)
+               != arrivalsLegMembers_.end();
+    };
+    candidateCount_ = static_cast<std::size_t>(
+        std::remove_if(candidates_.data(),
+                       candidates_.data() + candidateCount_,
+                       isReclassified)
+        - candidates_.data());
+    if (!legLane) {
+        return true;
+    }
+    for (const socket_plugs::Member member : arrivalsLegMembers_) {
+        if (candidateCount_ >= candidates_.size()) {
+            return false;
+        }
+        candidates_[candidateCount_++] = member;
+    }
     return true;
 }
 
@@ -238,6 +299,9 @@ bool SocketPlugBuild::intern(std::uint32_t& poolIndex) noexcept {
             categoryMembers_.data() + family * state::build_data::items::kDefinitionCapacity;
         std::copy_n(first, categoryCounts_[family], candidates_.data() + candidateCount_);
         candidateCount_ += categoryCounts_[family];
+    }
+    if (!route_arrivals_leg_mods()) {
+        return false;
     }
     std::sort(candidates_.data(), candidates_.data() + candidateCount_);
     candidateCount_ = static_cast<std::size_t>(
@@ -378,6 +442,8 @@ void SocketPlugBuild::release() noexcept {
     lookup_.shrink_to_fit();
     categoryCounts_ = {};
     trackerMembers_ = {};
+    arrivalsLegReference_ = UINT16_MAX;
+    arrivalsLegMembers_.fill(UINT16_MAX);
     trackerCount_ = 0;
     ruleCount_ = 0;
     poolCount_ = 0;

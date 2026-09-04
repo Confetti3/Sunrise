@@ -54,6 +54,7 @@ bool prepare(Scratch& scratch,
              const middleware::queuez::Subscription& subscription,
              std::uint32_t accountObjectId,
              const Reservation& reservation,
+             std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
              Prepared& prepared) noexcept {
     if (reservation.rawWriteOffset > scratch.plaintext.size()
         || reservation.compressedWriteOffset > scratch.sealed.size()) {
@@ -118,6 +119,10 @@ bool prepare(Scratch& scratch,
         if (!family4_datagen::character::encode(
                 selectedCharacter, selected.loadout, selected.lightEvaluation, characterBytes)) {
             return report_failure("character_encode");
+        }
+        if (!apply_acquisition_presentation(
+                characterBytes, selected.loadout, acquisitionPresentationRows)) {
+            return report_failure("character_presentation");
         }
         if (!append_object(scratch,
                            characterBytes,

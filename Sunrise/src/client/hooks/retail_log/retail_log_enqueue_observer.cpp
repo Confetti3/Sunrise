@@ -9,6 +9,8 @@
 #include <string_view>
 
 #include "../../../core/logging/log.h"
+#include "../bootflow/bootflow_hook_lifecycle.h"
+#include "../network/investment/internal.h"
 #include "../../targets/game.h"
 
 namespace sunrise::client::hooks::retail_log {
@@ -30,6 +32,9 @@ constexpr std::uint64_t kReassertIntervalMs = 2'000;
 constexpr std::uint32_t kCategoryCount = 26;
 /** 0 is the game's loosest category threshold. A higher value logs less. */
 constexpr std::uint32_t kMostVerbose = 0;
+/** Native boundary after plug tables finish patching and before their derived views resume. */
+constexpr std::string_view kContentTablePatchingComplete =
+    "content_table_patching: patch contents have been cleared";
 
 thread_local bool g_inObserver{};
 /** Tick at which the next re-assert is due. Zero makes the first call assert. */
@@ -64,11 +69,19 @@ volatile LONG64 g_nextAssertTick{};
  * @param text Borrowed native buffer.
  */
 void capture_line(std::int32_t siteId, const char* text) noexcept {
+    std::array<char, kNativeTextSize> sanitized{};
+    const std::size_t textLength = sanitize(text, sanitized);
+    const std::string_view message{sanitized.data(), textLength};
+    if (message.find(kContentTablePatchingComplete) != std::string_view::npos) {
+        network::investment::arm_socket_menu_routing();
+        // This must happen before the native logger returns to investment initialization. A later
+        // callback tick races the socket-menu caches that consume these descriptors.
+        network::investment::apply_socket_menu_routing();
+        network::investment::apply_lore_visibility();
+    }
     if (!core::log::accepts(core::log::Channel::client, core::log::Level::info)) {
         return;
     }
-    std::array<char, kNativeTextSize> sanitized{};
-    const std::size_t textLength = sanitize(text, sanitized);
     std::array<char, kEventCapacity> line{};
     const int written = std::snprintf(line.data(),
                                       line.size(),

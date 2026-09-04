@@ -19,7 +19,10 @@
 #include "items/item_catalog.h"
 #include "items/socket_plugs/definition.h"
 #include "material_requirements/material_requirement_catalog.h"
+#include "nodes/definition.h"
 #include "progressions/definition.h"
+#include "records/definition.h"
+#include "records/rewards/definition.h"
 #include "scenarios/definition.h"
 #include "socket_entry_buckets/definition.h"
 #include "socket_entry_lists/definition.h"
@@ -101,7 +104,13 @@ publish_item_definitions(std::span<const items::Definition> definitions) noexcep
 [[nodiscard]] bool find_item_definition_index(std::uint16_t definitionIndex,
                                               items::Definition& definition) noexcept;
 
-/** @return True when the whole dense collectible definition table is in State. */
+/** Resolves every installed reward row for one record. Empty output means no usable reward. */
+[[nodiscard]] bool
+find_generated_record_rewards(std::uint32_t recordHash,
+                              std::array<records::rewards::ResolvedReward,
+                                         records::rewards::kRewardPerRecordCapacity>& rewards,
+                              std::size_t& rewardCount) noexcept;
+
 [[nodiscard]] bool collectible_definitions_ready() noexcept;
 
 /**
@@ -287,6 +296,37 @@ void set_exotic_catalyst_completion_enabled(bool enabled) noexcept;
  */
 [[nodiscard]] bool is_consumed_on_apply(std::uint16_t itemDefinitionIndex,
                                         std::uint8_t bucketId) noexcept;
+
+/** @return True when the whole presentation node table is in State. */
+[[nodiscard]] bool node_definitions_ready() noexcept;
+
+/**
+ * Publishes the whole presentation node table in one step.
+ * @param definitions Complete dense rows in native node order.
+ * @return True when the rows pass the domain checks and fit fixed State storage.
+ */
+[[nodiscard]] bool
+publish_node_definitions(std::span<const nodes::Definition> definitions) noexcept;
+
+/** @return True when the whole record definition table is in State. */
+[[nodiscard]] bool record_definitions_ready() noexcept;
+
+/**
+ * Publishes the whole record definition table in one step.
+ * @param definitions Complete dense rows in native record order.
+ * @return True when the rows pass the domain checks and fit fixed State storage.
+ */
+[[nodiscard]] bool
+publish_record_definitions(std::span<const records::Definition> definitions) noexcept;
+
+/**
+ * Resolves the native record row an opcode-1801 claim names.
+ * @param definitionIndex Native record row carried by the claim.
+ * @param definition Receives the row, including its completion flag index, only on success.
+ * @return True when the table is complete and the row exists.
+ */
+[[nodiscard]] bool find_record_definition(std::uint16_t definitionIndex,
+                                          records::Definition& definition) noexcept;
 
 /** @return True when the whole progression definition table is in State. */
 [[nodiscard]] bool progression_definitions_ready() noexcept;
@@ -583,24 +623,6 @@ publish_vendor_catalog(std::span<const vendors::IndexEntry> index,
                        std::span<const vendors::Definition> definitions,
                        std::span<const vendors::SaleRow> saleRows,
                        std::span<const vendors::InstalledRow> installedRows) noexcept;
-
-/**
- * Finds one vendor's index row, which carries the index the wire uses.
- * @param definitionHash Vendor definition hash.
- * @param entry Receives the matching row.
- * @return True when the catalog is ready and exactly one row carries the hash.
- */
-[[nodiscard]] bool find_vendor_index(std::uint32_t definitionHash,
-                                     vendors::IndexEntry& entry) noexcept;
-
-/**
- * Finds one extracted vendor definition.
- * @param definitionHash Vendor definition hash.
- * @param definition Receives the matching definition.
- * @return True when the catalog is ready and holds that definition.
- */
-[[nodiscard]] bool find_vendor_definition(std::uint32_t definitionHash,
-                                          vendors::Definition& definition) noexcept;
 
 /**
  * An unsupported catalyst build finishes without writing an incomplete cache.

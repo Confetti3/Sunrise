@@ -23,6 +23,7 @@ inline constexpr std::uint16_t kUnavailableItemDefinitionIndex = 0xFFFFU;
 inline constexpr std::uint16_t kNoCollectibleIndex = 0xFFFEU;
 /** A collectible with no acquisition charge carries this native requirement-set sentinel. */
 inline constexpr std::uint16_t kUnavailableMaterialRequirementSetIndex = 0xFFFFU;
+
 /** Installed requirement sets contain at most six material rows. */
 inline constexpr std::size_t kMaterialRequirementCapacity = 6;
 

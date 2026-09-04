@@ -1,4 +1,4 @@
-﻿#include "service_outcome_commit.h"
+#include "service_outcome_commit.h"
 
 #include <array>
 #include <cstdio>
@@ -89,6 +89,9 @@ static void discard_activity_publication(Publication& publication) noexcept {
  * @param committed Whether the commit succeeded.
  */
 static void report_lease(const slots::PendingMutation& mutation, bool committed) noexcept {
+    if (committed) {
+        return;
+    }
     std::size_t held = 0;
     std::size_t reserved = 0;
     const bool known = slots::lease_counts(mutation.sessionId, held, reserved);
@@ -97,9 +100,8 @@ static void report_lease(const slots::PendingMutation& mutation, bool committed)
     const int written =
         std::snprintf(line.data(),
                       line.size(),
-                      "ev=activity stage=entity_slots result=%s kind=%s soid=0x%llX "
+                      "ev=activity stage=entity_slots result=fail kind=%s soid=0x%llX "
                       "requested=%zu picked=%zu held=%zu reserved=%zu returned=%zu known=%u",
-                      committed ? "ok" : "fail",
                       kind < kLeaseKinds.size() ? kLeaseKinds[kind] : "bad",
                       static_cast<unsigned long long>(mutation.sessionId),
                       mutation.requestedCount,
@@ -113,9 +115,16 @@ static void report_lease(const slots::PendingMutation& mutation, bool committed)
                       known ? 1U : 0U);
     if (written > 0) {
         core::log::write(core::log::Channel::server,
-                         committed ? core::log::Level::debug : core::log::Level::warn,
+                         core::log::Level::warn,
                          {line.data(), static_cast<std::size_t>(written)});
     }
+}
+
+[[nodiscard]] static bool report_commit(bool committed, const char* failure) noexcept {
+    if (!committed) {
+        core::log::write(core::log::Channel::server, core::log::Level::warn, failure);
+    }
+    return committed;
 }
 
 /**
@@ -218,10 +227,14 @@ bool commit(ServiceOutcome& outcome, Publication& publication, const char*& reas
         return committed;
     }
     if (auto* transaction = transaction_if<EquipmentSwapTransaction>(outcome)) {
+        if (transaction->pending == nullptr) {
+            return false;
+        }
+        auto& pending = *transaction->pending;
         const bool isSubclassSlot =
-            transaction->pending.equipmentSlotIndex
+            pending.equipmentSlotIndex
             == static_cast<std::size_t>(state::account::inventory::EquipmentSlot::subclass);
-        const bool committed = state::commit_equipment_swap(transaction->pending);
+        const bool committed = state::commit_equipment_swap(*transaction->pending);
         core::log::write(core::log::Channel::server,
                          committed ? core::log::Level::debug : core::log::Level::warn,
                          committed ? "ev=equip stage=transaction_commit result=ok"
@@ -233,25 +246,24 @@ bool commit(ServiceOutcome& outcome, Publication& publication, const char*& reas
             // character screen stops showing the previous subclass's resolution.
             client::content::investment::worker::request_slice();
         }
-        return committed;
+        return true;
     }
     if (auto* transaction = transaction_if<SubclassSelectionTransaction>(outcome)) {
-        const bool committed = state::commit_subclass_selection(transaction->pending);
-        core::log::write(core::log::Channel::server,
-                         committed ? core::log::Level::debug : core::log::Level::warn,
-                         committed ? "ev=subclass_select stage=transaction_commit result=ok"
-                                   : "ev=subclass_select stage=transaction_commit result=fail");
-        reason = "subclass_select";
-        if (committed) {
-            // The published ability buckets are keyed off the selection that just changed. Wake
-            // the investment worker so its next pump rebuilds them, instead of waiting on
-            // whatever cadence would otherwise trigger a fresh slice.
-            client::content::investment::worker::request_slice();
+        if (transaction->pending == nullptr) {
+            return false;
         }
-        return committed;
+        reason = "subclass_select";
+        if (!report_commit(state::commit_subclass_selection(*transaction->pending),
+                           "ev=subclass_select stage=transaction_commit result=fail")) {
+            return false;
+        }
+        // Rebuild the ability buckets keyed by the changed selection.
+        client::content::investment::worker::request_slice();
+        return true;
     }
     if (auto* transaction = transaction_if<ItemAcquisitionTransaction>(outcome)) {
-        const bool committed = state::commit_item_acquisition(transaction->pending);
+        const bool committed = transaction->pending != nullptr
+                               && state::commit_item_acquisition(*transaction->pending);
         core::log::write(core::log::Channel::server,
                          committed ? core::log::Level::debug : core::log::Level::warn,
                          committed ? "ev=acquire stage=transaction_commit result=ok"
@@ -265,7 +277,8 @@ bool commit(ServiceOutcome& outcome, Publication& publication, const char*& reas
         return committed;
     }
     if (auto* transaction = transaction_if<SocketPlugTransaction>(outcome)) {
-        const bool committed = state::commit_socket_plug(transaction->pending);
+        const bool committed = transaction->pending != nullptr
+                               && state::commit_socket_plug(*transaction->pending);
         core::log::write(core::log::Channel::server,
                          committed ? core::log::Level::debug : core::log::Level::warn,
                          committed ? "ev=socket_plug stage=transaction_commit result=ok"
@@ -274,7 +287,8 @@ bool commit(ServiceOutcome& outcome, Publication& publication, const char*& reas
         return committed;
     }
     if (auto* transaction = transaction_if<ItemStateTransaction>(outcome)) {
-        const bool committed = state::commit_item_state(transaction->pending);
+        const bool committed = transaction->pending != nullptr
+                               && state::commit_item_state(*transaction->pending);
         core::log::write(core::log::Channel::server,
                          committed ? core::log::Level::debug : core::log::Level::warn,
                          committed ? "ev=item_state stage=transaction_commit result=ok"
@@ -292,7 +306,8 @@ bool commit(ServiceOutcome& outcome, Publication& publication, const char*& reas
         return committed;
     }
     if (auto* transaction = transaction_if<ProfileItemAcquisitionTransaction>(outcome)) {
-        const bool committed = state::commit_profile_item_acquisition(transaction->pending);
+        const bool committed = transaction->pending != nullptr
+                               && state::commit_profile_item_acquisition(*transaction->pending);
         core::log::write(core::log::Channel::server,
                          committed ? core::log::Level::debug : core::log::Level::warn,
                          committed ? "ev=profile_acquire stage=transaction_commit result=ok"
@@ -304,13 +319,32 @@ bool commit(ServiceOutcome& outcome, Publication& publication, const char*& reas
         return committed;
     }
     if (auto* transaction = transaction_if<ItemDismantleTransaction>(outcome)) {
-        const bool committed = state::commit_item_dismantle(transaction->pending);
+        const bool committed = transaction->pending != nullptr
+                               && state::commit_item_dismantle(*transaction->pending);
         core::log::write(core::log::Channel::server,
                          committed ? core::log::Level::debug : core::log::Level::warn,
                          committed ? "ev=dismantle stage=transaction_commit result=ok"
                                    : "ev=dismantle stage=transaction_commit result=fail");
         reason = "dismantle";
         return committed;
+    }
+    if (auto* transaction = transaction_if<ArtifactPurchaseTransaction>(outcome)) {
+        reason = "artifact_purchase";
+        return transaction->pending != nullptr
+               && report_commit(state::commit_artifact_mod_unlock(*transaction->pending),
+                                "ev=ws901 stage=transaction_commit result=fail");
+    }
+    if (auto* transaction = transaction_if<SeasonPassRewardTransaction>(outcome)) {
+        reason = "season_pass_reward";
+        return transaction->pending != nullptr
+               && report_commit(state::commit_season_pass_reward(*transaction->pending),
+                                "ev=ws2400 stage=transaction_commit result=fail");
+    }
+    if (auto* transaction = transaction_if<RecordRewardGrantTransaction>(outcome)) {
+        reason = "record_reward";
+        return transaction->pending != nullptr
+               && report_commit(state::commit_record_reward(*transaction->pending),
+                                "ev=record_reward stage=transaction_commit result=fail");
     }
     return true;
 }

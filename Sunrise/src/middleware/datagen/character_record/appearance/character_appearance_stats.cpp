@@ -4,12 +4,14 @@
 #include "../../../../core/logging/log.h"
 #include "../../../../state/build_data/runtime.h"
 #include "../../../../state/equipment/light/definition.h"
+#include "../../../../state/progression/seasonal_experience.h"
 #include "internal.h"
 
 namespace sunrise::middleware::datagen::character_record::appearance {
 namespace {
 
 namespace constants = state::build_data::constants;
+namespace seasonal = state::progression::seasonal_experience;
 
 /**
  * Sums one definition's declared contribution to a single stat row.
@@ -167,6 +169,21 @@ bool apply_stats(const family4::loadout::ResolvedInstances& instances,
 
     std::size_t written = 0;
     append(named.lightStatRow, light, appearance.characterStats, written);
+    for (std::size_t index = 0; index < instances.itemCount; ++index) {
+        details::Definition detail{};
+        Equipped equipped{};
+        if (!resolve_equipped(instances.items[index], detail, equipped)
+            || detail.definitionHash != seasonal::kSeedOfSilverWingsHash
+            || detail.statCount == 0
+            || detail.stats.front().row == details::kEmptyStatRow) {
+            continue;
+        }
+        append(detail.stats.front().row,
+               seasonal::artifact_power_bonus(),
+               appearance.characterStats,
+               written);
+        break;
+    }
     for (const std::uint8_t row : rows) {
         std::int32_t total = 0;
         for (std::size_t index = 0; index < instances.itemCount; ++index) {

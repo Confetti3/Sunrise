@@ -2,7 +2,7 @@
 /.idea/
 /.vscode/
 /.direnv/
-/.xwin-cache/
+/.xwin-cache
 /.cache/
 *.user
 *.suo
@@ -14,4 +14,6 @@
 
 # CMake build files
 /build/
+/build-merge/
+/build-resolved/
 /out/

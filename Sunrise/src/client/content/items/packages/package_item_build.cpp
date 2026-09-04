@@ -8,19 +8,9 @@
 #include "../../../../core/settings/rule_text.h"
 #include "../../../../middleware/content/packages/reader/reader.h"
 #include "../../../../middleware/content/packages/tables/definition_index_table.h"
-#include "../../../../middleware/content/packages/tables/items.h"
-#include "../../../../state/account/account_state.h"
-#include "../../../../state/build_data/abilities/definition.h"
-#include "../../../../state/build_data/inventory/buckets/definition.h"
-#include "../../../../state/build_data/items/details/definition.h"
-#include "../../../../state/build_data/progressions/definition.h"
 #include "../../../../state/build_data/runtime.h"
-#include "../../../../state/build_data/socket_entry_lists/definition.h"
+#include "../../../../state/build_data/sobjects/sobject_catalog.h"
 #include "../../../../state/build_data/vendors/vendor_catalog.h"
-#include "../../../../state/content/content_catalog.h"
-#include "../../../../state/runtime/runtime.h"
-#include "../../../memory/current_process_memory.h"
-#include "../../../targets/game.h"
 #include "../../hash_names/hash_name_build.h"
 #include "../../scenarios/scenario_build.h"
 #include "../../spawn_sets/spawn_set_build.h"
@@ -80,24 +70,6 @@ void build_vendor_catalog(const reader::Source& source, reader::Scratch& scratch
     (void)content::vendors::build(source, scratch, std::span(named).first(namedCount));
 }
 
-/** @return True when every domain owned by the package pass is published. */
-[[nodiscard]] bool package_domains_ready() noexcept {
-    return state::build_data::item_definitions_ready()
-           && state::build_data::collectible_definitions_ready()
-           && state::build_data::material_requirement_sets_ready()
-           && state::build_data::configured_item_details_ready()
-           && state::build_data::socket_plug_rules_ready()
-           && state::build_data::inventory_bucket_descriptors_ready()
-           && state::build_data::socket_entry_lists_ready()
-           && state::build_data::ability_buckets_ready()
-           && state::build_data::socket_entry_buckets_ready()
-           && state::build_data::progression_definitions_ready()
-           && state::build_data::scenario_layouts_ready() && state::build_data::spawn_sets_ready()
-           && state::build_data::hash_names_ready()
-           && state::build_data::investment_constants_ready()
-           && state::build_data::exotic_catalysts_ready();
-}
-
 /** @return True when every item and investment-root domain is published. */
 [[nodiscard]] bool root_domains_ready() noexcept {
     return state::build_data::item_definitions_ready()
@@ -110,11 +82,20 @@ void build_vendor_catalog(const reader::Source& source, reader::Scratch& scratch
            && state::build_data::ability_buckets_ready()
            && state::build_data::socket_entry_buckets_ready()
            && state::build_data::progression_definitions_ready()
+           && state::build_data::record_definitions_ready()
+           && state::build_data::node_definitions_ready()
+           && state::build_data::sobjects::count() != 0
            && state::build_data::investment_constants_ready()
            && state::build_data::exotic_catalysts_ready();
 }
 
 } // namespace
+
+/** @return True when every domain owned by the package pass is published. */
+bool ready() noexcept {
+    return root_domains_ready() && state::build_data::scenario_layouts_ready()
+           && state::build_data::spawn_sets_ready() && state::build_data::hash_names_ready();
+}
 
 /** Publishes the dense item table from the installed packages, once. */
 bool build() noexcept {
@@ -140,20 +121,19 @@ bool build() noexcept {
         (void)content::spawn_sets::build(packageSource, storage.scratch);
         (void)content::hash_names::build(packageSource, storage.scratch);
         build_vendor_catalog(packageSource, storage.scratch);
-        if (package_domains_ready()) {
+        if (ready()) {
             SecureZeroMemory(&keys, sizeof keys);
             return true;
         }
     }
     if (root_domains_ready()) {
         SecureZeroMemory(&keys, sizeof keys);
-        return true;
+        return ready();
     }
     reason = "tag";
     std::array<std::uint32_t, kContainerCandidates> candidates{};
     std::size_t candidateCount = 0;
-    const bool named = investment_globals_tags(candidates, candidateCount);
-    if (named) {
+    if (investment_globals_tags(candidates, candidateCount)) {
         const reader::Source source{directory.chars.data(), &keys};
         tables::Array table{};
         bool located = false;
@@ -228,6 +208,30 @@ bool build() noexcept {
                         std::span(storage.progressionRows).first(progressionCount));
                 }
             }
+            if (!state::build_data::node_definitions_ready()) {
+                std::size_t nodeCount = 0;
+                if (build_nodes(source,
+                                storage.scratch,
+                                std::span<const std::byte>{storage.root},
+                                storage.child,
+                                storage.nodeRows,
+                                nodeCount)) {
+                    (void)state::build_data::publish_node_definitions(
+                        std::span(storage.nodeRows).first(nodeCount));
+                }
+            }
+            if (!state::build_data::record_definitions_ready()) {
+                std::size_t recordCount = 0;
+                if (build_records(source,
+                                  storage.scratch,
+                                  std::span<const std::byte>{storage.root},
+                                  storage.child,
+                                  storage.recordRows,
+                                  recordCount)) {
+                    (void)state::build_data::publish_record_definitions(
+                        std::span(storage.recordRows).first(recordCount));
+                }
+            }
             if (!state::build_data::investment_constants_ready()) {
                 state::build_data::constants::InvestmentConstants extracted{};
                 if (read_investment_constants(source,
@@ -264,7 +268,7 @@ bool build() noexcept {
         }
     }
     SecureZeroMemory(&keys, sizeof keys);
-    const bool complete = package_domains_ready();
+    const bool complete = ready();
     const bool itemDomainsReady = root_domains_ready();
     if (complete) {
         // Nothing reads a package again until the next boot, so this reader's files go back now.

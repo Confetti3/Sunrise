@@ -25,4 +25,14 @@ void acquire_item(const middleware::web_service::Message& message, Outcome& outc
 void purchase_item(const middleware::web_service::Message& message, Outcome& outcome) noexcept;
 void acquire_quest(const middleware::web_service::Message& message, Outcome& outcome) noexcept;
 
+/** Persists an opcode-1801 Triumph claim and prepares its optional reward. */
+void claim_record(const middleware::web_service::Message& message, Outcome& outcome) noexcept;
+
+/** Decodes and prepares one opcode-2400 active-season reward claim. */
+void claim_season_pass_reward(const middleware::web_service::Message& message,
+                              Outcome& outcome) noexcept;
+
+/** Decodes and applies one opcode-1821 earned-title selection. */
+void equip_title(const middleware::web_service::Message& message, Outcome& outcome) noexcept;
+
 } // namespace sunrise::server::web_service

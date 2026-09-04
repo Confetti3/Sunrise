@@ -9,6 +9,7 @@
 
 #include "../../../../core/logging/log.h"
 #include "../../../../core/settings/settings.h"
+#include "../../../../client/hooks/bootflow/bootflow_hook_lifecycle.h"
 #include "../../../../middleware/bap/activity_message/activity_client_identity_parser.h"
 #include "../../../../middleware/bap/activity_message/activity_join_request_parser.h"
 #include "../../../../middleware/bap/activity_message/activity_membership_acknowledgement_parser.h"
@@ -431,7 +432,10 @@ void report_message(std::uint32_t messageType,
     } else if (plan.bindingIntent == BindingIntent::preserveCurrent) {
         // A private join's burst carries the seed membership; the commit lands the same seed.
         static_cast<void>(push::activity::prepare_join_seed_snapshot(
-            parsed.memberKey, parsed.characterSoid, plan.membershipMutation));
+            plan.targetBinding.createdRevision,
+            parsed.memberKey,
+            parsed.characterSoid,
+            plan.membershipMutation));
     }
     return true;
 }

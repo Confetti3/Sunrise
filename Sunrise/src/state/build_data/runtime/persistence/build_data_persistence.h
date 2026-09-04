@@ -19,8 +19,11 @@
 #include "../../items/item_catalog.h"
 #include "../../items/socket_plugs/definition.h"
 #include "../../material_requirements/material_requirement_catalog.h"
+#include "../../nodes/definition.h"
 #include "../../progressions/definition.h"
+#include "../../records/definition.h"
 #include "../../scenarios/definition.h"
+#include "../../sobjects/sobject_catalog.h"
 #include "../../socket_entry_lists/definition.h"
 #include "../../spawn_sets/definition.h"
 #include "../../vendors/definition.h"
@@ -72,6 +75,9 @@ struct Context {
     std::vector<socket_entry_lists::EntryTable> socketEntryTableScratch{};
     std::vector<abilities::Definition> abilityBucketScratch{};
     std::vector<progressions::Definition> progressionScratch{};
+    std::vector<records::Definition> recordScratch{};
+    std::vector<nodes::Definition> nodeScratch{};
+    std::vector<sobjects::Definition> sobjectScratch{};
     std::vector<scenarios::Definition> scenarioScratch{};
     std::vector<scenarios::RosterGroup> rosterGroupScratch{};
     std::vector<spawn_sets::Stem> spawnStemScratch{};

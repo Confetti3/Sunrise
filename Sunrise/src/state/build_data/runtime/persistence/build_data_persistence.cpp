@@ -2,7 +2,6 @@
 
 #include <Windows.h>
 
-#include <algorithm>
 #include <span>
 #include <vector>
 
@@ -18,13 +17,15 @@
 #include "../../items/details/item_detail_catalog.h"
 #include "../../items/socket_plugs/socket_plug_catalog.h"
 #include "../../material_requirements/material_requirement_catalog.h"
+#include "../../nodes/node_catalog.h"
 #include "../../progressions/progression_catalog.h"
+#include "../../records/record_catalog.h"
 #include "../../runtime.h"
 #include "../../scenarios/scenario_catalog.h"
+#include "../../sobjects/sobject_catalog.h"
 #include "../../socket_entry_lists/socket_entry_list_catalog.h"
 #include "../../spawn_sets/spawn_set_catalog.h"
 #include "../../vendors/vendor_catalog.h"
-#include "../build_data_catalog_runtime.h"
 #include "../domain_markers.h"
 
 namespace sunrise::state::build_data::runtime::persistence {
@@ -84,6 +85,9 @@ to_record(const constants::InvestmentConstants& value) noexcept {
                                                         counts.socketEntryTables)
            && abilities::snapshot(scratch.abilityBuckets, counts.abilityBuckets)
            && progressions::snapshot(scratch.progressions, counts.progressions)
+           && records::snapshot(scratch.records, counts.records)
+           && nodes::snapshot(scratch.nodes, counts.nodes)
+           && sobjects::snapshot(scratch.sobjects, counts.sobjects)
            && scenarios::snapshot(scratch.scenarios, counts.scenarios)
            && scenarios::snapshot_groups(scratch.rosterGroups, counts.rosterGroups)
            && spawn_sets::snapshot(scratch.spawnStems, counts.spawnStems)
@@ -105,8 +109,9 @@ to_record(const constants::InvestmentConstants& value) noexcept {
            && collectible_definitions_ready() && socket_plug_rules_ready()
            && material_requirement_sets_ready() && inventory_bucket_descriptors_ready()
            && socket_entry_lists_ready() && ability_buckets_ready()
-           && progression_definitions_ready() && scenario_layouts_ready() && spawn_sets_ready()
-           && hash_names_ready() && constants::find(published);
+           && progression_definitions_ready() && record_definitions_ready()
+           && node_definitions_ready() && sobjects::count() != 0 && scenario_layouts_ready()
+           && spawn_sets_ready() && hash_names_ready() && constants::find(published);
 }
 
 } // namespace
@@ -159,6 +164,12 @@ cache::records::MutableDomains scratch_domains(Context& state) noexcept {
     const auto progressions =
         ensure_scratch<progressions::Definition, progressions::kDefinitionCapacity>(
             state.progressionScratch);
+    const auto recordRows =
+        ensure_scratch<records::Definition, records::kDefinitionCapacity>(state.recordScratch);
+    const auto nodeRows =
+        ensure_scratch<nodes::Definition, nodes::kDefinitionCapacity>(state.nodeScratch);
+    const auto sobjectRows =
+        ensure_scratch<sobjects::Definition, sobjects::kDefinitionCapacity>(state.sobjectScratch);
     const auto scenarios = ensure_scratch<scenarios::Definition, scenarios::kDefinitionCapacity>(
         state.scenarioScratch);
     const auto rosterGroups =
@@ -199,6 +210,9 @@ cache::records::MutableDomains scratch_domains(Context& state) noexcept {
         socketEntryTables,
         abilityBuckets,
         progressions,
+        recordRows,
+        nodeRows,
+        sobjectRows,
         scenarios,
         rosterGroups,
         spawnStems,
@@ -216,9 +230,8 @@ cache::records::MutableDomains scratch_domains(Context& state) noexcept {
  * Releases one transient cache snapshot bank without walking its capacity.
  * @param storage Bank emptied and handed back to the allocator.
  */
-template <typename Value> void release_bank(std::vector<Value>& storage) noexcept {
-    storage.clear();
-    storage.shrink_to_fit();
+template <typename Value> static void release_bank(std::vector<Value>& storage) noexcept {
+    std::vector<Value>{}.swap(storage);
 }
 
 /** Releases transient cache snapshot banks without allocating or walking their capacities. */
@@ -237,6 +250,9 @@ void release_scratch_locked(Context& state) noexcept {
     release_bank(state.socketEntryTableScratch);
     release_bank(state.abilityBucketScratch);
     release_bank(state.progressionScratch);
+    release_bank(state.recordScratch);
+    release_bank(state.nodeScratch);
+    release_bank(state.sobjectScratch);
     release_bank(state.scenarioScratch);
     release_bank(state.rosterGroupScratch);
     release_bank(state.spawnStemScratch);
@@ -298,6 +314,9 @@ cache::records::Domains occupied_domains(Context& state,
                                                counts.abilityBuckets},
         std::span<const progressions::Definition>{state.progressionScratch.data(),
                                                   counts.progressions},
+        std::span<const records::Definition>{state.recordScratch.data(), counts.records},
+        std::span<const nodes::Definition>{state.nodeScratch.data(), counts.nodes},
+        std::span<const sobjects::Definition>{state.sobjectScratch.data(), counts.sobjects},
         std::span<const scenarios::Definition>{state.scenarioScratch.data(), counts.scenarios},
         std::span<const scenarios::RosterGroup>{state.rosterGroupScratch.data(),
                                                 counts.rosterGroups},
