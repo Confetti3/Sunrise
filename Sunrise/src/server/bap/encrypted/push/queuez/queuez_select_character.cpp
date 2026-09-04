@@ -76,7 +76,6 @@ bool append_current_activity_notification(Scratch& scratch,
         return false;
     }
     const std::size_t objectCount = prepared.family.objects.size();
-    const std::size_t beforeBytes = written;
     if (objectCount != 1 || prepared.family.objects.front().id != swap.characterDefinitionId
         || prepared.family.objects.front().version != swap.characterSoid
         || prepared.family.objects.front().payload.empty()
