@@ -47,6 +47,7 @@ namespace sunrise::server::bap::encrypted::activity_message {
 namespace {
 
 namespace service = middleware::bap::activity_message;
+namespace authority = middleware::bap::activity_message::entity_authority;
 namespace store = state::activity::receipts;
 namespace wire_schema = middleware::bap::activity_message::wire_schema;
 namespace communication = wire_schema::communication;
