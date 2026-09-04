@@ -145,6 +145,15 @@ struct PendingItemAcquisition {
     bool prepared{};
 };
 
+/** One profile row an exchange changed, named the way the account's change ring names it. */
+struct ProfileStackChange {
+    std::int32_t mutationSerial{};
+    std::int32_t afterQuantity{};
+};
+
+/** Rows one exchange may announce. Shader recycling announces two: Glimmer and Legendary Shards. */
+inline constexpr std::size_t kProfileStackChangeCapacity = 4;
+
 /** Prepared account-profile stack insertion kept private until its reply and account upsert fit. */
 struct PendingProfileItemAcquisition {
     /** Exact profile inventory observed while preparing the mutation. */
@@ -168,6 +177,14 @@ struct PendingProfileItemAcquisition {
     std::uint16_t collectibleIndex{};
     std::uint8_t bucketId{};
     std::uint8_t materialRequirementCount{};
+    /**
+     * Rows this mutation announces to the account's change ring, which is what draws the floating
+     * "+5 Legendary Shards" the Client shows. Empty for an ordinary acquisition, which announces
+     * its one acquired row instead; non-empty marks this an exchange, whose quantities move by
+     * more than one and whose row count is not fixed at one.
+     */
+    std::array<ProfileStackChange, kProfileStackChangeCapacity> changes{};
+    std::size_t changeCount{};
     /** True only for installed profile mod/shader rows materialized as Family-4 residents. */
     bool actionSource{};
     bool appended{};
@@ -446,6 +463,14 @@ void publish_sign_in_time(std::uint64_t seconds) noexcept;
 [[nodiscard]] bool set_primary_soid(std::uint64_t primarySoid) noexcept;
 
 /**
+ * Permanently closes the process-local one-time profile-setup gate for the active account.
+ *
+ * The transition is monotonic: repeated profile-setting writes after completion are harmless.
+ * @return False only when no complete active account can be updated.
+ */
+[[nodiscard]] bool complete_profile_setup() noexcept;
+
+/**
  * Moves the selection to one authored character.
  * The Client names its pick only in the select-character request, so this is where a player's
  * choice enters State.
@@ -693,6 +718,33 @@ prepare_settings_update(const account::settings::SettingsDelta& delta,
  * @return True when the after-image was already current or was committed successfully.
  */
 [[nodiscard]] bool commit_settings_update(PendingSettingsUpdate& mutation) noexcept;
+/** One credited side of a vendor exchange: an authored profile stack and how much to add. */
+struct ProfileExchangePayout {
+    std::uint32_t definitionHash{};
+    std::int32_t quantity{};
+};
+
+/**
+ * Prepares one vendor recycle row: charges the stack it names and credits what it pays out.
+ *
+ * This rides the profile-stack mutation rather than writing State directly, because the Client is
+ * only told about a currency gain by the account object's change ring - a row named there is what
+ * draws the floating "+5 Legendary Shards"; a direct write with a resync moves the numbers and
+ * announces nothing. Every credited row is announced under a fresh mutation serial; the charged row
+ * is not. Only an already-held payout stack is credited, since the currencies a recycle pays into
+ * are authored from the start. `preview_profile_item_acquisition` and
+ * `commit_profile_item_acquisition` carry the result the rest of the way.
+ *
+ * @param costDefinitionHash Stack the row charges against.
+ * @param costQuantity Units of it the row consumes.
+ * @param payouts Stacks to credit, each clamped to its own native stack limit.
+ * @param mutation Gets the checked profile before/after images without changing account State.
+ * @return True only when the charge and every credit fit and the whole account stayed valid.
+ */
+[[nodiscard]] bool prepare_vendor_exchange(std::uint32_t costDefinitionHash,
+                                           std::int32_t costQuantity,
+                                           std::span<const ProfileExchangePayout> payouts,
+                                           PendingProfileItemAcquisition& mutation) noexcept;
 
 /** @return A copy of the active account state, read under the lock. */
 [[nodiscard]] AccountState account_snapshot() noexcept;

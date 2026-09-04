@@ -18,12 +18,20 @@ struct Settings {
     ui::runtime::Settings userInterface;
     /** Points the Client at a server outside this process. Off answers everything in process. */
     external::Settings externalServer;
+    /** Replaces stock bootflow textures that have matching DDS assets embedded in Sunrise. */
+    bool customBootflowTextures{true};
     /**
      * Releases the world-transition fade channel at the in-world step.
      * The client only releases it on the player spawn, so this covers a spawn that never runs
      * and leaves the world black. On by default.
      */
     bool fadeRelease{true};
+    /**
+     * Skips the one-time profile setup bootflow screens.
+     * Off by default: the server-authored account completion byte should drive normal behavior.
+     * Keep this only as a fallback for incomplete profile-state implementations.
+     */
+    bool skipProfileSetup{false};
     /**
      * Reports a public region as private to the region transition.
      * On, a public region loads solo. Off, it waits for a public activity host, which is the

@@ -7,6 +7,7 @@
 #include <cstdio>
 
 #include "../../core/logging/log.h"
+#include "../../middleware/encoding/bit_reader.h"
 #include "../../middleware/web_service/messages/opcode1801.h"
 #include "../../middleware/web_service/messages/opcode1821.h"
 #include "../../middleware/web_service/messages/opcode1901.h"
@@ -21,6 +22,7 @@
 #include "../../middleware/web_service/messages/opcode702.h"
 #include "../../middleware/web_service/messages/opcode801.h"
 #include "../../middleware/web_service/messages/opcode901/opcode901_codec.h"
+#include "../../middleware/web_service/messages/opcode904/opcode904_codec.h"
 #include "../../middleware/web_service/messages/opcode903.h"
 #include "../../middleware/web_service/web_service_envelope.h"
 #include "../../state/account/account_state.h"
@@ -106,6 +108,14 @@ void note_character_writeback(const middleware::web_service::Message& message) n
         state::activity::membership::note_client_writeback(request.worldState
                                                            == writeback::kInWorld);
     }
+}
+
+/** @return True when a purchase names the seasonal artifact vendor, which is answered here. */
+[[nodiscard]] bool names_artifact_vendor(const middleware::web_service::Message& message) noexcept {
+    namespace purchase_codec = middleware::web_service::messages::opcode901;
+    purchase_codec::Request purchase{};
+    return purchase_codec::parse_request(message, purchase)
+           && purchase.vendorIndex == kArtifactVendorIndex;
 }
 
 /**
@@ -248,6 +258,122 @@ bool encode_echo(const middleware::web_service::Message& message,
         message, ws::ResponseShape::generic, ws::StatusResponse{}, response, written);
 }
 
+/** Narrow semantic result from the prefix of reflected WS-701 schema 0x80807603. */
+struct ProfileSetupMarker {
+    bool present{};
+    bool completed{};
+};
+
+/** Reads the presence bit that precedes every optional WS-701 schema node. */
+[[nodiscard]] bool read_ws701_presence(middleware::encoding::bits::Reader& reader,
+                                       bool& present) noexcept {
+    std::uint64_t value = 0;
+    if (!reader.read(1, value)) {
+        return false;
+    }
+    present = value != 0;
+    return true;
+}
+
+/** Consumes one optional fixed-width field without retaining it. */
+[[nodiscard]] bool skip_ws701_optional(middleware::encoding::bits::Reader& reader,
+                                       std::size_t widthBits) noexcept {
+    bool present = false;
+    return read_ws701_presence(reader, present) && (!present || reader.skip(widthBits));
+}
+
+/**
+ * Reads only enough of WS-701 schema 0x80807603 to reach preference path 0.1.1.0.
+ *
+ * PR #71 maps that first preference scalar as the one-bit profile-setup marker. Everything after
+ * it belongs to the broader settings-write implementation and is deliberately left to that work.
+ * This function therefore validates the complete prefix, not the remainder of the request.
+ */
+[[nodiscard]] bool parse_profile_setup_marker(const middleware::web_service::Message& message,
+                                              ProfileSetupMarker& output) noexcept {
+    output = {};
+    if (message.opcode != middleware::web_service::messages::opcode701::kOpcode) {
+        return false;
+    }
+
+    middleware::encoding::bits::Reader reader(message.payload);
+    bool present = false;
+
+    // 0.0? client metadata.
+    if (!read_ws701_presence(reader, present)) {
+        return false;
+    }
+    if (present) {
+        // 0.0.0? [128] optional 64-bit publicity expiries.
+        bool publicityPresent = false;
+        if (!read_ws701_presence(reader, publicityPresent)) {
+            return false;
+        }
+        if (publicityPresent) {
+            for (std::size_t index = 0; index < 128; ++index) {
+                if (!skip_ws701_optional(reader, 64)) {
+                    return false;
+                }
+            }
+        }
+
+        // 0.0.1? [13] required 32-bit seen-message values.
+        bool seenMessagesPresent = false;
+        if (!read_ws701_presence(reader, seenMessagesPresent)
+            || (seenMessagesPresent && !reader.skip(13U * 32U))) {
+            return false;
+        }
+    }
+
+    // 0.1? account data.
+    bool accountPresent = false;
+    if (!read_ws701_presence(reader, accountPresent)) {
+        return false;
+    }
+    if (!accountPresent) {
+        return true;
+    }
+
+    // 0.1.0? [2] optional calibration vectors, each containing two required real32 values.
+    bool calibrationPresent = false;
+    if (!read_ws701_presence(reader, calibrationPresent)) {
+        return false;
+    }
+    if (calibrationPresent) {
+        for (std::size_t index = 0; index < 2; ++index) {
+            bool vectorPresent = false;
+            if (!read_ws701_presence(reader, vectorPresent)
+                || (vectorPresent && !reader.skip(2U * 32U))) {
+                return false;
+            }
+        }
+    }
+
+    // 0.1.1? preference record.
+    bool preferencesPresent = false;
+    if (!read_ws701_presence(reader, preferencesPresent)) {
+        return false;
+    }
+    if (!preferencesPresent) {
+        return true;
+    }
+
+    // 0.1.1.0? one-bit profile-setup marker.
+    if (!read_ws701_presence(reader, output.present)) {
+        return false;
+    }
+    if (!output.present) {
+        return true;
+    }
+
+    std::uint64_t completed = 0;
+    if (!reader.read(1, completed)) {
+        return false;
+    }
+    output.completed = completed != 0;
+    return true;
+}
+
 bool encode_resident_dependent_refusal(std::span<const std::byte> request,
                                        std::span<std::byte> response,
                                        std::size_t& written,
@@ -333,8 +459,11 @@ bool consume(std::span<const std::byte> request,
                || encode_echo(message, response, written);
     }
 
-    // Runs before the shared response-shape path, which would answer the success status.
-    if (message.opcode == middleware::web_service::messages::opcode901::kOpcode) {
+    // The artifact vendor is answered here. Every other vendor purchase falls through to the
+    // shared response-shape path, which runs the action and answers its status: an action that
+    // prepared no mutation is answered with the refused code.
+    if (message.opcode == middleware::web_service::messages::opcode901::kOpcode
+        && names_artifact_vendor(message)) {
         return purchase_artifact_mod(message, response, written, outcome)
                || refuse_purchase(message, response, written)
                || encode_echo(message, response, written);
@@ -357,6 +486,7 @@ bool consume(std::span<const std::byte> request,
     // a valid no-op heartbeat, so that one success is tracked separately from mutation presence.
     bool dispatched = true;
     bool acceptedWithoutMutation = false;
+    bool profileSetupRefused = false;
     if (message.opcode == middleware::web_service::messages::opcode1801::kOpcode) {
         claim_record(message, outcome);
     } else if (message.opcode == middleware::web_service::messages::opcode504::kOpcode) {
@@ -380,10 +510,32 @@ bool consume(std::span<const std::byte> request,
     } else if (message.opcode == middleware::web_service::messages::opcode701::kOpcode) {
         const state::SettingsUpdateDisposition disposition = mutate_settings(message, outcome);
         acceptedWithoutMutation = disposition == state::SettingsUpdateDisposition::acceptedNoChange;
+        // The completion marker is applied here. The shared status path below reports the result.
+        ProfileSetupMarker marker{};
+        const bool parsed = parse_profile_setup_marker(message, marker);
+        if (!parsed) {
+            // Preserve Sunrise's existing WS-701 success behavior outside this narrow feature.
+            // PR #71 owns complete settings-write validation and can later subsume this prefix.
+            core::log::write(core::log::Channel::server,
+                             core::log::Level::warn,
+                             "ev=ws701 stage=profile_setup result=ignored reason=prefix_parse");
+        } else if (marker.present && marker.completed) {
+            if (!state::complete_profile_setup()) {
+                profileSetupRefused = true;
+            } else {
+                core::log::write(core::log::Channel::server,
+                                 core::log::Level::info,
+                                 "ev=ws701 stage=profile_setup result=complete marker=1");
+            }
+        }
     } else if (message.opcode == kItemAcquisitionOpcode) {
         acquire_item(message, outcome);
     } else if (message.opcode == middleware::web_service::messages::opcode2400::kOpcode) {
         claim_season_pass_reward(message, outcome);
+    } else if (message.opcode == middleware::web_service::messages::opcode901::kOpcode) {
+        purchase_item(message, outcome);
+    } else if (message.opcode == middleware::web_service::messages::opcode904::kOpcode) {
+        acquire_quest(message, outcome);
     } else {
         dispatched = false;
     }
@@ -393,7 +545,7 @@ bool consume(std::span<const std::byte> request,
     middleware::web_service::ResponseShape shape{};
     resolve_response_shape(message.opcode, shape);
     middleware::web_service::StatusResponse status{};
-    if (dispatched && !prepared && !acceptedWithoutMutation) {
+    if ((dispatched && !prepared && !acceptedWithoutMutation) || profileSetupRefused) {
         status.code = kRefusedStatus;
     }
     if (!middleware::web_service::encode_response(message, shape, status, response, written)) {

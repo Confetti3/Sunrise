@@ -1,21 +1,74 @@
 #include <Windows.h>
 
 #include <array>
+#include <span>
 
 #include "../../../../core/filesystem/path.h"
+#include "../../../../core/logging/log.h"
+#include "../../../../core/settings/rule_text.h"
 #include "../../../../middleware/content/packages/reader/reader.h"
 #include "../../../../middleware/content/packages/tables/definition_index_table.h"
 #include "../../../../state/build_data/runtime.h"
 #include "../../../../state/build_data/sobjects/sobject_catalog.h"
+#include "../../../../state/build_data/vendors/vendor_catalog.h"
 #include "../../hash_names/hash_name_build.h"
 #include "../../scenarios/scenario_build.h"
 #include "../../spawn_sets/spawn_set_build.h"
+#include "../../vendors/vendor_build.h"
 #include "build.h"
 #include "internal.h"
 #include "package_socket_plug_build.h"
 
 namespace sunrise::client::content::items::packages {
 namespace {
+
+/**
+ * Reads the vendors to publish definitions for, by definition hash, from `vendor_catalog.txt`.
+ *
+ * A row position is not a stable name for a vendor and the useful ones are not all at the head of
+ * the index, so the list is authored by hash. An absent or empty file leaves the caller with the
+ * leading window it used before.
+ *
+ * @param hashes Receives the requested definition hashes.
+ * @return How many were read.
+ */
+[[nodiscard]] std::size_t read_vendor_hashes(std::span<std::uint32_t> hashes) noexcept {
+    static std::array<char, core::rule_text::kRuleTextCapacity> text{};
+    if (!core::path::read_artifact_text(L"vendor_catalog.txt", text)) {
+        return 0;
+    }
+    std::size_t count = 0;
+    core::rule_text::Cursor rules{text.data()};
+    while (count < hashes.size() && rules.seek_field()) {
+        const std::uint32_t parsed = rules.read_hex();
+        if (parsed != 0) {
+            hashes[count++] = parsed;
+        }
+    }
+    return count;
+}
+
+/**
+ * Publishes the vendor catalog, index and definitions both.
+ *
+ * `vendors::build` reads the whole index and a definition for each vendor named by hash, filling
+ * any room left from the head of the index. The names come from `vendor_catalog.txt`: a row
+ * position is not a stable name for a vendor and the useful ones are not all at the head - the
+ * Drifter is row 195, so every request against him once failed to resolve a definition that had
+ * never been read.
+ *
+ * @param source Package directory and borrowed block keys.
+ * @param scratch Block storage shared with the other content passes.
+ */
+void build_vendor_catalog(const reader::Source& source, reader::Scratch& scratch) noexcept {
+    namespace vendor_domain = state::build_data::vendors;
+    if (state::build_data::vendor_catalog_ready()) {
+        return;
+    }
+    static std::array<std::uint32_t, vendor_domain::kDefinitionCapacity> named{};
+    const std::size_t namedCount = read_vendor_hashes(named);
+    (void)content::vendors::build(source, scratch, std::span(named).first(namedCount));
+}
 
 /** @return True when every item and investment-root domain is published. */
 [[nodiscard]] bool root_domains_ready() noexcept {
@@ -46,9 +99,6 @@ bool ready() noexcept {
 
 /** Publishes the dense item table from the installed packages, once. */
 bool build() noexcept {
-    if (ready()) {
-        return true;
-    }
     static Storage storage{};
     reader::BlockKeys keys{};
     core::path::Buffer directory{};
@@ -70,6 +120,11 @@ bool build() noexcept {
         (void)content::scenarios::build(packageSource, storage.scratch);
         (void)content::spawn_sets::build(packageSource, storage.scratch);
         (void)content::hash_names::build(packageSource, storage.scratch);
+        build_vendor_catalog(packageSource, storage.scratch);
+        if (ready()) {
+            SecureZeroMemory(&keys, sizeof keys);
+            return true;
+        }
     }
     if (root_domains_ready()) {
         SecureZeroMemory(&keys, sizeof keys);

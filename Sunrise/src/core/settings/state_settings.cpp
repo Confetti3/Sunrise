@@ -264,6 +264,7 @@ bool Parser::account(state::AccountState& output) noexcept {
         return false;
     }
     bool hasPrimarySoid = false;
+    bool hasProfileSetupCompleted = false;
     bool hasSettings = false;
     bool hasDismantleRewards = false;
     bool hasRecordRewards = false;
@@ -280,6 +281,11 @@ bool Parser::account(state::AccountState& output) noexcept {
                 return false;
             }
             hasPrimarySoid = true;
+        } else if (key == "profile_setup_completed") {
+            if (hasProfileSetupCompleted || !boolean(output.profileSetupCompleted)) {
+                return false;
+            }
+            hasProfileSetupCompleted = true;
         } else if (key == "settings") {
             if (hasSettings || !account_settings(output.settings)) {
                 return false;

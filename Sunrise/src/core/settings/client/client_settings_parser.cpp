@@ -10,7 +10,9 @@ bool Parser::client_settings(client::Settings& output) noexcept {
     client::Settings candidate = output;
     bool hasUserInterface = false;
     bool hasExternalServer = false;
+    bool hasCustomBootflowTextures = false;
     bool hasFadeRelease = false;
+    bool hasSkipProfileSetup = false;
     bool hasRegionPrivate = false;
     bool hasSkipOrbitCinematicWait = false;
     bool hasSuppressPeerRelay = false;
@@ -38,11 +40,21 @@ bool Parser::client_settings(client::Settings& output) noexcept {
                 return false;
             }
             hasExternalServer = true;
+        } else if (key == "custom_bootflow_textures") {
+            if (hasCustomBootflowTextures || !boolean(candidate.customBootflowTextures)) {
+                return false;
+            }
+            hasCustomBootflowTextures = true;
         } else if (key == "fade_release") {
             if (hasFadeRelease || !boolean(candidate.fadeRelease)) {
                 return false;
             }
             hasFadeRelease = true;
+        } else if (key == "skip_profile_setup") {
+            if (hasSkipProfileSetup || !boolean(candidate.skipProfileSetup)) {
+                return false;
+            }
+            hasSkipProfileSetup = true;
         } else if (key == "region_private") {
             if (hasRegionPrivate || !boolean(candidate.regionPrivate)) {
                 return false;

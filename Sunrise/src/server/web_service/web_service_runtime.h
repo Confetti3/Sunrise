@@ -11,6 +11,7 @@
 
 #include "../../middleware/web_service/messages/opcode206.h"
 #include "../../state/runtime/runtime.h"
+#include "../../state/vendors/answered_interactions.h"
 
 namespace sunrise::server::web_service {
 
@@ -43,6 +44,14 @@ struct Outcome {
                                   std::unique_ptr<state::PendingSeasonPassReward>,
                                   std::unique_ptr<state::PendingSettingsUpdate>>;
     Mutation mutation{};
+    /**
+     * Vendor whose shown interaction this request answers once its mutation commits, or
+     * `state::vendors::kAbsentIndex`. A quest grant answers the banner that offered it, but only a
+     * committed grant does: queuez preflight or the commit's staleness guard can still drop the
+     * mutation, and an answered list that is append-only for the session would then bury a quest
+     * the player is still owed. So the answer rides the transaction to where the grant commits.
+     */
+    std::uint16_t answeredVendor{state::vendors::kAbsentIndex};
 };
 
 /** Allocates only the selected mutation outside the request's already deep stack. */

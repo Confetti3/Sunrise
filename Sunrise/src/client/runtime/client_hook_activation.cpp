@@ -39,6 +39,7 @@
 #include "../hooks/sense_chain_guard/sense_chain_guard.h"
 #include "../hooks/stall_probe/stall_probe.h"
 #include "../hooks/teleport/runtime.h"
+#include "../hooks/vendor_banner/vendor_banner_retire.h"
 #include "../hooks/world_objects/world_object_registry.h"
 #include "../patterns/registry.h"
 #include "../targets/game.h"
@@ -188,6 +189,7 @@ void clear_game_targets() noexcept {
         core::settings::get().client.stockEntityPool,
         core::settings::get().client.restockDrainedEntityPool);
     (void)hooks::retail_log::install();
+    (void)hooks::vendor_banner::install();
     (void)hooks::assert_handler::install();
     // Read-only. At a hitch it dumps every in-flight job record from the watchdog snapshot,
     // which names the job and thread the in-world freeze blocks on.

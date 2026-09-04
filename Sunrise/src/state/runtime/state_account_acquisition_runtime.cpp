@@ -126,20 +126,33 @@ bool prepare_item_acquisition(std::uint16_t collectibleIndex,
     const AccountState account = account_snapshot();
     build_data::collectibles::Definition collectible{};
     build_data::items::Definition grantedDefinition{};
+    // A vendor purchase names an item, not a collectible, so the collectible steps are skipped
+    // rather than faked. The item is still validated, just by its own hash.
+    const bool hasCollectible = collectibleIndex != build_data::collectibles::kNoCollectibleIndex;
     if (definitionHash == authored_inventory::kNoDefinitionHash || !account::valid(account)
-        || !valid_profile_inventory(account)
-        || !build_data::find_collectible_definition(collectibleIndex, collectible)
-        || collectible.itemDefinitionIndex
-               == build_data::collectibles::kUnavailableItemDefinitionIndex
-        || !build_data::find_item_definition_index(collectible.itemDefinitionIndex,
-                                                   grantedDefinition)
-        || grantedDefinition.definitionHash != definitionHash) {
+        || !valid_profile_inventory(account)) {
+        return false;
+    }
+    if (hasCollectible) {
+        if (!build_data::find_collectible_definition(collectibleIndex, collectible)
+            || collectible.itemDefinitionIndex
+                   == build_data::collectibles::kUnavailableItemDefinitionIndex
+            || !build_data::find_item_definition_index(collectible.itemDefinitionIndex,
+                                                       grantedDefinition)
+            || grantedDefinition.definitionHash != definitionHash) {
+            return false;
+        }
+    } else if (!build_data::find_item_definition_hash(definitionHash, grantedDefinition)
+               || grantedDefinition.definitionHash != definitionHash) {
         return false;
     }
 
-    AccountState chargedAccount{};
+    AccountState chargedAccount = account;
     bool profileChanged = false;
-    if (!apply_collection_materials(account, collectible, chargedAccount, profileChanged)) {
+    // Nothing is charged without a collectible: the cost lives on the collectible's material
+    // requirements, and a sale row's own cost fields are still role-open.
+    if (hasCollectible
+        && !apply_collection_materials(account, collectible, chargedAccount, profileChanged)) {
         return false;
     }
 
@@ -308,6 +321,15 @@ namespace {
                                      mutation.expectedProfileItemCount,
                                      mutation.afterProfileItems,
                                      mutation.afterProfileItemCount)
+               && build_data::find_item_definition_hash(mutation.acquiredDefinitionHash,
+                                                        definition);
+    }
+
+    if (mutation.collectibleIndex == build_data::collectibles::kNoCollectibleIndex) {
+        // The guard is that prepare and commit agree. Without a collectible they agree on there
+        // being none, which means both cost fields must still be clear.
+        build_data::items::Definition definition{};
+        return mutation.materialRequirementSetHash == 0 && mutation.materialRequirementCount == 0
                && build_data::find_item_definition_hash(mutation.acquiredDefinitionHash,
                                                         definition);
     }
@@ -684,16 +706,24 @@ bool prepare_profile_item_acquisition(std::uint16_t collectibleIndex,
     item_details::Definition detail{};
     if (definitionHash == authored_inventory::kNoDefinitionHash || !account::valid(account)
         || !valid_profile_inventory(account)
-        || !build_data::find_collectible_definition(collectibleIndex, collectible)
-        || collectible.itemDefinitionIndex
-               == build_data::collectibles::kUnavailableItemDefinitionIndex
-        || !resolve_profile_item(collectible.itemDefinitionIndex, item, detail)
+        || !build_data::find_item_definition_hash(definitionHash, item)
+        // The item resolves first, because the collectible cross-check reads it. With no
+        // collectible the item's own hash is the whole check.
+        || (collectibleIndex != build_data::collectibles::kNoCollectibleIndex
+            && (!build_data::find_collectible_definition(collectibleIndex, collectible)
+                || collectible.itemDefinitionIndex
+                       == build_data::collectibles::kUnavailableItemDefinitionIndex
+                || item.definitionIndex != collectible.itemDefinitionIndex))
+        || !resolve_profile_item(item.definitionIndex, item, detail)
         || item.definitionHash != definitionHash) {
         return false;
     }
-    AccountState chargedAccount{};
+    AccountState chargedAccount = account;
     bool materialsChanged = false;
-    if (!apply_collection_materials(account, collectible, chargedAccount, materialsChanged)) {
+    // Nothing is charged without a collectible: the cost lives on the collectible's material
+    // requirements, and a sale row's own cost fields are still role-open.
+    if (collectibleIndex != build_data::collectibles::kNoCollectibleIndex
+        && !apply_collection_materials(account, collectible, chargedAccount, materialsChanged)) {
         return false;
     }
     (void)materialsChanged;

@@ -90,10 +90,10 @@ Table<InstalledRow, kInstalledRowCapacity> g_installedRows;
                                        std::span<const SaleRow> saleRows) noexcept {
     for (std::size_t row = 0; row < definition.saleCount; ++row) {
         const SaleRow& value = saleRows[definition.saleRowOffset + row];
-        // Row +100 selects an installed row, so it is bounded before a reader strides with it.
+        // Row +100 is bounded by the installed count before any reader strides with it.
         const bool selects =
-            value.installedIndex == kAbsentInstalledIndex
-            || (value.installedIndex >= 0 && value.installedIndex < definition.installedCount);
+            value.categoryIndex == kAbsentCategoryIndex
+            || (value.categoryIndex >= 0 && value.categoryIndex < definition.installedCount);
         if (value.vendorIndex != definition.index || value.rowIndex != row || !selects) {
             return false;
         }
@@ -265,6 +265,22 @@ bool sale_rows(const Definition& definition,
         g_saleRows.rows(), definition.saleRowOffset, definition.saleCount, output, count);
 }
 
+/** Reads one sale row of one definition. */
+bool sale_row(const Definition& definition, std::size_t row, SaleRow& output) noexcept {
+    output = {};
+    if (row >= definition.saleCount) {
+        return false;
+    }
+    const std::shared_lock guard(g_lock);
+    const auto bank = g_saleRows.rows();
+    const std::size_t at = static_cast<std::size_t>(definition.saleRowOffset) + row;
+    if (at >= bank.size()) {
+        return false;
+    }
+    output = bank[at];
+    return true;
+}
+
 /** Copies the installed rows one definition owns. */
 bool installed_rows(const Definition& definition,
                     std::span<InstalledRow> output,
@@ -275,6 +291,22 @@ bool installed_rows(const Definition& definition,
                       definition.installedCount,
                       output,
                       count);
+}
+
+/** Reads one installed row of one definition. */
+bool installed_row(const Definition& definition, std::size_t row, InstalledRow& output) noexcept {
+    output = {};
+    if (row >= definition.installedCount) {
+        return false;
+    }
+    const std::shared_lock guard(g_lock);
+    const auto bank = g_installedRows.rows();
+    const std::size_t at = static_cast<std::size_t>(definition.installedRowOffset) + row;
+    if (at >= bank.size()) {
+        return false;
+    }
+    output = bank[at];
+    return true;
 }
 
 /** Copies every index row in ascending index order. */

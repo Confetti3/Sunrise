@@ -36,7 +36,7 @@ inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', '
  * 48: nodes and SObjects joined the unified cache, replacing their incomplete sidecar lifecycle.
  */
 // Upstream's format 45 and the PR's independent format 48 changes are both present.
-inline constexpr std::uint32_t kCacheFormatVersion = 58;
+inline constexpr std::uint32_t kCacheFormatVersion = 59;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */
@@ -458,7 +458,7 @@ struct VendorSaleRowRecord {
     std::uint16_t rowIndex{};
     std::uint16_t itemIndex{};
     std::uint16_t secondaryItemIndex{};
-    std::int32_t installedIndex{};
+    std::int32_t categoryIndex{};
     std::uint32_t raw104{};
     std::uint32_t raw108{};
     std::int32_t raw172{};
