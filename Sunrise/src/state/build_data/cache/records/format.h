@@ -30,7 +30,7 @@ inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', '
  * Bump it when a stored shape changes, and when the extraction filling it changes what it writes.
  * A cached row survives a code change, so a corrected walk keeps publishing the old rows.
  */
-inline constexpr std::uint32_t kCacheFormatVersion = 47;
+inline constexpr std::uint32_t kCacheFormatVersion = 48;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */
@@ -408,7 +408,7 @@ struct VendorSaleRowRecord {
     std::uint16_t rowIndex{};
     std::uint16_t itemIndex{};
     std::uint16_t secondaryItemIndex{};
-    std::int32_t installedIndex{};
+    std::int32_t categoryIndex{};
     std::uint32_t raw104{};
     std::uint32_t raw108{};
     std::int32_t raw172{};

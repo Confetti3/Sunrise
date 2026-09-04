@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cstdarg>
 #include <cstdio>
 #include <cstring>
 #include <mutex>
@@ -248,6 +249,23 @@ void write(Channel channel, Level level, std::string_view event) noexcept {
     g_writers.fetch_sub(1, std::memory_order_acq_rel);
     // Record after sink writes while the shared lifetime lock still excludes shutdown reset.
     snapshot::internal::record(channel, level, std::string_view(line.data(), snapshotLength));
+}
+
+/** Formats and emits one structured event when allowed by the channel threshold. */
+void writef(Channel channel, Level level, const char* format, ...) noexcept {
+    if (format == nullptr || !accepts(channel, level)) {
+        return;
+    }
+    std::array<char, kLineCapacity> line{};
+    va_list arguments;
+    va_start(arguments, format);
+    const int count = std::vsnprintf(line.data(), line.size(), format, arguments);
+    va_end(arguments);
+    if (count <= 0) {
+        return;
+    }
+    const std::size_t length = (std::min)(static_cast<std::size_t>(count), line.size() - 1);
+    write(channel, level, std::string_view(line.data(), length));
 }
 
 /** Formats and emits one debug event carrying a duration in the ms field. */

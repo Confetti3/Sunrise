@@ -68,12 +68,16 @@ struct CurrentActivityTransaction {
 struct ItemAcquisitionTransaction {
     state::PendingItemAcquisition pending{};
     queuez::ItemAcquisition update{};
+    /** Vendor whose shown interaction this grant answers once it commits, or `kAbsentIndex`. */
+    std::uint16_t answeredVendor{state::vendors::kAbsentIndex};
 };
 
 /** Profile acquisition and its exact account/resident QueueZ after-image. */
 struct ProfileItemAcquisitionTransaction {
     state::PendingProfileItemAcquisition pending{};
     queuez::ProfileItemAcquisition update{};
+    /** Vendor whose shown interaction this grant answers once it commits, or `kAbsentIndex`. */
+    std::uint16_t answeredVendor{state::vendors::kAbsentIndex};
 };
 
 /** Dismantle mutation and its exact QueueZ after-image. */

@@ -26,6 +26,7 @@
 #include "../../middleware/web_service/messages/opcode702.h"
 #include "../../middleware/web_service/messages/opcode801.h"
 #include "../../middleware/web_service/messages/opcode901/opcode901_codec.h"
+#include "../../middleware/web_service/messages/opcode904/opcode904_codec.h"
 #include "../../middleware/web_service/messages/opcode903.h"
 #include "../../middleware/web_service/web_service_envelope.h"
 #include "../../state/account/account_state.h"
@@ -43,8 +44,6 @@ namespace messages = middleware::web_service::messages;
 
 /** One ordinary event line carries an opcode and its fixed prefix. */
 constexpr std::size_t kOpcodeLineCapacity = 64;
-/** One refusal line carries both request indices, the clock presence, and the clock verdict. */
-constexpr std::size_t kPurchaseLineCapacity = 128;
 /** A request trace keeps enough payload to identify an item-action descriptor. */
 constexpr std::size_t kRequestPayloadTraceBytes = 192;
 /** Marks a trace that stopped at the cap, so a short hex string is not read as a short payload. */
@@ -79,51 +78,6 @@ void report_request(const middleware::web_service::Message& message) noexcept {
         length += kTruncated.size();
     }
     core::log::write(core::log::Channel::server, core::log::Level::info, {line.data(), length});
-}
-
-/**
- * Refuses one vendor purchase and answers it.
- * No award, cost or stock rule exists yet, so no purchase can succeed. The refusal must still be
- * answered, because no answer holds the head of the client's pending queue.
- * @param message Parsed purchase request.
- * @param response Response-body storage owned by the caller.
- * @param written Receives the encoded response size.
- * @return True when the refusal was encoded.
- */
-[[nodiscard]] bool refuse_purchase(const middleware::web_service::Message& message,
-                                   std::span<std::byte> response,
-                                   std::size_t& written) noexcept {
-    messages::opcode901::Request purchase;
-    const bool parsed = messages::opcode901::parse_request(message, purchase);
-    // The clock verdict is logged, never acted on. Nothing can pass while the route refuses.
-    const auto policy =
-        messages::opcode901::check_clock(purchase, core::runtime::server_clock_seconds());
-    std::array<char, kPurchaseLineCapacity> line{};
-    const int length =
-        parsed ? std::snprintf(
-                     line.data(),
-                     line.size(),
-                     "ev=ws901 stage=purchase result=refuse vendor=%d sale=%d present=%u policy=%s",
-                     static_cast<int>(purchase.vendorIndex),
-                     static_cast<int>(purchase.saleIndex),
-                     purchase.hasClock ? 1U : 0U,
-                     messages::opcode901::clock_policy_name(policy))
-               : std::snprintf(line.data(),
-                               line.size(),
-                               "ev=ws901 stage=purchase result=refuse reason=parse");
-    report_line(core::log::Level::error, line, length);
-    middleware::web_service::StatusResponse status{};
-    status.code = middleware::web_service::kRefusedStatusCode;
-    // A refused purchase grants nothing, so no Family-4 revision carries its result.
-    status.value = middleware::web_service::kNoFamily4Publication;
-    // The trailing bool drives a local action effect on the client, so it stays clear.
-    status.trailingBool = false;
-    return middleware::web_service::encode_response(
-        message,
-        middleware::web_service::ResponseShape::statusPairWithBool,
-        status,
-        response,
-        written);
 }
 
 /**
@@ -275,11 +229,8 @@ bool consume(std::span<const std::byte> request,
                || encode_echo(message, response, written);
     }
 
-    // Runs before the shared response-shape path, which would answer the success status.
-    if (message.opcode == messages::opcode901::kOpcode) {
-        return refuse_purchase(message, response, written)
-               || encode_echo(message, response, written);
-    }
+    // Vendor purchases fall through to the shared response-shape path, which runs the action and
+    // answers its status: an action that prepared no mutation is answered with the refused code.
 
     if (message.opcode == messages::opcode601::kOpcode) {
         return messages::opcode601::encode_response(message, response, written)
@@ -317,6 +268,10 @@ bool consume(std::span<const std::byte> request,
         acceptedWithoutMutation = disposition == state::SettingsUpdateDisposition::acceptedNoChange;
     } else if (message.opcode == messages::opcode1820::kOpcode) {
         acquire_item(message, outcome);
+    } else if (message.opcode == middleware::web_service::messages::opcode901::kOpcode) {
+        purchase_item(message, outcome);
+    } else if (message.opcode == middleware::web_service::messages::opcode904::kOpcode) {
+        acquire_quest(message, outcome);
     } else {
         dispatched = false;
     }

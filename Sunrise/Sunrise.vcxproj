@@ -137,6 +137,7 @@
     <ClCompile Include="src\client\hooks\graphics\renderer\graphics_renderer_device.cpp" />
     <ClCompile Include="src\middleware\web_service\messages\opcode504_codec.cpp" />
     <ClCompile Include="src\middleware\web_service\messages\opcode701\opcode701_codec.cpp" />
+    <ClCompile Include="src\middleware\web_service\messages\opcode904\opcode904_codec.cpp" />
     <ClCompile Include="src\middleware\web_service\messages\opcode903_codec.cpp" />
     <ClCompile Include="src\middleware\web_service\messages\opcode1901_codec.cpp" />
     <ClCompile Include="src\middleware\web_service\messages\opcode402_codec.cpp" />
@@ -247,6 +248,7 @@
     <ClCompile Include="src\client\hooks\infinite_ammo\infinite_ammo.cpp" />
     <ClCompile Include="src\client\input\window_focus.cpp" />
     <ClCompile Include="src\client\hooks\teleport\teleport_lifecycle.cpp" />
+    <ClCompile Include="src\client\hooks\vendor_banner\vendor_banner_retire.cpp" />
     <ClCompile Include="src\client\hooks\teleport\teleport_move.cpp" />
     <ClCompile Include="src\client\hooks\teleport\teleport_action_key.cpp" />
     <ClCompile Include="src\client\hooks\world_objects\world_object_registry.cpp" />
@@ -611,6 +613,8 @@
     <ClCompile Include="src\state\matchmaking\transactions\matchmaking_prepare.cpp" />
     <ClCompile Include="src\state\matchmaking\transactions\matchmaking_commit.cpp" />
     <ClCompile Include="src\state\runtime\equipment\configured_equipment_identity.cpp" />
+    <ClCompile Include="src\state\account\pursuit_hold.cpp" />
+    <ClCompile Include="src\state\vendors\answered_interactions.cpp" />
     <ClCompile Include="src\state\account\account_state.cpp" />
     <ClCompile Include="src\state\account\inventory\inventory_state.cpp" />
     <ClCompile Include="src\state\account\settings\settings_state.cpp" />
@@ -1195,6 +1199,7 @@
     <ClInclude Include="src\core\logging\snapshot\internal.h" />
     <ClInclude Include="src\core\logging\view\log_snapshot_view.h" />
     <ClInclude Include="src\core\filesystem\path.h" />
+    <ClInclude Include="src\core\settings\rule_text.h" />
     <ClInclude Include="src\core\filesystem\temporary_sibling.h" />
     <ClInclude Include="src\core\settings\settings.h" />
     <ClInclude Include="src\core\settings\parser.h" />
@@ -1215,6 +1220,8 @@
     <ClInclude Include="src\client\hooks\banner\banner_hook_lifecycle.h" />
     <ClInclude Include="src\middleware\web_service\messages\opcode504.h" />
     <ClInclude Include="src\middleware\web_service\messages\opcode701\opcode701_codec.h" />
+    <ClInclude Include="src\middleware\web_service\messages\opcode904\opcode904_codec.h" />
+    <ClInclude Include="src\middleware\web_service\messages\biased_field.h" />
     <ClInclude Include="src\middleware\web_service\messages\opcode903.h" />
     <ClInclude Include="src\middleware\web_service\messages\opcode1901.h" />
     <ClInclude Include="src\core\ui\busy\busy.h" />
@@ -1272,6 +1279,7 @@
     <ClInclude Include="src\client\hooks\infinite_ammo\infinite_ammo.h" />
     <ClInclude Include="src\client\input\window_focus.h" />
     <ClInclude Include="src\client\hooks\teleport\internal.h" />
+    <ClInclude Include="src\client\hooks\vendor_banner\vendor_banner_retire.h" />
     <ClInclude Include="src\client\hooks\teleport\runtime.h" />
     <ClInclude Include="src\client\hooks\world_objects\world_object_registry.h" />
     <ClInclude Include="src\client\ui\movement\movement_panel.h" />
@@ -1398,6 +1406,8 @@
     <ClInclude Include="src\state\steam\steam_state.h" />
     <ClInclude Include="src\state\matchmaking\transactions\internal.h" />
     <ClInclude Include="src\state\runtime\equipment\configured_equipment_identity.h" />
+    <ClInclude Include="src\state\account\pursuit_hold.h" />
+    <ClInclude Include="src\state\vendors\answered_interactions.h" />
     <ClInclude Include="src\state\account\account_state.h" />
     <ClInclude Include="src\state\account\inventory\inventory_state.h" />
     <ClInclude Include="src\state\account\settings\settings_state.h" />
