@@ -85,9 +85,12 @@ __declspec(noinline) bool __fastcall spawn_gate(std::int32_t datum) noexcept {
     const std::uint64_t age = state::activity::world_transition_age();
     const core::settings::client::Settings& client = core::settings::get().client;
     const bool gaveUp = age >= client.spawnHoldMs;
-    // Keep upstream's native spawn boundary: presentation readiness must never release the player
-    // before the boot flow reaches activity:in_world. Fade release is now independent of this gate.
     const bool loading = transitioning && !gaveUp && client.holdSpawn;
+    // Release only on arrival. The step-37 exit re-arms the fade unless one is already up, and
+    // nothing polls this gate after the spawn, so an early release leaves a fade nobody clears.
+    if (phase == state::activity::WorldPhase::arrived) {
+        release_world_fade();
+    }
     if (!allowed && transitioning) {
         report_spawn_refusal(datum, phase, age);
     }

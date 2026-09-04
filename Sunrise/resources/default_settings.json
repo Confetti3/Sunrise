@@ -35,6 +35,7 @@
       "config_guid": "d2legacy-0000-0000-0000-000000000001"
     },
     "suppress_peer_relay": true,
+    "fade_release": true,
     "region_private": false,
     "pin_replicated_record": true,
     "hold_spawn": true,

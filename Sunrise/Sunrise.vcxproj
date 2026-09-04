@@ -274,6 +274,7 @@
     <ClCompile Include="src\client\hooks\bootflow\profile_setup_skip.cpp" />
     <ClCompile Include="src\client\hooks\bootflow\world_step.cpp" />
     <ClCompile Include="src\client\hooks\bootflow\spawn_hold.cpp" />
+    <ClCompile Include="src\client\hooks\bootflow\fade_release.cpp" />
     <ClCompile Include="src\client\hooks\bootflow\spawn\spawn_gate_probe.cpp" />
     <ClCompile Include="src\client\hooks\bootflow\spawn\spawn_gate_targets.cpp" />
     <ClCompile Include="src\client\hooks\bootflow\spawn\spawn_gate_record_dump.cpp" />

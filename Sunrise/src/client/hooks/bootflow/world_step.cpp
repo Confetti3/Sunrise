@@ -26,7 +26,7 @@ constexpr auto kStepSignature = signature<signature_length(kStepSignatureText)>(
 
 /** First step that loads the map with no player in it yet. */
 constexpr std::int32_t kActivityLoadFirst = 33;
-/** Native `activity:in_world`; upstream releases the spawn hold on this step. */
+/** `activity:in_world`. The fade is armed by then, so a spawn now releases it. */
 constexpr std::int32_t kInWorld = 38;
 /** No step has been published. */
 constexpr std::int32_t kNoStep = -1;
@@ -56,17 +56,20 @@ std::atomic_uint64_t g_publishedSliceSetTick{0};
 
 /** Publishes the client's own boot-flow step. */
 void poll_world_step() noexcept {
-    const std::int32_t step = read_step();
-    g_publishedStep.store(step, std::memory_order_relaxed);
+    g_publishedStep.store(read_step(), std::memory_order_relaxed);
     g_publishedTick.store(GetTickCount64(), std::memory_order_release);
 }
 
 /** Publishes the client's current local slice-set index. */
 void poll_current_slice_set() noexcept {
     const std::int32_t index = spawn::sample_current_slice_set();
-    // A normal z-leg changes slice sets while the player remains in the same destination. It must
-    // not re-arm the destination-entry fade: public-area handoffs would otherwise consume a new
-    // fade release even though no fresh world entry occurred. Step 33 owns entry arming.
+    const std::int32_t previous = g_publishedSliceSet.load(std::memory_order_relaxed);
+    // A slice-set change is a world replacement whose transition arms a fresh fade, and a
+    // teleport never passes the off-destination step that re-arms the release. Re-arm here or
+    // the new world stays black behind the spent one-shot.
+    if (index >= 0 && previous >= 0 && index != previous) {
+        rearm_fade_release();
+    }
     g_publishedSliceSet.store(index, std::memory_order_relaxed);
     g_publishedSliceSetTick.store(GetTickCount64(), std::memory_order_release);
 }
@@ -106,6 +109,9 @@ void observe_world_step() noexcept {
         phase = state::activity::WorldPhase::arrived;
     } else if (step >= kActivityLoadFirst && step < kInWorld) {
         phase = state::activity::WorldPhase::transitioning;
+    } else {
+        // Off a destination, so the next load is a fresh arming and logs its own release line.
+        rearm_fade_release();
     }
     state::activity::note_world_phase(phase);
 }

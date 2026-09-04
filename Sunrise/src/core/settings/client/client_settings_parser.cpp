@@ -10,6 +10,7 @@ bool Parser::client_settings(client::Settings& output) noexcept {
     client::Settings candidate = output;
     bool hasUserInterface = false;
     bool hasExternalServer = false;
+    bool hasFadeRelease = false;
     bool hasRegionPrivate = false;
     bool hasSkipOrbitCinematicWait = false;
     bool hasSuppressPeerRelay = false;
@@ -34,6 +35,11 @@ bool Parser::client_settings(client::Settings& output) noexcept {
                 return false;
             }
             hasExternalServer = true;
+        } else if (key == "fade_release") {
+            if (hasFadeRelease || !boolean(candidate.fadeRelease)) {
+                return false;
+            }
+            hasFadeRelease = true;
         } else if (key == "region_private") {
             if (hasRegionPrivate || !boolean(candidate.regionPrivate)) {
                 return false;

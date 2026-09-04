@@ -19,6 +19,12 @@ struct Settings {
     /** Points the Client at a server outside this process. Off answers everything in process. */
     external::Settings externalServer;
     /**
+     * Releases the world-transition fade channel at the in-world step.
+     * The client only releases it on the player spawn, so this covers a spawn that never runs
+     * and leaves the world black. On by default.
+     */
+    bool fadeRelease{true};
+    /**
      * Reports a public region as private to the region transition.
      * On, a public region loads solo. Off, it waits for a public activity host, which is the
      * route to the citizen join. A forced destination loads solo either way.

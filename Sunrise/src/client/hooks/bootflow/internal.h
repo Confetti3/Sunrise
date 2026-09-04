@@ -99,4 +99,23 @@ void observe_world_step() noexcept;
 /** Detaches the spawn hold. */
 void uninstall_spawn_hold() noexcept;
 
+/**
+ * Finds the world-transition fade release and its manager object.
+ * Nothing is detoured: both are called, so a miss leaves the feature off, not the client changed.
+ * @return True when both targets were found.
+ */
+[[nodiscard]] bool install_fade_release() noexcept;
+
+/** Clears the fade release it found. */
+void uninstall_fade_release() noexcept;
+
+/**
+ * Releases the world-transition fade channel.
+ * The spawn gate owns the timing. Does nothing unless `client.fade_release` is set.
+ */
+void release_world_fade() noexcept;
+
+/** Re-arms the one line the release logs, so the next load reports its own. */
+void rearm_fade_release() noexcept;
+
 } // namespace sunrise::client::hooks::bootflow
