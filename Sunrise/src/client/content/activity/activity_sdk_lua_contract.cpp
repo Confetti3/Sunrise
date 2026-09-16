@@ -49,6 +49,7 @@ bool render_contract_files(const Source& source, Bundle& output) noexcept {
                  {"actor_sequence_tables", number(source.actorSequenceTables.size())},
                  {"actor_sequence_entries", number(source.actorSequenceEntries.size())},
                  {"actor_sequence_bindings", number(source.actorSequenceBindings.size())},
+                 {"authored_scene_event_keys", number(source.authoredSceneEventKeys.size())},
              })},
         });
         if (!render_json(manifest, 0, output.manifestJson)) {
@@ -360,6 +361,7 @@ local EventKind = {
 ---@field activate fun(self: SunriseScene, args: {spawn: boolean?}?): SunriseRequestKey
 ---@field stop fun(self: SunriseScene, args: table?): SunriseRequestKey
 ---@field send_event fun(self: SunriseScene, args: {key: integer}): SunriseRequestKey
+---@field event_keys integer[]|nil
 
 ---@class SunriseTaskTarget
 ---@field id string
