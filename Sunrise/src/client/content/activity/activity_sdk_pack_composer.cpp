@@ -718,7 +718,7 @@ link_text(const StringLinker& linker, const Text& input, format::StringRef& outp
     }
     for (const authored_scene_inventory::DirectiveElement& row : authoredScenes.directiveElements) {
         if (!keep_legacy(linker, row.id) || !keep_legacy(linker, row.title)
-            || !keep_legacy(linker, row.description)) {
+            || !keep_legacy(linker, row.description) || !keep_legacy(linker, row.progress)) {
             return false;
         }
     }

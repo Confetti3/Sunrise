@@ -115,6 +115,19 @@ inline constexpr std::uint32_t kOccupancyAuthSchema = 0x80809532U;
 inline constexpr std::uint32_t kDirectiveSlotType = 68U;
 inline constexpr std::uint32_t kDirectiveComponentClass = 0x80804F53U;
 inline constexpr std::uint32_t kDirectiveAuthSchema = 0x80804F67U;
+/** Packed directive table layout; only the counter bit of an element's flag word is named. */
+inline constexpr std::uint32_t kDirectiveTableClass = 0x80804F72U;
+inline constexpr std::uint32_t kDirectiveEntryArrayOffset = 0x8U;
+inline constexpr std::uint32_t kDirectiveEntryClass = 0x80804F74U;
+inline constexpr std::uint32_t kDirectiveEntrySize = 0x28U;
+inline constexpr std::uint32_t kDirectiveEntryElementsOffset = 0x18U;
+inline constexpr std::uint32_t kDirectiveElementClass = 0x80804F76U;
+inline constexpr std::uint32_t kDirectiveElementPackedSize = 0x24U;
+inline constexpr std::uint32_t kDirectiveElementTitleOffset = 0x0U;
+inline constexpr std::uint32_t kDirectiveElementDescriptionOffset = 0x8U;
+inline constexpr std::uint32_t kDirectiveElementProgressOffset = 0x10U;
+inline constexpr std::uint32_t kDirectiveElementFlagsOffset = 0x20U;
+inline constexpr std::uint32_t kDirectiveElementCounter = 0x1U;
 /** Exact generated slot tuple and descriptor field for authored dialogue. */
 inline constexpr std::uint32_t kDialogueSlotType = 53U;
 inline constexpr std::uint32_t kDialogueComponentClass = 0x80804F4BU;
@@ -434,7 +447,7 @@ inline constexpr std::size_t kAuthoredSceneEventKeySize = 40;
 inline constexpr std::size_t kAuthoredSceneSquadEdgeSize = 40;
 inline constexpr std::size_t kTaskTargetSize = 44;
 inline constexpr std::size_t kDialogueCueTextSize = 36;
-inline constexpr std::size_t kDirectiveElementSize = 56;
+inline constexpr std::size_t kDirectiveElementSize = 76;
 inline constexpr std::size_t kBehaviorProgramSize = 28;
 inline constexpr std::size_t kBehaviorInputSize = 36;
 inline constexpr std::size_t kBehaviorChannelWriteSize = 16;
@@ -1257,7 +1270,7 @@ struct DialogueCueText final {
     std::uint32_t stringHash{};
 };
 
-/** One bounded authored type-68 HUD element with its exact title and description fields. */
+/** One bounded authored type-68 HUD element; an absent field is empty with zero source tags. */
 struct DirectiveElement final {
     StringRef id{};
     StringRef title{};
@@ -1270,6 +1283,10 @@ struct DirectiveElement final {
     std::uint32_t titleStringHash{};
     std::uint32_t descriptionContainerTag{};
     std::uint32_t descriptionStringHash{};
+    StringRef progress{};
+    std::uint32_t progressContainerTag{};
+    std::uint32_t progressStringHash{};
+    std::uint32_t flags{};
 };
 
 /** One installed compiled behavior root and its complete local channel-edge ranges. */

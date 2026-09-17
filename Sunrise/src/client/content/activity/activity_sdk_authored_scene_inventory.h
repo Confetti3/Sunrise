@@ -88,11 +88,12 @@ struct DialogueCueText final {
     std::uint32_t stringHash{};
 };
 
-/** One exact type-68 HUD element and its two authored localized fields. */
+/** One exact type-68 HUD element and its authored localized fields; absent ones stay empty. */
 struct DirectiveElement final {
     Text id{};
     Text title{};
     Text description{};
+    Text progress{};
     std::uint32_t slotIndex{};
     std::uint32_t nameHash{};
     std::int32_t elementIndex{};
@@ -101,6 +102,9 @@ struct DirectiveElement final {
     std::uint32_t titleStringHash{};
     std::uint32_t descriptionContainerTag{};
     std::uint32_t descriptionStringHash{};
+    std::uint32_t progressContainerTag{};
+    std::uint32_t progressStringHash{};
+    std::uint32_t flags{};
 };
 
 /** Scene-owned descriptor facts retain a complete source universe per selected object. */

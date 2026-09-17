@@ -711,8 +711,12 @@ translate_native_rows(const Inputs& inputs, const detail::StringResolver& linker
         target.titleStringHash = input.titleStringHash;
         target.descriptionContainerTag = input.descriptionContainerTag;
         target.descriptionStringHash = input.descriptionStringHash;
+        target.progressContainerTag = input.progressContainerTag;
+        target.progressStringHash = input.progressStringHash;
+        target.flags = input.flags;
         if (!link_text(linker, input.id, target.id) || !link_text(linker, input.title, target.title)
-            || !link_text(linker, input.description, target.description)) {
+            || !link_text(linker, input.description, target.description)
+            || !link_text(linker, input.progress, target.progress)) {
             return false;
         }
     }

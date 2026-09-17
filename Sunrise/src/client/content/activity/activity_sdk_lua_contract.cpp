@@ -315,8 +315,18 @@ local EventKind = {
 ---@field transition any Generated device transition value.
 ---@field snap? boolean Jump to the end value instead of moving.
 
+---@class SunriseDirective
+---@field id string
+---@field slot_row integer
+---@field name_hash integer
+---@field element integer
+---@field title string
+---@field description string Empty when the element was authored without one.
+---@field progress string|nil Label shown before the counter, when authored.
+---@field counter boolean|nil True when the HUD shows the lane's progress values.
+
 ---@class SunriseDirectiveArguments
----@field directive table Generated mission directive declaration.
+---@field directive SunriseDirective Generated mission directive declaration.
 ---@field state? integer Defaults to 0, the native enter state.
 ---@field audience? SunriseSlot Authored type-70 engagement sensor for the mission banner.
 ---@field navpoint? SunriseSlot Authored type-47 navigation marker.
@@ -410,6 +420,7 @@ local EventKind = {
 ---@field TaskGroup table<string, table<string, SunriseCombatTaskGroup>>
 ---@field ActorAbility table<string, table<string, table<string, SunriseActorAbility>>>
 ---@field TriggerVolume table<string, SunriseTriggerVolume>
+---@field Directive table<string, SunriseDirective>
 
 ---@class SunriseActivity
 ---@field client_teleport_reset integer
