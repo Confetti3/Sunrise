@@ -162,20 +162,29 @@ constexpr std::uint32_t kAbilityTargetComponentClass = 0x80807D9BU;
             return false;
         }
     }
+    const format::DirectiveElement* priorElement = nullptr;
     for (const format::DirectiveElement& row : catalog.directive_elements()) {
         // An authored field has both source tags; an absent one has neither.
         const bool descriptionPaired =
             (row.descriptionContainerTag == 0) == (row.descriptionStringHash == 0);
         const bool progressPaired =
             (row.progressContainerTag == 0) == (row.progressStringHash == 0);
+        // Slot, name hash then element order, without repeats, backs the per-slot range lookup
+        // and makes every (slot, name hash, element) identity unique.
         if (row.slotIndex >= slots.size()
             || slots[row.slotIndex].slotType != format::kDirectiveSlotType || row.elementIndex < 0
             || static_cast<std::uint32_t>(row.elementIndex) >= row.elementCount
             || row.titleContainerTag == 0 || row.titleStringHash == 0 || !descriptionPaired
             || !progressPaired
-            || (row.descriptionContainerTag == 0 && row.progressContainerTag == 0)) {
+            || (row.descriptionContainerTag == 0 && row.progressContainerTag == 0)
+            || (priorElement != nullptr
+                && std::tie(row.slotIndex, row.nameHash, row.elementIndex)
+                       <= std::tie(priorElement->slotIndex,
+                                   priorElement->nameHash,
+                                   priorElement->elementIndex))) {
             return false;
         }
+        priorElement = &row;
     }
     return true;
 }

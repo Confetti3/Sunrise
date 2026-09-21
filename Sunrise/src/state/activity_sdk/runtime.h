@@ -511,6 +511,9 @@ slot_authored_scene_resources(const Catalog& catalog, const format::Slot& slot) 
 /** Returns all exact same-object squad edges owned by one type-43 slot. */
 [[nodiscard]] std::span<const format::AuthoredSceneSquadEdge>
 slot_authored_scene_squad_edges(const Catalog& catalog, const format::Slot& slot) noexcept;
+/** Returns every HUD element of one type-68 slot, in name hash then element order. */
+[[nodiscard]] std::span<const format::DirectiveElement>
+slot_directive_elements(const Catalog& catalog, const format::Slot& slot) noexcept;
 /** Returns the event keys of one type-43 slot's graph, in gate order. */
 [[nodiscard]] std::span<const format::AuthoredSceneEventKey>
 slot_authored_scene_event_keys(const Catalog& catalog, const format::Slot& slot) noexcept;

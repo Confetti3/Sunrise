@@ -528,7 +528,6 @@ void draw_directives(const sdk::BoundView& view, const mission::Snapshot& snapsh
     const sdk::Catalog& catalog = *view.catalog;
     const auto occurrences = catalog.occurrences();
     const auto objects = catalog.objects();
-    const auto slots = catalog.slots();
     const std::string_view query = search_text();
     std::size_t rows = 0;
     for (std::uint32_t occurrenceRow = 0; occurrenceRow < occurrences.size(); ++occurrenceRow) {
@@ -538,85 +537,93 @@ void draw_directives(const sdk::BoundView& view, const mission::Snapshot& snapsh
             || occurrence.objectIndex >= objects.size()) {
             continue;
         }
-        for (const sdk::format::DirectiveElement& directive : catalog.directive_elements()) {
-            if (directive.slotIndex >= slots.size()
-                || slots[directive.slotIndex].objectIndex != occurrence.objectIndex) {
+        for (const sdk::format::Slot& slot :
+             sdk::object_slots(catalog, objects[occurrence.objectIndex])) {
+            if (slot.slotType != sdk::format::kDirectiveSlotType) {
                 continue;
             }
-            const std::string_view title = display_text(catalog, directive.title);
-            const std::string_view description = display_text(catalog, directive.description);
-            const std::string_view progress = display_text(catalog, directive.progress);
-            const std::string_view id = display_text(catalog, directive.id);
-            if (!query.empty() && !contains_folded(title, query)
-                && !contains_folded(description, query) && !contains_folded(progress, query)
-                && !contains_folded(id, query)) {
+            const auto elements = sdk::slot_directive_elements(catalog, slot);
+            if (elements.empty()) {
                 continue;
             }
-            ++rows;
+            const std::uint32_t slotRow = global_slot_row(catalog, slot);
+            if (slotRow == sdk::format::kAbsentIndex) {
+                continue;
+            }
+            // The slot resolves once; validation keeps every element row unique inside it.
             const mission::SceneStatus available =
-                mission::directive_availability(view,
-                                                occurrenceRow,
-                                                directive.slotIndex,
-                                                directive.nameHash,
-                                                directive.elementIndex);
-            ImGui::PushID(static_cast<int>(occurrenceRow));
-            ImGui::PushID(static_cast<int>(directive.slotIndex));
-            ImGui::PushID(static_cast<int>(directive.nameHash));
-            ImGui::PushID(directive.elementIndex);
-            ImGui::Text("%.*s", print_length(title), title.data());
-            if (!description.empty()) {
-                ImGui::TextWrapped("%.*s", print_length(description), description.data());
-            }
-            if (!progress.empty()) {
-                ImGui::TextWrapped("%.*s%s",
-                                   print_length(progress),
-                                   progress.data(),
-                                   (directive.flags & sdk::format::kDirectiveElementCounter) != 0
-                                       ? " (counter)"
-                                       : "");
-            }
-            ImGui::TextDisabled("hash %08X  element %d  slot %u",
-                                static_cast<unsigned>(directive.nameHash),
-                                directive.elementIndex,
-                                static_cast<unsigned>(directive.slotIndex));
-            ImGui::BeginDisabled(available != mission::SceneStatus::ready);
-            const auto apply = [&](const char* label, std::int8_t state, bool visible) {
-                if (ImGui::Button(label)) {
-                    g_directiveActionOccurrence = occurrenceRow;
-                    g_directiveActionSlot = directive.slotIndex;
-                    g_directiveActionHash = directive.nameHash;
-                    g_directiveActionElement = directive.elementIndex;
-                    g_directiveActionStatus = mission::set_directive(view,
-                                                                     occurrenceRow,
-                                                                     directive.slotIndex,
-                                                                     directive.nameHash,
-                                                                     directive.elementIndex,
-                                                                     state,
-                                                                     visible);
-                    g_hasDirectiveActionStatus = true;
+                mission::directives_availability(view, occurrenceRow, slotRow);
+            for (const sdk::format::DirectiveElement& directive : elements) {
+                const std::string_view title = display_text(catalog, directive.title);
+                const std::string_view description = catalog.string(directive.description);
+                const std::string_view progress = catalog.string(directive.progress);
+                const std::string_view id = display_text(catalog, directive.id);
+                if (!query.empty() && !contains_folded(title, query)
+                    && !contains_folded(description, query) && !contains_folded(progress, query)
+                    && !contains_folded(id, query)) {
+                    continue;
                 }
-            };
-            apply("Show", 0, true);
-            ImGui::SameLine();
-            apply("Complete", 1, true);
-            ImGui::SameLine();
-            apply("Alternate exit", 2, true);
-            ImGui::SameLine();
-            apply("Hide", 0, false);
-            ImGui::EndDisabled();
-            ImGui::SameLine();
-            ImGui::TextDisabled("%s", mission::status_name(available));
-            if (g_hasDirectiveActionStatus && g_directiveActionOccurrence == occurrenceRow
-                && g_directiveActionSlot == directive.slotIndex
-                && g_directiveActionHash == directive.nameHash
-                && g_directiveActionElement == directive.elementIndex) {
-                ImGui::TextDisabled("last: %s", mission::status_name(g_directiveActionStatus));
+                ++rows;
+                ImGui::PushID(static_cast<int>(occurrenceRow));
+                ImGui::PushID(static_cast<int>(slotRow));
+                ImGui::PushID(static_cast<int>(directive.nameHash));
+                ImGui::PushID(directive.elementIndex);
+                ImGui::Text("%.*s", print_length(title), title.data());
+                if (!description.empty()) {
+                    ImGui::TextWrapped("%.*s", print_length(description), description.data());
+                }
+                if (!progress.empty()) {
+                    ImGui::TextWrapped("%.*s%s",
+                                       print_length(progress),
+                                       progress.data(),
+                                       (directive.flags & sdk::format::kDirectiveElementCounter)
+                                               != 0
+                                           ? " (counter)"
+                                           : "");
+                }
+                ImGui::TextDisabled("hash %08X  element %d  slot %u",
+                                    static_cast<unsigned>(directive.nameHash),
+                                    directive.elementIndex,
+                                    static_cast<unsigned>(slotRow));
+                ImGui::BeginDisabled(available != mission::SceneStatus::ready);
+                const auto apply = [&](const char* label, std::int8_t state, bool visible) {
+                    if (ImGui::Button(label)) {
+                        g_directiveActionOccurrence = occurrenceRow;
+                        g_directiveActionSlot = slotRow;
+                        g_directiveActionHash = directive.nameHash;
+                        g_directiveActionElement = directive.elementIndex;
+                        g_directiveActionStatus = mission::set_directive(view,
+                                                                         occurrenceRow,
+                                                                         slotRow,
+                                                                         directive.nameHash,
+                                                                         directive.elementIndex,
+                                                                         state,
+                                                                         visible);
+                        g_hasDirectiveActionStatus = true;
+                    }
+                };
+                apply("Show", 0, true);
+                ImGui::SameLine();
+                apply("Complete", 1, true);
+                ImGui::SameLine();
+                apply("Alternate exit", 2, true);
+                ImGui::SameLine();
+                apply("Hide", 0, false);
+                ImGui::EndDisabled();
+                ImGui::SameLine();
+                ImGui::TextDisabled("%s", mission::status_name(available));
+                if (g_hasDirectiveActionStatus && g_directiveActionOccurrence == occurrenceRow
+                    && g_directiveActionSlot == slotRow
+                    && g_directiveActionHash == directive.nameHash
+                    && g_directiveActionElement == directive.elementIndex) {
+                    ImGui::TextDisabled("last: %s", mission::status_name(g_directiveActionStatus));
+                }
+                ImGui::Separator();
+                ImGui::PopID();
+                ImGui::PopID();
+                ImGui::PopID();
+                ImGui::PopID();
             }
-            ImGui::Separator();
-            ImGui::PopID();
-            ImGui::PopID();
-            ImGui::PopID();
-            ImGui::PopID();
         }
     }
     if (rows == 0) {
