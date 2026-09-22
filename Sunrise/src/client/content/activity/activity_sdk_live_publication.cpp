@@ -10,6 +10,7 @@
 #include <string_view>
 
 #include "activity_sdk_tree_publication.h"
+#include "core/runtime/host_environment.h"
 
 namespace sunrise::client::content::activity::sdk_generation::live_publication {
 namespace {
@@ -113,8 +114,7 @@ constexpr std::size_t kDrivePrefixLength = 3;
     if (ancestry != Ancestry::driveRoot) {
         return false;
     }
-    const HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
-    return ntdll != nullptr && GetProcAddress(ntdll, "wine_get_version") != nullptr;
+    return core::runtime::is_wine();
 }
 
 /** Resolves one existing ordinary directory and rejects reparse points in every ancestor. */
