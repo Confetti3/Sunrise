@@ -4,7 +4,6 @@
 #include <cstdint>
 #include <optional>
 #include <span>
-#include <type_traits>
 #include <vector>
 
 #include "../../middleware/bap/activity_message/cinematic_incident.h"
@@ -529,7 +528,9 @@ struct Event final {
     std::int32_t triggerValue{};
     /** True when the whole watched set is inside the volume. */
     bool triggerAll{};
+    /** For triggerState events: whether a level was reported, and the volume's occupancy. */
     bool triggerAvailable{}, triggerOccupied{};
+    /** trigger_observation::Continuity of the report, for triggerState events. */
     std::uint8_t triggerContinuity{};
     /** Health and shield fractions, for damageState events. Negative until published. */
     float damageHealth{-1.0F};
@@ -574,11 +575,12 @@ struct Event final {
     bool squadObjectiveCostQualified{};
     /** Per-slot member counts the client published, for squadState events. */
     std::array<std::int32_t, kSquadSlotCapacity> squadSlotCounts{};
-    /** Native Sense .0 echo of the squad Auth .6 spawn generation, not the wire counter. */
+    /** Spawn generation the squad Sense echoes from its placement Auth; not the record counter. */
     std::int32_t squadSpawnGeneration{};
     bool squadHasSpawnGeneration{};
+    /** The alive counts were reported; otherwise they are zero placeholders. */
     bool squadPopulationAvailable{};
-    /** A backwards report counter requires retiring any existing objective job. */
+    /** The report counter went backwards or the spawn generation changed: a new registration. */
     bool squadRegistrationReset{};
     /** Alive members the client published. Six bits on the wire, so 0 through 63. */
     std::int32_t squadAliveCount{};
@@ -594,12 +596,12 @@ struct Event final {
     std::uint8_t squadSlotOrdinal{};
     /** Client flag written on its actor death or removal path. The meaning is unproved. */
     bool squadRemovalFlag{};
-    /** The raw flag is known for this exact observation lifetime; absence is not false. */
+    /** The removal flag was reported for this spawn lifetime. */
     bool squadHasRemovalFlag{};
-    /** Generic msg-6 record counter plus one; not a squad/actor lifetime identity. */
+    /** Msg-6 record counter plus one; not a squad or actor lifetime identity. */
     std::uint32_t senseGenerationPlusOne{};
     bool hasSenseGeneration{};
-    /** First/replacement observation reconciles current state instead of proving a spawn/death. */
+    /** A baseline report: it restates current levels and never proves a death. */
     bool initialObservation{};
     /** Authored entry index and spawn-mask words, for objectState events. */
     std::int32_t objectEntryIndex{};
@@ -873,15 +875,15 @@ struct PendingIncident final {
     std::uint64_t revision{};
 };
 
-/** Owned source selection for a neutral-prefix type-26 attachment, never a raw actor handle. */
+/** The squad a type-26 attachment follows, and the SDK and placement lifetime it was chosen in. */
 struct SquadAttachmentOwnership final {
     std::array<std::byte, 32> sdkBuildSha256{};
-    /** Authenticated catalog data, independent of the source-derived SDK identity. */
+    /** Catalog payload digest; an update must match the one the retained attachment used. */
     std::array<std::byte, 32> sdkPayloadSha256{};
     ScriptableTarget source{};
+    /** Placement spawn generation of the source squad. */
     std::uint64_t sourceSpawnGeneration{};
-    /** Compare-and-swap revision of the last delivered attachment body, zero for a fresh claim. */
-    std::uint64_t previousRevision{};
+    /** True to select the source, false to clear the selection. */
     bool active{};
     bool operator==(const SquadAttachmentOwnership&) const = default;
 };
@@ -916,9 +918,9 @@ struct PendingScriptableOverride final {
     /** Activity lifetime state for a lifetime request; ignored by every other kind. */
     std::uint8_t lifetimeState{kDefaultLifetimeState};
     bool sdkCompiled{};
+    /** Present only for a type-26 attachment written through set_squad_attachment. */
     std::optional<SquadAttachmentOwnership> squadAttachment{};
-    /** Spawn generation of the placement a squadObjective row replaced on this ClientRef; zero
-     * otherwise. */
+    /** For a squadObjective row: spawn generation of the placement it replaced. Zero otherwise. */
     std::uint64_t squadSpawnGeneration{};
 };
 
@@ -977,9 +979,8 @@ enum class IngressRefusal : std::uint8_t {
 };
 
 /**
- * Reports which ingress gate declined, for the skip diagnostic.
- * Every name keeps the `host_ingress_refused` prefix the earlier single reason used, so a search
- * for the collapsed name still finds all of them.
+ * Names the ingress gate that declined, for the skip diagnostic. Every name starts with
+ * `host_ingress_refused`.
  * @param refusal Gate reported by one failed submission.
  * @return Stable reason name.
  */

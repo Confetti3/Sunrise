@@ -851,7 +851,7 @@ private:
         const bool nestedSchemaKind =
             nested || command || entityReference || schemaReference || custom;
         const bool unknownOptional = field.presence != 0 && !nestedSchemaKind && !selected
-                                     && !zeroBit && field.typeCode != 35
+                                     && !zeroBit && !is_raw64(field.typeCode)
                                      && storage_width(field.typeCode) == 0;
         const bool structural = nestedSchemaKind || selected || zeroBit || unknownOptional;
         if (!nestedSchemaKind && field.nestedSchemaRow != runtime::kAbsentRuntimeRow) {

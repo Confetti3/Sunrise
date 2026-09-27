@@ -500,8 +500,8 @@ real_value(std::uint64_t raw, std::uint8_t width, std::uint32_t maximumBits) noe
     return NativeStatus::complete;
 }
 /**
- * The observed engagement list is empty. Nonempty custom35 elements remain unsupported until
- * their native codec is established; a storage size is not a wire width.
+ * Decodes the engagement body. Only an empty element list is supported: the element codec is
+ * unknown, and its storage size says nothing about its wire width.
  */
 [[nodiscard]] NativeStatus decode_engagement(Reader& reader, Values& values) noexcept {
     constexpr std::uint64_t capacity = 16;
@@ -522,7 +522,7 @@ real_value(std::uint64_t raw, std::uint8_t width, std::uint32_t maximumBits) noe
                : NativeStatus::malformed;
 }
 
-/** Build86657's attachment Sense has three required s32 counters and one bool. */
+/** Decodes the type-26 attachment body: three required signed 32-bit counters, then one flag. */
 [[nodiscard]] NativeStatus decode_attachment(Reader& reader, Values& values) noexcept {
     for (std::uint16_t ordinal = 0; ordinal < 3; ++ordinal) {
         if (!read_signed(reader,

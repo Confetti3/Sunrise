@@ -371,9 +371,9 @@ bool stage_entity_baseline_mutation(const CompositeEntityCodecContext& context,
         }
         return context.registry->slots[slot];
     };
-    // The native anchor pass (0x141713250) runs before its remove pass: an entity that receives a
-    // record detaches to root every descendant that received none in the same batch. A parent sent
-    // as a direct element therefore loses its children, and they outlive its removal as roots.
+    // The client's anchor pass runs before its remove pass: an entity that receives a record
+    // detaches to root every descendant that received none in the same batch. A parent sent as a
+    // direct element therefore loses its children, and they outlive its removal as roots.
     std::bitset<kMaximumEntitySlot + 1U> recorded{};
     for (std::size_t index = 0; index < count; ++index) {
         if (!candidate.ignoredRecordMask.test(index)) {
@@ -385,15 +385,15 @@ bool stage_entity_baseline_mutation(const CompositeEntityCodecContext& context,
         if (recorded.test(slot) || !retained[slot].occupied || !retained[slot].anchorPresent) {
             continue;
         }
-        // The native walk detaches a stale node and does not descend into it, so a stale node's own
-        // subtree leaves with it: only the direct parent's record matters.
+        // The walk detaches such a child without descending into it, so the child's own subtree
+        // moves with it: only the direct parent's record matters.
         const EntityToken parent = retained[slot].anchor;
-        bool stale = false;
+        bool detach = false;
         if (recorded.test(parent.slot)) {
             const auto& staged = current_slot(parent.slot);
-            stale = staged.occupied && staged.incarnation == parent.incarnation;
+            detach = staged.occupied && staged.incarnation == parent.incarnation;
         }
-        if (!stale) {
+        if (!detach) {
             continue;
         }
         if (changes == kEntityBatchCapacity) {

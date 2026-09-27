@@ -299,7 +299,7 @@ void report_squad_damage(const state::activity::SessionBinding& binding,
                            static_cast<float>(shield) / 1023.0F,
                            GetTickCount64());
     } else {
-        // Bounded evidence: a report that finds no mission is otherwise silent.
+        // Log the first few reports that find no mission; nothing else records them.
         static unsigned refused = 0;
         if (refused < 8) {
             ++refused;
@@ -385,6 +385,7 @@ void clear_instance(RuntimeInstance& instance, bool clearPending) noexcept {
     instance.objectInteractionObservations = {};
     instance.objectObservationHeldRegion = -1;
     instance.combatantDamageObservations = {};
+    instance.entityDamageObservations = {};
     instance.deviceObservations = {};
     instance.sceneObservations = {};
     instance.objectiveObservations = {};
@@ -431,6 +432,7 @@ void accept_mission_state(RuntimeInstance& instance,
         instance.ghostObservations = {};
         instance.damageObservations = {};
         instance.combatantDamageObservations = {};
+        instance.entityDamageObservations = {};
         instance.deviceObservations = {};
         instance.objectInteractionObservations = {};
         instance.actorPathObservations = {};

@@ -93,8 +93,8 @@ struct SelectedSquad final {
     output = {};
     const auto slots = catalog.slots();
     const auto objects = catalog.objects();
-    if ((squad.flags & format::kSquadRunnableMask) != format::kSquadRunnableMask
-        || squad.slotIndex >= slots.size() || squad.objectIndex >= objects.size()) {
+    if (!format::squad_runnable(squad.flags) || squad.slotIndex >= slots.size()
+        || squad.objectIndex >= objects.size()) {
         return false;
     }
     const auto& slot = slots[squad.slotIndex];

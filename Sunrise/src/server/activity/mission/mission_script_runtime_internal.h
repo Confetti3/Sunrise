@@ -91,11 +91,7 @@ constexpr std::size_t kTriggerOccupancyCapacity = 32;
 constexpr std::size_t kSquadObservationCapacity = 160;
 /** Watched authored scenes retained per instance. */
 constexpr std::size_t kSceneObservationCapacity = 32;
-/**
- * Watched objective sensors retained per instance. Strange Terrain reports eleven distinct
- * sensors before the relic phase; keep route-wide headroom aligned with the other authored-watch
- * tables so later crystals cannot lose their first baseline.
- */
+/** Watched objective sensors retained per instance. */
 constexpr std::size_t kObjectiveObservationCapacity = 32;
 static_assert(kSquadObjectiveGroupCount == host::kSquadObjectiveGroupCount);
 /** Watched Ghost links, damage monitors, interactable objects and named actors per instance. */
@@ -166,6 +162,11 @@ struct ObjectInteractionObservation final {
     ObjectInteractionLevel level{};
     /** Sense sequence of the last accepted observation; the oldest row yields at capacity. */
     std::uint64_t sequence{};
+    /**
+     * Set on a row recycled at capacity: its first report cannot tell a new interaction from one
+     * the evicted row already raised, so that report only records the interaction latch.
+     */
+    bool interactionBaseline{};
     std::uint32_t registryKey{};
     std::uint32_t objectTag{};
     std::uint16_t slotIndex{};
@@ -185,13 +186,15 @@ struct GhostObservation final {
 struct SquadObservation final {
     SquadObjectiveCosts objectiveCosts{};
     std::array<std::int32_t, host::kSquadSlotCapacity> slotCounts{};
-    /** Source, sequence and spawn-echo continuity; only consecutive reports bridge absent levels.
-     */
+    /** Source, sequence and spawn-generation continuity of the last accepted report. */
     observation_epoch::Cursor epoch{};
+    /** Sense record counter plus one of the last accepted report. */
     std::uint32_t reportCounter{};
     bool hasReportCounter{};
+    /** Spawn generation the squad Sense echoes from its placement Auth. */
     std::int32_t spawnGeneration{};
     bool hasSpawnGeneration{};
+    /** The alive count and removal flag below were reported, not defaulted. */
     bool hasAlive{};
     bool hasRemoval{};
     std::uint32_t registryKey{};
@@ -268,6 +271,8 @@ struct RuntimeInstance final {
     std::array<GhostObservation, kGhostObservationCapacity> ghostObservations{};
     std::array<DamageObservation, kDamageObservationCapacity> damageObservations{};
     std::array<CombatantDamageObservation, kSquadObservationCapacity> combatantDamageObservations{};
+    /** Damage levels replicated by authored entities, kept apart from the Type-2 Sense rows. */
+    std::array<CombatantDamageObservation, kSquadObservationCapacity> entityDamageObservations{};
     std::array<DeviceObservation, kDeviceObservationCapacity> deviceObservations{};
     std::array<ObjectInteractionObservation, kObjectInteractionObservationCapacity>
         objectInteractionObservations{};
@@ -300,7 +305,6 @@ struct RuntimeInstance final {
     std::int32_t activeRegion{-1};
     ProgramStatus programStatus{ProgramStatus::none};
     DeliveryStage deliveryStage{DeliveryStage::idle};
-    /** Last logged native reaction drain class; 0 is ready/empty, otherwise status+1. */
     /** The player key the bound link's message 5 binds, read at attach. */
     std::uint64_t playerKey{};
     bool publicTarget{};
@@ -492,12 +496,10 @@ void note_vm_status(RuntimeInstance& instance,
 
 /** Resolves the script root and the SDK Lua search path. Logs its own refusal. */
 [[nodiscard]] bool resolve_script_paths() noexcept;
-/** Clears both script buffers and both paths. */
+/** Clears the script buffer, both paths and every reload authorization. */
 void clear_script_paths() noexcept;
 /** @return False when no authorization slot is free, so the reload cannot replace this program. */
 [[nodiscard]] bool authorize_reload(const RuntimeInstance& instance) noexcept;
-/** @return True while the binding, link, SDK view and generated world still match the instance. */
-[[nodiscard]] bool still_exact(RuntimeInstance& instance) noexcept;
 /** Drops slots that no longer match, publishes the roster, and attaches active host instances. */
 void synchronize_instances(std::uint64_t now) noexcept;
 /** Advances fresh programs only when their declared state roster has reached transport output. */

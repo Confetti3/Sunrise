@@ -301,8 +301,7 @@ struct PreparedSquad final {
     if (squad.scenarioIndex != view.scenarioRow) {
         return Status::wrongScenario;
     }
-    const auto requiredMask = format::squad_required_mask(squad.flags);
-    if ((squad.flags & requiredMask) != requiredMask) {
+    if (!format::squad_runnable(squad.flags)) {
         return Status::notRunnable;
     }
     const Status members = member_status(catalog, squad, squadRow, requestedCounts);

@@ -97,7 +97,11 @@ push_trigger_member(lua_State* state, const host::Event& event, std::string_view
     return true;
 }
 
-/** Squad totals and native objective queries share the exact reported slot identity. */
+/**
+ * Squad totals and native objective queries share the exact reported slot identity. The counts
+ * stay integers so existing scripts can compare them; population_available says whether they are
+ * a reported population or zero placeholders for a report that carried none.
+ */
 [[nodiscard]] bool
 push_squad_state_member(lua_State* state, const host::Event& event, std::string_view key) {
     if (key == "task_cost") {
@@ -111,11 +115,7 @@ push_squad_state_member(lua_State* state, const host::Event& event, std::string_
     } else if (key == "population_available") {
         lua_pushboolean(state, event.squadPopulationAvailable);
     } else if (key == "alive_count") {
-        if (event.squadPopulationAvailable) {
-            lua_pushinteger(state, event.squadAliveCount);
-        } else {
-            lua_pushnil(state);
-        }
+        lua_pushinteger(state, event.squadPopulationAvailable ? event.squadAliveCount : 0);
     } else if (key == "objective_revision") {
         // Script-side assignment revision: one while a script assignment is retained, else zero.
         lua_pushinteger(state, event.squadObjectiveRegistryKey != 0 ? 1 : 0);
@@ -129,17 +129,9 @@ push_squad_state_member(lua_State* state, const host::Event& event, std::string_
             lua_rawseti(state, -2, static_cast<lua_Integer>(group) + 1);
         }
     } else if (key == "previous_alive_count") {
-        if (event.squadPopulationAvailable) {
-            lua_pushinteger(state, event.squadPreviousAliveCount);
-        } else {
-            lua_pushnil(state);
-        }
+        lua_pushinteger(state, event.squadPopulationAvailable ? event.squadPreviousAliveCount : 0);
     } else if (key == "removal_flag") {
-        if (event.squadHasRemovalFlag) {
-            lua_pushboolean(state, event.squadRemovalFlag);
-        } else {
-            lua_pushnil(state);
-        }
+        lua_pushboolean(state, event.squadHasRemovalFlag && event.squadRemovalFlag);
     } else if (key == "slot_counts") {
         const std::size_t count = event.squadSlotCountLength;
         lua_createtable(state, static_cast<int>(count), 0);
@@ -168,15 +160,11 @@ push_entity_spawned_member(lua_State* state, const host::Event& event, std::stri
     return true;
 }
 
-/** The alive count after the death, and the count it replaced. */
+/** The alive count after the death, the count it replaced, and the squad's removal flag. */
 [[nodiscard]] bool
 push_entity_died_member(lua_State* state, const host::Event& event, std::string_view key) {
     if (key == "removal_flag") {
-        if (event.squadHasRemovalFlag) {
-            lua_pushboolean(state, event.squadRemovalFlag);
-        } else {
-            lua_pushnil(state);
-        }
+        lua_pushboolean(state, event.squadHasRemovalFlag && event.squadRemovalFlag);
     } else if (key == "alive_count") {
         lua_pushinteger(state, event.squadAliveCount);
     } else if (key == "previous_alive_count") {

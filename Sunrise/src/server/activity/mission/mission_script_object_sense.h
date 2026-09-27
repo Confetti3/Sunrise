@@ -14,9 +14,6 @@ inline constexpr std::uint16_t kObjectGenerationOrdinal = 0;
 /** Ordinal 1 is the property the mode-2 interaction effect clears. The meaning is assumed. */
 inline constexpr std::uint16_t kObjectInteractionOpenOrdinal = 1;
 inline constexpr std::uint16_t kObjectExistsOrdinal = 2;
-/** Local aliases: ordinal 1 is read as the alive level, ordinal 2 as presence. */
-inline constexpr std::uint16_t kObjectAliveOrdinal = kObjectInteractionOpenOrdinal;
-inline constexpr std::uint16_t kObjectPresentOrdinal = kObjectExistsOrdinal;
 /** Authored entry the object instantiated, and its two 32-bit spawn-mask words. */
 inline constexpr std::uint16_t kObjectEntryIndexOrdinal = 3;
 inline constexpr std::uint32_t kObjectSpawnMaskSchema = 0x80809E1BU;

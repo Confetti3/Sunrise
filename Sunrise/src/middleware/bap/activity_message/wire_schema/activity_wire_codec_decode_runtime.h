@@ -828,8 +828,7 @@ private:
         const bool raw64 = is_raw64(field.typeCode);
         const std::uint8_t nativeWidth = raw64 ? 64 : storage_width(field.typeCode);
         const std::uint8_t width = raw64 ? 64 : runtime_declared_width(field);
-        // Native scalar readers read param[1] bits; a zero width (a union field's own params) reads
-        // none.
+        // A declared width of zero, as a union field's own parameters give, reads no bits.
         if (nativeWidth == 0) {
             return RuntimeWalkStatus::unsupportedField;
         }

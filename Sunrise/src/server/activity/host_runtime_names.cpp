@@ -60,7 +60,7 @@ const char* event_name(EventKind kind) noexcept {
     case EventKind::phaseEntered:
         return "mission phase entered";
     case EventKind::triggerState:
-        return "triggerState";
+        return "trigger volume state";
     case EventKind::triggerEntered:
         return "trigger volume entered";
     case EventKind::triggerExited:

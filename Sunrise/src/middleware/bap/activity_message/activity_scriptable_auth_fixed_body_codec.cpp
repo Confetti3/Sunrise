@@ -455,7 +455,10 @@ bool encode_type24(const Type24Body& body,
     return true;
 }
 
-/** Exact955A descriptor: registry32, biased signed type7/index16, biased signed state2. */
+/**
+ * Encodes one schema-0x8080955A body: registry key (32 bits), volume slot type + 1 (7), slot index
+ * + 32768 (16), then state + 1 (2), where state 1 turns the volume on and 0 turns it off.
+ */
 bool encode_type32_volume(const Type32VolumeBody& body,
                           std::span<std::byte> output,
                           std::size_t& written) noexcept {
@@ -471,7 +474,7 @@ bool encode_type32_volume(const Type32VolumeBody& body,
            && writer.finish(written) && written == kType32ByteCount;
 }
 
-/** Rejects no-op/reserved states, non-volume references and noncanonical trailing bits. */
+/** Decodes one volume toggle; the no-op state, a non-volume target and nonzero padding fail. */
 bool decode_type32_volume(std::span<const std::byte> input,
                           std::size_t bitCount,
                           Type32VolumeBody& body) noexcept {

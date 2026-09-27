@@ -20,7 +20,7 @@ namespace {
 
 /** Root ordinal of the squad removal flag. The rest of the root is inert on this build. */
 constexpr std::uint16_t kSquadRemovalOrdinal = 8;
-/** Root ordinal 0 echoes the squad Auth .6 spawn generation on build 86657. */
+/** Root ordinal 0 echoes the spawn generation the squad's placement Auth carries. */
 constexpr std::uint16_t kSquadSpawnGenerationOrdinal = 0;
 /** Root ordinals of the type-20 damage Sense body: health, shield, then the echoed revision. */
 constexpr std::uint16_t kDamageHealthOrdinal = 0;
@@ -446,10 +446,9 @@ void push_damage_edges(RuntimeInstance& instance,
 
 /**
  * Finds the retained row for one interactable object, allocating a free row on a first
- * observation. At capacity the least recently observed row is recycled: a mission streams more
- * objects than the table holds, and a later-authored object such as a door crystal must still
- * publish its levels rather than silently vanish. Recycling drops that row's level history, so the
- * next report republishes as a baseline.
+ * observation. At capacity the least recently observed row is recycled, so an object first seen
+ * late in a mission still publishes its levels. The recycled row starts without history: its next
+ * report publishes as a baseline and raises no interaction.
  */
 [[nodiscard]] ObjectInteractionObservation*
 find_object_row(RuntimeInstance& instance, const host::SenseObservation& observation) noexcept {
@@ -474,8 +473,10 @@ find_object_row(RuntimeInstance& instance, const host::SenseObservation& observa
     if (row == nullptr) {
         return nullptr;
     }
+    const bool recycled = spare == nullptr;
     *row = {};
     row->used = true;
+    row->interactionBaseline = recycled;
     row->sequence = observation.sequence;
     row->registryKey = observation.key.registryKey;
     row->objectTag = observation.key.objectTag;
@@ -542,10 +543,11 @@ void push_object_interaction_edges(RuntimeInstance& instance,
             }
             push_script_event(instance, event);
         }
-        if (interacted) {
+        if (interacted && !slot->interactionBaseline) {
             event.kind = host::EventKind::objectInteracted;
             push_script_event(instance, event);
         }
+        slot->interactionBaseline = false;
     }
 }
 
@@ -610,12 +612,6 @@ void push_squad_edges(RuntimeInstance& instance,
         if (!observe_population(instance, observation, body)) {
             return;
         }
-        // A root-absent delta carries no squad state and cannot replace the previous levels.
-        if (std::none_of(body.begin(), body.end(), [root](const sense_values::DecodedValue& value) {
-                return value.schemaRow == root;
-            })) {
-            continue;
-        }
         SquadObservation* const squad = find_squad(instance, observation.key);
         if (squad == nullptr) {
             continue;
@@ -631,30 +627,42 @@ void push_squad_edges(RuntimeInstance& instance,
             || (sameSource && observation.sequence <= squad->epoch.sequence)) {
             continue;
         }
-        if (sameSource && squad->hasReportCounter && observation.hasGeneration
-            && observation.generationPlusOne == squad->reportCounter) {
-            continue;
-        }
-        // After a Sense rebase the client re-sends already delivered counters, often with a fuller
-        // delta against an older baseline. A replay repeats known state; treating it as a counter
-        // reset tells the scripts the squad lost its registration and spawn echo. A native
-        // re-registration restarts at one and still reconciles below.
-        if (sameSource && squad->hasReportCounter && observation.hasGeneration
-            && observation.generationPlusOne > 1
-            && observation.generationPlusOne < squad->reportCounter) {
-            continue;
-        }
-        // Retained levels only bridge a proven consecutive report. A gap, wrap or re-registration
-        // reconciles from this body alone.
-        const bool consecutive = sameSource && squad->hasReportCounter && observation.hasGeneration
-                                 && squad->reportCounter != UINT32_MAX
-                                 && observation.generationPlusOne == squad->reportCounter + 1;
-
         const sense_values::DecodedValue* const generationValue =
             sense_value(body, root, kSquadSpawnGenerationOrdinal);
         const bool bodyHasGeneration = generationValue != nullptr && generationValue->present
                                        && generationValue->signedValue >= 0
                                        && generationValue->signedValue <= kMaximumCounter;
+        // A body naming a newer placement than the retained one is never a duplicate or replay.
+        const bool newerLifetime = bodyHasGeneration && squad->hasSpawnGeneration
+                                   && generationValue->signedValue > squad->spawnGeneration;
+        if (sameSource && squad->hasReportCounter && observation.hasGeneration
+            && observation.generationPlusOne == squad->reportCounter && !newerLifetime) {
+            continue;
+        }
+        // After a Sense rebase the client re-sends already delivered counters, often with a fuller
+        // delta against an older baseline. A replay repeats known state; treating it as a counter
+        // reset tells the scripts the squad lost its registration and spawn echo. A native
+        // re-registration restarts at one, or names a newer placement, and still reconciles below.
+        if (sameSource && squad->hasReportCounter && observation.hasGeneration
+            && observation.generationPlusOne > 1
+            && observation.generationPlusOne < squad->reportCounter && !newerLifetime) {
+            continue;
+        }
+        // Retained levels only bridge a proven consecutive report; after a gap, wrap or
+        // re-registration a field this body omits is unknown.
+        const bool consecutive = sameSource && squad->hasReportCounter && observation.hasGeneration
+                                 && squad->reportCounter != UINT32_MAX
+                                 && observation.generationPlusOne == squad->reportCounter + 1;
+        // A root-absent delta (a cost-only change, say) only continues the retained levels. After
+        // a gap it carries nothing to reconcile from, so it is ignored.
+        const bool rootPresent =
+            std::any_of(body.begin(), body.end(), [root](const sense_values::DecodedValue& value) {
+                return value.schemaRow == root;
+            });
+        if (!rootPresent && !consecutive) {
+            continue;
+        }
+
         std::int32_t spawnGeneration =
             bodyHasGeneration ? static_cast<std::int32_t>(generationValue->signedValue) : 0;
         bool hasSpawnGeneration = bodyHasGeneration;
@@ -666,10 +674,14 @@ void push_squad_edges(RuntimeInstance& instance,
             bodyHasGeneration
             && (!squad->hasSpawnGeneration || squad->spawnGeneration != spawnGeneration);
         const bool sameLifetime = consecutive && !lifetimeChanged;
+        // Costs are deltas, so they only carry over a consecutive report of the same lifetime. A
+        // reset counts as a change even when this body reports no cost.
+        const SquadObjectiveCosts priorCosts = squad->objectiveCosts;
         if (!sameLifetime) {
             squad->objectiveCosts = {};
         }
-        const bool costsChanged = update_squad_objective_costs(squad->objectiveCosts, body, root);
+        static_cast<void>(update_squad_objective_costs(squad->objectiveCosts, body, root));
+        const bool costsChanged = squad->objectiveCosts != priorCosts;
 
         std::int32_t alive = sameLifetime ? squad->aliveCount : 0;
         bool hasAlive = read_squad_alive(body, root, alive);
@@ -684,8 +696,17 @@ void push_squad_edges(RuntimeInstance& instance,
             removal = squad->removalFlag;
             hasRemoval = squad->hasRemoval;
         }
-        auto counts = sameLifetime ? squad->slotCounts : decltype(squad->slotCounts){};
-        auto countLength = sameLifetime ? squad->slotCountLength : std::uint8_t{};
+        // A forward gap whose body names the retained spawn generation is still that lifetime: its
+        // reported population compares with the retained one, so a death in the gap is not lost.
+        const bool gapInLifetime =
+            !consecutive && sameSource && squad->hasReportCounter && observation.hasGeneration
+            && observation.generationPlusOne > squad->reportCounter && bodyHasGeneration
+            && squad->hasSpawnGeneration && squad->spawnGeneration == spawnGeneration;
+        // Created counts only rise within one lifetime, so a report proven to continue it keeps the
+        // retained counts it omits and compares new ones against them.
+        const bool countsContinue = squad->used && (sameLifetime || gapInLifetime);
+        auto counts = countsContinue ? squad->slotCounts : decltype(squad->slotCounts){};
+        auto countLength = countsContinue ? squad->slotCountLength : std::uint8_t{};
         std::array<std::int32_t, host::kSquadSlotCapacity> incomingCounts{};
         const auto incomingLength = read_squad_created_counts(body, incomingCounts);
         if (incomingLength != 0) {
@@ -699,7 +720,7 @@ void push_squad_edges(RuntimeInstance& instance,
                                                     observation.sequence,
                                                     static_cast<std::uint32_t>(spawnGeneration),
                                                     hasSpawnGeneration && spawnGeneration > 0);
-        const bool counterReset = hadPrevious && !consecutive;
+        const bool counterReset = hadPrevious && !consecutive && !gapInLifetime;
         if (transition != observation_epoch::Transition::discard
             && (counterReset || !squad->hasAlive || !hasAlive)) {
             transition = observation_epoch::Transition::baseline;
@@ -711,7 +732,6 @@ void push_squad_edges(RuntimeInstance& instance,
         squad->hasReportCounter = observation.hasGeneration;
 
         const bool first = transition == observation_epoch::Transition::baseline;
-        const bool wasUsed = squad->used;
         squad->used = true;
         const std::int32_t previousAlive = first ? alive : squad->aliveCount;
         const bool changed =
@@ -746,7 +766,7 @@ void push_squad_edges(RuntimeInstance& instance,
 
         for (std::uint8_t slot = 0; slot < countLength; ++slot) {
             const std::int32_t previous =
-                wasUsed && !first && slot < squad->slotCountLength ? squad->slotCounts[slot] : 0;
+                countsContinue && slot < squad->slotCountLength ? squad->slotCounts[slot] : 0;
             if (counts[slot] <= previous) {
                 continue;
             }
@@ -754,12 +774,15 @@ void push_squad_edges(RuntimeInstance& instance,
             spawned.squadSlotOrdinal = slot;
             spawned.squadSlotValue = counts[slot];
             spawned.squadPreviousSlotValue = previous;
+            spawned.squadSpawnGeneration = spawnGeneration;
+            spawned.squadHasSpawnGeneration = hasSpawnGeneration;
             spawned.kind = host::EventKind::entitySpawned;
             if (instance.programStatus == ProgramStatus::loaded) {
                 push_script_event(instance, spawned);
             }
         }
-        // Only consecutive reports of one spawn lifetime may prove a population decrease.
+        // Only reports of one spawn lifetime, consecutive or across a gap the body confirms, may
+        // prove a population decrease.
         if (!first && hasAlive && squad->hasAlive && alive < squad->aliveCount) {
             host::Event died = sense_edge_event(instance, observation);
             died.squadAliveCount = alive;

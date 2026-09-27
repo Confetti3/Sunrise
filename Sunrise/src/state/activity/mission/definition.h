@@ -244,12 +244,8 @@ struct TypedIntent final {
     std::uint64_t requestKey{kAbsentIntentKey};
     IntentKind kind{IntentKind::placeSquad};
     std::uint32_t firstRow{};
-    /** placeSquad with active=true: director SDK row; slotIndex is its authored objective ordinal.
-     */
     std::uint32_t secondRow{};
-    /** Placement-only exact SDK slot row; all other intent kinds leave this absent. */
-    std::uint32_t spawnRuleSlotRow{0xFFFFFFFFU};
-    /** Attachment source lifetime observed from an exact type-1 Sense baseline. */
+    /** Placement spawn generation of a setSquadAttachment source squad. */
     std::uint64_t sourceSpawnGeneration{};
     std::uint32_t sceneEventKey{};
     std::uint32_t objectTag{};

@@ -3,7 +3,7 @@
 #include <algorithm>
 
 #include "../../middleware/bap/activity_message/squad_attachment_auth.h"
-#include "../../state/activity_sdk/attachment_compatibility.h"
+#include "../../state/activity_sdk/format.h"
 #include "host_runtime.h"
 
 namespace sunrise::server::activity::host::attachments {
@@ -15,11 +15,11 @@ namespace sunrise::server::activity::host::attachments {
 [[nodiscard]] inline bool same_owner_pair(const ScriptableTarget& target,
                                           const SquadAttachmentOwnership& owned) noexcept {
     const auto& source = owned.source;
+    namespace auth = middleware::bap::activity_message::scriptable_auth;
     return owned.sdkBuildSha256 != std::array<std::byte, 32>{}
-           && state::activity_sdk::attachment_compatibility::supports(owned.sdkPayloadSha256)
+           && owned.sdkPayloadSha256 != std::array<std::byte, 32>{}
            && owned.sourceSpawnGeneration > 0 && owned.sourceSpawnGeneration <= 0x7FFFFFFFU
-           && target.slotType == 26
-           && target.authSchema == middleware::bap::activity_message::scriptable_auth::kType26Schema
+           && target.slotType == auth::kType26SlotType && target.authSchema == auth::kType26Schema
            && source.objectTag == target.objectTag && source.registryKey == target.registryKey
            && source.slotType == state::activity_sdk::format::kSquadSlotType
            && source.authSchema == state::activity_sdk::format::kSquadAuthSchema
@@ -119,12 +119,15 @@ namespace sunrise::server::activity::host::attachments {
         || sourceSpawn != owned.sourceSpawnGeneration) {
         return false;
     }
+    // A request is stale when its source lifetime moved on (checked above) or when it would move an
+    // active attachment to another lifetime without an owned clear first. A fresh claim must
+    // select.
     if (previous == nullptr) {
-        if (!owned.active || owned.previousRevision != 0) {
+        if (!owned.active) {
             return false;
         }
     } else {
-        if (!previous->squadAttachment || previous->revision != owned.previousRevision
+        if (!previous->squadAttachment
             || previous->squadAttachment->sdkBuildSha256 != owned.sdkBuildSha256
             || previous->squadAttachment->sdkPayloadSha256 != owned.sdkPayloadSha256
             || previous->squadAttachment->source != owned.source

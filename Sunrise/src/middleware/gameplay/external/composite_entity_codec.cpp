@@ -106,8 +106,8 @@ read_schema(const void* raw, std::uint32_t rowIndex, wire::runtime::SchemaView& 
                                       format::RuntimeCodecFamily family,
                                       wire::runtime::FieldView& output) noexcept {
     output.typeCode = reference_alias(family, output.typeCode);
-    // The family-1/4 NESTED_CUSTOM reader (0x1409F7400) is a plain nested walk of one fixed schema,
-    // the one its global at 0x141FA32E0 names on 86657: a 19-bit real and a 5-bit int8, 24 bits.
+    // In mode one, a type-37 custom field is a plain nested walk of one fixed schema: a 19-bit real
+    // and a 5-bit int8, 24 bits in all.
     constexpr std::uint32_t kNestedCustomSchema = 0x808092FFU;
     if (family == format::RuntimeCodecFamily::sobjectModeOne && output.typeCode == 37) {
         wire::runtime::SchemaView nested{};

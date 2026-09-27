@@ -4,13 +4,17 @@
 
 namespace sunrise::client::content::activity::sdk_generation::squad_inventory {
 
+/** How one raw 64-bit spawn reference (key32, type8, padding8, index16) reads. */
 enum class SpawnReferenceState : std::uint8_t {
     invalid,
     absent,
     present,
 };
 
-/** Build86657 native unset tests are typeFF or indexFFFF; malformed is not absent. */
+/**
+ * The client treats a reference as unset when its type is 0xFF or its index is 0xFFFF. Nonzero
+ * padding or an out-of-range type is malformed, which is not the same as absent.
+ */
 [[nodiscard]] constexpr SpawnReferenceState spawn_reference_state(std::uint64_t raw) noexcept {
     const auto key = static_cast<std::uint32_t>(raw);
     const auto type = static_cast<std::uint8_t>(raw >> 32U);
@@ -26,7 +30,11 @@ enum class SpawnReferenceState : std::uint8_t {
                                                                      : SpawnReferenceState::invalid;
 }
 
-/** Source proof only: the selected rule and its occurrence still need independent validation. */
+/**
+ * A spawner needs a selected rule when both of its rule references (at offsets 0x98 and 0xA0) are
+ * absent and a complete parse found no inline point set. This proves only the source; the selected
+ * rule and its occurrence are validated separately.
+ */
 [[nodiscard]] constexpr bool requires_selected_spawn_rule(std::uint64_t reference98,
                                                           std::uint64_t referenceA0,
                                                           bool complete,

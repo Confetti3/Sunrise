@@ -103,11 +103,13 @@ namespace auth_catalog = middleware::bap::activity_message::auth_schema_catalog;
     return value;
 }
 
-/** Sends a native type-32 toggle for one current same-owner authored volume. */
+/** Turns one authored type-60 volume of the same object on or off through its type-32 toggle. */
 [[nodiscard]] int slot_set_volume_active(lua_State* state) {
-    const auto* handle = static_cast<const SlotHandle*>(luaL_checkudata(state, 1, kSlotMetatable));
-    static constexpr std::array<std::string_view, 2> declared{"volume", "active"};
-    refuse_unknown_arguments(state, declared);
+    const auto* const handle =
+        static_cast<const SlotHandle*>(luaL_checkudata(state, 1, kSlotMetatable));
+    // Only these named arguments belong to this API.
+    static constexpr std::array<std::string_view, 2> kDeclared{"volume", "active"};
+    refuse_unknown_arguments(state, kDeclared);
     const SlotHandle target = checked_argument<SlotHandle>(state, "volume", kSlotMetatable);
     lua_getfield(state, 2, "active");
     if (!lua_isboolean(state, -1)) {
@@ -143,12 +145,17 @@ namespace auth_catalog = middleware::bap::activity_message::auth_schema_catalog;
         state, source, scriptable_auth::kType32Schema, scriptable_auth::kType32BitCount, body);
 }
 
-/** Selects an audited same-owner squad lifetime for a type-26 attachment. */
+/**
+ * Selects or clears the squad a type-26 attachment follows. spawn_generation names the source
+ * placement; a request for any other placement is refused as stale.
+ */
 [[nodiscard]] int slot_set_squad_attachment(lua_State* state) {
-    const auto* handle = static_cast<const SlotHandle*>(luaL_checkudata(state, 1, kSlotMetatable));
-    static constexpr std::array<std::string_view, 3> declared{
+    const auto* const handle =
+        static_cast<const SlotHandle*>(luaL_checkudata(state, 1, kSlotMetatable));
+    // Only these named arguments belong to this API.
+    static constexpr std::array<std::string_view, 3> kDeclared{
         "source", "spawn_generation", "active"};
-    refuse_unknown_arguments(state, declared);
+    refuse_unknown_arguments(state, kDeclared);
     const SlotHandle sourceHandle = checked_argument<SlotHandle>(state, "source", kSlotMetatable);
     const lua_Integer generation = checked_integer_argument(state, "spawn_generation");
     lua_getfield(state, 2, "active");
@@ -161,7 +168,8 @@ namespace auth_catalog = middleware::bap::activity_message::auth_schema_catalog;
     if (!current_slot(state, *handle, target) || !current_slot(state, sourceHandle, source)) {
         return luaL_error(state, "attachment or squad source is stale or invalid");
     }
-    if (target.slotType != 26 || target.authSchema != scriptable_auth::kType26Schema
+    if (target.slotType != scriptable_auth::kType26SlotType
+        || target.authSchema != scriptable_auth::kType26Schema
         || (target.flags & format::kSlotSchemaJoinExact) == 0
         || source.slotType != format::kSquadSlotType
         || source.authSchema != format::kSquadAuthSchema
@@ -187,6 +195,7 @@ namespace auth_catalog = middleware::bap::activity_message::auth_schema_catalog;
     namespace effect = middleware::bap::activity_message::mission_effect;
     const auto* const handle =
         static_cast<const SlotHandle*>(luaL_checkudata(state, 1, kSlotMetatable));
+    // Only these named arguments belong to this API.
     static constexpr std::array<std::string_view, 3> kDeclared{"filter", "enabled", "revision"};
     refuse_unknown_arguments(state, kDeclared);
     SlotDefinition slot{};
@@ -217,6 +226,7 @@ namespace auth_catalog = middleware::bap::activity_message::auth_schema_catalog;
     }
     return queue_slot_auth(state, slot, effect::kSchema, effect::kBits, body);
 }
+
 /** Reads one Slot row member, its syntax methods, and its authorized actions. */
 [[nodiscard]] int slot_index(lua_State* state) {
     const auto* const handle =

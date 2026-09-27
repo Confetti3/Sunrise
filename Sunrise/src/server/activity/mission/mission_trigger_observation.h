@@ -10,10 +10,11 @@
 namespace sunrise::server::activity::mission::trigger_observation {
 
 namespace sense = middleware::bap::activity_message::sense_update;
-/** Build-86657 type30 Sense: two required bits followed by two required signed words. */
+/** Type-30 occupancy Sense: two required flags, then two required signed 32-bit values. */
 constexpr std::uint32_t kSchema = 0x80809531U;
 constexpr std::uint8_t kSlotType = 30;
 
+/** One complete occupancy report. */
 struct Snapshot final {
     bool occupied{};
     bool all{};
@@ -21,7 +22,7 @@ struct Snapshot final {
     std::int32_t threshold{};
 };
 
-/** Rejects incomplete/ambiguous bodies; required fields never inherit invented defaults. */
+/** Reads one occupancy body. An incomplete or ambiguous body is refused, never defaulted. */
 [[nodiscard]] inline bool read(std::span<const sense::DecodedValue> body,
                                Snapshot& output) noexcept {
     if (body.size() != 4) {
@@ -53,6 +54,7 @@ struct Snapshot final {
 }
 
 enum class Edge : std::uint8_t { none, entered, exited };
+/** How one report relates to the last accepted one, as scripts see it. */
 enum class Continuity : std::uint8_t {
     invalid,
     baseline,
@@ -64,6 +66,7 @@ enum class Continuity : std::uint8_t {
     missingCounter,
     wrap
 };
+/** @return The stable script-facing name of one continuity value. */
 [[nodiscard]] inline const char* name(Continuity value) noexcept {
     switch (value) {
     case Continuity::baseline:
@@ -86,13 +89,20 @@ enum class Continuity : std::uint8_t {
         return "invalid";
     }
 }
+/** What one report means: an optional edge, its continuity, and whether scripts hear of it. */
 struct Observation final {
     Edge edge{Edge::none};
     Continuity continuity{Continuity::invalid};
-    bool notify{}, available{};
+    /** Scripts receive a triggerState event for this report. */
+    bool notify{};
+    /** The report carried a complete level the event may expose. */
+    bool available{};
 };
 
-/** Adjacent native reports establish continuity; repeated envelopes never confirm a level. */
+/**
+ * Tracks one volume's reports. Only consecutive record counters from one source prove an edge; a
+ * repeated counter never confirms a level, and a conflicting repeat invalidates it.
+ */
 struct Tracker final {
     std::uint64_t source{}, sequence{};
     std::uint32_t counter{};
@@ -102,6 +112,7 @@ struct Tracker final {
         known = false;
     }
 
+    /** @param current The decoded level, or null when the body was malformed. */
     [[nodiscard]] Observation observe(const Snapshot* current,
                                       std::uint64_t expectedSource,
                                       std::uint64_t nextSource,
@@ -153,17 +164,6 @@ struct Tracker final {
         occupied = current->occupied;
         snapshot = *current;
         return {edge, continuity, true, nextHasCounter};
-    }
-    /** Compatibility entry point for edge-only consumers. */
-    [[nodiscard]] Edge accept(const Snapshot& current,
-                              std::uint64_t expectedSource,
-                              std::uint64_t nextSource,
-                              std::uint64_t nextSequence,
-                              std::uint32_t nextCounter,
-                              bool nextHasCounter) noexcept {
-        return observe(
-                   &current, expectedSource, nextSource, nextSequence, nextCounter, nextHasCounter)
-            .edge;
     }
 };
 

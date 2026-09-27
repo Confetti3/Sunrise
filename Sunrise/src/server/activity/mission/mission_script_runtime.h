@@ -12,7 +12,6 @@ namespace sunrise::server::activity::mission {
 /** One bounded, value-owned diagnostic row for an attached mission program. */
 struct InstanceDiagnostics final {
     state::activity::SessionBinding binding{};
-    std::array<std::byte, 32> scriptSourceSha256{}, sdkBuildSha256{};
     std::array<char, 64> activityId{};
     std::array<char, 24> programStatus{};
     std::array<char, 32> deliveryStage{};

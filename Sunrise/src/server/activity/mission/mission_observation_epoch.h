@@ -18,7 +18,7 @@ enum class Transition : std::uint8_t { discard, baseline, continuous };
 /**
  * Counts from different reported object generations cannot form a gameplay edge. Missing
  * generations also require reconciliation, following Host's same_sense_scalar_generations rule.
- * The caller publishes the baseline as state, without inventing a spawn or death.
+ * The caller publishes a baseline as state and never derives a death from it.
  */
 [[nodiscard]] inline Transition accept(Cursor& retained,
                                        std::uint64_t expectedSourceGeneration,

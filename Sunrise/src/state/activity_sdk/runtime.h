@@ -314,9 +314,9 @@ void shutdown() noexcept;
 [[nodiscard]] const char* status_name(MissionSeedStatus value) noexcept;
 /** @return Stable diagnostic text for one authored-scene seed result. */
 [[nodiscard]] const char* status_name(AuthoredSceneSeedStatus value) noexcept;
-/** @return Shared ownership of the current validated catalog. */
-/** Keeps catalog publication stable through one transport transaction.
- * Ordinary snapshot reads do not acquire this lock. Do not reload or nest this guard while held.
+/**
+ * Keeps catalog publication stable through one transport transaction. Ordinary snapshot reads do
+ * not take this lock. Do not reload or nest the guard while one is held.
  */
 class CatalogPublicationGuard final {
 public:
@@ -326,6 +326,7 @@ public:
     CatalogPublicationGuard& operator=(const CatalogPublicationGuard&) = delete;
 };
 
+/** @return Shared ownership of the current validated catalog. */
 [[nodiscard]] Snapshot snapshot() noexcept;
 /** Resolves one route only from the exact loaded SDK registry. */
 [[nodiscard]] bool executable_communication_route(

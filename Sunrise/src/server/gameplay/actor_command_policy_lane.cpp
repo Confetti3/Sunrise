@@ -288,8 +288,8 @@ stage_damage_report(const SessionRow& session,
     // A session learns its binding only from a policy; without one the packet's source names it.
     report.policyBinding = session.policyActive && session.bindingRetained;
     report.binding = session.binding;
-    report.generation = report.policyBinding ? session.activityClientGeneration
-                                             : origin.activityClientGeneration;
+    report.generation =
+        report.policyBinding ? session.activityClientGeneration : origin.activityClientGeneration;
     return report;
 }
 

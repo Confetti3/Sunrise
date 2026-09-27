@@ -14,8 +14,8 @@ namespace {
 }
 
 /**
- * Build86657 schemas 8080944C/80809452: optional word list, fixed words, and byte list.
- * Only their framing is consumed; these root channels do not become squad observations.
+ * Skips one root channel block (schemas 0x8080944C and 0x80809452): an optional word list, fixed
+ * words, and a byte list. None of it becomes a mission observation.
  */
 [[nodiscard]] bool consume_root_channels(Reader& reader,
                                          std::uint8_t countWidth,
@@ -36,9 +36,8 @@ namespace {
 } // namespace
 
 /**
- * Consumes the present build86657 80809445 root before the registry group stream.
- * Its global channels hold 256 entries; up to 64 keyed rows each hold 96 local entries.
- * Counts and nested presence come from the exact native reflection descriptors.
+ * Skips the root Sense body. Its global channels hold up to 256 entries, and up to 64 keyed rows
+ * hold 96 entries each; the counts and presence bits follow the client's schema descriptors.
  */
 bool consume_root_sense(Reader& reader) noexcept {
     constexpr std::uint32_t globalCapacity = 256, keyedCapacity = 64, localCapacity = 96;
@@ -57,7 +56,7 @@ bool consume_root_sense(Reader& reader) noexcept {
     if (!reader.read(7, count) || count > keyedCapacity) {
         return false;
     }
-    for (std::uint64_t i = 0; i < count; ++i) {
+    for (std::uint64_t row = 0; row < count; ++row) {
         if (!present(reader, true, exists) || (exists && !reader.skip(32))) {
             return false;
         }

@@ -184,7 +184,10 @@ Status apply_auth_reserved(const sdk::BoundView& view,
     return Status::refused;
 }
 
-/** Selects a same-owner squad through the audited build-86657 attachment Auth schema. */
+/**
+ * Selects or clears the squad a type-26 attachment follows. Both slots must belong to one authored
+ * object in the same held state, and the source must still be the placement the script named.
+ */
 Status
 set_squad_attachment_reserved(const sdk::BoundView& view,
                               std::uint32_t slotRow,
@@ -213,8 +216,8 @@ set_squad_attachment_reserved(const sdk::BoundView& view,
     }
     std::copy(digest.begin(), digest.end(), owned.sdkBuildSha256.begin());
     const auto payload = view.catalog->payload_sha256();
-    if (!state::activity_sdk::attachment_compatibility::supports(payload)) {
-        return Status::unsupportedAttachmentPayload;
+    if (payload.size() != owned.sdkPayloadSha256.size()) {
+        return Status::wrongSdkBuild;
     }
     std::copy(payload.begin(), payload.end(), owned.sdkPayloadSha256.begin());
     owned.source = source.target;
@@ -226,11 +229,6 @@ set_squad_attachment_reserved(const sdk::BoundView& view,
     std::vector<host::PendingScriptableOverride> estate;
     if (!host::scriptable_auth_estate(view.binding, target.activityClientGeneration, estate)) {
         return Status::staleBinding;
-    }
-    for (const auto& previous : estate) {
-        if (host::attachments::same_ref(previous.target, target.target)) {
-            owned.previousRevision = previous.revision;
-        }
     }
     const auth::Type26SquadSelection selection =
         active ? auth::Type26SquadSelection{source.target.registryKey,
@@ -673,8 +671,6 @@ const char* status_name(Status status) noexcept {
         return "refused";
     case Status::refusedSlotType:
         return "refused_slot_type";
-    case Status::unsupportedAttachmentPayload:
-        return "unsupported_attachment_payload";
     }
     return "unknown";
 }

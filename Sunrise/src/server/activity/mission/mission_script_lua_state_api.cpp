@@ -163,50 +163,41 @@ void push_variable_value(lua_State* state, const VariableValue& value) {
     frame.candidate.phaseChanged = true;
     return 0;
 }
-/**
- * Emits one script variable write. Controllers park their gate state in named variables
- * (`later.<name>.status`, `later.<name>.reason`, `route.invalidated`, ...); without this row a
- * stalled encounter can only be described as "no further requests", never explained.
- */
+/** Logs one staged variable write, so the gate state a controller keeps in variables is visible. */
 void log_variable_write(const StateKey& key, const VariableValue& value) noexcept {
-    std::array<char, core::log::kLineCapacity> line{};
-    const std::string_view name = state_key_view(key);
-    int written = 0;
+    std::array<char, 32> scalar{};
+    std::string_view text{};
+    int scalarWritten = 0;
     switch (value.kind) {
     case VariableValueKind::boolean:
-        written = std::snprintf(line.data(),
-                                line.size(),
-                                "ev=mission_script stage=variable result=set name=%.*s value=%s",
-                                static_cast<int>(name.size()),
-                                name.data(),
-                                value.booleanValue ? "true" : "false");
+        text = value.booleanValue ? "true" : "false";
         break;
     case VariableValueKind::integer:
-        written = std::snprintf(line.data(),
-                                line.size(),
-                                "ev=mission_script stage=variable result=set name=%.*s value=%lld",
-                                static_cast<int>(name.size()),
-                                name.data(),
-                                static_cast<long long>(value.integerValue));
+        scalarWritten = std::snprintf(
+            scalar.data(), scalar.size(), "%lld", static_cast<long long>(value.integerValue));
         break;
     case VariableValueKind::real:
-        written = std::snprintf(line.data(),
-                                line.size(),
-                                "ev=mission_script stage=variable result=set name=%.*s value=%.6g",
-                                static_cast<int>(name.size()),
-                                name.data(),
-                                value.realValue);
+        scalarWritten = std::snprintf(scalar.data(), scalar.size(), "%.6g", value.realValue);
         break;
     case VariableValueKind::string:
-        written = std::snprintf(line.data(),
-                                line.size(),
-                                "ev=mission_script stage=variable result=set name=%.*s value=%.*s",
-                                static_cast<int>(name.size()),
-                                name.data(),
-                                static_cast<int>(value.stringLength),
-                                value.stringValue.data());
+        text = {value.stringValue.data(),
+                (std::min)(std::size_t{value.stringLength}, value.stringValue.size())};
         break;
     }
+    if (scalarWritten > 0) {
+        text = {scalar.data(),
+                (std::min)(static_cast<std::size_t>(scalarWritten), scalar.size() - 1)};
+    }
+    const std::string_view name = state_key_view(key);
+    std::array<char, core::log::kLineCapacity> line{};
+    const int written =
+        std::snprintf(line.data(),
+                      line.size(),
+                      "ev=mission_script stage=variable result=set name=%.*s value=%.*s",
+                      static_cast<int>(name.size()),
+                      name.data(),
+                      static_cast<int>(text.size()),
+                      text.data());
     if (written > 0) {
         core::log::write(
             core::log::Channel::server,

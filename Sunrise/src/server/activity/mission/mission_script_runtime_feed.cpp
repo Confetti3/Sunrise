@@ -128,7 +128,6 @@ void clear_pending_event(PendingMissionEvent& pending) noexcept {
            || event.kind == host::EventKind::triggerEntered
            || event.kind == host::EventKind::triggerState
            || event.kind == host::EventKind::triggerExited
-           || event.kind == host::EventKind::objectState
            || event.kind == host::EventKind::squadState
            || event.kind == host::EventKind::squadProvoked
            || event.kind == host::EventKind::entitySpawned
@@ -567,8 +566,7 @@ void clear_feed_cursors() noexcept {
     g_missionInputCursor = {};
 }
 
-/** A committed held-region change requires fresh native object levels, preserving replay cursors.
- */
+/** A committed held-region change re-baselines object and trigger levels; replay cursors stay. */
 void reconcile_object_region(RuntimeInstance& instance, const host::Event& event) noexcept {
     if (event.kind != host::EventKind::clientStateChanged
         || instance.objectObservationHeldRegion == event.heldRegionIndex) {

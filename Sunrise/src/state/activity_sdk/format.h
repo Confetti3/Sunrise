@@ -9,8 +9,7 @@ namespace sunrise::state::activity_sdk::format {
 
 /** Eight-byte identity at the start of every runtime SDK pack. */
 inline constexpr std::array<char, 8> kMagic{'S', 'R', 'S', 'D', 'K', 'P', '0', '1'};
-/** Runtime-pack schema version accepted by this reader. */
-/** Version 41 adds independently verified common squad-member profiles. */
+/** Runtime-pack schema version accepted by this reader. 41 adds squad-member spawn profiles. */
 inline constexpr std::uint32_t kVersion = 41;
 /** The ABI contains only activity identity, topology, placement, and panel metadata. */
 inline constexpr std::uint32_t kSectionCount = 50;
@@ -246,10 +245,15 @@ inline constexpr std::uint32_t kSquadRequiresSelectedRule = 0x40U;
 /** Runnable without the authored edge and its points, which a selected rule replaces. */
 inline constexpr std::uint32_t kSquadSourcePrerequisiteMask =
     kSquadRunnableMask & ~(kSquadSpawnerRuleEdgeExact | kSquadAllPointsExact);
-/** The mask one squad row must satisfy before it can be placed. */
-[[nodiscard]] constexpr std::uint32_t squad_required_mask(std::uint32_t flags) noexcept {
-    return (flags & kSquadRequiresSelectedRule) != 0 ? kSquadSourcePrerequisiteMask
-                                                     : kSquadRunnableMask;
+/**
+ * @return True when a squad row may be placed or commanded. A rule-less squad is exempt from the
+ * rule edge and points that its selected rule supplies.
+ */
+[[nodiscard]] constexpr bool squad_runnable(std::uint32_t flags) noexcept {
+    const std::uint32_t required = (flags & kSquadRequiresSelectedRule) != 0
+                                       ? kSquadSourcePrerequisiteMask
+                                       : kSquadRunnableMask;
+    return (flags & required) == required;
 }
 /** Member flags separate actor resolution from count-array completeness. */
 inline constexpr std::uint32_t kSquadMemberActorClassExact = 0x1U;
@@ -259,7 +263,10 @@ inline constexpr std::uint32_t kSquadMemberNoNullCandidates = 0x8U;
 inline constexpr std::uint32_t kSquadMemberAuthoredProfileExact = 0x10U;
 inline constexpr std::uint32_t kSquadMemberFlagMask = 0x1FU;
 
-/** Auth field 5 lanes 1..4 retain the validated package logical ranges. */
+/**
+ * @return True when every lane of a squad member's authored spawn profile (the four lanes the
+ * placement Auth carries in field 5) is within the range the package format allows.
+ */
 [[nodiscard]] constexpr bool
 valid_authored_spawn_profile(const std::array<std::int8_t, 4>& profile) noexcept {
     constexpr std::array<std::int8_t, 4> maximum{2, 6, 2, 6};
@@ -270,6 +277,7 @@ valid_authored_spawn_profile(const std::array<std::int8_t, 4>& profile) noexcept
     }
     return true;
 }
+
 inline constexpr std::uint32_t kSquadMemberInvariantReadyMask =
     kSquadMemberCandidateCountsComplete | kSquadMemberCandidateCountsInvariant
     | kSquadMemberNoNullCandidates;

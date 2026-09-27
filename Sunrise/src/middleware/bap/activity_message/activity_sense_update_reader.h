@@ -56,7 +56,7 @@ private:
 }
 
 /**
- * Consumes the present build86657 80809445 root before the registry group stream.
+ * Skips the packet's root Sense body (schema 0x80809445), which precedes the registry groups.
  * @return False when the root's framing does not fit the reader's budget.
  */
 [[nodiscard]] bool consume_root_sense(Reader& reader) noexcept;
