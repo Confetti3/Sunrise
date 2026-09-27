@@ -394,6 +394,27 @@ bool render_mission(const Source& source,
             append_hex(output, scene.configTag);
             output.append(", resource_tag = ");
             append_hex(output, scene.resourceTag);
+            // The graph's gates in order: what set_scene_events publishes to run the scene.
+            // The section is sorted by scene slot, so the slot's rows are one range.
+            const auto& gates = source.authoredSceneEventKeys;
+            const auto firstGate = std::lower_bound(
+                gates.begin(), gates.end(), slotRow, [](const auto& row, std::uint32_t index) {
+                    return row.sceneSlotIndex < index;
+                });
+            const auto lastGate = std::upper_bound(
+                firstGate, gates.end(), slotRow, [](std::uint32_t index, const auto& row) {
+                    return index < row.sceneSlotIndex;
+                });
+            if (firstGate != lastGate) {
+                output.append(", event_keys = { ");
+                for (auto gate = firstGate; gate != lastGate; ++gate) {
+                    if (gate != firstGate) {
+                        output.append(", ");
+                    }
+                    append_hex(output, gate->key);
+                }
+                output.append(" }");
+            }
             output.append(" },\n");
             sceneConstants.append("    ");
             sceneConstants.append(key);
@@ -583,8 +604,14 @@ bool render_mission(const Source& source,
         }
         for (const std::uint32_t rowIndex : found->second) {
             const format::DirectiveElement& row = source.directiveElements[rowIndex];
-            (void)append_unique_key(
-                directiveConstants, directiveKeys, text(source, row.title), row.nameHash);
+            const std::string_view progress = text(source, row.progress);
+            // Only a row with no description is new; a described row keeps the title key that
+            // shipped scripts use.
+            const bool labelKey = !progress.empty() && text(source, row.description).empty();
+            (void)append_unique_key(directiveConstants,
+                                    directiveKeys,
+                                    labelKey ? progress : text(source, row.title),
+                                    row.nameHash);
             directiveConstants.append("{ id = ");
             append_string(directiveConstants, text(source, row.id));
             directiveConstants.append(", slot_row = ");
@@ -597,6 +624,13 @@ bool render_mission(const Source& source,
             append_string(directiveConstants, text(source, row.title));
             directiveConstants.append(", description = ");
             append_string(directiveConstants, text(source, row.description));
+            if (!progress.empty()) {
+                directiveConstants.append(", progress = ");
+                append_string(directiveConstants, progress);
+            }
+            if ((row.flags & format::kDirectiveElementCounter) != 0) {
+                directiveConstants.append(", counter = true");
+            }
             directiveConstants.append(" },\n");
         }
     }

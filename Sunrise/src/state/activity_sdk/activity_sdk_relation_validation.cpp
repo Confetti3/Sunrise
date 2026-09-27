@@ -56,6 +56,40 @@ constexpr std::uint32_t kAbilityTargetComponentClass = 0x80807D9BU;
     return true;
 }
 
+/**
+ * @return True when every scene event key belongs to a resourced type-43 slot, names that
+ *         slot's resource, and the rows come in slot then gate order without repeats.
+ */
+[[nodiscard]] bool authored_scene_event_keys(const Catalog& catalog) noexcept {
+    const auto keys = catalog.authored_scene_event_keys();
+    const auto slots = catalog.slots();
+    for (std::size_t index = 0; index < keys.size(); ++index) {
+        const format::AuthoredSceneEventKey& row = keys[index];
+        if (row.sceneSlotIndex >= slots.size() || row.flags != format::kAuthoredSceneEventKeyExact
+            || row.reserved != 0 || row.key == 0 || row.key == format::kAbsentIndex
+            || row.graphTag == 0 || row.graphTag == format::kAbsentIndex) {
+            return false;
+        }
+        const format::Slot& slot = slots[row.sceneSlotIndex];
+        if (slot.slotType != format::kAuthoredSceneSlotType) {
+            return false;
+        }
+        const auto resources = slot_authored_scene_resources(catalog, slot);
+        if (resources.size() != 1 || resources.front().resourceTag != row.resourceTag) {
+            return false;
+        }
+        if (index != 0) {
+            const format::AuthoredSceneEventKey& previous = keys[index - 1];
+            if (previous.sceneSlotIndex > row.sceneSlotIndex
+                || (previous.sceneSlotIndex == row.sceneSlotIndex
+                    && previous.gateOffset >= row.gateOffset)) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 /** @return True when every task target names slots and objectives the catalog holds. */
 [[nodiscard]] bool task_targets(const Catalog& catalog) noexcept {
     const auto targets = catalog.task_targets();
@@ -163,14 +197,29 @@ constexpr std::uint32_t kAbilityTargetComponentClass = 0x80807D9BU;
             return false;
         }
     }
+    const format::DirectiveElement* priorElement = nullptr;
     for (const format::DirectiveElement& row : catalog.directive_elements()) {
-        if (row.slotIndex >= slots.size() || slots[row.slotIndex].slotType != 68U
-            || row.elementIndex < 0
+        // An authored field has both source tags; an absent one has neither.
+        const bool descriptionPaired =
+            (row.descriptionContainerTag == 0) == (row.descriptionStringHash == 0);
+        const bool progressPaired =
+            (row.progressContainerTag == 0) == (row.progressStringHash == 0);
+        // Slot, name hash then element order, without repeats, backs the per-slot range lookup
+        // and makes every (slot, name hash, element) identity unique.
+        if (row.slotIndex >= slots.size()
+            || slots[row.slotIndex].slotType != format::kDirectiveSlotType || row.elementIndex < 0
             || static_cast<std::uint32_t>(row.elementIndex) >= row.elementCount
-            || row.titleContainerTag == 0 || row.titleStringHash == 0
-            || row.descriptionContainerTag == 0 || row.descriptionStringHash == 0) {
+            || row.titleContainerTag == 0 || row.titleStringHash == 0 || !descriptionPaired
+            || !progressPaired
+            || (row.descriptionContainerTag == 0 && row.progressContainerTag == 0)
+            || (priorElement != nullptr
+                && std::tie(row.slotIndex, row.nameHash, row.elementIndex)
+                       <= std::tie(priorElement->slotIndex,
+                                   priorElement->nameHash,
+                                   priorElement->elementIndex))) {
             return false;
         }
+        priorElement = &row;
     }
     return true;
 }
@@ -617,8 +666,9 @@ bool relations(const Catalog& catalog) {
         bool (*run)(const Catalog&) noexcept;
     };
     // Every relation check a catalog must pass, named so a refusal reports which one failed.
-    static constexpr std::array<Check, 8> kChecks{
-        {{"task_targets", &task_targets},
+    static constexpr std::array<Check, 9> kChecks{
+        {{"authored_scene_event_keys", &authored_scene_event_keys},
+         {"task_targets", &task_targets},
          {"squad_member_profiles", &squad_member_profiles},
          {"authored_text", &authored_text},
          {"behavior_edges", &behavior_edges},

@@ -178,6 +178,21 @@ SceneStatus play_dialogue_cue(const sdk::BoundView& view,
     return SceneStatus::refused;
 }
 
+/** Checks one exact type-68 slot; the answer holds for every element the slot carries. */
+SceneStatus directives_availability(const sdk::BoundView& view,
+                                    std::uint32_t occurrenceRow,
+                                    std::uint32_t slotRow) noexcept {
+    PreparedScene prepared{};
+    return prepare_typed_behavior(view,
+                                  occurrenceRow,
+                                  slotRow,
+                                  sdk::format::kDirectiveSlotType,
+                                  sdk::format::kDirectiveComponentClass,
+                                  sdk::format::kDirectiveAuthSchema,
+                                  false,
+                                  prepared);
+}
+
 SceneStatus directive_availability(const sdk::BoundView& view,
                                    std::uint32_t occurrenceRow,
                                    std::uint32_t slotRow,
