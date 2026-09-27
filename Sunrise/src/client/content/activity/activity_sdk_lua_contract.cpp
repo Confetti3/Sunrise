@@ -49,6 +49,7 @@ bool render_contract_files(const Source& source, Bundle& output) noexcept {
                  {"actor_sequence_tables", number(source.actorSequenceTables.size())},
                  {"actor_sequence_entries", number(source.actorSequenceEntries.size())},
                  {"actor_sequence_bindings", number(source.actorSequenceBindings.size())},
+                 {"authored_scene_event_keys", number(source.authoredSceneEventKeys.size())},
              })},
         });
         if (!render_json(manifest, 0, output.manifestJson)) {
@@ -245,6 +246,7 @@ local EventKind = {
 ---@field auth_component_offset integer|nil
 ---@field auth_dynamic boolean|nil
 ---@field auth_writable boolean|nil
+---@field unresourced boolean|nil
 ---@field set_object_active fun(SunriseSlot, SunriseObjectArguments?): SunriseRequestKey
 ---@field applied fun(self: SunriseSlot, args: {channel: any}): boolean
 ---@field run_atoms fun(self: SunriseSlot, )lua"
@@ -313,9 +315,20 @@ local EventKind = {
 ---@field transition any Generated device transition value.
 ---@field snap? boolean Jump to the end value instead of moving.
 
+---@class SunriseDirective
+---@field id string
+---@field slot_row integer
+---@field name_hash integer
+---@field element integer
+---@field title string
+---@field description string Empty when the element was authored without one.
+---@field progress string|nil Label shown before the counter, when authored.
+---@field counter boolean|nil True when the HUD shows the lane's progress values.
+
 ---@class SunriseDirectiveArguments
----@field directive table Generated mission directive declaration.
+---@field directive SunriseDirective Generated mission directive declaration.
 ---@field state? integer Defaults to 0, the native enter state.
+---@field progress? integer[] One to four lane values, current then maximum first; the element must declare a counter.
 ---@field audience? SunriseSlot Authored type-70 engagement sensor for the mission banner.
 ---@field navpoint? SunriseSlot Authored type-47 navigation marker.
 ---@field waypoint? SunriseSlot Authored type-60 volume; inside it the HUD marker hides.
@@ -359,6 +372,7 @@ local EventKind = {
 ---@field activate fun(self: SunriseScene, args: {spawn: boolean?}?): SunriseRequestKey
 ---@field stop fun(self: SunriseScene, args: table?): SunriseRequestKey
 ---@field send_event fun(self: SunriseScene, args: {key: integer}): SunriseRequestKey
+---@field event_keys integer[]|nil
 
 ---@class SunriseTaskTarget
 ---@field id string
@@ -407,6 +421,7 @@ local EventKind = {
 ---@field TaskGroup table<string, table<string, SunriseCombatTaskGroup>>
 ---@field ActorAbility table<string, table<string, table<string, SunriseActorAbility>>>
 ---@field TriggerVolume table<string, SunriseTriggerVolume>
+---@field Directive table<string, SunriseDirective>
 
 ---@class SunriseActivity
 ---@field client_teleport_reset integer

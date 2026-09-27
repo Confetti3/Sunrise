@@ -21,14 +21,32 @@ struct SceneSpawnPair final {
     bool sourceReady{};
 };
 
-/** The scene wire format bounds the complete cast before any output is queued. */
+/** The package participant table bounds the complete cast before any output is queued. */
 struct SceneSpawnPlan final {
-    std::array<
-        SceneSpawnPair,
-        middleware::bap::activity_message::sensor_auth_update::kAuthoredSceneMaximumDependencyCount>
+    std::array<SceneSpawnPair, state::activity_sdk::format::kAuthoredSceneParticipantCapacity>
         pairs{};
     std::size_t count{};
 };
+
+/**
+ * Names the cast's source squads as the scene's wire dependencies.
+ *
+ * The client uses them for one thing: once the scene runs, it marks each squad's remaining
+ * spawn budget as consumed. It binds roles from its own content, so a scene plays without
+ * them. The schema carries at most eight; a wider cast sends none.
+ * @param plan Complete resolved cast.
+ * @param output Receives the bounded set; empty when the cast exceeds the wire capacity.
+ * @return False when the cast was omitted.
+ */
+[[nodiscard]] bool
+scene_dependencies(const SceneSpawnPlan& plan,
+                   middleware::bap::activity_message::sensor_auth_update::AuthoredSceneDependencies&
+                       output) noexcept;
+
+/** Logs, at warn, a cast the wire could not carry; for the activation paths only. */
+void log_omitted_scene_dependencies(const state::activity_sdk::Catalog& catalog,
+                                    std::uint32_t sceneSlotRow,
+                                    std::size_t castCount) noexcept;
 
 /** Resolves the complete cast from exact package edges without reading Host state. */
 [[nodiscard]] SceneStatus

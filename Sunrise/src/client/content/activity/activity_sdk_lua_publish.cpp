@@ -158,7 +158,7 @@ private:
     }
     const DWORD attributes = GetFileAttributesW(path);
     if (attributes == INVALID_FILE_ATTRIBUTES
-        || (attributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0) {
+        || (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
         return false;
     }
     const HANDLE file = CreateFileW(path,
@@ -427,6 +427,7 @@ bool is_current(const wchar_t* sdkDirectory, const state::activity_sdk::Catalog&
         source.actorSequenceTables = catalog.actor_sequence_tables();
         source.actorSequenceEntries = catalog.actor_sequence_entries();
         source.actorSequenceBindings = catalog.actor_sequence_bindings();
+        source.authoredSceneEventKeys = catalog.authored_scene_event_keys();
         Bundle expected{};
         if (!internal::render_contract_files(source, expected)) {
             return false;

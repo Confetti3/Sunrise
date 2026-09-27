@@ -92,7 +92,12 @@ is_performance_descriptor(const topology::Snapshot& topology,
 
 /** Sort key matching the final section-22 pack order. */
 [[nodiscard]] inline auto edge_natural(const SquadEdge& row) noexcept {
-    return std::tie(row.sceneSlotIndex, row.configTag, row.descriptorOffset);
+    return std::tie(row.sceneSlotIndex, row.configTag, row.descriptorOffset, row.squadSlotIndex);
+}
+
+/** Sort key matching the final event-key pack order: the scene, then the gate. */
+[[nodiscard]] inline auto event_key_natural(const EventKey& row) noexcept {
+    return std::tie(row.slotIndex, row.gateOffset);
 }
 
 /** Sort key matching the final task-target pack order. */
@@ -176,9 +181,17 @@ schema_index(const topology::Snapshot& topology, const Facts& facts, SchemaIndex
                                const squad::DescriptorFact& descriptor,
                                Text& output) noexcept;
 
-/** Formats one scene-to-squad edge ID from its exact descriptor tuple. */
+/** Formats one event-key ID from the resource, its graph, the scene slot and the gate. */
+[[nodiscard]] bool event_key_id(const topology::Snapshot& topology,
+                                const squad::DescriptorFact& descriptor,
+                                std::uint32_t graphTag,
+                                std::uint32_t gateOffset,
+                                Text& output) noexcept;
+
+/** Formats one scene-to-squad edge ID from its descriptor tuple and the squad slot it names. */
 [[nodiscard]] bool edge_id(const topology::Snapshot& topology,
                            const squad::DescriptorFact& descriptor,
+                           std::uint32_t squadSlotRow,
                            Text& output) noexcept;
 
 /** Formats one task-to-objective target ID from its exact descriptor tuple. */

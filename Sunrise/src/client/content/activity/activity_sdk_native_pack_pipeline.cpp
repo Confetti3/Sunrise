@@ -213,7 +213,8 @@ lua_source(const state::activity_sdk::identity::Expected& identity,
             storage.actorSequenceBindings,
             worldSources,
             storage.combatObjectiveGroups,
-            storage.actorAbilities};
+            storage.actorAbilities,
+            storage.authoredSceneEventKeys};
 }
 
 } // namespace
@@ -371,6 +372,9 @@ Status stage(const wchar_t* sdkDirectory,
         if (!authored_scene::build(topology, sceneFacts, &read_tag, &packageContext, sceneRows)) {
             return cancelled(cancel, cancelContext) ? Status::cancelled
                                                     : Status::authoredSceneLinks;
+        }
+        if (!attach_unresourced_scenes(topology, sceneRows, topologyDetails)) {
+            return Status::authoredSceneLinks;
         }
         report(progress, progressContext, Phase::dialogueCues);
         if (!attach_dialogue_cue_counts(
