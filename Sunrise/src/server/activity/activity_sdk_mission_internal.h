@@ -16,6 +16,8 @@ struct PreparedScene final {
     state::build_data::scenarios::RosterGroup rosterGroup{};
     middleware::bap::activity_message::sensor_auth_update::AuthoredSceneDependencies
         sceneDependencies{};
+    /** Squads the resolved cast draws from; more than the wire carries leaves the set empty. */
+    std::size_t castCount{};
     std::uint64_t activityClientGeneration{};
     std::uint32_t scenarioRow{state::activity_sdk::format::kAbsentIndex};
     std::uint32_t stateRow{state::activity_sdk::format::kAbsentIndex};

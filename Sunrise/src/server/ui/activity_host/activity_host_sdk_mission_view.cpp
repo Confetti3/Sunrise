@@ -8,7 +8,9 @@
 #include <cstdio>
 #include <imgui.h>
 #include <span>
+#include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "../../../core/ui/components/section/ui_section_component.h"
@@ -49,6 +51,32 @@ struct SceneBrowserRow final {
 };
 
 std::vector<SceneBrowserRow> g_visibleScenes{};
+
+/**
+ * Everything the scene rows are computed from. Resolving one row prepares its whole cast, so
+ * the rows are rebuilt when this changes or after kSceneRefreshSeconds, not every frame.
+ */
+struct SceneBrowserKey final {
+    const sdk::Catalog* catalog{};
+    std::uint32_t scenarioRow{sdk::format::kAbsentIndex};
+    std::uint32_t stateRow{sdk::format::kAbsentIndex};
+    std::uint64_t activityClientGeneration{};
+    std::uint64_t revision{};
+    std::uint64_t publishedRevision{};
+    std::int32_t effectiveRegion{-1};
+    bool configured{};
+    bool publicationPending{};
+    bool regionArrivalPending{};
+    std::string query{};
+
+    [[nodiscard]] bool operator==(const SceneBrowserKey&) const noexcept = default;
+};
+
+/** Bounds how stale a row's availability can be when nothing observable changed. */
+constexpr double kSceneRefreshSeconds = 0.25;
+SceneBrowserKey g_visibleScenesKey{};
+double g_visibleScenesTime{-1.0};
+bool g_visibleScenesReady{};
 
 /** @return The global row of one borrowed slot or the absent marker. */
 [[nodiscard]] std::uint32_t global_slot_row(const sdk::Catalog& catalog,
@@ -146,8 +174,28 @@ std::vector<SceneBrowserRow> g_visibleScenes{};
 
 /** Builds type-43 rows from only the selected state-ordinal-0 occurrence set. */
 [[nodiscard]] bool materialize_visible_scenes(const sdk::BoundView& view,
-                                              std::uint32_t stateRow) noexcept {
+                                              const mission::Snapshot& snapshot) noexcept {
+    const std::uint32_t stateRow = snapshot.plan.stateRow;
     try {
+        SceneBrowserKey key{.catalog = view.catalog.get(),
+                            .scenarioRow = view.scenarioRow,
+                            .stateRow = stateRow,
+                            .activityClientGeneration = snapshot.activityClientGeneration,
+                            .revision = snapshot.revision,
+                            .publishedRevision = snapshot.publishedRevision,
+                            .effectiveRegion = snapshot.effectiveRegion,
+                            .configured = snapshot.configured,
+                            .publicationPending = snapshot.publicationPending,
+                            .regionArrivalPending = snapshot.regionArrivalPending,
+                            .query = std::string(search_text())};
+        const double now = ImGui::GetTime();
+        if (key == g_visibleScenesKey && g_visibleScenesTime >= 0.0
+            && now - g_visibleScenesTime < kSceneRefreshSeconds) {
+            return g_visibleScenesReady;
+        }
+        g_visibleScenesKey = std::move(key);
+        g_visibleScenesTime = now;
+        g_visibleScenesReady = false;
         g_visibleScenes.clear();
         if (view.catalog == nullptr || stateRow >= view.catalog->states().size()) {
             return false;
@@ -185,16 +233,19 @@ std::vector<SceneBrowserRow> g_visibleScenes{};
                 }
             }
         }
+        g_visibleScenesReady = true;
         return true;
     } catch (...) {
         g_visibleScenes.clear();
+        g_visibleScenesKey = {};
+        g_visibleScenesTime = -1.0;
         return false;
     }
 }
 
 /** Draws searchable exact type-43 rows and their manual one-generation action. */
 void draw_authored_scenes(const sdk::BoundView& view, const mission::Snapshot& snapshot) noexcept {
-    if (!materialize_visible_scenes(view, snapshot.plan.stateRow)) {
+    if (!materialize_visible_scenes(view, snapshot)) {
         ImGui::TextDisabled("No scene in this state.");
         return;
     }
@@ -328,6 +379,7 @@ void draw_authored_scenes(const sdk::BoundView& view, const mission::Snapshot& s
                 g_sceneActionStatus =
                     mission::activate_authored_scene(view, row.occurrenceRow, row.slotRow);
                 g_hasSceneActionStatus = true;
+                g_visibleScenesTime = -1.0;
             }
             ImGui::EndDisabled();
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {

@@ -9,6 +9,7 @@
 #include "../../state/activity/runtime.h"
 #include "activity_sdk_behavior_scope.h"
 #include "activity_sdk_mission_internal.h"
+#include "activity_sdk_scene_spawn.h"
 #include "activity_sdk_scriptable_route.h"
 #include "host_runtime.h"
 
@@ -125,6 +126,9 @@ SceneStatus activate_authored_scene(const sdk::BoundView& view,
     const SceneStatus status = prepare_scene(view, occurrenceRow, slotRow, prepared);
     if (status != SceneStatus::ready) {
         return status;
+    }
+    if (prepared.sceneDependencies.count == 0 && prepared.castCount != 0) {
+        log_omitted_scene_dependencies(*view.catalog, slotRow, prepared.castCount);
     }
     if (server::bap::request_activity_state_local_authored_scene_override(
             view.binding,
@@ -751,6 +755,9 @@ SceneStatus activate_authored_scene_reserved(const sdk::BoundView& view,
     const SceneStatus status = prepare_scene(view, occurrenceRow, slotRow, prepared);
     if (status != SceneStatus::ready) {
         return status;
+    }
+    if (prepared.sceneDependencies.count == 0 && prepared.castCount != 0) {
+        log_omitted_scene_dependencies(*view.catalog, slotRow, prepared.castCount);
     }
     if (server::bap::request_activity_state_local_authored_scene_override(
             view.binding,
