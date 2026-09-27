@@ -8,7 +8,6 @@
 #include <utility>
 
 #include "../../../client/ui/activity/authored_placement_marker.h"
-#include "../../../core/ui/components/card/ui_card_component.h"
 #include "../../../core/ui/scaling/dpi/ui_dpi_scaling.h"
 #include "../../../state/activity_sdk/generation/runtime.h"
 #include "../../../state/activity_sdk/runtime.h"
@@ -25,7 +24,6 @@
 namespace sunrise::server::ui::activity_host::sdk_view {
 namespace {
 
-namespace card = core::ui::components::card;
 namespace format = state::activity_sdk::format;
 namespace generation = state::activity_sdk::generation;
 namespace host = server::activity::host;
@@ -386,13 +384,10 @@ void draw(bool& open, const host::InstanceSnapshot* instance) noexcept {
         marker::set_world_page(marker::WorldPage::none);
         return;
     }
-    const bool visible = tool_window::begin(
-        "Activity Host - World###activity_host_sdk", open, {32.0F, 40.0F}, {940.0F, 680.0F});
+    const bool visible =
+        tool_window::begin("World - Activity Host###activity_host_sdk", open, {0.72F, 0.68F});
     if (visible) {
-        const card::Scope surface("##activity_host_sdk_card");
-        if (surface.visible()) {
-            draw_content(instance);
-        }
+        draw_content(instance);
     }
     ImGui::End();
     if (!open) {

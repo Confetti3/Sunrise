@@ -39,6 +39,8 @@ constexpr std::size_t kFrameLimit = 16;
 constexpr std::size_t kFramesPerLine = 8;
 /** Time the stopping side waits for the watcher to leave its loop. */
 constexpr DWORD kJoinMs = 2'000;
+/** No image maps below the first 64 KiB; a stack slot holding less is data, not a return. */
+constexpr std::uint64_t kLowestCodeAddress = 0x10000;
 
 HANDLE g_thread{};
 HANDLE g_stop{};
@@ -57,7 +59,53 @@ void resolve_module_ranges() noexcept {
     (void)diagnostics::module_range(own, g_ownRange);
 }
 
-/** Formats one code address as a module-relative token, or raw hex outside both images. */
+/**
+ * Names the loaded module holding one address, as "<basename>+0x<rva>".
+ * Runs only after every suspended thread has resumed: the loader lock may be held by one of
+ * them, and this takes it.
+ * @return True when a module owns the address and the token fit.
+ */
+[[nodiscard]] bool
+format_module_address(std::uint64_t value, char* out, std::size_t size) noexcept {
+    HMODULE module = nullptr;
+    diagnostics::ModuleRange range{};
+    if (value < kLowestCodeAddress
+        || GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS
+                                  | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                              reinterpret_cast<LPCWSTR>(static_cast<std::uintptr_t>(value)),
+                              &module)
+               == 0
+        || !diagnostics::module_range(module, range) || !diagnostics::contains(range, value)) {
+        return false;
+    }
+    std::array<wchar_t, MAX_PATH> path{};
+    const DWORD length = GetModuleFileNameW(module, path.data(), static_cast<DWORD>(path.size()));
+    if (length == 0 || length >= path.size()) {
+        return false;
+    }
+    std::size_t start = length;
+    while (start > 0 && path[start - 1] != L'\\' && path[start - 1] != L'/') {
+        --start;
+    }
+    // The extension carries nothing the module name does not, and the line has a budget.
+    std::size_t stop = length;
+    if (stop > start + 4 && path[stop - 4] == L'.') {
+        stop -= 4;
+    }
+    const int written = std::snprintf(
+        out,
+        size,
+        "%.*ls+0x%llX",
+        static_cast<int>(stop - start),
+        path.data() + start,
+        static_cast<unsigned long long>(value - reinterpret_cast<std::uintptr_t>(module)));
+    return written > 0 && static_cast<std::size_t>(written) < size;
+}
+
+/**
+ * Formats one code address as a module-relative token: the game image, this DLL, any other
+ * loaded module by name, or raw hex when nothing owns it.
+ */
 void format_address(std::uint64_t value, char* out, std::size_t size) noexcept {
     if (diagnostics::contains(g_gameRange, value)) {
         std::snprintf(
@@ -69,7 +117,27 @@ void format_address(std::uint64_t value, char* out, std::size_t size) noexcept {
             out, size, "own+0x%llX", static_cast<unsigned long long>(value - g_ownRange.base));
         return;
     }
+    if (format_module_address(value, out, size)) {
+        return;
+    }
     std::snprintf(out, size, "0x%llX", static_cast<unsigned long long>(value));
+}
+
+/** @return True when some loaded image, not only the two known ones, holds the address. */
+[[nodiscard]] bool in_any_module(std::uint64_t value) noexcept {
+    if (diagnostics::contains(g_gameRange, value) || diagnostics::contains(g_ownRange, value)) {
+        return true;
+    }
+    HMODULE module = nullptr;
+    diagnostics::ModuleRange range{};
+    // Wine answers the main image for a null address, so the range check is what decides.
+    return value >= kLowestCodeAddress
+           && GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS
+                                     | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                 reinterpret_cast<LPCWSTR>(static_cast<std::uintptr_t>(value)),
+                                 &module)
+                  != 0
+           && diagnostics::module_range(module, range) && diagnostics::contains(range, value);
 }
 
 /**
@@ -105,7 +173,7 @@ void format_address(std::uint64_t value, char* out, std::size_t size) noexcept {
     return captured;
 }
 
-/** Logs one thread's rip, rsp and every in-image return address on its stack. */
+/** Logs one thread's rip, rsp and every module-owned return address on its stack. */
 void report_thread(std::uint32_t tid) noexcept {
     alignas(16) CONTEXT context{};
     std::array<std::byte, kStackWindowBytes> stack{};
@@ -113,7 +181,7 @@ void report_thread(std::uint32_t tid) noexcept {
     if (!capture_thread(tid, context, stack.data(), stackBytes)) {
         return;
     }
-    std::array<char, 32> ripText{};
+    std::array<char, 64> ripText{};
     format_address(context.Rip, ripText.data(), ripText.size());
     std::array<char, core::log::kLineCapacity> line{};
     int written = std::snprintf(line.data(),
@@ -135,8 +203,7 @@ void report_thread(std::uint32_t tid) noexcept {
     for (std::size_t index = 0; index * 8 + 8 <= stackBytes && frames < kFrameLimit; ++index) {
         std::uint64_t value = 0;
         std::memcpy(&value, stack.data() + index * 8, sizeof value);
-        if (!diagnostics::contains(g_gameRange, value)
-            && !diagnostics::contains(g_ownRange, value)) {
+        if (!in_any_module(value)) {
             continue;
         }
         if (onLine == 0) {
@@ -144,7 +211,7 @@ void report_thread(std::uint32_t tid) noexcept {
                 line.data(), line.size(), "ev=probe stage=stall set=frames tid=0x%08X", tid);
             offset = prefix > 0 ? static_cast<std::size_t>(prefix) : 0;
         }
-        std::array<char, 32> text{};
+        std::array<char, 64> text{};
         format_address(value, text.data(), text.size());
         const int piece = std::snprintf(
             line.data() + offset, line.size() - offset, " f%zu=%s", frames, text.data());
