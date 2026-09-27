@@ -172,8 +172,7 @@ bool build_character_abilities(
         }
         output[count++] = row;
     };
-    for (std::size_t character = 0; character < account.characterCount && count < output.size();
-         ++character) {
+    for (std::size_t character = 0; character < account.characterCount; ++character) {
         std::uint16_t equippedSocketEntryListIndex = 0;
         const char* subclassReason = "subclass";
         if (!subclass_list(

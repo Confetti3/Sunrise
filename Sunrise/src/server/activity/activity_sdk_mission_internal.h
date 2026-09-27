@@ -14,10 +14,11 @@ namespace sunrise::server::activity::activity_sdk_mission::detail {
 struct PreparedScene final {
     host::ScriptableTarget target{};
     state::build_data::scenarios::RosterGroup rosterGroup{};
+    /** Squads the resolved cast draws from; a cast wider than the wire is refused. */
     middleware::bap::activity_message::sensor_auth_update::AuthoredSceneDependencies
         sceneDependencies{};
-    /** Squads the resolved cast draws from; more than the wire carries leaves the set empty. */
-    std::size_t castCount{};
+    /** Squad participants the cast left to the client. */
+    std::size_t omittedParticipants{};
     std::uint64_t activityClientGeneration{};
     std::uint32_t scenarioRow{state::activity_sdk::format::kAbsentIndex};
     std::uint32_t stateRow{state::activity_sdk::format::kAbsentIndex};

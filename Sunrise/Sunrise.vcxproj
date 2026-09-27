@@ -709,6 +709,7 @@
     <ClCompile Include="src\client\content\activity\activity_sdk_activity_enrichment_inventory.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_actor_rsat_inventory.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_authored_scene_facts.cpp" />
+    <ClCompile Include="src\client\content\activity\activity_sdk_authored_scene_identity.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_authored_scene_inventory.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_behavior_inventory.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_lua_activities.cpp" />
@@ -2130,6 +2131,7 @@
     <ClCompile Include="src\client\content\activity\scriptable_catalog_object_analysis.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_authored_scene_validation.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_lua_missions.cpp" />
+    <ClCompile Include="src\client\content\activity\activity_sdk_lua_missions_catalog_constants.cpp" />
     <ClCompile Include="src\client\content\activity\scriptable_catalog_container_placement_cache.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_native_pack_text.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_policy_inventory_capabilities.cpp" />

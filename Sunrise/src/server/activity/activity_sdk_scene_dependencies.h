@@ -24,11 +24,8 @@ struct SceneSquadParticipants final {
 };
 
 /**
- * Collects the selected scene descriptor's exact squad edges.
- *
- * The client binds every role from the participant table in its own content; these rows only
- * tell the server which squads the scene may draw actors from. The wire dependency set is
- * narrower (see scene_dependencies in activity_sdk_scene_spawn.h).
+ * Collects the selected scene descriptor's exact squad edges: the squads the scene may draw
+ * actors from. The client binds every role from its own participant table.
  * @param catalog Authenticated SDK catalog.
  * @param sceneSlot Owned scene slot.
  * @param resource Selected resource descriptor for that slot.

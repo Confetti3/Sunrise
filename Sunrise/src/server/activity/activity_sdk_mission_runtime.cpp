@@ -127,8 +127,8 @@ SceneStatus activate_authored_scene(const sdk::BoundView& view,
     if (status != SceneStatus::ready) {
         return status;
     }
-    if (prepared.sceneDependencies.count == 0 && prepared.castCount != 0) {
-        log_omitted_scene_dependencies(*view.catalog, slotRow, prepared.castCount);
+    if (prepared.omittedParticipants != 0) {
+        log_omitted_participants(*view.catalog, slotRow, prepared.omittedParticipants);
     }
     if (server::bap::request_activity_state_local_authored_scene_override(
             view.binding,
@@ -771,8 +771,8 @@ SceneStatus activate_authored_scene_reserved(const sdk::BoundView& view,
     if (status != SceneStatus::ready) {
         return status;
     }
-    if (prepared.sceneDependencies.count == 0 && prepared.castCount != 0) {
-        log_omitted_scene_dependencies(*view.catalog, slotRow, prepared.castCount);
+    if (prepared.omittedParticipants != 0) {
+        log_omitted_participants(*view.catalog, slotRow, prepared.omittedParticipants);
     }
     if (server::bap::request_activity_state_local_authored_scene_override(
             view.binding,
@@ -869,6 +869,8 @@ const char* status_name(SceneStatus status) noexcept {
         return "mission_seed_pending";
     case SceneStatus::outputBusy:
         return "output_busy";
+    case SceneStatus::dependencyCapacity:
+        return "dependency_capacity";
     case SceneStatus::refused:
         return "refused";
     }

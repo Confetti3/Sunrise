@@ -69,12 +69,9 @@ using Source = state::gameplay::entity_identity::ActorSourceReference;
 } // namespace
 
 /**
- * Resolves the complete cast before exposing any pair.
- *
- * A squad participant joins the cast only when one exact actor control in the scene's own
- * scenario state resolves to it. The client binds every role from its content and waits for
- * the squads nobody supplies, so a participant without an actor control is left to it rather
- * than refused.
+ * Resolves the complete cast before exposing any pair. A squad participant joins only when one
+ * exact actor control in the scene's own state resolves to it; the client binds every other role
+ * from its content, so such a participant is counted as omitted, not refused.
  * @param catalog Authenticated SDK data.
  * @param world Exact generated package references.
  * @param occurrenceRow Selected scene occurrence.
@@ -123,6 +120,7 @@ SceneStatus collect_scene_spawn_plan(const sdk::Catalog& catalog,
         const auto parent = source_squad(catalog, occurrenceRow, source, pair.squadRow);
         if (parent == SceneStatus::targetUnavailable) {
             pair = {};
+            ++candidate.omitted;
             continue;
         }
         if (parent != SceneStatus::ready) {
@@ -164,6 +162,7 @@ SceneStatus collect_scene_spawn_plan(const sdk::Catalog& catalog,
         }
         if (pair.actorSlotRow == sdk::format::kAbsentIndex) {
             pair = {};
+            ++candidate.omitted;
             continue;
         }
         pair.actorTarget = physical_target(catalog, pair.actorSlotRow);

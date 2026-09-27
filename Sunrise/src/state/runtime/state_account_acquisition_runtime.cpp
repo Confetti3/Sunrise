@@ -161,6 +161,24 @@ using Quest = build_data::items::QuestInitialization;
 
 } // namespace runtime::detail
 
+namespace {
+
+/** A vendor row pays its own price; a Collections pull pays the collectible's materials. */
+[[nodiscard]] bool
+charge_acquisition(const AccountState& account,
+                   std::optional<std::span<const build_data::vendors::SaleCost>> price,
+                   const build_data::collectibles::Definition* collectible,
+                   AccountState& charged,
+                   bool& changed) noexcept {
+    if (price.has_value()) {
+        return apply_sale_price(account, *price, charged, changed);
+    }
+    return collectible == nullptr
+           || apply_collection_materials(account, *collectible, charged, changed);
+}
+
+} // namespace
+
 /**
  * Inventory and quest state must come from the same locked save view.
  * @param collectibleIndex Collections row, or kNoCollectibleIndex for an item-only grant.
@@ -201,19 +219,15 @@ bool prepare_item_acquisition(std::uint16_t collectibleIndex,
 
     AccountState chargedAccount = account;
     bool profileChanged = false;
-    // A vendor row pays its own price, whatever its collectible would charge from Collections;
-    // a Collections pull pays with the collectible's materials, and an item-only grant is free.
-    const bool paid = price.has_value()
-                          ? apply_sale_price(account, *price, chargedAccount, profileChanged)
-                          : !hasCollectible
-                                || apply_collection_materials(
-                                    account, collectible, chargedAccount, profileChanged);
-    if (!paid) {
+    if (!charge_acquisition(account,
+                            price,
+                            hasCollectible ? &collectible : nullptr,
+                            chargedAccount,
+                            profileChanged)) {
         return false;
     }
 
-    // Commit re-checks the collectible's own cost fields, so the mutation carries those; a sale
-    // price is proven only by its before/after profile images.
+    // Commit re-checks the collectible's cost fields; a sale price is proven by the profile images.
     return finalize_item_acquisition(
         account,
         chargedAccount,
@@ -749,22 +763,18 @@ bool prepare_profile_item_acquisition(
     }
     AccountState chargedAccount = account;
     bool materialsChanged = false;
-    // A vendor row pays its own price, whatever its collectible would charge from Collections;
-    // a Collections pull pays with the collectible's materials, and an item-only grant is free.
-    const bool paid = price.has_value()
-                          ? apply_sale_price(account, *price, chargedAccount, materialsChanged)
-                          : collectibleIndex == build_data::collectibles::kNoCollectibleIndex
-                                || apply_collection_materials(
-                                    account, collectible, chargedAccount, materialsChanged);
-    if (!paid) {
+    const bool hasCollectible = collectibleIndex != build_data::collectibles::kNoCollectibleIndex;
+    if (!charge_acquisition(account,
+                            price,
+                            hasCollectible ? &collectible : nullptr,
+                            chargedAccount,
+                            materialsChanged)) {
         return false;
     }
-    (void)materialsChanged;
     const bool actionSource =
         build_data::is_profile_action_source(item.definitionIndex, item.bucketId);
 
-    // Commit re-checks the collectible's own cost fields, so the mutation carries those; a sale
-    // price is proven only by its before/after profile images.
+    // Commit re-checks the collectible's cost fields; a sale price is proven by the profile images.
     return finalize_profile_item_acquisition(
         account,
         chargedAccount,

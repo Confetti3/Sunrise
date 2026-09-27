@@ -648,10 +648,10 @@ bool relations(const Catalog& catalog) {
         bool (*run)(const Catalog&) noexcept;
     };
     // Every relation check a catalog must pass, named so a refusal reports which one failed.
-    static constexpr std::array<Check, 8> kChecks{
+    static constexpr std::array<Check, 9> kChecks{
         {{"authored_scene_event_keys", &authored_scene_event_keys},
          {"squad_profiles", &squad_profiles},
-                                                   {"task_targets", &task_targets},
+         {"task_targets", &task_targets},
          {"authored_text", &authored_text},
          {"behavior_edges", &behavior_edges},
          {"actor_semantics", &actor_semantics},

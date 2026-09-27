@@ -328,7 +328,7 @@ local EventKind = {
 ---@class SunriseDirectiveArguments
 ---@field directive SunriseDirective Generated mission directive declaration.
 ---@field state? integer Defaults to 0, the native enter state.
----@field progress? integer[] One to four lane values, current then maximum first; the element must declare a counter.
+---@field progress? integer[] One to four lane values, current then maximum; counter elements only.
 ---@field audience? SunriseSlot Authored type-70 engagement sensor for the mission banner.
 ---@field navpoint? SunriseSlot Authored type-47 navigation marker.
 ---@field waypoint? SunriseSlot Authored type-60 volume; inside it the HUD marker hides.

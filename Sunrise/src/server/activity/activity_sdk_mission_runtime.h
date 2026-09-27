@@ -50,6 +50,8 @@ enum class SceneStatus : std::uint8_t {
     missionSeedUnavailable,
     missionSeedPending,
     outputBusy,
+    /** The cast has more squads than the eight dependencies the Auth schema carries. */
+    dependencyCapacity,
     refused,
 };
 

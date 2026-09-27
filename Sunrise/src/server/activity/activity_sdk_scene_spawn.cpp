@@ -118,7 +118,7 @@ prepare_pair(const sdk::BoundView& view, std::uint32_t sceneState, SceneSpawnPai
 
 } // namespace
 
-/** Sends the cast's squads when the wire can carry them all, otherwise none. */
+/** Carries the cast's squads only when the schema holds them all. */
 bool scene_dependencies(
     const SceneSpawnPlan& plan,
     middleware::bap::activity_message::sensor_auth_update::AuthoredSceneDependencies&
@@ -136,29 +136,19 @@ bool scene_dependencies(
     return true;
 }
 
-/** Logged once per activation; an availability check resolves the same cast every frame. */
-void log_omitted_scene_dependencies(const sdk::Catalog& catalog,
-                                    std::uint32_t sceneSlotRow,
-                                    std::size_t castCount) noexcept {
-    std::array<char, core::log::kLineCapacity> line{};
+/** Names the scene and how many of its squad participants the host did not cast. */
+void log_omitted_participants(const sdk::Catalog& catalog,
+                              std::uint32_t sceneSlotRow,
+                              std::size_t omitted) noexcept {
     const std::string_view scene = sceneSlotRow < catalog.slots().size()
                                        ? catalog.string(catalog.slots()[sceneSlotRow].id)
                                        : std::string_view{};
-    const int written = std::snprintf(
-        line.data(),
-        line.size(),
-        "ev=scene_dependencies result=omitted scene=%.*s cast=%zu capacity=%zu",
-        static_cast<int>(scene.size()),
-        scene.data(),
-        castCount,
-        middleware::bap::activity_message::sensor_auth_update::AuthoredSceneDependencies{}
-            .references.size());
-    if (written > 0) {
-        core::log::write(
-            core::log::Channel::server,
-            core::log::Level::warn,
-            {line.data(), (std::min)(static_cast<std::size_t>(written), line.size() - 1)});
-    }
+    core::log::writef(core::log::Channel::server,
+                      core::log::Level::info,
+                      "ev=scene_cast result=partial scene=%.*s omitted=%zu",
+                      static_cast<int>(scene.size()),
+                      scene.data(),
+                      omitted);
 }
 
 /** Returns immutable scene cast identities without consulting live output state. */

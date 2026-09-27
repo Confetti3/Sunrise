@@ -12,6 +12,7 @@
 #include <TlHelp32.h>
 #include <array>
 #include <atomic>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -61,8 +62,7 @@ void resolve_module_ranges() noexcept {
 
 /**
  * Names the loaded module holding one address, as "<basename>+0x<rva>".
- * Runs only after every suspended thread has resumed: the loader lock may be held by one of
- * them, and this takes it.
+ * Takes the loader lock, so it runs only after every suspended thread has resumed.
  * @return True when a module owns the address and the token fit.
  */
 [[nodiscard]] bool
@@ -72,7 +72,7 @@ format_module_address(std::uint64_t value, char* out, std::size_t size) noexcept
     if (value < kLowestCodeAddress
         || GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS
                                   | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                              reinterpret_cast<LPCWSTR>(static_cast<std::uintptr_t>(value)),
+                              std::bit_cast<LPCWSTR>(static_cast<std::uintptr_t>(value)),
                               &module)
                == 0
         || !diagnostics::module_range(module, range) || !diagnostics::contains(range, value)) {
@@ -103,41 +103,25 @@ format_module_address(std::uint64_t value, char* out, std::size_t size) noexcept
 }
 
 /**
- * Formats one code address as a module-relative token: the game image, this DLL, any other
- * loaded module by name, or raw hex when nothing owns it.
+ * Formats one code address as a module-relative token, or raw hex when no image owns it.
+ * @return True when the game image, this DLL or another loaded module owns the address.
  */
-void format_address(std::uint64_t value, char* out, std::size_t size) noexcept {
+bool format_address(std::uint64_t value, char* out, std::size_t size) noexcept {
     if (diagnostics::contains(g_gameRange, value)) {
         std::snprintf(
             out, size, "exe+0x%llX", static_cast<unsigned long long>(value - g_gameRange.base));
-        return;
+        return true;
     }
     if (diagnostics::contains(g_ownRange, value)) {
         std::snprintf(
             out, size, "own+0x%llX", static_cast<unsigned long long>(value - g_ownRange.base));
-        return;
-    }
-    if (format_module_address(value, out, size)) {
-        return;
-    }
-    std::snprintf(out, size, "0x%llX", static_cast<unsigned long long>(value));
-}
-
-/** @return True when some loaded image, not only the two known ones, holds the address. */
-[[nodiscard]] bool in_any_module(std::uint64_t value) noexcept {
-    if (diagnostics::contains(g_gameRange, value) || diagnostics::contains(g_ownRange, value)) {
         return true;
     }
-    HMODULE module = nullptr;
-    diagnostics::ModuleRange range{};
-    // Wine answers the main image for a null address, so the range check is what decides.
-    return value >= kLowestCodeAddress
-           && GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS
-                                     | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                                 reinterpret_cast<LPCWSTR>(static_cast<std::uintptr_t>(value)),
-                                 &module)
-                  != 0
-           && diagnostics::module_range(module, range) && diagnostics::contains(range, value);
+    if (format_module_address(value, out, size)) {
+        return true;
+    }
+    std::snprintf(out, size, "0x%llX", static_cast<unsigned long long>(value));
+    return false;
 }
 
 /**
@@ -182,7 +166,7 @@ void report_thread(std::uint32_t tid) noexcept {
         return;
     }
     std::array<char, 64> ripText{};
-    format_address(context.Rip, ripText.data(), ripText.size());
+    (void)format_address(context.Rip, ripText.data(), ripText.size());
     std::array<char, core::log::kLineCapacity> line{};
     int written = std::snprintf(line.data(),
                                 line.size(),
@@ -203,7 +187,9 @@ void report_thread(std::uint32_t tid) noexcept {
     for (std::size_t index = 0; index * 8 + 8 <= stackBytes && frames < kFrameLimit; ++index) {
         std::uint64_t value = 0;
         std::memcpy(&value, stack.data() + index * 8, sizeof value);
-        if (!in_any_module(value)) {
+        // A slot no image owns is data, not a return address.
+        std::array<char, 64> text{};
+        if (!format_address(value, text.data(), text.size())) {
             continue;
         }
         if (onLine == 0) {
@@ -211,8 +197,6 @@ void report_thread(std::uint32_t tid) noexcept {
                 line.data(), line.size(), "ev=probe stage=stall set=frames tid=0x%08X", tid);
             offset = prefix > 0 ? static_cast<std::size_t>(prefix) : 0;
         }
-        std::array<char, 64> text{};
-        format_address(value, text.data(), text.size());
         const int piece = std::snprintf(
             line.data() + offset, line.size() - offset, " f%zu=%s", frames, text.data());
         if (piece > 0) {

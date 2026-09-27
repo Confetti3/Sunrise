@@ -29,6 +29,12 @@ struct RenderIndex final {
                                             std::string_view name,
                                             std::uint32_t fallback);
 
+/** Appends one signed decimal literal. */
+void append_int(std::string& output, std::int32_t value);
+
+/** Appends the catalog-wide constant tables every mission module shares. */
+void append_catalog_constants(const Source& source, std::string& output);
+
 /** Emits one concrete mission module with no pack or resolver access. */
 [[nodiscard]] bool render_mission(const Source& source,
                                   const RenderIndex& index,

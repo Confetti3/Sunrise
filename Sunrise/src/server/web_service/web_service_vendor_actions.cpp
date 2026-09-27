@@ -299,15 +299,14 @@ constexpr std::array<LegacyQuestStep, 3> kLegacyQuestSteps{{
     // A sale row holds its cost as u32; the mutation charges an i32, so a wider row is refused.
     constexpr auto kQuantityLimit =
         static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)());
-    // An exchange charges exactly one static stack, so a row that is not plainly priced, or
-    // declares any number of entries but one, is not one.
+    // An exchange charges exactly one static stack; the caller already refused a row whose
+    // entries are not its price.
     const std::span<const vendor_domain::SaleCost> price = vendor_domain::cost_entries(row);
     const vendor_domain::SaleCost single = price.size() == 1 ? price[0] : vendor_domain::SaleCost{};
     state::build_data::items::Definition cost{};
     // A recycle row owns its purchase from here, refused or not: falling through would grant the
     // placeholder, which is the failure this path exists to avoid.
-    if (row.priceState != vendor_domain::PriceState::plain || price.size() != 1
-        || single.quantity == 0 || single.quantity > kQuantityLimit
+    if (price.size() != 1 || single.quantity == 0 || single.quantity > kQuantityLimit
         || !state::build_data::find_item_definition_index(single.itemIndex, cost)) {
         core::log::writef(core::log::Channel::server,
                           core::log::Level::warn,
@@ -644,8 +643,8 @@ constexpr std::uint32_t kAbsentNameHash = 0x811C9DC5U;
  * @param opcode Opcode to report under.
  * @param vendorIndex Vendor the request names.
  * @param rowIndex Sale row the request names.
- * @param row The resolved sale row. Its price is spent by a grant and by a bounty roll, and an
- *        exchange spends it as the stack it recycles.
+ * @param row The resolved sale row; a grant and a bounty roll spend its price, an exchange recycles
+ * it.
  * @param outcome Receives whatever mutation the row prepared.
  */
 void settle_vendor_row(const middleware::web_service::Message& message,
