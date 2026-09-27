@@ -23,11 +23,16 @@ using TagReader = bool (*)(void* context,
                            std::vector<std::byte>& bytes,
                            std::uint32_t& classId) noexcept;
 
-/** The actor inventory may close one exact definition tag to its final row index. */
+/** One validated actor definition supplies its identity and native spawn profile. */
+struct ResolvedActor final {
+    std::uint32_t actorClassIndex{format::kAbsentIndex};
+    std::array<std::int8_t, 4> authoredSpawnProfile{};
+};
+
+/** The actor inventory closes one exact definition tag to its validated row. */
 using ActorResolver = bool (*)(void* context,
                                std::uint32_t definitionTag,
-                               std::uint32_t& actorClassIndex,
-                               std::array<std::int8_t, 4>& authoredSpawnProfile) noexcept;
+                               ResolvedActor& output) noexcept;
 
 enum class CandidateState : std::uint8_t {
     nullPlacement,

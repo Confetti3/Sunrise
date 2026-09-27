@@ -13,152 +13,6 @@
 
 namespace sunrise::client::content::activity::sdk_generation::authored_scene_inventory {
 
-/** Formats one resource ID from its exact descriptor tuple. */
-bool resource_id(const topology::Snapshot& topology,
-                 const squad::DescriptorFact& descriptor,
-                 Text& output) noexcept {
-    if (descriptor.objectIndex >= topology.objects.size()
-        || descriptor.slotIndex >= topology.slots.size()) {
-        return false;
-    }
-    const topology::Object& object = topology.objects[descriptor.objectIndex];
-    const topology::Slot& slot = topology.slots[descriptor.slotIndex];
-    return format_text(output,
-                       "authored-scene-resource/%08x/%08x/%08x/%04x/%04x",
-                       static_cast<unsigned>(descriptor.configTag),
-                       static_cast<unsigned>(object.objectTag),
-                       static_cast<unsigned>(descriptor.descriptorOffset),
-                       static_cast<unsigned>(slot.slotIndex),
-                       static_cast<unsigned>(slot.slotType));
-}
-
-/** Formats one event-key ID from the resource, its graph, the scene slot and the gate. */
-bool event_key_id(const topology::Snapshot& topology,
-                  const squad::DescriptorFact& descriptor,
-                  std::uint32_t graphTag,
-                  std::uint32_t gateOffset,
-                  Text& output) noexcept {
-    if (descriptor.slotIndex >= topology.slots.size()) {
-        return false;
-    }
-    const topology::Slot& slot = topology.slots[descriptor.slotIndex];
-    return format_text(output,
-                       "authored-scene-event-key/%08x/%08x/%04x/%04x/%08x",
-                       static_cast<unsigned>(descriptor.configTag),
-                       static_cast<unsigned>(graphTag),
-                       static_cast<unsigned>(slot.slotIndex),
-                       static_cast<unsigned>(slot.slotType),
-                       static_cast<unsigned>(gateOffset));
-}
-
-/** Formats one scene-to-squad edge ID from its descriptor tuple and the squad slot it names. */
-bool edge_id(const topology::Snapshot& topology,
-             const squad::DescriptorFact& descriptor,
-             std::uint32_t squadSlotRow,
-             Text& output) noexcept {
-    if (descriptor.objectIndex >= topology.objects.size()
-        || descriptor.slotIndex >= topology.slots.size() || squadSlotRow >= topology.slots.size()) {
-        return false;
-    }
-    const topology::Object& object = topology.objects[descriptor.objectIndex];
-    const topology::Slot& slot = topology.slots[descriptor.slotIndex];
-    const topology::Slot& squad = topology.slots[squadSlotRow];
-    return format_text(output,
-                       "authored-scene-squad-edge/%08x/%08x/%08x/%04x/%04x/%04x/%04x",
-                       static_cast<unsigned>(descriptor.configTag),
-                       static_cast<unsigned>(object.objectTag),
-                       static_cast<unsigned>(descriptor.descriptorOffset),
-                       static_cast<unsigned>(slot.slotIndex),
-                       static_cast<unsigned>(slot.slotType),
-                       static_cast<unsigned>(squad.slotIndex),
-                       static_cast<unsigned>(squad.slotType));
-}
-
-/** Formats one task-to-objective target ID from its exact descriptor tuple. */
-bool task_target_id(const topology::Snapshot& topology,
-                    const squad::DescriptorFact& descriptor,
-                    Text& output) noexcept {
-    if (descriptor.objectIndex >= topology.objects.size()
-        || descriptor.slotIndex >= topology.slots.size()) {
-        return false;
-    }
-    const topology::Object& object = topology.objects[descriptor.objectIndex];
-    const topology::Slot& slot = topology.slots[descriptor.slotIndex];
-    return format_text(output,
-                       "task-target/%08x/%08x/%08x/%04x/%04x",
-                       static_cast<unsigned>(descriptor.configTag),
-                       static_cast<unsigned>(object.objectTag),
-                       static_cast<unsigned>(descriptor.descriptorOffset),
-                       static_cast<unsigned>(slot.slotIndex),
-                       static_cast<unsigned>(slot.slotType));
-}
-
-/** Tests one exact final slot shape supplied by the separate schema join. */
-bool slot_shape(const topology::Snapshot& topology,
-                const SchemaIndex& schemas,
-                std::uint32_t slotIndex,
-                std::uint32_t slotType,
-                std::uint32_t componentClass,
-                std::uint32_t senseSchema,
-                std::uint32_t authSchema) noexcept {
-    if (slotIndex >= topology.slots.size()) {
-        return false;
-    }
-    const auto found = schemas.find(slotIndex);
-    if (found == schemas.end() || found->second == nullptr || !found->second->exact) {
-        return false;
-    }
-    const topology::Slot& slot = topology.slots[slotIndex];
-    const squad::SlotSchemaFact& schema = *found->second;
-    return slot.slotType == slotType && schema.slotIndex == slotIndex
-           && schema.componentClass == componentClass && schema.senseSchema == senseSchema
-           && schema.authSchema == authSchema;
-}
-
-/** Builds and validates the unique global schema lookup. */
-bool schema_index(const topology::Snapshot& topology, const Facts& facts, SchemaIndex& output) {
-    output.clear();
-    try {
-        output.reserve(facts.slotSchemas.size());
-        for (const squad::SlotSchemaFact& schema : facts.slotSchemas) {
-            if (schema.slotIndex >= topology.slots.size()
-                || !output.emplace(schema.slotIndex, &schema).second) {
-                return false;
-            }
-        }
-        return true;
-    } catch (...) {
-        output.clear();
-        return false;
-    }
-}
-
-/** Checks the topology fields consumed by this bounded projection. */
-bool valid_topology(const topology::Snapshot& topology) noexcept {
-    if (!topology.ready || topology.objects.empty() || topology.slots.empty()) {
-        return false;
-    }
-    std::size_t nextSlot = 0;
-    for (std::size_t objectIndex = 0; objectIndex < topology.objects.size(); ++objectIndex) {
-        const topology::Object& object = topology.objects[objectIndex];
-        if (object.objectTag == 0 || object.objectTag == format::kAbsentIndex
-            || object.objectKey == 0 || object.objectKey == format::kAbsentIndex
-            || object.firstSlot != nextSlot || object.firstSlot > topology.slots.size()
-            || object.slotCount > topology.slots.size() - object.firstSlot) {
-            return false;
-        }
-        for (std::uint32_t index = object.firstSlot; index < object.firstSlot + object.slotCount;
-             ++index) {
-            const topology::Slot& slot = topology.slots[index];
-            if (slot.objectIndex != objectIndex || slot.slotIndex != index - object.firstSlot) {
-                return false;
-            }
-        }
-        nextSlot += object.slotCount;
-    }
-    return nextSlot == topology.slots.size();
-}
-
 namespace {
 
 namespace tables = middleware::content::packages::tables;
@@ -710,8 +564,14 @@ bool build(const topology::Snapshot& topology,
                                descriptorOffset
                                    + format::kAuthoredSceneParticipantTableClassRelativeOffset,
                                tableClass)
-                || tableClass != format::kAuthoredSceneParticipantTableClass
-                || participantCount > format::kAuthoredSceneParticipantCapacity) {
+                || tableClass != format::kAuthoredSceneParticipantTableClass) {
+                log_scene_resource(
+                    descriptor, resourceTag, "participant_table", core::log::Level::warn);
+                continue;
+            }
+            if (participantCount > format::kAuthoredSceneParticipantCapacity) {
+                log_scene_resource(
+                    descriptor, resourceTag, "participant_capacity", core::log::Level::warn);
                 continue;
             }
             for (std::uint64_t entry = 0; entry < participantCount; ++entry) {
@@ -720,22 +580,24 @@ bool build(const topology::Snapshot& topology,
                     + static_cast<std::size_t>(entry)
                           * format::kAuthoredSceneParticipantPointerSize;
                 std::uint64_t pointer = 0;
-                if (!read_value(blob, pointerField, pointer)
-                    || pointer > blob.size() - pointerField) {
-                    break;
-                }
-                const std::size_t payload = pointerField + static_cast<std::size_t>(pointer);
                 std::uint32_t blockClass = 0;
-                if (payload < format::kAuthoredSceneParticipantClassSize
-                    || !read_value(
-                        blob, payload - format::kAuthoredSceneParticipantClassSize, blockClass)) {
+                // A pointer or block that does not read is a misread table; the rest is dropped.
+                if (!read_value(blob, pointerField, pointer) || pointer > blob.size() - pointerField
+                    || pointerField + pointer < format::kAuthoredSceneParticipantClassSize
+                    || !read_value(blob,
+                                   pointerField + static_cast<std::size_t>(pointer)
+                                       - format::kAuthoredSceneParticipantClassSize,
+                                   blockClass)) {
+                    log_scene_resource(
+                        descriptor, resourceTag, "participant", core::log::Level::warn);
                     break;
                 }
                 if (blockClass != format::kAuthoredSceneSquadBlockClass) {
                     continue;
                 }
                 const std::size_t referenceField =
-                    payload + format::kAuthoredSceneSquadPayloadReferenceOffset;
+                    pointerField + static_cast<std::size_t>(pointer)
+                    + format::kAuthoredSceneSquadPayloadReferenceOffset;
                 std::uint32_t targetObjectKey = 0;
                 std::uint16_t targetSlotType = 0;
                 std::uint16_t targetSlotIndex = 0;
@@ -744,6 +606,8 @@ bool build(const topology::Snapshot& topology,
                         blob, referenceField + kTargetSlotTypeRelativeOffset, targetSlotType)
                     || !read_value(
                         blob, referenceField + kTargetSlotIndexRelativeOffset, targetSlotIndex)) {
+                    log_scene_resource(
+                        descriptor, resourceTag, "squad_block", core::log::Level::warn);
                     break;
                 }
                 if (targetSlotType != format::kSquadSlotType
@@ -764,6 +628,8 @@ bool build(const topology::Snapshot& topology,
                                    format::kSquadComponentClass,
                                    format::kSquadSenseSchema,
                                    format::kSquadAuthSchema)) {
+                    log_scene_resource(
+                        descriptor, resourceTag, "squad_unrunnable", core::log::Level::debug);
                     continue;
                 }
                 SquadEdge row{};
@@ -805,11 +671,7 @@ bool build(const topology::Snapshot& topology,
             }
         }
         std::sort(pending.resources.begin(), pending.resources.end(), resource_less);
-        std::sort(pending.eventKeys.begin(),
-                  pending.eventKeys.end(),
-                  [](const EventKey& left, const EventKey& right) {
-                      return event_key_natural(left) < event_key_natural(right);
-                  });
+        std::sort(pending.eventKeys.begin(), pending.eventKeys.end(), event_key_less);
         std::sort(pending.squadEdges.begin(), pending.squadEdges.end(), edge_less);
         std::sort(pending.taskTargets.begin(), pending.taskTargets.end(), task_less);
         pending.resources.erase(std::unique(pending.resources.begin(),

@@ -8,10 +8,10 @@
 #include "../../middleware/content/packages/tables/region_reader.h"
 #include "../../state/activity/membership/activity_membership_query.h"
 #include "../../state/activity/runtime.h"
+#include "../../state/activity_sdk/squad_profiles.h"
 #include "../../state/build_data/runtime.h"
 #include "../bap/runtime.h"
 #include "host_runtime.h"
-#include "squad_authored_profile.h"
 
 namespace sunrise::server::activity::activity_sdk_squads {
 namespace {
@@ -97,7 +97,8 @@ struct PreparedSquad final {
                                     const format::Squad& squad,
                                     std::span<const std::int32_t> requestedCounts,
                                     std::array<std::int8_t, 4>& output) noexcept {
-    return select_authored_profile(sdk::squad_members(catalog, squad), requestedCounts, output);
+    return sdk::squad_spawn_profile(
+        sdk::squad_members(catalog, squad), catalog.actor_classes(), requestedCounts, output);
 }
 /** Checks the generated source slot before it can select a wire roster target. */
 [[nodiscard]] bool valid_generated_slot(const sdk::Catalog& catalog,

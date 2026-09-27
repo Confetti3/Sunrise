@@ -358,8 +358,10 @@ namespace {
     if (collected != SceneStatus::ready) {
         return collected;
     }
-    output.castCount = cast.count;
-    static_cast<void>(scene_dependencies(cast, output.sceneDependencies));
+    if (!scene_dependencies(cast, output.sceneDependencies)) {
+        return SceneStatus::dependencyCapacity;
+    }
+    output.omittedParticipants = cast.omitted;
 
     const SceneStatus lease = scene_lease_status(view, link, occurrence.stateIndex);
     if (lease != SceneStatus::ready) {

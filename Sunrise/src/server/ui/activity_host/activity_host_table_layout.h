@@ -4,8 +4,6 @@
 #include <cstddef>
 #include <imgui.h>
 
-#include "../../../core/ui/scaling/dpi/ui_dpi_scaling.h"
-
 namespace sunrise::server::ui::activity_host::table_layout {
 
 /** Eight rows leave room for the selected-object workspace below each browser. */
@@ -23,14 +21,6 @@ inline constexpr std::size_t kVisibleRowLimit = 8;
     const float header = ImGui::GetTextLineHeightWithSpacing();
     const float border = ImGui::GetStyle().CellPadding.y * 2.0F + 2.0F;
     return {0.0F, header + (row_height() * static_cast<float>(visible)) + border};
-}
-
-/** @return Authored window height occupied by a bounded set of data rows. */
-[[nodiscard]] inline float
-authored_rows_height(std::size_t rows, std::size_t maximumVisibleRows = kVisibleRowLimit) noexcept {
-    const float scale = (std::max)(core::ui::scaling::dpi::current(), 0.01F);
-    const std::size_t visible = (std::min)(rows, (std::min)(maximumVisibleRows, kVisibleRowLimit));
-    return row_height() * static_cast<float>(visible) / scale;
 }
 
 /** Freezes the header row before emitting it. */

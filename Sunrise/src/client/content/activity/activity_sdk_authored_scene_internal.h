@@ -100,6 +100,11 @@ is_performance_descriptor(const topology::Snapshot& topology,
     return std::tie(row.slotIndex, row.gateOffset);
 }
 
+/** Compares event-key rows in final pack order. */
+[[nodiscard]] inline bool event_key_less(const EventKey& left, const EventKey& right) noexcept {
+    return event_key_natural(left) < event_key_natural(right);
+}
+
 /** Sort key matching the final task-target pack order. */
 [[nodiscard]] inline auto task_natural(const TaskTarget& row) noexcept {
     return std::tie(row.taskSlotIndex, row.configTag, row.descriptorOffset);

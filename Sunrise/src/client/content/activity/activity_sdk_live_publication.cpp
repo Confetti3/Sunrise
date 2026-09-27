@@ -23,6 +23,8 @@ constexpr std::wstring_view kCommittedMarkerSuffix = L"\\.activity-sdk-publicati
 constexpr std::size_t kAllocationAttempts = 16;
 /** Marker file magic, bytes "ASP1"; a file without it is not ours. */
 constexpr std::uint32_t kMarkerMagic = 0x31505341U;
+/** A drive path opens with the drive letter, a colon and a separator. */
+constexpr std::size_t kDrivePrefixLength = 3;
 
 volatile LONG g_sequence{};
 
@@ -61,7 +63,8 @@ struct Marker final {
             return false;
         }
         pending.resize(written);
-        while (pending.size() > 3U && (pending.back() == L'\\' || pending.back() == L'/')) {
+        while (pending.size() > kDrivePrefixLength
+               && (pending.back() == L'\\' || pending.back() == L'/')) {
             pending.pop_back();
         }
         output = std::move(pending);
@@ -72,15 +75,15 @@ struct Marker final {
     }
 }
 
-/** Requires every existing drive-path directory component to be ordinary, never a reparse point. */
-[[nodiscard]] bool ordinary_ancestry(const std::wstring& directory) noexcept {
-    if (directory.size() < 3U || directory[1] != L':' || directory[2] != L'\\') {
+/** Requires every component of a drive path to be an existing directory. */
+[[nodiscard]] bool directory_ancestry(const std::wstring& directory) noexcept {
+    if (directory.size() < kDrivePrefixLength || directory[1] != L':' || directory[2] != L'\\') {
         return false;
     }
-    if (!is_directory(directory.substr(0, 3U).c_str())) {
+    if (!is_directory(directory.substr(0, kDrivePrefixLength).c_str())) {
         return false;
     }
-    std::size_t cursor = 3U;
+    std::size_t cursor = kDrivePrefixLength;
     while (cursor < directory.size()) {
         const std::size_t separator = directory.find(L'\\', cursor);
         const std::size_t end = separator == std::wstring::npos ? directory.size() : separator;
@@ -96,9 +99,9 @@ struct Marker final {
     return true;
 }
 
-/** Resolves one existing ordinary directory and rejects reparse points in every ancestor. */
+/** Resolves one path whose every component is an existing directory. */
 [[nodiscard]] bool canonical_directory(const wchar_t* input, std::wstring& output) noexcept {
-    return full_path(input, output) && ordinary_ancestry(output);
+    return full_path(input, output) && directory_ancestry(output);
 }
 
 /** Compares two complete Windows path components without locale-sensitive folding. */
@@ -141,7 +144,7 @@ split(std::wstring_view path, std::wstring_view& parent, std::wstring_view& leaf
     return MoveFileExW(source, target, MOVEFILE_WRITE_THROUGH) != FALSE;
 }
 
-/** Requires one ordinary directory. */
+/** Requires one existing directory. */
 [[nodiscard]] bool is_directory(const wchar_t* path) noexcept {
     if (path == nullptr || path[0] == L'\0') {
         return false;
@@ -150,14 +153,13 @@ split(std::wstring_view path, std::wstring_view& parent, std::wstring_view& leaf
     return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
 }
 
-/** Requires one ordinary file and rejects a reparse-backed leaf. */
+/** Requires one existing file that is not a directory. */
 [[nodiscard]] bool is_file(const wchar_t* path) noexcept {
     if (path == nullptr || path[0] == L'\0') {
         return false;
     }
     const DWORD attributes = GetFileAttributesW(path);
-    return attributes != INVALID_FILE_ATTRIBUTES
-           && (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
+    return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
 }
 
 /** Accepts a missing final path or checks its exact expected ordinary kind. */
@@ -498,8 +500,7 @@ Status allocate(const wchar_t* finalPackPath, Stage& output) noexcept {
         }
         const std::wstring finalSdkDirectory = parentPath + L"\\sdk";
         const std::wstring finalCatalogPath = finalSdkDirectory + L"\\catalog.bin";
-        if (!is_directory(parentPath.c_str())
-            || !is_directory(finalSdkDirectory.c_str())
+        if (!is_directory(parentPath.c_str()) || !is_directory(finalSdkDirectory.c_str())
             || !recover(finalSdkDirectory.c_str(), normalizedPack.c_str(), finalCatalogPath.c_str())
             || !discard_stale_stages(parentPath)) {
             return Status::invalidInput;
@@ -576,8 +577,7 @@ Status publish(const Stage& stage,
         || !full_path(stage.catalogPath.c_str(), canonicalStageCatalog)
         || !full_path(finalPackPath, canonicalFinalPack)
         || !full_path(finalCatalogPath, canonicalFinalCatalog)
-        || !is_file(canonicalStagePack.c_str())
-        || !is_file(canonicalStageCatalog.c_str())) {
+        || !is_file(canonicalStagePack.c_str()) || !is_file(canonicalStageCatalog.c_str())) {
         return Status::invalidInput;
     }
     const std::wstring expectedStageSdk = canonicalStageRoot + L"\\sdk";

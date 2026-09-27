@@ -6,10 +6,27 @@
 
 #include "actor_sequences.h"
 #include "internal.h"
+#include "squad_profiles.h"
 #include "validation_internal.h"
 
 namespace sunrise::state::activity_sdk::validation {
 namespace {
+
+/** @return True when every member certificate belongs to its declared squad lane. */
+[[nodiscard]] bool squad_profiles(const Catalog& catalog) noexcept {
+    const auto squads = catalog.squads();
+    const auto members = catalog.squad_members();
+    for (std::size_t index = 0; index < members.size(); ++index) {
+        const auto& member = members[index];
+        if (member.squadIndex >= squads.size()
+            || member.memberOrdinal >= squads[member.squadIndex].members.count
+            || squads[member.squadIndex].members.first + member.memberOrdinal != index
+            || !valid_member_spawn_profile(member, catalog.actor_classes())) {
+            return false;
+        }
+    }
+    return true;
+}
 
 // An empty authored name uses the FNV-1 basis.
 constexpr std::uint32_t kAbsentDefinitionHash = 0x811C9DC5U;
@@ -20,41 +37,6 @@ constexpr std::uint32_t kAbilitySenseSchema = 0x80807DA2U;
 constexpr std::uint32_t kAbilityAuthSchema = 0x80807DA1U;
 constexpr std::uint32_t kAbilityTargetSlotType = 58U;
 constexpr std::uint32_t kAbilityTargetComponentClass = 0x80807D9BU;
-
-/** Validates common profile evidence without manufacturing a single actor identity. */
-[[nodiscard]] bool squad_member_profiles(const Catalog& catalog) noexcept {
-    const auto actors = catalog.actor_classes();
-    for (const format::SquadMember& member : catalog.squad_members()) {
-        const bool exactActor = (member.flags & format::kSquadMemberActorClassExact) != 0;
-        const bool exactProfile = (member.flags & format::kSquadMemberAuthoredProfileExact) != 0;
-        if ((member.flags & ~format::kSquadMemberFlagMask) != 0
-            || member.squadIndex >= catalog.squads().size()
-            || (exactActor ? member.actorClassIndex >= actors.size()
-                           : member.actorClassIndex != format::kAbsentIndex)) {
-            return false;
-        }
-        if (!exactProfile) {
-            if (member.authoredSpawnProfile != std::array<std::int8_t, 4>{} || exactActor) {
-                return false;
-            }
-            continue;
-        }
-        constexpr auto required =
-            format::kSquadMemberCandidateCountsComplete | format::kSquadMemberNoNullCandidates;
-        bool anyCandidate = false;
-        for (const auto count : member.candidateCounts) {
-            anyCandidate = anyCandidate || count != 0;
-        }
-        if ((member.flags & required) != required || !anyCandidate
-            || !format::valid_authored_spawn_profile(member.authoredSpawnProfile)
-            || (exactActor
-                && member.authoredSpawnProfile
-                       != actors[member.actorClassIndex].authoredSpawnProfile)) {
-            return false;
-        }
-    }
-    return true;
-}
 
 /**
  * @return True when every scene event key belongs to a resourced type-43 slot, names that
@@ -668,8 +650,8 @@ bool relations(const Catalog& catalog) {
     // Every relation check a catalog must pass, named so a refusal reports which one failed.
     static constexpr std::array<Check, 9> kChecks{
         {{"authored_scene_event_keys", &authored_scene_event_keys},
+         {"squad_profiles", &squad_profiles},
          {"task_targets", &task_targets},
-         {"squad_member_profiles", &squad_member_profiles},
          {"authored_text", &authored_text},
          {"behavior_edges", &behavior_edges},
          {"actor_semantics", &actor_semantics},

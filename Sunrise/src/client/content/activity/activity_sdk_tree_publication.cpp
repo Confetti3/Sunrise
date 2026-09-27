@@ -62,8 +62,7 @@ struct Marker final {
 /** Requires one existing ordinary file. */
 [[nodiscard]] bool is_file(const wchar_t* path) noexcept {
     const DWORD attributes = GetFileAttributesW(path);
-    return attributes != INVALID_FILE_ATTRIBUTES
-           && (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
+    return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
 }
 
 /** Requires every existing drive-path directory component to be ordinary. */

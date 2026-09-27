@@ -10,6 +10,7 @@
 
 #include "../../../middleware/content/packages/tables/authored_squad_reader.h"
 #include "../../../middleware/content/packages/tables/scenario_reader.h"
+#include "../../../state/activity_sdk/squad_profiles.h"
 #include "activity_sdk_squad_inventory_internal.h"
 
 namespace sunrise::client::content::activity::sdk_generation::squad_inventory::detail {
@@ -377,34 +378,33 @@ template <typename... Values>
     if (noNull) {
         output.flags |= format::kSquadMemberNoNullCandidates;
     }
-    bool commonProfileExact = allActorsEligible && actorResolver != nullptr;
-    bool foundProfile = false;
-    std::uint32_t singleActorIndex = format::kAbsentIndex;
+    ResolvedActor onlyActor{};
     std::array<std::int8_t, 4> commonProfile{};
-    if (commonProfileExact) {
-        for (const std::uint32_t tag : actorTags) {
-            std::uint32_t actorIndex = format::kAbsentIndex;
-            std::array<std::int8_t, 4> profile{};
-            if (!actorResolver(actorContext, tag, actorIndex, profile)
-                || actorIndex == format::kAbsentIndex
-                || !format::valid_authored_spawn_profile(profile)) {
-                commonProfileExact = false;
-                actorLinksComplete = false;
-                continue;
-            }
-            if (actorTags.size() == 1) {
-                singleActorIndex = actorIndex;
-            }
-            if (foundProfile && profile != commonProfile) {
-                commonProfileExact = false;
-            }
-            commonProfile = profile;
-            foundProfile = true;
+    bool profileExact = allActorsEligible && actorResolver != nullptr;
+    bool firstProfile = true;
+    for (const auto tag : actorTags) {
+        ResolvedActor resolved{};
+        if (actorResolver == nullptr || !actorResolver(actorContext, tag, resolved)
+            || resolved.actorClassIndex == format::kAbsentIndex) {
+            profileExact = false;
+            continue;
         }
+        if (actorTags.size() == 1) {
+            onlyActor = resolved;
+        }
+        if (!state::activity_sdk::valid_spawn_profile(resolved.authoredSpawnProfile)) {
+            profileExact = false;
+            continue;
+        }
+        if (!firstProfile && commonProfile != resolved.authoredSpawnProfile) {
+            profileExact = false;
+        }
+        commonProfile = resolved.authoredSpawnProfile;
+        firstProfile = false;
     }
-    if (commonProfileExact && foundProfile) {
-        output.flags |= format::kSquadMemberAuthoredProfileExact;
+    if (profileExact && !firstProfile) {
         output.authoredSpawnProfile = commonProfile;
+        output.flags |= format::kSquadMemberSpawnProfileExact;
     }
     if (allActorsEligible && actorTags.size() == 1) {
         output.actorDefinitionTag = *actorTags.begin();
@@ -413,8 +413,8 @@ template <typename... Values>
                          static_cast<unsigned>(output.actorDefinitionTag))) {
             return false;
         }
-        if (singleActorIndex != format::kAbsentIndex) {
-            output.actorClassIndex = singleActorIndex;
+        if (onlyActor.actorClassIndex != format::kAbsentIndex) {
+            output.actorClassIndex = onlyActor.actorClassIndex;
             output.actorLink = ActorLink::exactReciprocal;
             output.flags |= format::kSquadMemberActorClassExact;
         } else {

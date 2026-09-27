@@ -709,6 +709,7 @@
     <ClCompile Include="src\client\content\activity\activity_sdk_activity_enrichment_inventory.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_actor_rsat_inventory.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_authored_scene_facts.cpp" />
+    <ClCompile Include="src\client\content\activity\activity_sdk_authored_scene_identity.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_authored_scene_inventory.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_behavior_inventory.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_lua_activities.cpp" />
@@ -1484,6 +1485,7 @@
     <ClInclude Include="src\state\content_manifest\scanner\package\content_manifest_package_name.h" />
     <ClInclude Include="src\state\content_manifest\content_manifest_row_validation.h" />
     <ClInclude Include="src\state\activity_sdk\format.h" />
+    <ClInclude Include="src\state\activity_sdk\squad_profiles.h" />
     <ClInclude Include="src\state\activity_sdk\identity.h" />
     <ClInclude Include="src\state\activity_sdk\generation\definition.h" />
     <ClInclude Include="src\state\activity_sdk\generation\internal.h" />
@@ -2080,7 +2082,6 @@
     <ClInclude Include="src\server\activity\mission\mission_observation_epoch.h" />
     <ClInclude Include="src\server\activity\mission\mission_trigger_observation.h" />
     <ClInclude Include="src\server\activity\squad_attachment_ownership_validation.h" />
-    <ClInclude Include="src\server\activity\squad_authored_profile.h" />
     <ClInclude Include="src\middleware\bap\activity_message\music_section_auth.h" />
     <ClInclude Include="src\middleware\bap\activity_message\roster_presence.h" />
     <ClInclude Include="src\middleware\bap\activity_message\scene_events_auth.h" />
@@ -2138,6 +2139,7 @@
     <ClCompile Include="src\client\content\activity\scriptable_catalog_object_analysis.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_authored_scene_validation.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_lua_missions.cpp" />
+    <ClCompile Include="src\client\content\activity\activity_sdk_lua_missions_catalog_constants.cpp" />
     <ClCompile Include="src\client\content\activity\scriptable_catalog_container_placement_cache.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_native_pack_text.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_policy_inventory_capabilities.cpp" />

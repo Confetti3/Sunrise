@@ -31,22 +31,25 @@ inline void set_next(const ImVec2& workFraction) noexcept {
     ImGui::SetNextWindowPos(viewport->GetWorkCenter(), ImGuiCond_FirstUseEver, {0.5F, 0.5F});
 }
 
-/** Begins a movable, resizable window whose title bar reads as a raised Sunrise panel. */
+/** Begins a movable window that resizes from its edges, with a title bar in the panel colour. */
 [[nodiscard]] inline bool begin(const char* id, bool& open, const ImVec2& workFraction) noexcept {
-    namespace scaling = core::ui::scaling::dpi;
     set_next(workFraction);
     // Dear ImGui reads these only while Begin draws the frame, so the body keeps the theme.
-    // The same colour whether focused or not, so focus never lights the bar up.
+    // The same colour whether focused or not, so focus never lights the bar up. The corner grips
+    // are drawn transparent; the edges carry the resize.
     const ImGuiStyle& style = ImGui::GetStyle();
     const ImVec4 titleBackground = style.Colors[ImGuiCol_ChildBg];
+    // Alpha 0 hides the corner grips; the edges still resize.
+    constexpr ImVec4 kTransparent{0.0F, 0.0F, 0.0F, 0.0F};
     ImGui::PushStyleColor(ImGuiCol_TitleBg, titleBackground);
     ImGui::PushStyleColor(ImGuiCol_TitleBgActive, titleBackground);
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
-                        ImVec2{style.FramePadding.x, scaling::pixels(8.0F)});
+    ImGui::PushStyleColor(ImGuiCol_ResizeGrip, kTransparent);
+    ImGui::PushStyleColor(ImGuiCol_ResizeGripHovered, kTransparent);
+    ImGui::PushStyleColor(ImGuiCol_ResizeGripActive, kTransparent);
     ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, style.WindowBorderSize);
     const bool visible = ImGui::Begin(id, &open, kWindowFlags);
-    ImGui::PopStyleVar(2);
-    ImGui::PopStyleColor(2);
+    ImGui::PopStyleVar();
+    ImGui::PopStyleColor(5);
     return visible;
 }
 

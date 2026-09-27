@@ -9,7 +9,7 @@ namespace sunrise::state::activity_sdk::format {
 
 /** Eight-byte identity at the start of every runtime SDK pack. */
 inline constexpr std::array<char, 8> kMagic{'S', 'R', 'S', 'D', 'K', 'P', '0', '1'};
-/** Runtime-pack schema version accepted by this reader. 43 adds squad-member spawn profiles. */
+/** Runtime-pack schema version accepted by this reader. 43 adds rule-less squads. */
 inline constexpr std::uint32_t kVersion = 43;
 /** The ABI contains only activity identity, topology, placement, and panel metadata. */
 inline constexpr std::uint32_t kSectionCount = 51;
@@ -280,24 +280,9 @@ inline constexpr std::uint32_t kSquadMemberActorClassExact = 0x1U;
 inline constexpr std::uint32_t kSquadMemberCandidateCountsComplete = 0x2U;
 inline constexpr std::uint32_t kSquadMemberCandidateCountsInvariant = 0x4U;
 inline constexpr std::uint32_t kSquadMemberNoNullCandidates = 0x8U;
-inline constexpr std::uint32_t kSquadMemberAuthoredProfileExact = 0x10U;
+/** Every authored candidate resolves to the same four-byte spawn profile. */
+inline constexpr std::uint32_t kSquadMemberSpawnProfileExact = 0x10U;
 inline constexpr std::uint32_t kSquadMemberFlagMask = 0x1FU;
-
-/**
- * @return True when every lane of a squad member's authored spawn profile (the four lanes the
- * placement Auth carries in field 5) is within the range the package format allows.
- */
-[[nodiscard]] constexpr bool
-valid_authored_spawn_profile(const std::array<std::int8_t, 4>& profile) noexcept {
-    constexpr std::array<std::int8_t, 4> maximum{2, 6, 2, 6};
-    for (std::size_t index = 0; index < profile.size(); ++index) {
-        if (profile[index] < 0 || profile[index] > maximum[index]) {
-            return false;
-        }
-    }
-    return true;
-}
-
 inline constexpr std::uint32_t kSquadMemberInvariantReadyMask =
     kSquadMemberCandidateCountsComplete | kSquadMemberCandidateCountsInvariant
     | kSquadMemberNoNullCandidates;

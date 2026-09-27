@@ -157,8 +157,7 @@ private:
         return false;
     }
     const DWORD attributes = GetFileAttributesW(path);
-    if (attributes == INVALID_FILE_ATTRIBUTES
-        || (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+    if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
         return false;
     }
     const HANDLE file = CreateFileW(path,
