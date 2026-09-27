@@ -814,27 +814,6 @@ slot_directive_elements(const Catalog& catalog, const format::Slot& slot) noexce
                           static_cast<std::size_t>(last - first));
 }
 
-/** Relies on scene-slot ordering to return one contiguous zero-copy key range. */
-std::span<const format::AuthoredSceneEventKey>
-slot_authored_scene_event_keys(const Catalog& catalog, const format::Slot& slot) noexcept {
-    const auto slots = catalog.slots();
-    if (!owns(slots, slot)) {
-        return {};
-    }
-    const auto values = catalog.authored_scene_event_keys();
-    const std::uint32_t slotIndex = static_cast<std::uint32_t>(&slot - slots.data());
-    const auto first =
-        std::lower_bound(values.begin(), values.end(), slotIndex, [](const auto& row, auto index) {
-            return row.sceneSlotIndex < index;
-        });
-    const auto last =
-        std::upper_bound(first, values.end(), slotIndex, [](auto index, const auto& row) {
-            return index < row.sceneSlotIndex;
-        });
-    return values.subspan(static_cast<std::size_t>(first - values.begin()),
-                          static_cast<std::size_t>(last - first));
-}
-
 /** Relies on scene-slot ordering to return one contiguous zero-copy edge range. */
 std::span<const format::AuthoredSceneSquadEdge>
 slot_authored_scene_squad_edges(const Catalog& catalog, const format::Slot& slot) noexcept {

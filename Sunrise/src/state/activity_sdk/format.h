@@ -10,7 +10,7 @@ namespace sunrise::state::activity_sdk::format {
 /** Eight-byte identity at the start of every runtime SDK pack. */
 inline constexpr std::array<char, 8> kMagic{'S', 'R', 'S', 'D', 'K', 'P', '0', '1'};
 /** Runtime-pack schema version accepted by this reader. */
-inline constexpr std::uint32_t kVersion = 41;
+inline constexpr std::uint32_t kVersion = 42;
 /** The ABI contains only activity identity, topology, placement, and panel metadata. */
 inline constexpr std::uint32_t kSectionCount = 51;
 #if defined(SUNRISE_ACTIVITY_SDK_TESTING)
@@ -287,16 +287,18 @@ inline constexpr std::uint32_t kAuthoredSceneAuthSchema = 0x8080626BU;
 inline constexpr std::uint32_t kAuthoredSceneResourceRelativeOffset = 0x60U;
 inline constexpr std::uint32_t kAuthoredSceneResourceClass = 0x80809C0FU;
 /**
- * A scene resource references its event graph at a fixed field. In the graph, the gates form
- * one typed package array: a marker, a 64-bit count, the element class, then the elements. A
- * gate element opens with the graph's own tag and its class, and carries the event key the
- * server publishes and the gate's ordinal in the scene's progression (-1 for the opening gate
- * every scene shares).
+ * The resource names its graph at a fixed field. The graph's gate table is an array field whose
+ * rows each name one gate body by absolute offset. A body opens with the graph's tag and the row
+ * class, then carries the event key and the gate's ordinal (-1 opens every scene).
  */
 inline constexpr std::uint32_t kAuthoredSceneGraphRelativeOffset = 0xC0U;
+inline constexpr std::uint32_t kAuthoredSceneGraphClass = 0x80809C36U;
 inline constexpr std::uint32_t kPackageArrayMarker = 0x80809FBDU;
-inline constexpr std::uint32_t kAuthoredSceneGateArrayClass = 0x8080638AU;
-inline constexpr std::uint32_t kAuthoredSceneGateClass = 0x8080637DU;
+inline constexpr std::uint32_t kAuthoredSceneGateTableOffset = 0xE8U;
+inline constexpr std::uint32_t kAuthoredSceneGateRowClass = 0x8080637DU;
+inline constexpr std::uint32_t kAuthoredSceneGateRowSize = 0xC0U;
+inline constexpr std::uint32_t kAuthoredSceneGateBodyClass = 0x8080638AU;
+inline constexpr std::uint32_t kAuthoredSceneGateBodyOffset = 0x8U;
 inline constexpr std::uint32_t kAuthoredSceneGateSize = 0x60U;
 inline constexpr std::uint32_t kAuthoredSceneGateClassOffset = 0x4U;
 inline constexpr std::uint32_t kAuthoredSceneGateKeyOffset = 0x10U;

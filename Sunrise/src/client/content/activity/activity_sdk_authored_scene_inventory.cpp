@@ -261,34 +261,34 @@ void log_scene_graph(const squad::DescriptorFact& descriptor,
 }
 
 /**
- * Finds the one typed array of gate elements in a scene graph.
+ * Reads the gate table field of a scene graph.
  * @param blob Graph bytes.
- * @param first Receives the offset of the first element.
- * @param count Receives the element count.
- * @return False when the graph holds no such array, or more than one.
+ * @param rows Receives the offset of the first table row.
+ * @param count Receives the row count.
+ * @return False when the field does not hold a table of gate rows that fits the graph.
  */
-[[nodiscard]] bool find_gate_array(std::span<const std::byte> blob,
-                                   std::size_t& first,
-                                   std::uint64_t& count) noexcept {
-    bool found = false;
-    for (std::size_t offset = 0; offset + 16 <= blob.size(); offset += 4) {
-        std::uint32_t marker = 0;
-        std::uint32_t elementClass = 0;
-        std::uint64_t declared = 0;
-        if (!read_value(blob, offset, marker) || marker != format::kPackageArrayMarker
-            || !read_value(blob, offset + 4, declared)
-            || !read_value(blob, offset + 12, elementClass)
-            || elementClass != format::kAuthoredSceneGateArrayClass) {
-            continue;
-        }
-        if (found) {
-            return false;
-        }
-        found = true;
-        first = offset + 20;
-        count = declared;
+[[nodiscard]] bool
+read_gate_table(std::span<const std::byte> blob, std::size_t& rows, std::uint64_t& count) noexcept {
+    std::int64_t relative = 0;
+    std::uint32_t marker = 0;
+    std::uint64_t repeated = 0;
+    std::uint32_t rowClass = 0;
+    const std::size_t pointer = format::kAuthoredSceneGateTableOffset + 8U;
+    if (!read_value(blob, format::kAuthoredSceneGateTableOffset, count)
+        || !read_value(blob, pointer, relative) || relative <= 0
+        || static_cast<std::uint64_t>(relative) > blob.size() - pointer) {
+        return false;
     }
-    return found;
+    // The pointer is relative to its own field and lands on the count of the array header.
+    const std::size_t header = pointer + static_cast<std::size_t>(relative);
+    if (header < 4U || !read_value(blob, header - 4U, marker)
+        || marker != format::kPackageArrayMarker || !read_value(blob, header, repeated)
+        || repeated != count || !read_value(blob, header + 8U, rowClass)
+        || rowClass != format::kAuthoredSceneGateRowClass) {
+        return false;
+    }
+    rows = header + 16U;
+    return rows <= blob.size() && count <= (blob.size() - rows) / format::kAuthoredSceneGateRowSize;
 }
 
 /** Reads one tag once and retains the physical class beside its bytes. */
@@ -384,14 +384,10 @@ void log_scene_graph(const squad::DescriptorFact& descriptor,
     return true;
 }
 
-} // namespace
-
-/** Builds both authored-scene sections from complete topology and package facts. */
 /**
  * Follows a scene resource to its event graph and appends one row per gate.
- * A graph that cannot be read or holds no gate array leaves the scene without keys and is
- * logged; a gate that is not a gate element, or a count past the capacity, is a misread graph
- * and is logged the same way. Only a topology inconsistency fails the build.
+ * A graph that cannot be read, or one gate that is not a gate element, leaves the scene with no
+ * keys and is logged. Only a topology inconsistency fails the build.
  */
 [[nodiscard]] bool collect_event_keys(const topology::Snapshot& topology,
                                       const squad::DescriptorFact& descriptor,
@@ -401,10 +397,11 @@ void log_scene_graph(const squad::DescriptorFact& descriptor,
                                       std::uint32_t resourceTag,
                                       std::span<const std::byte> resource,
                                       std::vector<EventKey>& output) {
+    const std::size_t start = output.size();
     std::uint32_t graphTag = 0;
     if (!read_value(resource, format::kAuthoredSceneGraphRelativeOffset, graphTag) || graphTag == 0
         || graphTag == format::kAbsentIndex) {
-        log_scene_graph(descriptor, graphTag, "unreferenced", core::log::Level::warn);
+        log_scene_graph(descriptor, graphTag, "unreferenced", core::log::Level::debug);
         return true;
     }
     const PackageRow* graph = nullptr;
@@ -412,11 +409,15 @@ void log_scene_graph(const squad::DescriptorFact& descriptor,
         log_scene_graph(descriptor, graphTag, "unreadable", core::log::Level::warn);
         return true;
     }
+    if (graph->classId != format::kAuthoredSceneGraphClass) {
+        log_scene_graph(descriptor, graphTag, "graph_class", core::log::Level::warn);
+        return true;
+    }
     const auto blob = std::span(graph->bytes);
-    std::size_t first = 0;
+    std::size_t rows = 0;
     std::uint64_t count = 0;
-    if (!find_gate_array(blob, first, count)) {
-        log_scene_graph(descriptor, graphTag, "gate_array", core::log::Level::warn);
+    if (!read_gate_table(blob, rows, count)) {
+        log_scene_graph(descriptor, graphTag, "gate_table", core::log::Level::warn);
         return true;
     }
     if (count > format::kAuthoredSceneGateCapacity) {
@@ -424,18 +425,33 @@ void log_scene_graph(const squad::DescriptorFact& descriptor,
         return true;
     }
     for (std::uint64_t gate = 0; gate < count; ++gate) {
-        const std::size_t element =
-            first + static_cast<std::size_t>(gate) * format::kAuthoredSceneGateSize;
+        const std::size_t tableRow =
+            rows + static_cast<std::size_t>(gate) * format::kAuthoredSceneGateRowSize;
+        std::uint32_t rowOwner = 0;
+        std::uint32_t rowClass = 0;
+        std::uint64_t body = 0;
+        // A row names its body by absolute offset; the body names the row class back.
+        if (!read_value(blob, tableRow, rowOwner)
+            || !read_value(blob, tableRow + format::kAuthoredSceneGateClassOffset, rowClass)
+            || !read_value(blob, tableRow + format::kAuthoredSceneGateBodyOffset, body)
+            || rowOwner != graphTag || rowClass != format::kAuthoredSceneGateBodyClass
+            || body > blob.size() - format::kAuthoredSceneGateSize) {
+            output.resize(start);
+            log_scene_graph(descriptor, graphTag, "gate_row", core::log::Level::warn);
+            return true;
+        }
+        const auto element = static_cast<std::size_t>(body);
         std::uint32_t owner = 0;
-        std::uint32_t elementClass = 0;
+        std::uint32_t bodyClass = 0;
         std::uint32_t key = 0;
         std::int32_t ordinal = 0;
         if (!read_value(blob, element, owner)
-            || !read_value(blob, element + format::kAuthoredSceneGateClassOffset, elementClass)
+            || !read_value(blob, element + format::kAuthoredSceneGateClassOffset, bodyClass)
             || !read_value(blob, element + format::kAuthoredSceneGateKeyOffset, key)
             || !read_value(blob, element + format::kAuthoredSceneGateOrdinalOffset, ordinal)
-            || owner != graphTag || elementClass != format::kAuthoredSceneGateClass || key == 0
+            || owner != graphTag || bodyClass != format::kAuthoredSceneGateRowClass || key == 0
             || key == format::kAbsentIndex) {
+            output.resize(start);
             log_scene_graph(descriptor, graphTag, "gate", core::log::Level::warn);
             return true;
         }
@@ -456,6 +472,9 @@ void log_scene_graph(const squad::DescriptorFact& descriptor,
     return true;
 }
 
+} // namespace
+
+/** Builds both authored-scene sections from complete topology and package facts. */
 bool build(const topology::Snapshot& topology,
            const Facts& facts,
            squad::TagReader reader,

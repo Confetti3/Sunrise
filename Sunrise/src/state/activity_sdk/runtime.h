@@ -514,9 +514,6 @@ slot_authored_scene_squad_edges(const Catalog& catalog, const format::Slot& slot
 /** Returns every HUD element of one type-68 slot, in name hash then element order. */
 [[nodiscard]] std::span<const format::DirectiveElement>
 slot_directive_elements(const Catalog& catalog, const format::Slot& slot) noexcept;
-/** Returns the event keys of one type-43 slot's graph, in gate order. */
-[[nodiscard]] std::span<const format::AuthoredSceneEventKey>
-slot_authored_scene_event_keys(const Catalog& catalog, const format::Slot& slot) noexcept;
 /** Resolves one validated scene edge to its exact type-1 target slot. */
 [[nodiscard]] const format::Slot*
 authored_scene_linked_squad_slot(const Catalog& catalog,
