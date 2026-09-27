@@ -624,14 +624,14 @@ namespace {
     if (status != SceneStatus::ready) {
         return status;
     }
-    std::size_t matches = 0;
-    for (const sdk::format::DirectiveElement& row : view.catalog->directive_elements()) {
-        matches +=
-            row.slotIndex == slotRow && row.nameHash == nameHash && row.elementIndex == elementIndex
-                ? 1U
-                : 0U;
+    // Validation keeps one row per (slot, name hash, element), so the slot's range decides.
+    for (const sdk::format::DirectiveElement& row :
+         sdk::slot_directive_elements(*view.catalog, view.catalog->slots()[slotRow])) {
+        if (row.nameHash == nameHash && row.elementIndex == elementIndex) {
+            return SceneStatus::ready;
+        }
     }
-    return matches == 1 ? SceneStatus::ready : SceneStatus::invalidSlot;
+    return SceneStatus::invalidSlot;
 }
 
 /** Resolves one exact type-3 objective sensor without changing transport state. */

@@ -32,6 +32,25 @@ bool resource_id(const topology::Snapshot& topology,
                        static_cast<unsigned>(slot.slotType));
 }
 
+/** Formats one event-key ID from the resource, its graph, the scene slot and the gate. */
+bool event_key_id(const topology::Snapshot& topology,
+                  const squad::DescriptorFact& descriptor,
+                  std::uint32_t graphTag,
+                  std::uint32_t gateOffset,
+                  Text& output) noexcept {
+    if (descriptor.slotIndex >= topology.slots.size()) {
+        return false;
+    }
+    const topology::Slot& slot = topology.slots[descriptor.slotIndex];
+    return format_text(output,
+                       "authored-scene-event-key/%08x/%08x/%04x/%04x/%08x",
+                       static_cast<unsigned>(descriptor.configTag),
+                       static_cast<unsigned>(graphTag),
+                       static_cast<unsigned>(slot.slotIndex),
+                       static_cast<unsigned>(slot.slotType),
+                       static_cast<unsigned>(gateOffset));
+}
+
 /** Formats one scene-to-squad edge ID from its descriptor tuple and the squad slot it names. */
 bool edge_id(const topology::Snapshot& topology,
              const squad::DescriptorFact& descriptor,
@@ -219,6 +238,59 @@ void log_scene_resource(const squad::DescriptorFact& descriptor,
     }
 }
 
+/** Logs a scene graph that yielded no event keys, and why. */
+void log_scene_graph(const squad::DescriptorFact& descriptor,
+                     std::uint32_t graphTag,
+                     const char* result,
+                     core::log::Level level) noexcept {
+    std::array<char, 176> line{};
+    const int written = std::snprintf(line.data(),
+                                      line.size(),
+                                      "ev=activity_sdk_scene_graph result=%s config=0x%08X "
+                                      "slot_row=%u graph=0x%08X",
+                                      result,
+                                      static_cast<unsigned>(descriptor.configTag),
+                                      static_cast<unsigned>(descriptor.slotIndex),
+                                      static_cast<unsigned>(graphTag));
+    if (written > 0) {
+        core::log::write(
+            core::log::Channel::client,
+            level,
+            {line.data(), (std::min)(static_cast<std::size_t>(written), line.size() - 1U)});
+    }
+}
+
+/**
+ * Reads the gate table field of a scene graph.
+ * @param blob Graph bytes.
+ * @param rows Receives the offset of the first table row.
+ * @param count Receives the row count.
+ * @return False when the field does not hold a table of gate rows that fits the graph.
+ */
+[[nodiscard]] bool
+read_gate_table(std::span<const std::byte> blob, std::size_t& rows, std::uint64_t& count) noexcept {
+    std::int64_t relative = 0;
+    std::uint32_t marker = 0;
+    std::uint64_t repeated = 0;
+    std::uint32_t rowClass = 0;
+    const std::size_t pointer = format::kAuthoredSceneGateTableOffset + 8U;
+    if (!read_value(blob, format::kAuthoredSceneGateTableOffset, count)
+        || !read_value(blob, pointer, relative) || relative <= 0
+        || static_cast<std::uint64_t>(relative) > blob.size() - pointer) {
+        return false;
+    }
+    // The pointer is relative to its own field and lands on the count of the array header.
+    const std::size_t header = pointer + static_cast<std::size_t>(relative);
+    if (header < 4U || !read_value(blob, header - 4U, marker)
+        || marker != format::kPackageArrayMarker || !read_value(blob, header, repeated)
+        || repeated != count || !read_value(blob, header + 8U, rowClass)
+        || rowClass != format::kAuthoredSceneGateRowClass) {
+        return false;
+    }
+    rows = header + 16U;
+    return rows <= blob.size() && count <= (blob.size() - rows) / format::kAuthoredSceneGateRowSize;
+}
+
 /** Reads one tag once and retains the physical class beside its bytes. */
 [[nodiscard]] bool package_row(squad::TagReader reader,
                                void* readerContext,
@@ -308,6 +380,94 @@ void log_scene_resource(const squad::DescriptorFact& descriptor,
             output = index;
             return true;
         }
+    }
+    return true;
+}
+
+/**
+ * Follows a scene resource to its event graph and appends one row per gate.
+ * A graph that cannot be read, or one gate that is not a gate element, leaves the scene with no
+ * keys and is logged. Only a topology inconsistency fails the build.
+ */
+[[nodiscard]] bool collect_event_keys(const topology::Snapshot& topology,
+                                      const squad::DescriptorFact& descriptor,
+                                      squad::TagReader reader,
+                                      void* readerContext,
+                                      PackageCache& cache,
+                                      std::uint32_t resourceTag,
+                                      std::span<const std::byte> resource,
+                                      std::vector<EventKey>& output) {
+    const std::size_t start = output.size();
+    std::uint32_t graphTag = 0;
+    if (!read_value(resource, format::kAuthoredSceneGraphRelativeOffset, graphTag) || graphTag == 0
+        || graphTag == format::kAbsentIndex) {
+        log_scene_graph(descriptor, graphTag, "unreferenced", core::log::Level::debug);
+        return true;
+    }
+    const PackageRow* graph = nullptr;
+    if (!package_row(reader, readerContext, graphTag, cache, graph) || graph == nullptr) {
+        log_scene_graph(descriptor, graphTag, "unreadable", core::log::Level::warn);
+        return true;
+    }
+    if (graph->classId != format::kAuthoredSceneGraphClass) {
+        log_scene_graph(descriptor, graphTag, "graph_class", core::log::Level::warn);
+        return true;
+    }
+    const auto blob = std::span(graph->bytes);
+    std::size_t rows = 0;
+    std::uint64_t count = 0;
+    if (!read_gate_table(blob, rows, count)) {
+        log_scene_graph(descriptor, graphTag, "gate_table", core::log::Level::warn);
+        return true;
+    }
+    if (count > format::kAuthoredSceneGateCapacity) {
+        log_scene_graph(descriptor, graphTag, "capacity", core::log::Level::warn);
+        return true;
+    }
+    for (std::uint64_t gate = 0; gate < count; ++gate) {
+        const std::size_t tableRow =
+            rows + static_cast<std::size_t>(gate) * format::kAuthoredSceneGateRowSize;
+        std::uint32_t rowOwner = 0;
+        std::uint32_t rowClass = 0;
+        std::uint64_t body = 0;
+        // A row names its body by absolute offset; the body names the row class back.
+        if (!read_value(blob, tableRow, rowOwner)
+            || !read_value(blob, tableRow + format::kAuthoredSceneGateClassOffset, rowClass)
+            || !read_value(blob, tableRow + format::kAuthoredSceneGateBodyOffset, body)
+            || rowOwner != graphTag || rowClass != format::kAuthoredSceneGateBodyClass
+            || body > blob.size() - format::kAuthoredSceneGateSize) {
+            output.resize(start);
+            log_scene_graph(descriptor, graphTag, "gate_row", core::log::Level::warn);
+            return true;
+        }
+        const auto element = static_cast<std::size_t>(body);
+        std::uint32_t owner = 0;
+        std::uint32_t bodyClass = 0;
+        std::uint32_t key = 0;
+        std::int32_t ordinal = 0;
+        if (!read_value(blob, element, owner)
+            || !read_value(blob, element + format::kAuthoredSceneGateClassOffset, bodyClass)
+            || !read_value(blob, element + format::kAuthoredSceneGateKeyOffset, key)
+            || !read_value(blob, element + format::kAuthoredSceneGateOrdinalOffset, ordinal)
+            || owner != graphTag || bodyClass != format::kAuthoredSceneGateRowClass || key == 0
+            || key == format::kAbsentIndex) {
+            output.resize(start);
+            log_scene_graph(descriptor, graphTag, "gate", core::log::Level::warn);
+            return true;
+        }
+        EventKey row{};
+        if (!event_key_id(
+                topology, descriptor, graphTag, static_cast<std::uint32_t>(element), row.id)) {
+            return false;
+        }
+        row.slotIndex = descriptor.slotIndex;
+        row.resourceTag = resourceTag;
+        row.graphTag = graphTag;
+        row.gateOffset = static_cast<std::uint32_t>(element);
+        row.ordinal = ordinal;
+        row.key = key;
+        row.flags = format::kAuthoredSceneEventKeyExact;
+        output.push_back(row);
     }
     return true;
 }
@@ -525,6 +685,16 @@ bool build(const topology::Snapshot& topology,
                         row.flags = format::kAuthoredSceneResourceExact;
                         pending.resources.push_back(row);
                     }
+                    if (!collect_event_keys(topology,
+                                            descriptor,
+                                            reader,
+                                            readerContext,
+                                            cache,
+                                            resourceTag,
+                                            std::span(resourcePackage->bytes),
+                                            pending.eventKeys)) {
+                        return false;
+                    }
                 }
             }
 
@@ -635,6 +805,11 @@ bool build(const topology::Snapshot& topology,
             }
         }
         std::sort(pending.resources.begin(), pending.resources.end(), resource_less);
+        std::sort(pending.eventKeys.begin(),
+                  pending.eventKeys.end(),
+                  [](const EventKey& left, const EventKey& right) {
+                      return event_key_natural(left) < event_key_natural(right);
+                  });
         std::sort(pending.squadEdges.begin(), pending.squadEdges.end(), edge_less);
         std::sort(pending.taskTargets.begin(), pending.taskTargets.end(), task_less);
         pending.resources.erase(std::unique(pending.resources.begin(),
@@ -644,6 +819,13 @@ bool build(const topology::Snapshot& topology,
                                                        == resource_natural(right);
                                             }),
                                 pending.resources.end());
+        pending.eventKeys.erase(std::unique(pending.eventKeys.begin(),
+                                            pending.eventKeys.end(),
+                                            [](const auto& left, const auto& right) {
+                                                return event_key_natural(left)
+                                                       == event_key_natural(right);
+                                            }),
+                                pending.eventKeys.end());
         pending.squadEdges.erase(std::unique(pending.squadEdges.begin(),
                                              pending.squadEdges.end(),
                                              [](const auto& left, const auto& right) {
