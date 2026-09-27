@@ -1483,6 +1483,7 @@
     <ClInclude Include="src\state\content_manifest\scanner\package\content_manifest_package_name.h" />
     <ClInclude Include="src\state\content_manifest\content_manifest_row_validation.h" />
     <ClInclude Include="src\state\activity_sdk\format.h" />
+    <ClInclude Include="src\state\activity_sdk\squad_profiles.h" />
     <ClInclude Include="src\state\activity_sdk\identity.h" />
     <ClInclude Include="src\state\activity_sdk\generation\definition.h" />
     <ClInclude Include="src\state\activity_sdk\generation\internal.h" />

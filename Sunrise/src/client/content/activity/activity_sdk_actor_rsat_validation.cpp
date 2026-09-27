@@ -7,6 +7,7 @@
 #include <string_view>
 #include <vector>
 
+#include "../../../state/activity_sdk/squad_profiles.h"
 #include "activity_sdk_actor_rsat_inventory_internal.h"
 #include "activity_sdk_actor_sequences.h"
 
@@ -52,15 +53,7 @@ namespace {
 
 /** Field-5 lanes 1..4 are bias-one values with widths 2, 3, 2, and 3. */
 [[nodiscard]] bool valid_authored_spawn_profile(const ActorClass& actor) noexcept {
-    // Logical maxima of the four lanes after the bias-one decode.
-    constexpr std::array<std::int8_t, 4> kMaximumLogical{2, 6, 2, 6};
-    for (std::size_t index = 0; index < actor.authoredSpawnProfile.size(); ++index) {
-        if (actor.authoredSpawnProfile[index] < 0
-            || actor.authoredSpawnProfile[index] > kMaximumLogical[index]) {
-            return false;
-        }
-    }
-    return true;
+    return state::activity_sdk::valid_spawn_profile(actor.authoredSpawnProfile);
 }
 
 /** Checks an exact stored self-relative header and data pair. */

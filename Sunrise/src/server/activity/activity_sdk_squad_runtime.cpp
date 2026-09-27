@@ -7,6 +7,7 @@
 
 #include "../../middleware/content/packages/tables/region_reader.h"
 #include "../../state/activity/runtime.h"
+#include "../../state/activity_sdk/squad_profiles.h"
 #include "../../state/build_data/runtime.h"
 #include "../bap/runtime.h"
 #include "host_runtime.h"
@@ -95,30 +96,8 @@ struct PreparedSquad final {
                                     const format::Squad& squad,
                                     std::span<const std::int32_t> requestedCounts,
                                     std::array<std::int8_t, 4>& output) noexcept {
-    output = {};
-    const auto members = sdk::squad_members(catalog, squad);
-    const auto actors = catalog.actor_classes();
-    bool found = false;
-    // A named type-2 member needs its parent's authored profile but zero loose actors.
-    const bool loose = std::any_of(
-        requestedCounts.begin(), requestedCounts.end(), [](auto count) { return count > 0; });
-    for (std::size_t index = 0; index < members.size(); ++index) {
-        if (loose && requestedCounts[index] <= 0) {
-            continue;
-        }
-        const format::SquadMember& member = members[index];
-        if ((member.flags & format::kSquadMemberActorClassExact) == 0
-            || member.actorClassIndex >= actors.size()) {
-            return false;
-        }
-        const auto& candidate = actors[member.actorClassIndex].authoredSpawnProfile;
-        if (found && candidate != output) {
-            return false;
-        }
-        output = candidate;
-        found = true;
-    }
-    return found;
+    return sdk::squad_spawn_profile(
+        sdk::squad_members(catalog, squad), catalog.actor_classes(), requestedCounts, output);
 }
 /** Checks the generated source slot before it can select a wire roster target. */
 [[nodiscard]] bool valid_generated_slot(const sdk::Catalog& catalog,

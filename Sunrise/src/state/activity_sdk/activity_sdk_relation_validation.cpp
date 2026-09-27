@@ -6,10 +6,27 @@
 
 #include "actor_sequences.h"
 #include "internal.h"
+#include "squad_profiles.h"
 #include "validation_internal.h"
 
 namespace sunrise::state::activity_sdk::validation {
 namespace {
+
+/** @return True when every member certificate belongs to its declared squad lane. */
+[[nodiscard]] bool squad_profiles(const Catalog& catalog) noexcept {
+    const auto squads = catalog.squads();
+    const auto members = catalog.squad_members();
+    for (std::size_t index = 0; index < members.size(); ++index) {
+        const auto& member = members[index];
+        if (member.squadIndex >= squads.size()
+            || member.memberOrdinal >= squads[member.squadIndex].members.count
+            || squads[member.squadIndex].members.first + member.memberOrdinal != index
+            || !valid_member_spawn_profile(member, catalog.actor_classes())) {
+            return false;
+        }
+    }
+    return true;
+}
 
 // An empty authored name uses the FNV-1 basis.
 constexpr std::uint32_t kAbsentDefinitionHash = 0x811C9DC5U;
@@ -582,7 +599,8 @@ bool relations(const Catalog& catalog) {
         bool (*run)(const Catalog&) noexcept;
     };
     // Every relation check a catalog must pass, named so a refusal reports which one failed.
-    static constexpr std::array<Check, 7> kChecks{{{"task_targets", &task_targets},
+    static constexpr std::array<Check, 8> kChecks{{{"squad_profiles", &squad_profiles},
+                                                   {"task_targets", &task_targets},
                                                    {"authored_text", &authored_text},
                                                    {"behavior_edges", &behavior_edges},
                                                    {"actor_semantics", &actor_semantics},

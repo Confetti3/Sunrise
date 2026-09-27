@@ -10,6 +10,7 @@
 
 #include "../../../middleware/content/packages/tables/authored_squad_reader.h"
 #include "../../../middleware/content/packages/tables/scenario_reader.h"
+#include "../../../state/activity_sdk/squad_profiles.h"
 #include "activity_sdk_squad_inventory_internal.h"
 
 namespace sunrise::client::content::activity::sdk_generation::squad_inventory::detail {
@@ -377,6 +378,34 @@ template <typename... Values>
     if (noNull) {
         output.flags |= format::kSquadMemberNoNullCandidates;
     }
+    ResolvedActor onlyActor{};
+    std::array<std::int8_t, 4> commonProfile{};
+    bool profileExact = allActorsEligible && actorResolver != nullptr;
+    bool firstProfile = true;
+    for (const auto tag : actorTags) {
+        ResolvedActor resolved{};
+        if (actorResolver == nullptr || !actorResolver(actorContext, tag, resolved)
+            || resolved.actorClassIndex == format::kAbsentIndex) {
+            profileExact = false;
+            continue;
+        }
+        if (actorTags.size() == 1) {
+            onlyActor = resolved;
+        }
+        if (!state::activity_sdk::valid_spawn_profile(resolved.authoredSpawnProfile)) {
+            profileExact = false;
+            continue;
+        }
+        if (!firstProfile && commonProfile != resolved.authoredSpawnProfile) {
+            profileExact = false;
+        }
+        commonProfile = resolved.authoredSpawnProfile;
+        firstProfile = false;
+    }
+    if (profileExact && !firstProfile) {
+        output.authoredSpawnProfile = commonProfile;
+        output.flags |= format::kSquadMemberSpawnProfileExact;
+    }
     if (allActorsEligible && actorTags.size() == 1) {
         output.actorDefinitionTag = *actorTags.begin();
         if (!format_text(output.actorDefinitionId,
@@ -384,11 +413,8 @@ template <typename... Values>
                          static_cast<unsigned>(output.actorDefinitionTag))) {
             return false;
         }
-        std::uint32_t actorIndex = format::kAbsentIndex;
-        if (actorResolver != nullptr
-            && actorResolver(actorContext, output.actorDefinitionTag, actorIndex)
-            && actorIndex != format::kAbsentIndex) {
-            output.actorClassIndex = actorIndex;
+        if (onlyActor.actorClassIndex != format::kAbsentIndex) {
+            output.actorClassIndex = onlyActor.actorClassIndex;
             output.actorLink = ActorLink::exactReciprocal;
             output.flags |= format::kSquadMemberActorClassExact;
         } else {
