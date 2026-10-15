@@ -59,7 +59,8 @@ inline constexpr std::uint8_t kDefaultLifetimeState = 3;
 /** Lifetime state that shows the loading presentation and refuses the native spawn gate. */
 inline constexpr std::uint8_t kLoadingLifetimeState = 4;
 /** Highest lifetime state inside the client's jump table. */
-inline constexpr std::uint8_t kMaximumLifetimeState = 10;
+inline constexpr std::uint8_t kMaximumLifetimeState =
+    middleware::bap::activity_message::sensor_auth_update::kMaximumLifetimeState;
 
 /** Events visible at the Activity Host boundary. */
 enum class EventKind : std::uint8_t {
@@ -145,11 +146,13 @@ enum class EventKind : std::uint8_t {
     deviceState = 39,
     /** An accepted client report moved the held region to another authored region. */
     regionChanged = 40,
+    /** A watched authored scene newly reported one of its output gates; from one msg 6 body. */
+    sceneOutput = 41,
 };
 
 /** Kinds are numbered without gaps, so the last one plus one is the count. */
 inline constexpr std::size_t kEventKindCount =
-    static_cast<std::size_t>(EventKind::regionChanged) + 1U;
+    static_cast<std::size_t>(EventKind::sceneOutput) + 1U;
 
 /**
  * Terminal delivery outcome of one script-requested effect.
@@ -496,8 +499,8 @@ struct Event final {
     /** Absolute service tick committed when the timer was armed. */
     std::uint64_t timerDeadlineTick{};
     /** Stable timer identity allocated by authoritative Mission State. */
-    std::uint64_t
-        timerSequence{}; /** Durable intent sequence the effect call returned to the script. */
+    std::uint64_t timerSequence{};
+    /** Durable intent sequence the effect call returned to the script. */
     std::uint64_t effectRequestKey{};
     /** Peer session id, for sessionJoined and sessionLeft events. */
     std::uint64_t peerSessionId{};
@@ -580,8 +583,10 @@ struct Event final {
     std::uint8_t squadSlotOrdinal{};
     /** Client flag written on its actor death or removal path. The meaning is unproved. */
     bool squadRemovalFlag{};
-    /** Activation token the completed authored scene echoed, for sceneFinished events. */
+    /** Activation token the authored scene echoed, for sceneFinished and sceneOutput events. */
     std::int32_t sceneActivationToken{};
+    /** Output gate key the scene newly reported, for sceneOutput events. */
+    std::uint32_t sceneOutputKey{};
     /** Task counter the client published, for objectiveProgress events. Clamped to 80. */
     std::int32_t objectiveTaskCount{};
     /** Counter that task held before it rose. */
@@ -748,8 +753,6 @@ struct InstanceSnapshot final {
     std::uint64_t scriptableReservedRevision{};
     std::uint32_t senseCount{};
     std::uint32_t outputAttempts{};
-    std::uint32_t incidentsReceived{};
-    std::uint32_t incidentsQueued{};
     std::uint32_t incidentsPending{};
     std::uint32_t senseObservationCount{};
     std::uint32_t senseObservationValueCount{};

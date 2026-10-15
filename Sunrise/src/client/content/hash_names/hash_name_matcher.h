@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include "../../../state/build_data/hash_names/definition.h"
+#include "../../../state/build_data/scenarios/definition.h"
 
 namespace sunrise::client::content::hash_names {
 
@@ -66,11 +67,14 @@ struct Storage {
 void reset(Storage& storage) noexcept;
 
 /**
- * Records every hash the published domains declare: bubble names and spawn-set names.
- * @param storage Pass storage receiving the ascending unique target set.
- * @return True when both domains are readable and their hashes fit.
+ * Records every hash the given layouts and the published spawn sets declare.
+ * @param storage Pass storage receiving the ascending unique nonzero target set.
+ * @param definitions Destination layouts whose bubble hashes are named.
+ * @return True when at least one target was found.
  */
-[[nodiscard]] bool collect_targets(Storage& storage) noexcept;
+[[nodiscard]] bool
+collect_targets(Storage& storage,
+                std::span<const state::build_data::scenarios::Definition> definitions) noexcept;
 
 /**
  * Offers one id, keeping the shortest name that gives a target hash.

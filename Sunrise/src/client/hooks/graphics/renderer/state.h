@@ -44,7 +44,7 @@ namespace selection {
 /** @param resources Chosen SDK resources. @return True when a back-buffer RTV is owned. */
 [[nodiscard]] bool create_render_target(Resources& resources) noexcept;
 
-/** @param resources Chosen resources whose RTV is unbound and released. */
+/** @param resources Chosen resources whose RTV is released. */
 void release_render_target(Resources& resources) noexcept;
 
 /** @param resources SDK resources freed in an order that respects their dependencies. */
@@ -56,7 +56,7 @@ void release_resources(Resources& resources) noexcept;
 /** @return True when the whole presentation stack is ready for frames and input. */
 [[nodiscard]] bool fully_active_locked() noexcept;
 
-/** Runs one Dear ImGui frame. Draws only while the Core UI is visible. */
+/** Runs one Dear ImGui frame. Sends draw data only when an overlay or the surface drew. */
 void render_frame_locked() noexcept;
 
 } // namespace sunrise::client::hooks::graphics::renderer

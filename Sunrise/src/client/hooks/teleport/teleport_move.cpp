@@ -43,14 +43,15 @@ constexpr std::uint16_t kForwardAction =
     static_cast<std::uint16_t>(state::account::settings::bindings::Action::moveForward);
 
 std::atomic_bool g_requested{false};
-std::atomic_bool g_forwardValid{false};
 std::atomic_bool g_keyDown{false};
 std::atomic_uint32_t g_requestAge{0};
 /** Set while the feature is usable, so the per-tick path costs one atomic read when it is not. */
 std::atomic_bool g_active{false};
+/** Guards the camera singleton, the target revision and the pose. */
 SRWLOCK g_cameraPoseLock{SRWLOCK_INIT};
 CameraPose g_cameraPose{};
-bool g_cameraPoseValid{};
+/** Written under g_cameraPoseLock; the physics tick reads it without the lock. */
+std::atomic_bool g_cameraPoseValid{false};
 
 /**
  * The player's physics component, kept from the last tick that carried it. At rest the sync stops
@@ -60,25 +61,25 @@ std::atomic<std::byte*> g_playerComponent{nullptr};
 /** Frames left before the injected press is released. */
 std::atomic_uint32_t g_pressFrames{0};
 
-ControlledHandle g_controlledHandle{};
+/** Game-image function, read once per physics component, so it is atomic, not locked. */
+std::atomic<ControlledHandle> g_controlledHandle{nullptr};
 CameraSingleton g_cameraSingleton{};
+/** Target changes invalidate a camera read that began before clear or reinitialization. */
+std::uint64_t g_targetRevision{};
 
-/** Camera forward vector for the next physics tick. Every access holds g_cameraPoseLock. */
-std::array<float, kVectorLanes> g_forward{};
-
-/** Withdraws the pose when the camera block is not readable for this frame. */
-void invalidate_camera_pose() noexcept {
-    AcquireSRWLockExclusive(&g_cameraPoseLock);
+/** Target and pose publication share this lock; callers already hold it exclusively. */
+void reset_camera_locked() noexcept {
     g_cameraPose = {};
-    g_cameraPoseValid = false;
-    ReleaseSRWLockExclusive(&g_cameraPoseLock);
+    g_cameraPoseValid.store(false, std::memory_order_release);
 }
 
-/** @param forward Receives the published camera forward vector, copied under the pose lock. */
-void copy_forward(Vector& forward) noexcept {
-    AcquireSRWLockShared(&g_cameraPoseLock);
-    forward = g_forward;
-    ReleaseSRWLockShared(&g_cameraPoseLock);
+/** A failed old read must not erase a newer target's camera pose. */
+void invalidate_camera_pose(std::uint64_t revision) noexcept {
+    AcquireSRWLockExclusive(&g_cameraPoseLock);
+    if (g_targetRevision == revision) {
+        reset_camera_locked();
+    }
+    ReleaseSRWLockExclusive(&g_cameraPoseLock);
 }
 
 /**
@@ -144,13 +145,6 @@ void expire_request() noexcept {
     }
 }
 
-/**
- * Runs the whole move for a component already proved to be the player's.
- * @param component Physics component driving the player.
- * @return True when the body was found and its position was written.
- */
-[[nodiscard]] bool perform_move(std::byte* component) noexcept;
-
 /** @param reason Key naming the step that stopped the move. */
 void report_skip(const char* reason) noexcept;
 
@@ -188,9 +182,9 @@ void end_press() noexcept {
  * @param component Candidate physics component.
  * @return True when it drives the object the local player controls.
  */
-[[nodiscard]] bool owns_player(std::byte* component) noexcept {
+[[nodiscard]] bool owns_player(std::byte* component, ControlledHandle target) noexcept {
     std::uint32_t controlled = kInvalidHandle;
-    g_controlledHandle(&controlled);
+    target(&controlled);
     if (controlled == kInvalidHandle) {
         return false;
     }
@@ -258,8 +252,9 @@ void set_vertical_velocity(std::byte* body, float value) noexcept {
  * @return True when the new position was stored.
  */
 [[nodiscard]] bool move_body(std::byte* body, float distance) noexcept {
-    Vector forward{};
-    copy_forward(forward);
+    AcquireSRWLockShared(&g_cameraPoseLock);
+    const Vector forward = g_cameraPose.forward;
+    ReleaseSRWLockShared(&g_cameraPoseLock);
     std::array<float, kVectorLanes> delta{};
     for (std::size_t lane = 0; lane < kVectorLanes; ++lane) {
         delta[lane] = forward[lane] * distance;
@@ -313,32 +308,42 @@ void set_vertical_velocity(std::byte* body, float value) noexcept {
 
 /** Publishes the two functions the hooks call. */
 void publish_targets(ControlledHandle controlled, CameraSingleton singleton) noexcept {
-    g_controlledHandle = controlled;
+    AcquireSRWLockExclusive(&g_cameraPoseLock);
+    g_controlledHandle.store(controlled, std::memory_order_release);
     g_cameraSingleton = singleton;
+    ++g_targetRevision;
+    reset_camera_locked();
+    ReleaseSRWLockExclusive(&g_cameraPoseLock);
 }
 
 /** Drops those functions and every latched request. */
 void clear_targets() noexcept {
-    g_controlledHandle = nullptr;
+    AcquireSRWLockExclusive(&g_cameraPoseLock);
+    g_controlledHandle.store(nullptr, std::memory_order_release);
     g_cameraSingleton = nullptr;
+    ++g_targetRevision;
+    reset_camera_locked();
+    ReleaseSRWLockExclusive(&g_cameraPoseLock);
     g_requested.store(false, std::memory_order_release);
-    g_forwardValid.store(false, std::memory_order_release);
     g_keyDown.store(false, std::memory_order_relaxed);
     g_requestAge.store(0, std::memory_order_relaxed);
     g_active.store(false, std::memory_order_relaxed);
     g_playerComponent.store(nullptr, std::memory_order_relaxed);
-    invalidate_camera_pose();
 }
 
 /** Publishes the frame's complete camera pose and its forward vector. */
 void capture_camera_pose(std::uint32_t playerIndex) noexcept {
-    if (playerIndex == kInvalidHandle || g_cameraSingleton == nullptr) {
-        invalidate_camera_pose();
+    AcquireSRWLockShared(&g_cameraPoseLock);
+    const auto target = g_cameraSingleton;
+    const auto revision = g_targetRevision;
+    ReleaseSRWLockShared(&g_cameraPoseLock);
+    if (playerIndex == kInvalidHandle || target == nullptr) {
+        invalidate_camera_pose(revision);
         return;
     }
-    std::byte* const camera = g_cameraSingleton();
+    std::byte* const camera = target();
     if (camera == nullptr) {
-        invalidate_camera_pose();
+        invalidate_camera_pose(revision);
         return;
     }
     const std::size_t playerOffset = kCameraBlockStride * playerIndex;
@@ -348,15 +353,17 @@ void capture_camera_pose(std::uint32_t playerIndex) noexcept {
         || !read_at(camera + playerOffset + kCameraUpX, pose.up)
         || !read_at(camera + playerOffset + kCameraHorizontalFov, pose.horizontalFov)
         || !read_at(camera + playerOffset + kCameraAspect, pose.aspect)) {
-        invalidate_camera_pose();
+        invalidate_camera_pose(revision);
         return;
     }
     AcquireSRWLockExclusive(&g_cameraPoseLock);
+    if (g_targetRevision != revision) {
+        ReleaseSRWLockExclusive(&g_cameraPoseLock);
+        return;
+    }
     g_cameraPose = pose;
-    g_cameraPoseValid = true;
-    g_forward = pose.forward;
+    g_cameraPoseValid.store(true, std::memory_order_release);
     ReleaseSRWLockExclusive(&g_cameraPoseLock);
-    g_forwardValid.store(true, std::memory_order_release);
 }
 
 /** Latches one teleport request if the bound key went down this frame. */
@@ -387,8 +394,11 @@ void poll_request() noexcept {
 
 /** Moves the local player if a request is pending and this component owns them. */
 void apply_pending(void* component) noexcept {
-    if (!g_active.load(std::memory_order_relaxed) || component == nullptr
-        || g_controlledHandle == nullptr) {
+    if (!g_active.load(std::memory_order_relaxed) || component == nullptr) {
+        return;
+    }
+    const auto target = g_controlledHandle.load(std::memory_order_acquire);
+    if (target == nullptr) {
         return;
     }
     const bool requested = g_requested.load(std::memory_order_acquire);
@@ -397,12 +407,12 @@ void apply_pending(void* component) noexcept {
     if (!requested && g_playerComponent.load(std::memory_order_relaxed) != nullptr) {
         return;
     }
-    if (!owns_player(static_cast<std::byte*>(component))) {
+    if (!owns_player(static_cast<std::byte*>(component), target)) {
         return;
     }
     std::byte* const physics = static_cast<std::byte*>(component);
     g_playerComponent.store(physics, std::memory_order_relaxed);
-    if (!requested || !g_forwardValid.load(std::memory_order_acquire)) {
+    if (!requested || !g_cameraPoseValid.load(std::memory_order_acquire)) {
         return;
     }
     g_requested.store(false, std::memory_order_release);
@@ -412,13 +422,14 @@ void apply_pending(void* component) noexcept {
 /** Runs the move for a request no physics tick collected. */
 void force_pending() noexcept {
     if (!g_requested.load(std::memory_order_acquire)
-        || !g_forwardValid.load(std::memory_order_acquire)
+        || !g_cameraPoseValid.load(std::memory_order_acquire)
         || g_requestAge.load(std::memory_order_relaxed) < kForceAfterFrames) {
         return;
     }
     std::byte* const physics = g_playerComponent.load(std::memory_order_relaxed);
     // The cached pointer outlives a destination change, so it is proved again before use.
-    if (physics == nullptr || g_controlledHandle == nullptr || !owns_player(physics)) {
+    const auto target = g_controlledHandle.load(std::memory_order_acquire);
+    if (physics == nullptr || target == nullptr || !owns_player(physics, target)) {
         return;
     }
     g_requested.store(false, std::memory_order_release);
@@ -437,8 +448,20 @@ void* local_player_component() noexcept {
 
 /** @param component Candidate physics component. @return True when the local player drives it. */
 bool owns_local_player(void* component) noexcept {
-    return component != nullptr && g_controlledHandle != nullptr
-           && owns_player(static_cast<std::byte*>(component));
+    const auto target = g_controlledHandle.load(std::memory_order_acquire);
+    return component != nullptr && target != nullptr
+           && owns_player(static_cast<std::byte*>(component), target);
+}
+
+/** Calls the same getter the ownership test uses. */
+bool controlled_handle(std::uint32_t& handle) noexcept {
+    handle = kInvalidHandle;
+    const auto target = g_controlledHandle.load(std::memory_order_acquire);
+    if (target == nullptr) {
+        return false;
+    }
+    target(&handle);
+    return handle != kInvalidHandle;
 }
 
 /** Reads the world position of the body a physics component drives. */
@@ -464,19 +487,19 @@ bool write_velocity(void* component, const Vector& velocity) noexcept {
     return body != nullptr && write_vector(body + kBodyVelocityX, velocity);
 }
 
-/** Reports the camera forward vector published this frame. */
+/** Copies forward and validity from one camera publication. */
 bool camera_forward(Vector& forward) noexcept {
-    if (!g_forwardValid.load(std::memory_order_acquire)) {
-        return false;
-    }
-    copy_forward(forward);
-    return true;
+    AcquireSRWLockShared(&g_cameraPoseLock);
+    const bool valid = g_cameraPoseValid.load(std::memory_order_relaxed);
+    forward = valid ? g_cameraPose.forward : Vector{};
+    ReleaseSRWLockShared(&g_cameraPoseLock);
+    return valid;
 }
 
 /** Copies the last complete pose published by the camera-frame hook. */
 bool camera_pose(CameraPose& pose) noexcept {
     AcquireSRWLockShared(&g_cameraPoseLock);
-    const bool valid = g_cameraPoseValid;
+    const bool valid = g_cameraPoseValid.load(std::memory_order_relaxed);
     pose = valid ? g_cameraPose : CameraPose{};
     ReleaseSRWLockShared(&g_cameraPoseLock);
     return valid;

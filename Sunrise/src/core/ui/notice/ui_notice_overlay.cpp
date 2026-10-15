@@ -13,8 +13,6 @@
 namespace sunrise::core::ui::notice {
 namespace {
 
-/** 4 notices cover a burst without hiding the first one that mattered. */
-constexpr std::size_t kNoticeCapacity = 4;
 /** 12 seconds is long enough to read a line and short enough to clear itself. */
 constexpr float kNoticeSeconds = 12.0F;
 /** A slot with no time left is free. */

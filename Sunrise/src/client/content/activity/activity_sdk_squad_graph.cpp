@@ -16,17 +16,7 @@ namespace {
 
 namespace topology = topology_inventory;
 
-/** Formats one bounded canonical identity. */
-template <typename... Values>
-[[nodiscard]] bool format_text(std::string& output, const char* pattern, Values... values) {
-    std::array<char, 192> bytes{};
-    const int count = std::snprintf(bytes.data(), bytes.size(), pattern, values...);
-    if (count < 0 || static_cast<std::size_t>(count) >= bytes.size()) {
-        return false;
-    }
-    output.assign(bytes.data(), static_cast<std::size_t>(count));
-    return true;
-}
+using detail::format_text;
 
 /** Inserts one unique config tag and rejects duplicate normalized definitions. */
 template <typename Row>

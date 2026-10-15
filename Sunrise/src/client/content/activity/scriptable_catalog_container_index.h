@@ -37,11 +37,17 @@ struct ContainerIndex final {
  * @param source Package directory and borrowed block keys.
  * @param output Receives the entries and the two completeness flags.
  * @param cancel Optional cancellation probe.
- * @return True when the sweep finished, cancelled or not.
+ * @return False on cancellation or retention failure; partial scans keep explicit flags.
  */
 [[nodiscard]] bool
 build_container_index(const middleware::content::packages::reader::Source& source,
                       ContainerIndex& output,
                       ContainerIndexCancelCheck cancel) noexcept;
+
+/** Authoritative generation refuses partial scans and unbound package stems. */
+[[nodiscard]] bool
+build_complete_container_index(const middleware::content::packages::reader::Source& source,
+                               ContainerIndex& output,
+                               ContainerIndexCancelCheck cancel) noexcept;
 
 } // namespace sunrise::client::content::activity::scriptables::internal

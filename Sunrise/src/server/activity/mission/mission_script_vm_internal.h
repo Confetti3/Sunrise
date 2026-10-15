@@ -94,7 +94,15 @@ struct CallFrame final {
     bool instructionExceeded{};
     bool memoryExceeded{};
     bool intentAllocationFailed{};
+    bool moduleOwnershipFailed{};
 };
+
+/** @return One LUA_NOREF per event kind; a zero would read as a captured callback. */
+[[nodiscard]] constexpr std::array<int, host::kEventKindCount> make_unset_references() noexcept {
+    std::array<int, host::kEventKindCount> references{};
+    references.fill(LUA_NOREF);
+    return references;
+}
 
 /** Complete per-activity VM state; no allocation is shared with another instance. */
 struct Impl final {
@@ -111,6 +119,9 @@ struct Impl final {
     /** The peer set the host last published. Read by context.peers, never by an event. */
     std::array<PeerSession, kPeerCapacity> peers{};
     std::uint8_t peerCount{};
+    std::array<std::array<char, state::mods::kIdCapacity>, state::mods::kModCapacity>
+        moduleOwners{};
+    std::size_t moduleOwnerCount{};
     std::vector<Intent> outbox{};
     std::array<ScriptVariable, kVariableCapacity> variables{};
     std::array<MissionTimer, kTimerCapacity> timers{};
@@ -138,13 +149,21 @@ struct Impl final {
     std::array<char, 256> lastError{};
     lua_State* state{};
     CallFrame* frame{};
-    int programReference{LUA_NOREF};
     int startReference{LUA_NOREF};
-    std::array<int, host::kEventKindCount> eventReferences{};
+    std::array<int, host::kEventKindCount> eventReferences{make_unset_references()};
     int loadReference{LUA_NOREF};
     bool hasInitialState{};
     bool active{};
     bool faulted{};
+};
+
+struct VmAccess final {
+    [[nodiscard]] static Impl& get(Vm& vm) noexcept {
+        return *std::launder(reinterpret_cast<Impl*>(vm.storage_.data()));
+    }
+    [[nodiscard]] static const Impl& get(const Vm& vm) noexcept {
+        return *std::launder(reinterpret_cast<const Impl*>(vm.storage_.data()));
+    }
 };
 
 /** @return True once the arena owns a block laid out as one free span. */
@@ -221,6 +240,28 @@ inline void push_u64_string(lua_State* state, std::uint64_t value) {
     lua_pushlstring(state, text.data(), static_cast<std::size_t>(converted.ptr - text.data()));
 }
 
+/** Pushes one 32-byte digest as 64 lowercase hex characters. */
+inline void push_digest(lua_State* state, const std::array<std::byte, 32>& value) {
+    // Lowercase hex digits; every digest and byte field is spelled this way.
+    constexpr char digits[] = "0123456789abcdef";
+    std::array<char, 64> text{};
+    for (std::size_t index = 0; index < value.size(); ++index) {
+        const auto byte = static_cast<std::uint8_t>(value[index]);
+        text[index * 2U] = digits[byte >> 4U];
+        text[index * 2U + 1U] = digits[byte & 0xFU];
+    }
+    lua_pushlstring(state, text.data(), text.size());
+}
+
+/** Pushes the text, or nil when it is empty. */
+inline void push_optional_name(lua_State* state, std::string_view value) {
+    if (value.empty()) {
+        lua_pushnil(state);
+    } else {
+        lua_pushlstring(state, value.data(), value.size());
+    }
+}
+
 inline void set_integer(lua_State* state, const char* key, lua_Integer value) {
     lua_pushinteger(state, value);
     lua_setfield(state, -2, key);
@@ -233,11 +274,6 @@ inline void set_boolean(lua_State* state, const char* key, bool value) {
 
 inline void set_string(lua_State* state, const char* key, std::string_view value) {
     lua_pushlstring(state, value.data(), value.size());
-    lua_setfield(state, -2, key);
-}
-
-inline void set_u64_string(lua_State* state, const char* key, std::uint64_t value) {
-    push_u64_string(state, value);
     lua_setfield(state, -2, key);
 }
 

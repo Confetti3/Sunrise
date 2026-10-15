@@ -301,7 +301,8 @@ plan_policy(const mission::ActorCommandPolicyRequest& request, PolicyPlan& outpu
                                const mission::ActorCommandPolicyRequest& request,
                                const PolicyPlan& plan) noexcept {
     return session.policyActive && session.bindingRetained
-           && same_binding(session.binding, request.binding) && session.catalog == plan.snapshot
+           && same_binding(session.binding, request.binding)
+           && state::activity_sdk::same_identity(session.catalog, plan.snapshot)
            && session.worldView.generation_identity() == plan.worldView.generation_identity()
            && session.activityClientGeneration == plan.activityClientGeneration
            && session.commandIndex == request.commandRow && session.policyValue == request.value
@@ -773,11 +774,11 @@ void service(std::uint64_t) noexcept {
     std::array<bool, kSessionCapacity> valid{};
     for (std::size_t index = 0; index < count; ++index) {
         group::HostSessionBinding host{};
-        valid[index] = catalogs[index] == state::activity_sdk::snapshot()
-                       && activity::binding_matches(bindings[index])
-                       && group::host_session_for_group(groups[index], host)
-                       && host.generation == generations[index]
-                       && same_binding(host.source, bindings[index]);
+        valid[index] =
+            state::activity_sdk::same_identity(catalogs[index], state::activity_sdk::snapshot())
+            && activity::binding_matches(bindings[index])
+            && group::host_session_for_group(groups[index], host)
+            && host.generation == generations[index] && same_binding(host.source, bindings[index]);
         linkPresent[index] = peer::link_identity(groups[index], linkIdentities[index]);
     }
     std::array<activity::SessionBinding, kSessionCapacity> releases{};

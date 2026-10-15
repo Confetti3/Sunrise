@@ -43,20 +43,8 @@ namespace tables = middleware::content::packages::tables;
 
 /** Compares two parsed candidate lanes exactly. */
 [[nodiscard]] bool same_member(const MemberFact& left, const MemberFact& right) noexcept {
-    if (left.memberKey != right.memberKey || left.reservedU32 != right.reservedU32) {
-        return false;
-    }
-    for (std::size_t lane = 0; lane < left.candidates.size(); ++lane) {
-        if (left.candidates[lane].size() != right.candidates[lane].size()) {
-            return false;
-        }
-        for (std::size_t row = 0; row < left.candidates[lane].size(); ++row) {
-            if (left.candidates[lane][row] != right.candidates[lane][row]) {
-                return false;
-            }
-        }
-    }
-    return true;
+    return left.memberKey == right.memberKey && left.reservedU32 == right.reservedU32
+           && left.candidates == right.candidates;
 }
 
 } // namespace
@@ -88,20 +76,12 @@ namespace tables = middleware::content::packages::tables;
 
 /** Compares repeated spawn-rule definitions from different placed paths. */
 [[nodiscard]] bool same_rule(const RuleFact& left, const RuleFact& right) noexcept {
-    if (left.configTag != right.configTag || left.complete != right.complete
-        || left.primaryComponentOffset != right.primaryComponentOffset
-        || left.secondaryComponentOffset != right.secondaryComponentOffset
-        || left.primaryComponentClass != right.primaryComponentClass
-        || left.secondaryComponentClass != right.secondaryComponentClass
-        || left.inlineForm != right.inlineForm || left.points.size() != right.points.size()) {
-        return false;
-    }
-    for (std::size_t index = 0; index < left.points.size(); ++index) {
-        if (left.points[index] != right.points[index]) {
-            return false;
-        }
-    }
-    return true;
+    return left.configTag == right.configTag && left.complete == right.complete
+           && left.primaryComponentOffset == right.primaryComponentOffset
+           && left.secondaryComponentOffset == right.secondaryComponentOffset
+           && left.primaryComponentClass == right.primaryComponentClass
+           && left.secondaryComponentClass == right.secondaryComponentClass
+           && left.inlineForm == right.inlineForm && left.points == right.points;
 }
 
 /** Parses one exact authored type-1 config. */

@@ -2,7 +2,7 @@
 
 namespace sunrise::client::hooks::network {
 
-/** Installs game-owned HTTP, BAP, and transport hooks. */
+/** Installs the game-owned HTTP, transport-kind, bubble-authority and content-config hooks. */
 [[nodiscard]] bool install_game() noexcept;
 
 /** Installs late-loaded Steam networking state hooks. */

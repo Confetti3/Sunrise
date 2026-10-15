@@ -3,8 +3,8 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
-#include <limits>
 
+#include "../definitions.h"
 #include "../roster/queuez_roster.h"
 
 namespace sunrise::middleware::datagen::family3 {
@@ -16,8 +16,6 @@ constexpr std::size_t kPrimaryIndexCapacity = 27;
 constexpr std::size_t kSecondaryIndexCapacity = 5;
 /** 7 tail bytes complete the native object stride after its final flag. */
 constexpr std::size_t kTailSize = 7;
-/** A missing biased 16-bit definition index is every bit set. */
-constexpr std::uint16_t kEmptyDefinitionIndex = (std::numeric_limits<std::uint16_t>::max)();
 
 /** Native family-3 roster object with explicit ABI padding and sizes. */
 struct RosterLayout {

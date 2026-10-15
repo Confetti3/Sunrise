@@ -47,9 +47,6 @@ steps(std::uint16_t definitionIndex, std::span<Step> output, std::size_t& count)
  */
 [[nodiscard]] bool snapshot_steps(std::span<Step> output, std::size_t& count) noexcept;
 
-/** @return The step bank row count, read under the lock. */
-[[nodiscard]] std::size_t step_count() noexcept;
-
 /**
  * Lists the definition index each slot of one scope's record array carries.
  * Slot order is native definition order among the definitions sharing that scope.

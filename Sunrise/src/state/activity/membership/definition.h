@@ -44,12 +44,6 @@ inline constexpr std::int8_t kClientTeleportResetState = 0;
 inline constexpr std::int32_t kMaximumSliceSetIndex = 1022;
 /** Bubble -1 means no refresh bubble is chosen. */
 inline constexpr std::int32_t kMinimumRefreshBubble = -1;
-/** Membership refreshes reach at most the 64 bubble slots. */
-inline constexpr std::int32_t kMaximumRefreshBubble = 63;
-/** All-one bits are not a usable secondary member SOID. */
-inline constexpr std::uint64_t kInvalidOpaqueSoid = (std::numeric_limits<std::uint64_t>::max)();
-/** All-one bits are not a usable per-join lookup identity. */
-inline constexpr std::uint64_t kInvalidJoinIdentity = (std::numeric_limits<std::uint64_t>::max)();
 
 /** Client identity, kept without its source payload bytes. */
 struct Identity final {

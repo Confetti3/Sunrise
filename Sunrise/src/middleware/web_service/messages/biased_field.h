@@ -12,11 +12,7 @@ inline constexpr std::uint8_t kBiasedIndexWidth = 16;
 inline constexpr std::int32_t kBiasedIndexBias = 0x8000;
 
 /**
- * Reads one biased 16-bit index field.
- *
- * Opcodes 901 and 904 both open with fields of this shape, and each codec carried its own copy of
- * the reader. One copy means the two cannot drift.
- *
+ * Reads one biased 16-bit index field, the shape every vendor opcode opens with.
  * @param reader Open reader.
  * @param output Receives the logical index.
  * @return True when the field was present.

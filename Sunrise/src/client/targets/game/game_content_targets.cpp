@@ -23,8 +23,6 @@ constexpr std::size_t kObjectStoreCallOffset = 22;
 constexpr std::size_t kNearCallDisplacementOffset = kObjectStoreCallOffset + 1;
 /** The object-store near call ends after its opcode and 4-byte displacement. */
 constexpr std::size_t kObjectStoreCallEndOffset = kObjectStoreCallOffset + 5;
-/** Intel's direct near-call opcode guards the decoded target against layout drift. */
-constexpr std::byte kNearCallOpcode{0xE8};
 
 Targets g_targets;
 std::atomic_bool g_resolved{false};
@@ -54,7 +52,6 @@ bool derive(std::span<const patterns::ImageRange> image,
                            kHandleTablesDisplacementOffset,
                            kHandleTablesInstructionSize,
                            resolved.contentHandleTablesSlot)
-        || family5Subscribe[kObjectStoreCallOffset] != kNearCallOpcode
         || !relative::resolve(family5Subscribe,
                               kNearCallDisplacementOffset,
                               kObjectStoreCallEndOffset,
@@ -66,9 +63,6 @@ bool derive(std::span<const patterns::ImageRange> image,
     std::memcpy(&resolved.queuezDescriptorFamilyBias,
                 objectResolver + kDescriptorFamilyBiasOffset,
                 sizeof resolved.queuezDescriptorFamilyBias);
-    if (resolved.queuezDescriptorFamilyBias == 0) {
-        return false;
-    }
     output = resolved;
     return true;
 }

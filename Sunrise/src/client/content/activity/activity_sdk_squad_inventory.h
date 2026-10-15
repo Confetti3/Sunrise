@@ -279,13 +279,4 @@ struct GraphSnapshot;
                         void* actorContext,
                         Snapshot& output) noexcept;
 
-/** Runs package extraction and linking without retaining an intermediate copy. */
-[[nodiscard]] bool build(const topology_inventory::Snapshot& topology,
-                         TagReader reader,
-                         void* readerContext,
-                         std::span<const SlotSchemaFact> slotSchemas,
-                         ActorResolver actorResolver,
-                         void* actorContext,
-                         Snapshot& output) noexcept;
-
 } // namespace sunrise::client::content::activity::sdk_generation::squad_inventory

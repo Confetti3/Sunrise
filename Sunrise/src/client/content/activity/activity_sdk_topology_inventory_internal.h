@@ -37,6 +37,15 @@ template <typename... Arguments>
     return true;
 }
 
+/** Returns the compact FNV-1 hash used by package-inline names. */
+[[nodiscard]] inline std::uint32_t content_hash(std::string_view value) noexcept {
+    std::uint32_t hash = 2166136261U;
+    for (const unsigned char byte : value) {
+        hash = (hash * 16777619U) ^ byte;
+    }
+    return hash;
+}
+
 [[nodiscard]] bool text_view(const Text& source, std::string_view& output) noexcept;
 [[nodiscard]] bool byte_less(std::string_view left, std::string_view right) noexcept;
 [[nodiscard]] bool valid_utf8(std::string_view value) noexcept;

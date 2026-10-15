@@ -25,41 +25,21 @@ enum class SessionMessageId : std::uint8_t {
     timeSynchronize = 29,
 };
 
-/** Declared decoded sizes the registry holds. A message must carry its own constant. */
-inline constexpr std::uint32_t kPeerConnectSize = 24;
-/** See kPeerConnectSize. */
-inline constexpr std::uint32_t kJoinCompleteSize = 24;
-/** See kPeerConnectSize. */
-inline constexpr std::uint32_t kJoinAbortSize = 24;
-/** See kPeerConnectSize. */
-inline constexpr std::uint32_t kLeaveSessionSize = 8;
-/** See kPeerConnectSize. */
+/** Declared decoded sizes the registry holds for the ids this host sends. */
 inline constexpr std::uint32_t kLeaveAcknowledgeSize = 8;
-/** See kPeerConnectSize. */
-inline constexpr std::uint32_t kSessionDisbandSize = 24;
-/** See kPeerConnectSize. */
-inline constexpr std::uint32_t kSessionBootSize = 24;
-/** See kPeerConnectSize. */
-inline constexpr std::uint32_t kPeerEstablishSize = 8;
-/** See kPeerConnectSize. */
+/** See kLeaveAcknowledgeSize. */
 inline constexpr std::uint32_t kTimeSynchronizeSize = 48;
-/** See kPeerConnectSize. */
+/** See kLeaveAcknowledgeSize. */
 inline constexpr std::uint32_t kMembershipUpdateSize = 31104;
 
 /** Member slots one session holds. It is both the schema array bound and the delta index range. */
 inline constexpr std::size_t kMemberCapacity = 32;
 
-/** Body of a peer-connect fan-out. */
-struct PeerConnect {
-    std::uint16_t protocolVersion{};
-    std::uint64_t machineId{};
-    std::uint64_t sessionId{};
-};
-
 /** Body of a join-complete. */
 struct JoinComplete {
     std::uint64_t sessionId{};
-    std::uint64_t machineId{};
+    /** Join id the peer's own join request carried. */
+    std::uint64_t joinId{};
     std::uint32_t joinSequence{};
 };
 
@@ -68,14 +48,6 @@ struct SessionNotice {
     std::uint64_t sessionId{};
     std::uint64_t machineId{};
     bool flag{};
-};
-
-/** Body of a session-boot. */
-struct SessionBoot {
-    std::uint64_t sessionId{};
-    std::uint64_t machineId{};
-    std::uint8_t kind{};
-    std::uint8_t reason{};
 };
 
 /** Body of a time-synchronize probe or response. */
@@ -91,14 +63,6 @@ struct TimeSynchronize {
     std::uint64_t responderSendTime{};
 };
 
-/** Writes a peer-connect body. @return True when every field fit. */
-[[nodiscard]] bool write_peer_connect(encoding::bits::Writer& writer,
-                                      const PeerConnect& body) noexcept;
-
-/** Writes a join-complete body. @return True when every field fit. */
-[[nodiscard]] bool write_join_complete(encoding::bits::Writer& writer,
-                                       const JoinComplete& body) noexcept;
-
 /** Reads a join-complete body. @return True when every field was present. */
 [[nodiscard]] bool read_join_complete(encoding::bits::Reader& reader,
                                       JoinComplete& output) noexcept;
@@ -113,14 +77,6 @@ struct TimeSynchronize {
 /** Writes a session-identity-only body. @return True when the field fit. */
 [[nodiscard]] bool write_session_only(encoding::bits::Writer& writer,
                                       std::uint64_t sessionId) noexcept;
-
-/** Writes a session-disband body. @return True when every field fit. */
-[[nodiscard]] bool write_session_disband(encoding::bits::Writer& writer,
-                                         const SessionNotice& body) noexcept;
-
-/** Writes a session-boot body. @return True when every field fit. */
-[[nodiscard]] bool write_session_boot(encoding::bits::Writer& writer,
-                                      const SessionBoot& body) noexcept;
 
 /** Reads a time-synchronize body. @return True when the selected form was complete. */
 [[nodiscard]] bool read_time_synchronize(encoding::bits::Reader& reader,

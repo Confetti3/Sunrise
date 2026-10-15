@@ -23,12 +23,6 @@ inline constexpr std::size_t kMissionSeedOmitCapacity = 32;
 inline constexpr std::size_t kSquadMemberCapacity = 15;
 /** A compiled Slot Auth body must fit the widest bounded msg-5 table. */
 inline constexpr std::size_t kMaximumAuthBodyByteCount = (53'150U + 7U) / 8U;
-/** The msg-5 biased slot-type field carries native values from zero through 126. */
-inline constexpr std::uint8_t kMaximumAuthSlotType = 126;
-/** The msg-5 biased slot-index field wraps above this native value. */
-inline constexpr std::uint16_t kMaximumAuthSlotIndex = 32767;
-/** Above the highest jump-table entry the client's spawn gate jumps out of its image. */
-inline constexpr std::uint8_t kMaximumIntentLifetimeState = 10;
 /** Zero is reserved as the absent durable intent sequence. */
 inline constexpr std::uint64_t kAbsentIntentSequence = 0;
 /** Durable intent sequences begin at one. */
@@ -166,6 +160,8 @@ struct ProgramKey final {
     std::uint32_t worldScenarioTag{};
     std::int16_t activityIndex{-1};
     bool publicTarget{};
+
+    friend bool operator==(const ProgramKey&, const ProgramKey&) = default;
 };
 
 /** Closed typed actions that may leave Mission Lua. */

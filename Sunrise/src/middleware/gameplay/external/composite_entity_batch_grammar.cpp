@@ -186,7 +186,7 @@ static bool append_compiled_component(const CompositeEntityCodecContext& context
 [[nodiscard]] bool registry_sobject_tag(const CompositeEntityCodecContext& context,
                                         const EntityToken& token,
                                         std::uint32_t& output) noexcept {
-    if (context.registry == nullptr || !detail::valid_token(token)) {
+    if (context.registry == nullptr || !valid_token(token)) {
         return false;
     }
     const EntityBaselineSlot& slot = context.registry->slots[token.slot];

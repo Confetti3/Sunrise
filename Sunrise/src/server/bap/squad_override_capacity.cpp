@@ -1,5 +1,10 @@
 #include "squad_override_capacity.h"
 
+#include <algorithm>
+#include <array>
+#include <cstdint>
+#include <span>
+
 #include "../../middleware/bap/activity_message/sensor_auth_update.h"
 #include "../../middleware/content/packages/tables/region_reader.h"
 #include "../../state/build_data/runtime.h"
@@ -30,7 +35,10 @@ struct ClientBudget final {
     return true;
 }
 
-/** Loads every canonical group and counts only top-level plus one requested bubble. */
+/**
+ * Loads every canonical group and counts only top-level plus one requested bubble.
+ * A key counts once, as the roster merges same-key groups; top-level groups come first.
+ */
 [[nodiscard]] bool add_canonical(const layouts::Definition& layout,
                                  std::size_t bubble,
                                  ClientBudget& budget) noexcept {
@@ -41,6 +49,8 @@ struct ClientBudget final {
         || bubbleCount > layout.bubbleGroupMasks.size()) {
         return false;
     }
+    std::array<std::uint32_t, roster_message::kPublishedGroupCapacity> counted{};
+    std::size_t countedCount = 0;
     for (std::size_t index = 0; index < topCount + bubbleCount; ++index) {
         const std::uint16_t tableIndex =
             index < topCount ? layout.rosterGroups[index] : layout.bubbleGroups[index - topCount];
@@ -52,9 +62,18 @@ struct ClientBudget final {
         const bool active =
             index < topCount
             || (layout.bubbleGroupMasks[index - topCount] & (std::uint64_t{1} << bubble)) != 0;
-        if (active && !add_group(group.slotCount, budget)) {
+        if (!active) {
+            continue;
+        }
+        const auto countedKeys = std::span(counted).first(countedCount);
+        if (std::find(countedKeys.begin(), countedKeys.end(), group.registryKey)
+            != countedKeys.end()) {
+            continue;
+        }
+        if (countedCount == counted.size() || !add_group(group.slotCount, budget)) {
             return false;
         }
+        counted[countedCount++] = group.registryKey;
     }
     return true;
 }

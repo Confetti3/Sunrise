@@ -52,12 +52,14 @@ extract_file(const wchar_t* path, Visitor visitor, void* context, Result& result
 /**
  * Extracts named definitions from every package in one installed directory.
  * @param directory Package directory with or without a trailing separator.
+ * @param installedOnly Skips every file a mod serves.
  * @param visitor Required non-owning entry consumer.
  * @param context Caller context passed to the visitor.
  * @param result Receives file and entry totals.
  * @return True when the walk and every package extraction work.
  */
 [[nodiscard]] bool extract_directory(std::wstring_view directory,
+                                     bool installedOnly,
                                      Visitor visitor,
                                      void* context,
                                      DirectoryResult& result) noexcept;

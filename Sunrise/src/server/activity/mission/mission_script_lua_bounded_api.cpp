@@ -10,6 +10,7 @@
 #include <limits>
 #include <string_view>
 
+#include "mission_script_lua_dispatch.h"
 #include "mission_script_lua_internal.h"
 
 namespace sunrise::server::activity::mission::lua_vm::detail {
@@ -52,6 +53,37 @@ namespace {
     return 0;
 }
 
+/** A list's length and the lane it belongs to; every list field reads these two. */
+struct ListView final {
+    std::uint8_t count{};
+    const BoundedLane* lane{};
+};
+
+/** Pushes the length of a list. */
+void push_list_count(lua_State* state, const ListView& list) {
+    lua_pushinteger(state, list.count);
+}
+
+/** Pushes the capacity of a list's lane. */
+void push_list_capacity(lua_State* state, const ListView& list) {
+    lua_pushinteger(state, list.lane->capacity);
+}
+
+/** Pushes the name of a list's lane. */
+void push_list_lane(lua_State* state, const ListView& list) {
+    lua_pushlstring(state, list.lane->name.data(), list.lane->name.size());
+}
+
+/** Count list members in table order. */
+constexpr std::array<Binding<ListView>, std::size(api::kCountListMembers)> kCountListBindings{{
+    {"count", nullptr, &push_list_count},
+    {"capacity", nullptr, &push_list_capacity},
+    {"lane", nullptr, &push_list_lane},
+    {"at", &count_list_at},
+    {"append", &count_list_append},
+}};
+static_assert(bound_to<ListView>(api::kCountListMembers, kCountListBindings));
+
 /** Lua index for a count list: the lane's counts and bounds. Errors on an unknown lane. */
 [[nodiscard]] int count_list_index(lua_State* state) {
     const auto* const handle =
@@ -60,21 +92,8 @@ namespace {
     if (lane == nullptr) {
         return luaL_error(state, "count list lane is unknown");
     }
-    const std::string_view key = lua_string_view(state, 2);
-    if (key == "count") {
-        lua_pushinteger(state, handle->count);
-    } else if (key == "capacity") {
-        lua_pushinteger(state, lane->capacity);
-    } else if (key == "lane") {
-        lua_pushlstring(state, lane->name.data(), lane->name.size());
-    } else if (key == "at") {
-        lua_pushcfunction(state, &count_list_at);
-    } else if (key == "append") {
-        lua_pushcfunction(state, &count_list_append);
-    } else {
-        lua_pushnil(state);
-    }
-    return 1;
+    return dispatch<ListView>(
+        state, kCountListBindings, lua_string_view(state, 2), ListView{handle->count, lane});
 }
 
 /** Pushes the slot at one 1-based list row. Raises a Lua error when the row is out of range. */
@@ -112,6 +131,17 @@ namespace {
     return 0;
 }
 
+/** Object reference list members in table order. */
+constexpr std::array<Binding<ListView>, std::size(api::kObjectRefListMembers)>
+    kObjectRefListBindings{{
+        {"count", nullptr, &push_list_count},
+        {"capacity", nullptr, &push_list_capacity},
+        {"lane", nullptr, &push_list_lane},
+        {"at", &object_ref_list_at},
+        {"append", &object_ref_list_append},
+    }};
+static_assert(bound_to<ListView>(api::kObjectRefListMembers, kObjectRefListBindings));
+
 /** Lua index for an object reference list: the lane's refs and bounds. */
 [[nodiscard]] int object_ref_list_index(lua_State* state) {
     const auto* const handle =
@@ -120,21 +150,8 @@ namespace {
     if (lane == nullptr) {
         return luaL_error(state, "object reference lane is unknown");
     }
-    const std::string_view key = lua_string_view(state, 2);
-    if (key == "count") {
-        lua_pushinteger(state, handle->count);
-    } else if (key == "capacity") {
-        lua_pushinteger(state, lane->capacity);
-    } else if (key == "lane") {
-        lua_pushlstring(state, lane->name.data(), lane->name.size());
-    } else if (key == "at") {
-        lua_pushcfunction(state, &object_ref_list_at);
-    } else if (key == "append") {
-        lua_pushcfunction(state, &object_ref_list_append);
-    } else {
-        lua_pushnil(state);
-    }
-    return 1;
+    return dispatch<ListView>(
+        state, kObjectRefListBindings, lua_string_view(state, 2), ListView{handle->count, lane});
 }
 
 /** Mints the empty list of the lane at stack index one. */
@@ -157,7 +174,28 @@ namespace {
     return 1;
 }
 
-/** Lua index for one bounded lane: its name, bound and current use. */
+/** Bounded lane members in table order. */
+constexpr std::array<Binding<BoundedLane>, std::size(api::kBoundedLaneMembers)>
+    kBoundedLaneBindings{{
+        {"name",
+         nullptr,
+         [](lua_State* state, const BoundedLane& lane) {
+             lua_pushlstring(state, lane.name.data(), lane.name.size());
+         }},
+        {"capacity",
+         nullptr,
+         [](lua_State* state, const BoundedLane& lane) { lua_pushinteger(state, lane.capacity); }},
+        {"kind",
+         nullptr,
+         [](lua_State* state, const BoundedLane& lane) {
+             const std::string_view kind = api::bounded_lane_kind_name(lane.kind);
+             lua_pushlstring(state, kind.data(), kind.size());
+         }},
+        {"list", &bounded_lane_list},
+    }};
+static_assert(bound_to<BoundedLane>(api::kBoundedLaneMembers, kBoundedLaneBindings));
+
+/** Lua index for one bounded lane: its name, capacity, kind and list maker. */
 [[nodiscard]] int bounded_lane_index(lua_State* state) {
     const auto* const handle =
         static_cast<const BoundedLaneHandle*>(luaL_checkudata(state, 1, kBoundedLaneMetatable));
@@ -165,27 +203,25 @@ namespace {
     if (lane == nullptr) {
         return luaL_error(state, "bounded lane is unknown");
     }
-    const std::string_view key = lua_string_view(state, 2);
-    if (key == "name") {
-        lua_pushlstring(state, lane->name.data(), lane->name.size());
-    } else if (key == "capacity") {
-        lua_pushinteger(state, lane->capacity);
-    } else if (key == "kind") {
-        lua_pushstring(state, lane->kind == BoundedLaneKind::count ? "count" : "object_ref");
-    } else if (key == "list") {
-        lua_pushcfunction(state, &bounded_lane_list);
-    } else {
-        lua_pushnil(state);
-    }
-    return 1;
+    return dispatch<BoundedLane>(state, kBoundedLaneBindings, lua_string_view(state, 2), *lane);
 }
+
+/** Bounded lane collection members in table order; lane names are served after them. */
+constexpr std::array<Binding<NoSubject>, std::size(api::kBoundedLanesMembers)>
+    kBoundedLanesBindings{{
+        {"count",
+         nullptr,
+         [](lua_State* state, const NoSubject&) {
+             lua_pushinteger(state, static_cast<lua_Integer>(kBoundedLanes.size()));
+         }},
+    }};
+static_assert(bound_to<NoSubject>(api::kBoundedLanesMembers, kBoundedLanesBindings));
 
 /** Lua index for the bounded lane collection: `count` or a lane name, else nil. */
 [[nodiscard]] int bounded_lane_collection_index(lua_State* state) {
     static_cast<void>(luaL_checkudata(state, 1, kBoundedLaneCollectionMetatable));
     const std::string_view key = lua_string_view(state, 2);
-    if (key == "count") {
-        lua_pushinteger(state, static_cast<lua_Integer>(kBoundedLanes.size()));
+    if (serve<NoSubject>(state, kBoundedLanesBindings, key, NoSubject{})) {
         return 1;
     }
     for (std::size_t row = 0; row < kBoundedLanes.size(); ++row) {
@@ -198,21 +234,33 @@ namespace {
     return 1;
 }
 
+/** World position members in table order: one lane each. */
+constexpr std::array<Binding<WorldPositionHandle>, std::size(api::kWorldPositionMembers)>
+    kWorldPositionBindings{{
+        {"x",
+         nullptr,
+         [](lua_State* state, const WorldPositionHandle& handle) {
+             lua_pushnumber(state, handle.value[0]);
+         }},
+        {"y",
+         nullptr,
+         [](lua_State* state, const WorldPositionHandle& handle) {
+             lua_pushnumber(state, handle.value[1]);
+         }},
+        {"z",
+         nullptr,
+         [](lua_State* state, const WorldPositionHandle& handle) {
+             lua_pushnumber(state, handle.value[2]);
+         }},
+    }};
+static_assert(bound_to<WorldPositionHandle>(api::kWorldPositionMembers, kWorldPositionBindings));
+
 /** Lua index for a world position: `x`, `y` and `z` select a lane, any other key is nil. */
 [[nodiscard]] int world_position_index(lua_State* state) {
     const auto* const handle =
         static_cast<const WorldPositionHandle*>(luaL_checkudata(state, 1, kWorldPositionMetatable));
-    const std::string_view key = lua_string_view(state, 2);
-    if (key == "x") {
-        lua_pushnumber(state, handle->value[0]);
-    } else if (key == "y") {
-        lua_pushnumber(state, handle->value[1]);
-    } else if (key == "z") {
-        lua_pushnumber(state, handle->value[2]);
-    } else {
-        lua_pushnil(state);
-    }
-    return 1;
+    return dispatch<WorldPositionHandle>(
+        state, kWorldPositionBindings, lua_string_view(state, 2), *handle);
 }
 
 /** Mints one finite world position. The client applies no magnitude bound, so none is here. */

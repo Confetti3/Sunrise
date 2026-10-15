@@ -1,28 +1,17 @@
 #include "hash_name_matcher.h"
 
 #include <algorithm>
+#include <vector>
 
 #include "../../../state/build_data/runtime.h"
+#include "../../../state/build_data/scriptables/inline_name_evidence.h"
 
 namespace sunrise::client::content::hash_names {
 namespace {
 
 namespace layouts = state::build_data::scenarios;
 namespace spawn_state = state::build_data::spawn_sets;
-
-/** FNV-1 32-bit offset basis. The engine hashes names with FNV-1, not FNV-1a. */
-constexpr std::uint32_t kHashBasis = 0x811C9DC5U;
-/** FNV-1 32-bit prime. */
-constexpr std::uint32_t kHashPrime = 0x01000193U;
-
-/** @return The FNV-1 hash of text, which is what a bubble carries. */
-[[nodiscard]] std::uint32_t hash_of(std::string_view text) noexcept {
-    std::uint32_t value = kHashBasis;
-    for (const char character : text) {
-        value = (value * kHashPrime) ^ static_cast<std::uint8_t>(character);
-    }
-    return value;
-}
+namespace evidence = state::build_data::scriptables::inline_name_evidence;
 
 /**
  * Records one candidate against its target row.
@@ -60,6 +49,28 @@ target_slot(const MatchState& state, std::uint32_t hash, std::size_t& slot) noex
     return true;
 }
 
+/** Sorts the targets and drops duplicates. */
+void compact_targets(Storage& storage) noexcept {
+    const auto end = storage.targets.begin() + static_cast<std::ptrdiff_t>(storage.targetCount);
+    std::sort(storage.targets.begin(), end);
+    storage.targetCount = static_cast<std::size_t>(std::unique(storage.targets.begin(), end)
+                                                   - storage.targets.begin());
+}
+
+/** Adds one nonzero hash. Layouts repeat hashes, so a full table drops duplicates first. */
+void add_target(Storage& storage, std::uint32_t hash) noexcept {
+    if (hash == 0) {
+        return;
+    }
+    if (storage.targetCount == storage.targets.size()) {
+        compact_targets(storage);
+    }
+    // Past capacity the extra hashes stay unnamed.
+    if (storage.targetCount < storage.targets.size()) {
+        storage.targets[storage.targetCount++] = hash;
+    }
+}
+
 } // namespace
 
 /** Clears one extraction pass without freeing process-owned outer storage. */
@@ -74,43 +85,31 @@ void reset(Storage& storage) noexcept {
     storage.invalid = false;
 }
 
-/** Records every hash the published domains declare: bubble names and spawn-set names. */
-bool collect_targets(Storage& storage) noexcept {
+/** Records every hash the given layouts and the spawn sets declare. */
+bool collect_targets(Storage& storage, std::span<const layouts::Definition> definitions) noexcept {
     storage.targets.fill(0);
     storage.targetCount = 0;
-    // One whole domain of fixed rows, so the snapshot is static rather than a local.
-    static std::array<layouts::Definition, layouts::kDefinitionCapacity> scratch{};
-    std::size_t rows = 0;
-    if (!state::build_data::snapshot_scenario_layouts(scratch, rows)) {
-        return false;
-    }
-    for (std::size_t row = 0; row < rows; ++row) {
-        const layouts::Definition& layout = scratch[row];
+    for (const layouts::Definition& layout : definitions) {
         const std::size_t declared =
             (std::min)(static_cast<std::size_t>(layout.bubbleCount), layout.bubbleHashes.size());
         for (std::size_t bubble = 0; bubble < declared; ++bubble) {
-            const std::uint32_t hash = layout.bubbleHashes[bubble];
-            if (hash == 0 || storage.targetCount >= storage.targets.size()) {
-                continue;
-            }
-            storage.targets[storage.targetCount++] = hash;
+            add_target(storage, layout.bubbleHashes[bubble]);
         }
     }
     // The spawn sets name themselves the same way, and this pass already reads every blob that
     // could carry one, so their hashes ride along at no extra read.
-    static std::array<spawn_state::NameHash, spawn_state::kNameHashCapacity> spawns{};
-    std::size_t spawnCount = 0;
-    if (state::build_data::snapshot_spawn_name_hashes(spawns, spawnCount)) {
-        for (std::size_t row = 0; row < spawnCount; ++row) {
-            if (spawns[row].value != 0 && storage.targetCount < storage.targets.size()) {
-                storage.targets[storage.targetCount++] = spawns[row].value;
+    try {
+        std::vector<spawn_state::NameHash> spawns(spawn_state::kNameHashCapacity);
+        std::size_t spawnCount = 0;
+        if (state::build_data::snapshot_spawn_name_hashes(spawns, spawnCount)) {
+            for (std::size_t row = 0; row < spawnCount; ++row) {
+                add_target(storage, spawns[row].value);
             }
         }
+    } catch (...) {
+        // The bubble hashes still name; the spawn sets stay unnamed.
     }
-    auto end = storage.targets.begin() + static_cast<std::ptrdiff_t>(storage.targetCount);
-    std::sort(storage.targets.begin(), end);
-    storage.targetCount = static_cast<std::size_t>(std::unique(storage.targets.begin(), end)
-                                                   - storage.targets.begin());
+    compact_targets(storage);
     return storage.targetCount != 0;
 }
 
@@ -138,7 +137,8 @@ void offer(MatchState& state, std::string_view text) noexcept {
             }
             const std::string_view candidate = text.substr(begin, end - begin);
             std::size_t slot = 0;
-            if (target_slot(state, hash_of(candidate), slot)) {
+            // A bubble carries the FNV-1 hash of its name.
+            if (target_slot(state, evidence::hash(candidate), slot)) {
                 keep(state, candidate, slot);
             }
         }

@@ -2,8 +2,10 @@
 
 #include <Windows.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <map>
 #include <span>
 #include <vector>
@@ -45,17 +47,55 @@ inline constexpr std::uint8_t kKindContainer = 11;
 /** Field type code of a nested schema; codes above 63 have no primitive size. */
 inline constexpr std::uint8_t kTypeNested = 1;
 inline constexpr std::uint8_t kTypeLimit = 64;
-/** RVA of the executable's 64-entry primitive size table (VA 0x7FF7438B5780). */
-inline constexpr std::uint64_t kPrimitiveSizeTableRva = 0x1BF5780U;
 /** Capacities the runtime decoder shares with the compiler. */
 inline constexpr std::size_t kMaximumDepth = 32;
 inline constexpr std::size_t kMaximumSteps = 65536;
 inline constexpr std::uint32_t kMaximumRepeat = 16384;
 inline constexpr std::uint32_t kMaximumSectionCount = 65536;
 inline constexpr std::uint64_t kMaximumArrayCount = 0x100000U;
-/** Stride of one selection child row and one codec field descriptor. */
-inline constexpr std::size_t kChildRowSize = 40;
+/** Stride of one codec field descriptor. */
 inline constexpr std::size_t kFieldRowSize = 40;
+/** Candidate offsets of the block chain marker inside a reflection record. */
+inline constexpr std::array<std::uint32_t, 4> kMarkerOffsets{0x58, 0x60, 0x68, 0x70};
+
+/** Header size and row stride of each reflection block class. */
+struct BlockLayout final {
+    std::uint32_t header{};
+    std::uint32_t stride{};
+};
+
+/**
+ * Looks up the header size and row stride of one reflection block class.
+ * @return False for an unknown block class.
+ */
+[[nodiscard]] inline bool block_layout(std::uint32_t kind, BlockLayout& output) noexcept {
+    switch (kind) {
+    case kCodecBlock:
+        output = {0x28, 0x28};
+        return true;
+    case kPropertyBlock:
+        output = {0x20, 0x0C};
+        return true;
+    case kMethodBlock:
+        output = {0x10, 0x08};
+        return true;
+    case kTailBlock:
+        output = {0x18, 0x00};
+        return true;
+    default:
+        return false;
+    }
+}
+
+/** Copies one unaligned value. @return False when it does not fit inside `bytes`. */
+template <typename T>
+[[nodiscard]] bool read_at(std::span<const std::byte> bytes, std::size_t at, T& value) noexcept {
+    if (at > bytes.size() || bytes.size() - at < sizeof(T)) {
+        return false;
+    }
+    std::memcpy(&value, bytes.data() + at, sizeof(T));
+    return true;
+}
 
 /** One codec field descriptor in reflection or package layout. */
 struct Field final {
@@ -76,7 +116,6 @@ struct Field final {
 /** One field codec block. */
 struct Codec final {
     bool present{};
-    std::uint32_t handle{};
     std::uint32_t original{};
     std::uint32_t serialized{};
     std::uint32_t flags{};
@@ -94,7 +133,6 @@ struct Property final {
 /** One reflection or package metadata record. */
 struct Metadata final {
     bool package{};
-    std::uint32_t handle{};
     std::uint32_t size{};
     std::uint8_t alignment{};
     std::uint8_t kind{};
@@ -132,12 +170,13 @@ public:
     [[nodiscard]] std::span<const std::byte> file() const noexcept;
     /** @return The bytes the reflection reads go through: the file or the mapped module. */
     [[nodiscard]] std::span<const std::byte> bytes() const noexcept;
-    [[nodiscard]] std::uint64_t image_base() const noexcept {
-        return imageBase_;
-    }
     /** Bound handle to reflection record address, first slot wins. */
     [[nodiscard]] const std::map<std::uint32_t, std::uint64_t>& slots() const noexcept {
         return slots_;
+    }
+    /** Address of the 64-entry primitive size table, one u32 per field type code. */
+    [[nodiscard]] std::uint64_t primitive_sizes() const noexcept {
+        return primitiveSizes_;
     }
     [[nodiscard]] bool u8(std::uint64_t address, std::uint8_t& value) const noexcept;
     [[nodiscard]] bool u16(std::uint64_t address, std::uint16_t& value) const noexcept;
@@ -152,12 +191,14 @@ private:
         std::uint64_t rawOffset{};
         std::uint64_t rawSize{};
         bool data{};
+        bool code{};
     };
 
     [[nodiscard]] bool
     offset(std::uint64_t address, std::size_t size, std::size_t& at) const noexcept;
     [[nodiscard]] bool parse_headers(bool mapped) noexcept;
     [[nodiscard]] bool index_slots() noexcept;
+    [[nodiscard]] bool resolve_primitive_sizes() noexcept;
 
     HANDLE file_{INVALID_HANDLE_VALUE};
     HANDLE mapping_{};
@@ -169,6 +210,7 @@ private:
     std::uint64_t imageBase_{};
     std::uint64_t vmp0Low_{};
     std::uint64_t vmp0High_{};
+    std::uint64_t primitiveSizes_{};
     std::vector<Section> sections_{};
     std::map<std::uint32_t, std::uint64_t> slots_{};
 };
@@ -222,7 +264,6 @@ struct Plan final {
 
 /** Parses one bound reflection record at `address` for the compiler. */
 [[nodiscard]] bool parse_native(const Image& image,
-                                std::uint32_t handle,
                                 std::uint64_t address,
                                 Metadata& output,
                                 const char*& error) noexcept;

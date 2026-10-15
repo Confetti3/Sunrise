@@ -15,11 +15,23 @@ namespace format = state::activity_sdk::format;
 /** Returned task-group values compare by their two SDK identity fields. */
 constexpr const char* kTaskGroupMetatable = "sunrise.mission.task_group";
 
+// Table entries of the members this file implements.
+constexpr const api::MemberSpec& kAssignObjective = api::slot_member("assign_combat_objective");
+constexpr const api::MemberSpec& kTaskCost =
+    api::find_member(api::group_members(api::FieldGroupId::squadState), "task_cost");
+constexpr const api::MemberSpec& kTaskGroupQuery =
+    api::find_member(api::group_members(api::FieldGroupId::squadState), "task_group");
+// The two identity fields of a generated mission.TaskGroup row.
+constexpr const char* kSlotRowKey =
+    table_field_key(kAssignObjective, "task_group", "slot_row", api::ValueKind::integer);
+constexpr const char* kGroupIndexKey =
+    table_field_key(kAssignObjective, "task_group", "group_index", api::ValueKind::integer);
+
 /** Resolves one generated task-group reference through the pinned native SDK. */
 [[nodiscard]] CombatObjectiveGroupDefinition task_group(lua_State* state, int table) {
     luaL_checktype(state, table, LUA_TTABLE);
-    const lua_Integer slotRow = directive_integer(state, table, "slot_row");
-    const lua_Integer group = directive_integer(state, table, "group_index");
+    const lua_Integer slotRow = directive_integer(state, table, kSlotRowKey);
+    const lua_Integer group = directive_integer(state, table, kGroupIndexKey);
     Impl* const impl = impl_from_state(state);
     CombatObjectiveGroupDefinition output{};
     if (slotRow < 0 || slotRow > (std::numeric_limits<std::uint32_t>::max)() || group < 0
@@ -59,11 +71,10 @@ void set_task_group_metatable(lua_State* state) {
 int slot_assign_combat_objective(lua_State* state) {
     const auto* const handle =
         static_cast<const SlotHandle*>(luaL_checkudata(state, 1, kSlotMetatable));
-    // Only these named arguments belong to this API.
-    static constexpr std::array<std::string_view, 5> kDeclared{
-        "objective", "task_group", "reconsider", "reserved", "refresh_player_awareness"};
-    refuse_unknown_arguments(state, kDeclared);
-    const auto reference = checked_argument<SlotHandle>(state, "objective", kSlotMetatable);
+    refuse_unknown_arguments(state, kAssignObjective);
+    using Kind = api::ValueKind;
+    const auto reference = checked_argument<SlotHandle>(
+        state, required_key(kAssignObjective, "objective", Kind::handle), kSlotMetatable);
     SlotDefinition squad{};
     SlotDefinition target{};
     if (!current_slot(state, *handle, squad) || !current_slot(state, reference, target)
@@ -83,7 +94,7 @@ int slot_assign_combat_objective(lua_State* state) {
     intent.firstRow = squad.nativeRow;
     intent.secondRow = target.nativeRow;
     intent.entryIndex = objective::kNoTaskGroup;
-    lua_getfield(state, 2, "task_group");
+    lua_getfield(state, 2, optional_key(kAssignObjective, "task_group", Kind::missionRow));
     if (!lua_isnil(state, -1)) {
         const auto group = task_group(state, -1);
         if (group.slotRow != target.nativeRow) {
@@ -92,13 +103,19 @@ int slot_assign_combat_objective(lua_State* state) {
         intent.entryIndex = static_cast<std::int32_t>(group.groupIndex);
     }
     lua_pop(state, 1);
-    intent.objectiveReconsider = optional_boolean_argument(state, "reconsider", false);
-    intent.objectiveRefreshAwareness =
-        optional_boolean_argument(state, "refresh_player_awareness", false);
-    lua_getfield(state, 2, "reserved");
-    intent.objectivePreserveReservation = lua_isnil(state, -1);
+    intent.objectiveReconsider =
+        optional_boolean_argument(state, boolean_option(kAssignObjective, "reconsider"));
+    intent.objectiveRefreshAwareness = optional_boolean_argument(
+        state, boolean_option(kAssignObjective, "refresh_player_awareness"));
+    const char* const reservedKey = optional_key(kAssignObjective, "reserved", Kind::boolean);
+    // Left out, the reservation keeps its current value.
+    const int reservedType = push_argument(state, reservedKey);
+    if (reservedType != LUA_TNIL && reservedType != LUA_TBOOLEAN) {
+        return luaL_error(state, "%s must be a boolean", reservedKey);
+    }
+    intent.objectivePreserveReservation = reservedType == LUA_TNIL;
+    intent.objectiveReserved = lua_toboolean(state, -1) != 0;
     lua_pop(state, 1);
-    intent.objectiveReserved = optional_boolean_argument(state, "reserved", false);
     if (!intent.objectiveReconsider && frame.event != nullptr
         && frame.event->kind == host::EventKind::squadState
         && frame.event->firstRegistryKey == squad.registryKey
@@ -112,10 +129,8 @@ int slot_assign_combat_objective(lua_State* state) {
 /** Returns a reachable cost and whether this report supplies a qualified value for the group. */
 int event_task_cost(lua_State* state) {
     const host::Event& event = check_event(state, 1);
-    // Only these named arguments belong to this API.
-    static constexpr std::array<std::string_view, 1> kDeclared{"group"};
-    refuse_unknown_arguments(state, kDeclared);
-    lua_getfield(state, 2, "group");
+    refuse_unknown_arguments(state, kTaskCost);
+    lua_getfield(state, 2, required_key(kTaskCost, "group", api::ValueKind::missionRow));
     const auto group = task_group(state, -1);
     lua_pop(state, 1);
     const bool qualified = event.kind == host::EventKind::squadState
@@ -138,10 +153,9 @@ int event_task_cost(lua_State* state) {
 /** Returns the selected authored group and whether the squad is assigned to this objective. */
 int event_task_group(lua_State* state) {
     const host::Event& event = check_event(state, 1);
-    // Only these named arguments belong to this API.
-    static constexpr std::array<std::string_view, 1> kDeclared{"objective"};
-    refuse_unknown_arguments(state, kDeclared);
-    const auto handle = checked_argument<SlotHandle>(state, "objective", kSlotMetatable);
+    refuse_unknown_arguments(state, kTaskGroupQuery);
+    const auto handle = checked_argument<SlotHandle>(
+        state, required_key(kTaskGroupQuery, "objective", api::ValueKind::handle), kSlotMetatable);
     SlotDefinition target{};
     if (!current_slot(state, handle, target) || target.slotType != format::kObjectiveSlotType) {
         return luaL_error(state, "task group needs an SDK objective");
@@ -152,9 +166,9 @@ int event_task_group(lua_State* state) {
     if (assigned && event.squadObjectiveTaskGroup >= 0) {
         lua_createtable(state, 0, 2);
         lua_pushinteger(state, target.nativeRow);
-        lua_setfield(state, -2, "slot_row");
+        lua_setfield(state, -2, kSlotRowKey);
         lua_pushinteger(state, event.squadObjectiveTaskGroup);
-        lua_setfield(state, -2, "group_index");
+        lua_setfield(state, -2, kGroupIndexKey);
         set_task_group_metatable(state);
     } else {
         lua_pushnil(state);

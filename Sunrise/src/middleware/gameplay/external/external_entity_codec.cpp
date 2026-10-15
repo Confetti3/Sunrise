@@ -189,11 +189,6 @@ static TypePayloadCodec batch_codec(BatchCodecContext& context) noexcept {
     return codec;
 }
 
-/** @return True when a token fits its 17-bit wire identity. */
-[[nodiscard]] bool valid_token(const EntityToken& token) noexcept {
-    return token.slot <= kMaximumEntitySlot && token.incarnation <= kMaximumEntityIncarnation;
-}
-
 /** @return True when an entity cell is absent or fits the optional byte. */
 [[nodiscard]] bool valid_cell(std::uint16_t cell) noexcept {
     return cell == kNoEntityCell || cell <= kMaximumEntityCell;

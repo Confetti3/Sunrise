@@ -30,6 +30,7 @@ enum class Status : std::uint8_t {
 struct Snapshot final {
     MissionState state{};
     std::uint64_t activityStateRevision{};
+    std::uint64_t recordRevision{};
 };
 
 /** Durable accepted-input cursors used to prove whether a retained feed interval is complete. */
@@ -53,19 +54,24 @@ struct CommitCandidate final {
     bool started{};
 };
 
+/** A prepared replacement owns its values; expected revisions guard its later publication. */
+struct ReloadCommit final {
+    SessionBinding binding{};
+    const Snapshot* expected{};
+    Snapshot* replacement{};
+};
+
+/** Validates and builds replacement state without publishing it or changing the old program. */
+[[nodiscard]] Status prepare_reload(const Snapshot& current,
+                                    const ProgramKey& program,
+                                    const CommitCandidate& transaction,
+                                    Snapshot& output) noexcept;
+/** Publishes every prepared replacement together, or leaves every record unchanged. */
+[[nodiscard]] Status commit_reloads(std::span<const ReloadCommit> replacements) noexcept;
+
 /** Binds a program once, or reads the existing exact program state. */
 [[nodiscard]] Status
 bind(const SessionBinding& binding, const ProgramKey& program, Snapshot& output) noexcept;
-
-/**
- * Replaces the bound program identity while keeping the mission record.
- * Refuses unless the record is unfaulted, holds no pending intent, and its input cursors agree.
- * It changes nothing else, so a replacement can never mint a request key the old program spent.
- */
-[[nodiscard]] Status rebind_program(const SessionBinding& binding,
-                                    const ProgramKey& expected,
-                                    const ProgramKey& replacement,
-                                    Snapshot& output) noexcept;
 
 /** Atomically issues the next durable per-binding Host mission-input sequence. */
 [[nodiscard]] bool issue_input_sequence(const SessionBinding& binding,
@@ -176,12 +182,6 @@ renew_device_publications(const SessionBinding& binding,
                            std::uint64_t expectedRevision,
                            Snapshot& output) noexcept;
 
-/** Clears one exact program fault and drops its uncommitted input cursor. */
-[[nodiscard]] Status recover(const SessionBinding& binding,
-                             const ProgramKey& program,
-                             std::uint64_t expectedRevision,
-                             Snapshot& output) noexcept;
-
 /**
  * Value-owned publishable projection of one mission record, with no wire form.
  * It carries no pending intent and no request key. A pending intent names a Host output revision
@@ -201,8 +201,7 @@ struct PublishedMissionState final {
 
 /**
  * Projects one committed record into the value-owned form a publication would carry.
- * There is no encoder and no transport behind this. It exists so whatever publication is proved
- * reuses one shape.
+ * TODO: no caller yet. The late-join mission publisher and the editor mission view need it.
  * @param now Service tick the timer remainders are measured from.
  * @return True when the record is bound, unfaulted and within every capacity.
  */

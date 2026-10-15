@@ -185,7 +185,7 @@ make_temporary_path(const wchar_t* finalPath, LONG counter, core::path::Buffer& 
            && payload_size(header) <= kMaximumPayloadSize;
 }
 
-/** Loads a strict version-one catalog for scenario shard reuse during migration. */
+/** Reads a strict version-one catalog. The caller discards it and keeps only the status. */
 [[nodiscard]] bool load_legacy_catalog(HANDLE file,
                                        std::uint64_t fileSize,
                                        const Digest& expectedSourceFingerprint,
@@ -417,6 +417,25 @@ namespace {
 }
 
 } // namespace
+
+/** @return The stable log name of one catalog load result. */
+const char* status_name(LoadStatus value) noexcept {
+    switch (value) {
+    case LoadStatus::loaded:
+        return "loaded";
+    case LoadStatus::missing:
+        return "missing";
+    case LoadStatus::sourceMismatch:
+        return "source_mismatch";
+    case LoadStatus::sdkMismatch:
+        return "sdk_mismatch";
+    case LoadStatus::invalid:
+        return "invalid";
+    case LoadStatus::versionMismatch:
+        return "version_mismatch";
+    }
+    return "invalid";
+}
 
 /** Loads and validates one explicit generated SDK catalog path. */
 bool load(const wchar_t* path,

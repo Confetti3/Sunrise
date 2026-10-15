@@ -36,15 +36,6 @@ SRWLOCK g_lock{SRWLOCK_INIT};
 bool g_enabled{};
 bool g_pathReady{};
 
-static_assert(mission_state::kSquadMemberCapacity == lua_vm::kSquadMemberCapacity);
-
-/** Copies the complete VM outbox into typed State values in delivery order. */
-[[nodiscard]] bool
-snapshot_state_intents(const lua_vm::Vm& vm,
-                       std::vector<mission_state::TypedIntent>& output) noexcept {
-    return lua_vm::snapshot_intents(vm, output);
-}
-
 [[nodiscard]] bool earlier_timer(const lua_vm::MissionTimer& left,
                                  const lua_vm::MissionTimer& right) noexcept {
     return left.deadlineTick < right.deadlineTick
@@ -151,12 +142,8 @@ void publish_fireteam_life(std::uint64_t now) noexcept {
         }
         instance.lastFireteamLife = counts;
         instance.fireteamLifePublished = true;
-        host::Event event{};
+        host::Event event = state_edge_event(instance);
         event.kind = host::EventKind::fireteamState;
-        event.binding = instance.view.binding;
-        event.sequence = instance.missionStateRevision;
-        event.sourceGeneration = instance.view.activityClientGeneration;
-        event.missionSequence = instance.lastMissionSequence;
         event.tick = now;
         event.fireteamAlive = counts.alive;
         event.fireteamDead = counts.dead;
@@ -275,6 +262,20 @@ void note_vm_status(RuntimeInstance& instance,
     copy_text(instance.lastVmStatus, status);
 }
 
+/** Native Sense levels cannot cross an attempt or ActivityClient generation boundary. */
+void clear_sense_levels(RuntimeInstance& instance) noexcept {
+    instance.triggerOccupancy = {};
+    instance.squadObservations = {};
+    instance.ghostObservations = {};
+    instance.damageObservations = {};
+    instance.combatantDamageObservations = {};
+    instance.deviceObservations = {};
+    instance.objectInteractionObservations = {};
+    instance.actorPathObservations = {};
+    instance.sceneObservations = {};
+    instance.objectiveObservations = {};
+}
+
 /** Frees one slot; its queued events are retired unless the caller keeps them for a reattach. */
 void clear_instance(RuntimeInstance& instance, bool clearPending) noexcept {
     if (instance.occupied && clearPending) {
@@ -297,7 +298,6 @@ void clear_instance(RuntimeInstance& instance, bool clearPending) noexcept {
     instance.eventsSeen = 0;
     instance.eventsCommitted = 0;
     instance.intentsTransportStaged = 0;
-    instance.lastEventSequence = 0;
     instance.lastLoggedRevision = 0;
     instance.lastMissionSequence = 0;
     instance.missionPhase = 0;
@@ -308,15 +308,9 @@ void clear_instance(RuntimeInstance& instance, bool clearPending) noexcept {
     instance.expectedScriptableRevision = 0;
     instance.deliveryDeadline = 0;
     instance.firstIntentAttempt = 0;
-    instance.nextIntentAttempt = 0;
-    instance.firstStartAttempt = 0;
-    instance.nextStartAttempt = 0;
     instance.pendingTimerEvent = {};
-    instance.firstTimerAttempt = 0;
-    instance.nextTimerAttempt = 0;
     instance.intentAttempts = 0;
     instance.startAttempts = 0;
-    instance.timerAttempts = 0;
     instance.durablePendingIntentCount = 0;
     instance.lastIntentStatus = (std::numeric_limits<std::uint16_t>::max)();
     instance.initialStateRegion = -1;
@@ -333,14 +327,7 @@ void clear_instance(RuntimeInstance& instance, bool clearPending) noexcept {
     instance.missionReattached = false;
     instance.startPending = false;
     instance.timerPending = false;
-    instance.triggerOccupancy = {};
-    instance.ghostObservations = {};
-    instance.actorPathObservations = {};
-    instance.squadObservations = {};
-    instance.combatantDamageObservations = {};
-    instance.deviceObservations = {};
-    instance.sceneObservations = {};
-    instance.objectiveObservations = {};
+    clear_sense_levels(instance);
     instance.sessionRoster = {};
     instance.sessionRosterObserved = false;
     instance.playerLife = {};
@@ -348,9 +335,6 @@ void clear_instance(RuntimeInstance& instance, bool clearPending) noexcept {
     instance.lastFireteamLife = {};
     instance.fireteamLifePublished = false;
     std::vector<host::Event>{}.swap(instance.scriptEvents);
-    instance.firstScriptEventAttempt = 0;
-    instance.nextScriptEventAttempt = 0;
-    instance.scriptEventAttempts = 0;
     instance.scriptEventRead = 0;
     instance.occupied = false;
 }
@@ -379,23 +363,13 @@ RuntimeInstance* free_instance() noexcept {
 void accept_mission_state(RuntimeInstance& instance,
                           const mission_state::Snapshot& snapshot) noexcept {
     if (instance.attempt.generation != snapshot.state.attempt.generation) {
-        instance.triggerOccupancy = {};
-        instance.squadObservations = {};
-        instance.ghostObservations = {};
-        instance.damageObservations = {};
-        instance.combatantDamageObservations = {};
-        instance.deviceObservations = {};
-        instance.objectInteractionObservations = {};
-        instance.actorPathObservations = {};
-        instance.sceneObservations = {};
-        instance.objectiveObservations = {};
+        clear_sense_levels(instance);
         // Player life is kept: the client sends only changed fields and never resends the region.
         instance.fireteamLifePublished = false;
         instance.timerPending = false;
         instance.pendingTimerEvent = {};
     }
-    instance.attempt = snapshot.state.attempt;
-    lua_vm::publish_attempt(instance.vm, instance.attempt);
+    lua_vm::publish_attempt(instance.vm, snapshot.state.attempt);
     if (!lua_vm::publish_device_requests(
             instance.vm, snapshot.state.deviceRequests, instance.view.activityClientGeneration)) {
         lua_vm::fault(instance.vm, "device request snapshot allocation failed");
@@ -406,6 +380,13 @@ void accept_mission_state(RuntimeInstance& instance,
         lua_vm::fault(instance.vm, "population snapshot allocation failed");
         instance.programStatus = ProgramStatus::programError;
     }
+    accept_compare_fields(instance, snapshot);
+}
+
+/** Copies the committed attempt, revision, cursors, phase and intent head into the instance. */
+void accept_compare_fields(RuntimeInstance& instance,
+                           const mission_state::Snapshot& snapshot) noexcept {
+    instance.attempt = snapshot.state.attempt;
     instance.missionStateRevision = snapshot.state.revision;
     instance.lastMissionSequence = snapshot.state.inputSequence;
     instance.activityStateRevision = snapshot.activityStateRevision;
@@ -463,7 +444,7 @@ bool commit_mission_state(RuntimeInstance& instance,
     std::size_t timerCount = 0;
     std::uint64_t nextTimerSequence = mission_state::kAbsentTimerSequence;
     std::uint64_t nextIntentKey = mission_state::kAbsentIntentKey;
-    if (!snapshot_state_intents(instance.vm, pendingIntents)) {
+    if (!lua_vm::snapshot_intents(instance.vm, pendingIntents)) {
         fault_instance(instance, "mission VM outbox snapshot was refused");
         return false;
     }
@@ -513,7 +494,7 @@ namespace {
 
 /**
  * Settles the inputs of every instance whose activity has no script. No program will consume
- * them, and an unsettled row is retained by the Host feed until its capacity refuses new ones.
+ * them, and the unbounded Host feed retains an unsettled row until it is settled.
  */
 void retire_scriptless_inputs() noexcept {
     for (RuntimeInstance& instance : g_instances) {
@@ -550,14 +531,9 @@ void service_script_events(std::uint64_t now) noexcept {
                    && !lua_vm::pending_intent(instance.vm, pendingIntent);
         };
         const auto dispatch = [&] {
-            const bool firstAttempt = instance.scriptEventAttempts == 0;
-            if (firstAttempt) {
-                instance.firstScriptEventAttempt = now;
-            }
-            ++instance.scriptEventAttempts;
             host::Event& head = instance.scriptEvents[instance.scriptEventRead];
             head.tick = now;
-            static_cast<void>(dispatch_event(instance, head, nullptr, nullptr, firstAttempt, now));
+            static_cast<void>(dispatch_event(instance, head, nullptr, nullptr, now));
             retire_script_event(instance);
         };
         static_cast<void>(drain_script_event_batch(ready, dispatch));
@@ -620,19 +596,11 @@ void service_timers(std::uint64_t now) noexcept {
             instance.pendingTimerEvent.timerSequence = selected->sequence;
             instance.pendingTimerEvent.missionSequence = instance.lastMissionSequence;
             instance.pendingTimerEvent.kind = host::EventKind::timerElapsed;
-            instance.firstTimerAttempt = now;
-            instance.nextTimerAttempt = now;
-            instance.timerAttempts = 0;
             instance.timerPending = true;
         }
-        const bool firstAttempt = instance.timerAttempts == 0;
-        ++instance.timerAttempts;
-        static_cast<void>(dispatch_event(
-            instance, instance.pendingTimerEvent, nullptr, nullptr, firstAttempt, now));
+        static_cast<void>(
+            dispatch_event(instance, instance.pendingTimerEvent, nullptr, nullptr, now));
         instance.pendingTimerEvent = {};
-        instance.firstTimerAttempt = 0;
-        instance.nextTimerAttempt = 0;
-        instance.timerAttempts = 0;
         instance.timerPending = false;
     }
 }
@@ -663,7 +631,6 @@ void initialize() noexcept {
     ReleaseSRWLockExclusive(&g_lock);
 }
 
-/** One pass: attach, start, events, timers, then delivery for every open instance. */
 namespace {
 
 // A step this long blocks the game's loopback sends; the step that took it is named.
@@ -720,6 +687,7 @@ void service(std::uint64_t now) noexcept {
             }
         }
     });
+    timed_step("reload", [now] { service_reload(now); });
     ReleaseSRWLockExclusive(&g_lock);
 }
 
@@ -738,47 +706,12 @@ void snapshot(DiagnosticsSnapshot& output) noexcept {
     ReleaseSRWLockShared(&g_lock);
 }
 
-/** Closes every instance and authorizes one program replacement so the next attach recompiles. */
-bool reload() noexcept {
-    AcquireSRWLockExclusive(&g_lock);
-    if (!g_enabled || !g_pathReady) {
-        ReleaseSRWLockExclusive(&g_lock);
-        return false;
-    }
-    bool reloaded = true;
-    for (RuntimeInstance& instance : g_instances) {
-        if (!instance.occupied) {
-            continue;
-        }
-        log_line(core::log::Level::info, &instance, "reload", "requested");
-        if (instance.missionStateBound && instance.missionStateFaulted) {
-            mission_state::Snapshot recovered{};
-            const mission_state::Status status =
-                mission_state::recover(instance.view.binding,
-                                       instance.programKey,
-                                       instance.missionStateRevision,
-                                       recovered);
-            if (status != mission_state::Status::ready) {
-                log_line(core::log::Level::warn,
-                         &instance,
-                         "reload",
-                         mission_state::status_name(status));
-                reloaded = false;
-                continue;
-            }
-            accept_mission_state(instance, recovered);
-            clear_pending_events(instance.view.binding);
-        }
-        if (!authorize_reload(instance)) {
-            log_line(core::log::Level::warn, &instance, "reload", "capacity");
-            reloaded = false;
-            continue;
-        }
-        clear_instance(instance, false);
-    }
-    clear_attach_diagnostics();
-    ReleaseSRWLockExclusive(&g_lock);
-    return reloaded;
+/** @return True when mission scripting is on and its paths resolved. */
+bool runtime_ready() noexcept {
+    AcquireSRWLockShared(&g_lock);
+    const bool ready = g_enabled && g_pathReady;
+    ReleaseSRWLockShared(&g_lock);
+    return ready;
 }
 
 /** Closes every instance and clears every global this unit owns. */
@@ -789,8 +722,9 @@ void shutdown() noexcept {
     }
     clear_all_pending_events();
     clear_attach_diagnostics();
-    clear_script_paths();
+    clear_script_sources();
     clear_feed_cursors();
+    clear_reload_mailbox();
     g_enabled = false;
     g_pathReady = false;
     ReleaseSRWLockExclusive(&g_lock);

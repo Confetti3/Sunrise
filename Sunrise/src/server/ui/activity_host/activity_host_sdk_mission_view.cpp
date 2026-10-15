@@ -17,6 +17,7 @@
 #include "../../activity/activity_sdk_mission_runtime.h"
 #include "activity_host_sdk_behavior_view.h"
 #include "activity_host_sdk_mission_text.h"
+#include "activity_host_sdk_scene_inputs.h"
 #include "activity_host_table_layout.h"
 
 namespace sunrise::server::ui::activity_host::sdk_mission_view {
@@ -77,6 +78,17 @@ constexpr double kSceneRefreshSeconds = 0.25;
 SceneBrowserKey g_visibleScenesKey{};
 double g_visibleScenesTime{-1.0};
 bool g_visibleScenesReady{};
+
+/** Records one scene action's result and forces the rows to refresh. */
+void note_scene_action(std::uint32_t occurrence,
+                       std::uint32_t slot,
+                       mission::SceneStatus status) noexcept {
+    g_sceneActionOccurrence = occurrence;
+    g_sceneActionSlot = slot;
+    g_sceneActionStatus = status;
+    g_hasSceneActionStatus = true;
+    g_visibleScenesTime = -1.0;
+}
 
 /** @return The global row of one borrowed slot or the absent marker. */
 [[nodiscard]] std::uint32_t global_slot_row(const sdk::Catalog& catalog,
@@ -374,16 +386,24 @@ void draw_authored_scenes(const sdk::BoundView& view, const mission::Snapshot& s
             ImGui::TableNextColumn();
             ImGui::BeginDisabled(available != mission::SceneStatus::ready);
             if (ImGui::Button("Advance")) {
-                g_sceneActionOccurrence = row.occurrenceRow;
-                g_sceneActionSlot = row.slotRow;
-                g_sceneActionStatus =
-                    mission::activate_authored_scene(view, row.occurrenceRow, row.slotRow);
-                g_hasSceneActionStatus = true;
-                g_visibleScenesTime = -1.0;
+                note_scene_action(
+                    row.occurrenceRow,
+                    row.slotRow,
+                    mission::activate_authored_scene(view, row.occurrenceRow, row.slotRow));
             }
             ImGui::EndDisabled();
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
                 ImGui::SetTooltip("%s", mission::status_name(available));
+            }
+            bool sent = false;
+            const mission::SceneStatus inputStatus =
+                draw_scene_inputs(view,
+                                  row.occurrenceRow,
+                                  row.slotRow,
+                                  available == mission::SceneStatus::ready,
+                                  sent);
+            if (sent) {
+                note_scene_action(row.occurrenceRow, row.slotRow, inputStatus);
             }
             ImGui::PopID();
             ImGui::PopID();

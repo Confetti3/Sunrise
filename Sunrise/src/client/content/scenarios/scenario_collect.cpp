@@ -168,13 +168,13 @@ bool collect_rows(const reader::Source& source, Storage& storage, const char*& r
     storage.rowPatch.fill(0);
     packages::reader::ScanResult scan{};
     if (!packages::reader::scan_class_entries(
-            source.directory, packages::tables::kScenarioClass, &collect_tag, &storage, scan)) {
+            source, packages::tables::kScenarioClass, &collect_tag, &storage, scan)) {
         reason = "sweep";
         return false;
     }
     packages::named_tags::DirectoryResult names{};
     if (!packages::named_tags::extract_directory(
-            source.directory, &collect_named, &storage, names)) {
+            source.directory, source.installedOnly, &collect_named, &storage, names)) {
         reason = "names";
         return false;
     }
@@ -223,6 +223,19 @@ bool resolve_pending(const reader::Source& source,
     // Every row the sweep still carries has read, or the window has closed on the rest.
     return storage.resolvedCount >= storage.liveRowCount
            || GetTickCount64() >= storage.resolveDeadlineTick;
+}
+
+/** Reads the bubble layout of every row once, with no budget and no retry window. */
+void resolve_all(const reader::Source& source,
+                 reader::Scratch& scratch,
+                 Storage& storage) noexcept {
+    for (std::size_t row = 0; row < storage.rowCount; ++row) {
+        if (storage.resolved[row] == 0
+            && resolve_row(source, scratch, storage, storage.rows[row])) {
+            storage.resolved[row] = 1;
+            ++storage.resolvedCount;
+        }
+    }
 }
 
 /**

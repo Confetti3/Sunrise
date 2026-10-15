@@ -20,6 +20,10 @@ struct Settings {
      * On by default; a client stand-in until the unlock banks carry every gate the nodes read.
      */
     bool revealLoreBooks{true};
+    /** Unlocks the cheat tools. A session with them unlocked saves no progress. */
+    bool cheats{false};
+    /** Writes the installed package keys for Sunrise Studio at startup when requested. */
+    bool dumpPackageKeys{false};
 };
 
 } // namespace sunrise::core::settings::client

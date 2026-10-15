@@ -7,6 +7,9 @@
 
 namespace sunrise::client::hooks::network::http {
 
+/** Returning 5 makes the worker skip the native external operation. */
+inline constexpr std::int64_t kSkipNativeOperation = 5;
+
 /** @return Per-thread storage that stands in for a null worker result pointer. */
 [[nodiscard]] void* discard_result() noexcept;
 
@@ -24,11 +27,12 @@ void publish_completion(void* wrapper,
                         std::uint32_t httpStatus) noexcept;
 
 /**
- * Routes one game-owned HTTP descriptor without calling the native transport.
+ * Routes one game-owned HTTP descriptor to the local consumer, or in external-server mode
+ * rewrites its host and calls the native transport.
  * @param lease Admission and consumer state held by the replacement.
  * @param wrapper Game-owned HTTP wrapper whose result getters feed the worker.
  * @param descriptor Writable 640-byte request descriptor owned by the worker.
- * @return The value that makes the worker skip the external HTTP operation.
+ * @return kSkipNativeOperation, or the native result in external-server mode.
  */
 [[nodiscard]] std::int64_t route_descriptor(const coordinator::CallLease& lease,
                                             void* wrapper,

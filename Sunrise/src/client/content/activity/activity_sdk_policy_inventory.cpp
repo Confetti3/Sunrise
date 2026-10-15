@@ -23,6 +23,8 @@ constexpr std::size_t kFixedDeferredStringEstimate = 64;
 
 /** Slot type 31 contributes the currently unimplemented trigger adapter operation. */
 constexpr std::uint32_t kTriggerSlotType = 31;
+/** Auth schema of the type-31 player trigger sensor. */
+constexpr std::uint32_t kTriggerAuthSchema = 0x80809524U;
 
 /**
  * The compiled host inventory contains three implemented and two refused surfaces.
@@ -72,11 +74,10 @@ void Builder::reserve() {
     output_.activityCapabilities.resize(inputs_.activities.size());
     output_.slotAliases.resize(inputs_.slots.size());
     output_.slotCapabilities.resize(inputs_.slots.size());
-    const std::size_t expectedStrings =
-        (std::min)(kMaximumDeferredStringCount,
-                   inputs_.activities.size() * kActivityDeferredStringEstimate
-                       + inputs_.slots.size() * kSlotDeferredStringEstimate
-                       + kFixedDeferredStringEstimate);
+    const std::size_t expectedStrings = (std::min)(
+        kMaximumDeferredStringCount,
+        inputs_.activities.size() * kActivityDeferredStringEstimate
+            + inputs_.slots.size() * kSlotDeferredStringEstimate + kFixedDeferredStringEstimate);
     output_.strings.reserve(expectedStrings);
     stringIndexes_.reserve(expectedStrings);
 }
@@ -112,7 +113,7 @@ bool Builder::intern(std::string_view value, Text& output) {
 /**
  * Appends one nonempty canonical Text row.
  * @param value The UTF-8 row value.
- * @param kind The format-v12 text classification.
+ * @param kind The text classification.
  * @return True when the value is retained within the Text row bound.
  */
 bool Builder::add_text(std::string_view value, format::TextKind kind) {
@@ -256,7 +257,7 @@ bool Builder::add_refusal(std::string_view capabilityId,
  * @param subjectId The stable subject identity.
  * @param operation The stable operation name.
  * @param valueSchemaId The optional value schema identity.
- * @param subjectKind The format-v12 subject domain.
+ * @param subjectKind The subject domain.
  * @param subjectIndex The row within that subject domain.
  * @param exposureFlags The current allowed surfaces.
  * @param candidateExposureFlags The candidate-only surfaces.
@@ -334,8 +335,7 @@ bool Builder::build_activity_capabilities() {
         const std::size_t firstGate = output_.gates.size();
         FailureReasons failures{};
         const bool identityExact = input.joinStatus == ActivityJoinStatus::exact;
-        // The gate publishes the activity's binding reason code. Naming the join status here
-        // instead would invent a second vocabulary for the same fact.
+        // The gate publishes the activity's binding reason code, not the join status name.
         std::string_view identityReason = "activity_root_edge_missing";
         switch (input.joinStatus) {
         case ActivityJoinStatus::exact:
@@ -438,7 +438,8 @@ bool Builder::build_adapter_capability(const SlotInput& input,
     const bool type6 = input.slotType == format::kCinematicSlotType
                        && input.componentClass == format::kCinematicComponentClass
                        && input.authSchema == format::kCinematicAuthSchema;
-    const bool type31 = input.slotType == 31U && input.authSchema == 0x80809524U;
+    const bool type31 =
+        input.slotType == kTriggerSlotType && input.authSchema == kTriggerAuthSchema;
     const bool type53 = input.slotType == format::kDialogueSlotType
                         && input.componentClass == format::kDialogueComponentClass
                         && input.authSchema == format::kDialogueAuthSchema

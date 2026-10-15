@@ -83,6 +83,26 @@ void begin_intent_attempt(RuntimeInstance& instance, std::uint64_t now) noexcept
     return true;
 }
 
+/**
+ * Reserves one Host revision for the intent, or refuses the intent while the program is loaded.
+ * @param result Refusal result name.
+ * @param reason Refusal reason.
+ * @return False when no revision was reserved.
+ */
+[[nodiscard]] bool
+reserve_or_refuse(RuntimeInstance& instance,
+                  host::ScriptableOutputReservation& reservation,
+                  std::string_view result,
+                  std::string_view reason = "host_reservation_unavailable") noexcept {
+    if (reserve_delivery(instance, reservation)) {
+        return true;
+    }
+    if (instance.programStatus == ProgramStatus::loaded) {
+        refuse_delivery(instance, result, reason, host::EffectOutcome::refused);
+    }
+    return false;
+}
+
 /** Releases State before opening the reserved Host lane after an adapter refusal. */
 [[nodiscard]] bool
 abandon_reserved_delivery(RuntimeInstance& instance,
@@ -126,7 +146,24 @@ void await_host_commit(RuntimeInstance& instance,
     log_line(core::log::Level::info, &instance, "intent", result);
 }
 
-} // namespace
+/**
+ * Awaits the Host commit of a queued device-family request, or releases it and refuses.
+ * @param enqueued Diagnostic name when the adapter queued the request.
+ * @param refused Refusal result name when the adapter refused it.
+ */
+void finish_reserved(RuntimeInstance& instance,
+                     std::uint64_t now,
+                     const host::ScriptableOutputReservation& reservation,
+                     devices::Status status,
+                     std::string_view enqueued,
+                     std::string_view refused) noexcept {
+    if (status == devices::Status::queued) {
+        await_host_commit(instance, now, enqueued);
+    } else if (abandon_reserved_delivery(instance, reservation)) {
+        refuse_delivery(
+            instance, refused, devices::status_name(status), host::EffectOutcome::refused);
+    }
+}
 
 /**
  * @return True while a scene-family request is valid but its mission-seed lease has not published.
@@ -136,6 +173,31 @@ void await_host_commit(RuntimeInstance& instance,
     return status == scenes::SceneStatus::missionSeedPending
            || status == scenes::SceneStatus::outputBusy;
 }
+
+/**
+ * Awaits the Host commit of a queued scene-family request, or releases it and waits or refuses.
+ * @param enqueued Diagnostic name when the adapter queued the request.
+ * @param refused Refusal result name when the adapter refused it.
+ */
+void finish_reserved_scene(RuntimeInstance& instance,
+                           std::uint64_t now,
+                           const host::ScriptableOutputReservation& reservation,
+                           scenes::SceneStatus status,
+                           std::string_view enqueued,
+                           std::string_view refused) noexcept {
+    if (status == scenes::SceneStatus::queued) {
+        await_host_commit(instance, now, enqueued);
+    } else if (!abandon_reserved_delivery(instance, reservation)) {
+        return;
+    } else if (scene_lease_still_publishing(status)) {
+        report_intent_status(instance, kIntentStatusSceneLeasePending, scenes::status_name(status));
+    } else {
+        refuse_delivery(
+            instance, refused, scenes::status_name(status), host::EffectOutcome::refused);
+    }
+}
+
+} // namespace
 
 /** Raises one queued intent, or advances the delivery already in flight. */
 void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
@@ -304,13 +366,7 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
         const std::span<const std::int32_t> counts(intent.squadCounts.data(), intent.squadCount);
         const auto mode = static_cast<squad_auth::Mode>(intent.squadMode);
         host::ScriptableOutputReservation reservation{};
-        if (!reserve_delivery(instance, reservation)) {
-            if (instance.programStatus == ProgramStatus::loaded) {
-                refuse_delivery(instance,
-                                "squad_refused",
-                                "host_reservation_unavailable",
-                                host::EffectOutcome::refused);
-            }
+        if (!reserve_or_refuse(instance, reservation, "squad_refused")) {
             return;
         }
         const squads::Status status =
@@ -354,38 +410,22 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
     }
     case lua_vm::IntentKind::bindCombatantToSquad: {
         host::ScriptableOutputReservation reservation{};
-        if (!reserve_delivery(instance, reservation)) {
-            if (instance.programStatus == ProgramStatus::loaded) {
-                refuse_delivery(instance,
-                                "combatant_binding_refused",
-                                "host_reservation_unavailable",
-                                host::EffectOutcome::refused);
-            }
+        if (!reserve_or_refuse(instance, reservation, "combatant_binding_refused")) {
             return;
         }
         const devices::Status status =
             devices::bind_combatant_to_squad_reserved(instance.view, intent.firstRow, reservation);
-        if (status == devices::Status::queued) {
-            await_host_commit(instance, now, "combatant_binding_enqueued");
-        } else if (!abandon_reserved_delivery(instance, reservation)) {
-            return;
-        } else {
-            refuse_delivery(instance,
-                            "combatant_binding_refused",
-                            devices::status_name(status),
-                            host::EffectOutcome::refused);
-        }
+        finish_reserved(instance,
+                        now,
+                        reservation,
+                        status,
+                        "combatant_binding_enqueued",
+                        "combatant_binding_refused");
         return;
     }
     case lua_vm::IntentKind::setObjectActive: {
         host::ScriptableOutputReservation reservation{};
-        if (!reserve_delivery(instance, reservation)) {
-            if (instance.programStatus == ProgramStatus::loaded) {
-                refuse_delivery(instance,
-                                "object_refused",
-                                "host_reservation_unavailable",
-                                host::EffectOutcome::refused);
-            }
+        if (!reserve_or_refuse(instance, reservation, "object_refused")) {
             return;
         }
         const devices::Status status = devices::set_objects_active_reserved(
@@ -395,28 +435,13 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
             intent.entryIndex,
             intent.active,
             reservation);
-        if (status == devices::Status::queued) {
-            await_host_commit(instance, now, "object_enqueued");
-        } else if (!abandon_reserved_delivery(instance, reservation)) {
-            return;
-        } else {
-            refuse_delivery(instance,
-                            "object_refused",
-                            devices::status_name(status),
-                            host::EffectOutcome::refused);
-        }
+        finish_reserved(instance, now, reservation, status, "object_enqueued", "object_refused");
         return;
     }
     case lua_vm::IntentKind::setDeviceChannel: {
         const auto channel = static_cast<scriptable_auth::Type23Channel>(intent.deviceChannel);
         host::ScriptableOutputReservation reservation{};
-        if (!reserve_delivery(instance, reservation)) {
-            if (instance.programStatus == ProgramStatus::loaded) {
-                refuse_delivery(instance,
-                                "device_refused",
-                                "host_reservation_unavailable",
-                                host::EffectOutcome::refused);
-            }
+        if (!reserve_or_refuse(instance, reservation, "device_refused")) {
             return;
         }
         const devices::Status status = devices::set_channel_reserved(instance.view,
@@ -425,54 +450,25 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
                                                                      intent.deviceValue,
                                                                      intent.deviceSnap,
                                                                      reservation);
-        if (status == devices::Status::queued) {
-            await_host_commit(instance, now, "device_enqueued");
-        } else if (!abandon_reserved_delivery(instance, reservation)) {
-            return;
-        } else {
-            refuse_delivery(instance,
-                            "device_refused",
-                            devices::status_name(status),
-                            host::EffectOutcome::refused);
-        }
+        finish_reserved(instance, now, reservation, status, "device_enqueued", "device_refused");
         return;
     }
     case lua_vm::IntentKind::fireTrigger: {
         host::ScriptableOutputReservation reservation{};
-        if (!reserve_delivery(instance, reservation)) {
-            if (instance.programStatus == ProgramStatus::loaded) {
-                refuse_delivery(instance,
-                                "trigger_refused",
-                                "host_reservation_unavailable",
-                                host::EffectOutcome::refused);
-            }
+        if (!reserve_or_refuse(instance, reservation, "trigger_refused")) {
             return;
         }
         const devices::Status status = devices::fire_trigger_reserved(
             instance.view, intent.firstRow, reservation, intent.active);
-        if (status == devices::Status::queued) {
-            await_host_commit(instance, now, "trigger_enqueued");
-        } else if (!abandon_reserved_delivery(instance, reservation)) {
-            return;
-        } else {
-            refuse_delivery(instance,
-                            "trigger_refused",
-                            devices::status_name(status),
-                            host::EffectOutcome::refused);
-        }
+        finish_reserved(instance, now, reservation, status, "trigger_enqueued", "trigger_refused");
         return;
     }
     case lua_vm::IntentKind::playSequence:
     case lua_vm::IntentKind::setCinematicActive: {
         const bool sequence = intent.kind == lua_vm::IntentKind::playSequence;
         host::ScriptableOutputReservation reservation{};
-        if (!reserve_delivery(instance, reservation)) {
-            if (instance.programStatus == ProgramStatus::loaded) {
-                refuse_delivery(instance,
-                                sequence ? "sequence_refused" : "cinematic_refused",
-                                "host_reservation_unavailable",
-                                host::EffectOutcome::refused);
-            }
+        if (!reserve_or_refuse(
+                instance, reservation, sequence ? "sequence_refused" : "cinematic_refused")) {
             return;
         }
         const scenes::SceneStatus status =
@@ -519,13 +515,7 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
     }
     case lua_vm::IntentKind::playActorSequence: {
         host::ScriptableOutputReservation reservation{};
-        if (!reserve_delivery(instance, reservation)) {
-            if (instance.programStatus == ProgramStatus::loaded) {
-                refuse_delivery(instance,
-                                "actor_sequence_refused",
-                                "host_reservation_unavailable",
-                                host::EffectOutcome::refused);
-            }
+        if (!reserve_or_refuse(instance, reservation, "actor_sequence_refused")) {
             return;
         }
         const devices::Status status =
@@ -533,70 +523,38 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
                 ? devices::play_combatant_sequence_reserved(
                       instance.view, intent.sequenceOwner, intent.secondRow, reservation)
                 : devices::Status::invalidSlot;
-        if (status == devices::Status::queued) {
-            await_host_commit(instance, now, "actor_sequence_enqueued");
-        } else if (abandon_reserved_delivery(instance, reservation)) {
-            refuse_delivery(instance,
-                            "actor_sequence_refused",
-                            devices::status_name(status),
-                            host::EffectOutcome::refused);
-        }
+        finish_reserved(instance,
+                        now,
+                        reservation,
+                        status,
+                        "actor_sequence_enqueued",
+                        "actor_sequence_refused");
         return;
     }
     case lua_vm::IntentKind::playPerformance: {
         host::ScriptableOutputReservation reservation{};
-        if (!reserve_delivery(instance, reservation)) {
-            if (instance.programStatus == ProgramStatus::loaded) {
-                refuse_delivery(instance,
-                                "performance_refused",
-                                "host_reservation_unavailable",
-                                host::EffectOutcome::refused);
-            }
+        if (!reserve_or_refuse(instance, reservation, "performance_refused")) {
             return;
         }
         const scenes::SceneStatus status = scenes::play_performance_slot_reserved(
             instance.view, intent.firstRow, intent.secondRow, reservation);
-        if (status == scenes::SceneStatus::queued) {
-            await_host_commit(instance, now, "performance_enqueued");
-        } else if (!abandon_reserved_delivery(instance, reservation)) {
-            return;
-        } else if (scene_lease_still_publishing(status)) {
-            report_intent_status(
-                instance, kIntentStatusSceneLeasePending, scenes::status_name(status));
-        } else {
-            refuse_delivery(instance,
-                            "performance_refused",
-                            scenes::status_name(status),
-                            host::EffectOutcome::refused);
-        }
+        finish_reserved_scene(
+            instance, now, reservation, status, "performance_enqueued", "performance_refused");
         return;
     }
     case lua_vm::IntentKind::resetObjectives: {
         host::ScriptableOutputReservation reservation{};
-        if (!reserve_delivery(instance, reservation)) {
-            if (instance.programStatus == ProgramStatus::loaded) {
-                refuse_delivery(instance,
-                                "objective_reset_refused",
-                                "host_reservation_unavailable",
-                                host::EffectOutcome::refused);
-            }
+        if (!reserve_or_refuse(instance, reservation, "objective_reset_refused")) {
             return;
         }
         const scenes::SceneStatus status =
             scenes::reset_objectives_slot_reserved(instance.view, intent.firstRow, reservation);
-        if (status == scenes::SceneStatus::queued) {
-            await_host_commit(instance, now, "objective_reset_enqueued");
-        } else if (!abandon_reserved_delivery(instance, reservation)) {
-            return;
-        } else if (scene_lease_still_publishing(status)) {
-            report_intent_status(
-                instance, kIntentStatusSceneLeasePending, scenes::status_name(status));
-        } else {
-            refuse_delivery(instance,
-                            "objective_reset_refused",
-                            scenes::status_name(status),
-                            host::EffectOutcome::refused);
-        }
+        finish_reserved_scene(instance,
+                              now,
+                              reservation,
+                              status,
+                              "objective_reset_enqueued",
+                              "objective_reset_refused");
         return;
     }
     case lua_vm::IntentKind::advanceTask:
@@ -604,13 +562,8 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
         const bool dialogue = intent.kind == lua_vm::IntentKind::playDialogueCue;
         const std::uint16_t cueIndex = static_cast<std::uint16_t>(intent.secondRow);
         host::ScriptableOutputReservation reservation{};
-        if (!reserve_delivery(instance, reservation)) {
-            if (instance.programStatus == ProgramStatus::loaded) {
-                refuse_delivery(instance,
-                                dialogue ? "dialogue_refused" : "task_refused",
-                                "host_reservation_unavailable",
-                                host::EffectOutcome::refused);
-            }
+        if (!reserve_or_refuse(
+                instance, reservation, dialogue ? "dialogue_refused" : "task_refused")) {
             return;
         }
         const scenes::SceneStatus status =
@@ -625,48 +578,31 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
                           : std::optional<std::uint32_t>{static_cast<std::uint32_t>(
                                 intent.dialogueFilterRow)})
                 : scenes::activate_task_slot_reserved(instance.view, intent.firstRow, reservation);
-        if (status == scenes::SceneStatus::queued) {
-            await_host_commit(instance, now, dialogue ? "dialogue_enqueued" : "task_enqueued");
-        } else if (!abandon_reserved_delivery(instance, reservation)) {
-            return;
-        } else if (scene_lease_still_publishing(status)) {
-            report_intent_status(
-                instance, kIntentStatusSceneLeasePending, scenes::status_name(status));
-        } else {
-            refuse_delivery(instance,
-                            dialogue ? "dialogue_refused" : "task_refused",
-                            scenes::status_name(status),
-                            host::EffectOutcome::refused);
-        }
+        finish_reserved_scene(instance,
+                              now,
+                              reservation,
+                              status,
+                              dialogue ? "dialogue_enqueued" : "task_enqueued",
+                              dialogue ? "dialogue_refused" : "task_refused");
         return;
     }
     case lua_vm::IntentKind::runActorProgram:
     case lua_vm::IntentKind::retireActor:
     case lua_vm::IntentKind::assignCombatObjective: {
         host::ScriptableOutputReservation reservation{};
-        if (!reserve_delivery(instance, reservation)) {
-            if (instance.programStatus == ProgramStatus::loaded) {
-                refuse_delivery(instance,
-                                "native_decision_refused",
-                                "output_busy",
-                                host::EffectOutcome::refused);
-            }
+        if (!reserve_or_refuse(instance, reservation, "native_decision_refused", "output_busy")) {
             return;
         }
         const auto status =
             intent.kind != lua_vm::IntentKind::assignCombatObjective
                 ? devices::run_actor_program_reserved(instance.view, intent, reservation)
                 : devices::assign_combat_objective_reserved(instance.view, intent, reservation);
-        if (status == devices::Status::queued) {
-            await_host_commit(instance, now, "native_decision_enqueued");
-        } else if (!abandon_reserved_delivery(instance, reservation)) {
-            return;
-        } else {
-            refuse_delivery(instance,
-                            "native_decision_refused",
-                            devices::status_name(status),
-                            host::EffectOutcome::refused);
-        }
+        finish_reserved(instance,
+                        now,
+                        reservation,
+                        status,
+                        "native_decision_enqueued",
+                        "native_decision_refused");
         return;
     }
     case lua_vm::IntentKind::setInteractableObject:
@@ -681,13 +617,7 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
         const std::span<const std::byte> body(intent.authBody.data(), intent.authByteCount);
         const std::span<const std::byte> sdkBuild(intent.sdkBuildSha256);
         host::ScriptableOutputReservation reservation{};
-        if (!reserve_delivery(instance, reservation)) {
-            if (instance.programStatus == ProgramStatus::loaded) {
-                refuse_delivery(instance,
-                                "slot_auth_refused",
-                                "host_reservation_unavailable",
-                                host::EffectOutcome::refused);
-            }
+        if (!reserve_or_refuse(instance, reservation, "slot_auth_refused")) {
             return;
         }
         const devices::Status status =
@@ -709,16 +639,8 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
                                          : intent.kind == lua_vm::IntentKind::watchDamage
                                              ? host::ScriptableOverrideKind::damageWatch
                                              : host::ScriptableOverrideKind::sdkAuth);
-        if (status == devices::Status::queued) {
-            await_host_commit(instance, now, "slot_auth_enqueued");
-        } else if (!abandon_reserved_delivery(instance, reservation)) {
-            return;
-        } else {
-            refuse_delivery(instance,
-                            "slot_auth_refused",
-                            devices::status_name(status),
-                            host::EffectOutcome::refused);
-        }
+        finish_reserved(
+            instance, now, reservation, status, "slot_auth_enqueued", "slot_auth_refused");
         return;
     }
     case lua_vm::IntentKind::setLifetime: {
@@ -731,27 +653,13 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
             return;
         }
         host::ScriptableOutputReservation reservation{};
-        if (!reserve_delivery(instance, reservation)) {
-            if (instance.programStatus == ProgramStatus::loaded) {
-                refuse_delivery(instance,
-                                "lifetime_refused",
-                                "host_reservation_unavailable",
-                                host::EffectOutcome::refused);
-            }
+        if (!reserve_or_refuse(instance, reservation, "lifetime_refused")) {
             return;
         }
         const devices::Status status =
             lifetimes::set_reserved(instance.view, intent.lifetimeState, reservation);
-        if (status == devices::Status::queued) {
-            await_host_commit(instance, now, "lifetime_enqueued");
-        } else if (!abandon_reserved_delivery(instance, reservation)) {
-            return;
-        } else {
-            refuse_delivery(instance,
-                            "lifetime_refused",
-                            devices::status_name(status),
-                            host::EffectOutcome::refused);
-        }
+        finish_reserved(
+            instance, now, reservation, status, "lifetime_enqueued", "lifetime_refused");
         return;
     }
     case lua_vm::IntentKind::stopAuthoredScene:
@@ -764,13 +672,7 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
             return;
         }
         host::ScriptableOutputReservation reservation{};
-        if (!reserve_delivery(instance, reservation)) {
-            if (instance.programStatus == ProgramStatus::loaded) {
-                refuse_delivery(instance,
-                                "scene_refused",
-                                "host_reservation_unavailable",
-                                host::EffectOutcome::refused);
-            }
+        if (!reserve_or_refuse(instance, reservation, "scene_refused")) {
             return;
         }
         const scenes::SceneStatus status =
@@ -784,19 +686,8 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
                       reservation,
                       intent.sceneEventKey,
                       intent.kind == lua_vm::IntentKind::stopAuthoredScene);
-        if (status == scenes::SceneStatus::queued) {
-            await_host_commit(instance, now, "scene_enqueued");
-        } else if (!abandon_reserved_delivery(instance, reservation)) {
-            return;
-        } else if (scene_lease_still_publishing(status)) {
-            report_intent_status(
-                instance, kIntentStatusSceneLeasePending, scenes::status_name(status));
-        } else {
-            refuse_delivery(instance,
-                            "scene_refused",
-                            scenes::status_name(status),
-                            host::EffectOutcome::refused);
-        }
+        finish_reserved_scene(
+            instance, now, reservation, status, "scene_enqueued", "scene_refused");
         return;
     }
     }

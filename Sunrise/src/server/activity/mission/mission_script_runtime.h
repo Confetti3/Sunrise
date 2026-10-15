@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string_view>
 
 #include "../../../state/activity/definition.h"
 
@@ -20,7 +21,6 @@ struct InstanceDiagnostics final {
     std::array<char, 256> lastVmError{};
     std::uint64_t eventsSeen{};
     std::uint64_t eventsCommitted{};
-    std::uint64_t lastEventSequence{};
     std::uint64_t lastMissionSequence{};
     std::uint64_t vmStateRevision{};
     std::uint64_t missionStateRevision{};
@@ -36,10 +36,8 @@ struct InstanceDiagnostics final {
     std::uint32_t startAttempts{};
     std::size_t pendingIntents{};
     std::size_t pendingEvents{};
-    bool publicTarget{};
     bool missionStateBound{};
     bool missionStarted{};
-    bool startPending{};
     bool vmActive{};
     bool vmFaulted{};
 };
@@ -95,7 +93,7 @@ void report_squad_provoked(const state::activity::SessionBinding& binding,
                            std::uint32_t registryKey,
                            std::uint16_t slotIndex) noexcept;
 
-/** Starts the optional, off-by-default server mission-script manager. */
+/** Starts the server mission-script manager when its setting is enabled. */
 void initialize() noexcept;
 /** Writes the authored controller path, `<name>/<name>.lua`, for one 1-based SDK activity row. */
 [[nodiscard]] bool controller_file_name(std::uint32_t oneBasedActivityRow,
@@ -104,8 +102,47 @@ void initialize() noexcept;
 void service(std::uint64_t now) noexcept;
 /** Copies mission-program state without invoking Lua or changing delivery state. */
 void snapshot(DiagnosticsSnapshot& output) noexcept;
-/** Closes attached programs and reattaches them from disk on the next service slice. */
-[[nodiscard]] bool reload() noexcept;
+
+/** How one reload request ended. */
+enum class ReloadStatus : std::uint8_t {
+    pending,
+    ok,
+    /** Mission scripting is off or its paths did not resolve. */
+    disabled,
+    /** A new controller does not compile; every old program keeps running. */
+    compileError,
+    /** Preparation or publication was refused; old programs remain in place. */
+    failed,
+    /** A newer request took the mailbox before this one was answered. */
+    replaced,
+    /** The requester left before publication started. */
+    cancelled,
+};
+
+/** The answer to one reload request. */
+struct ReloadResult final {
+    ReloadStatus status{ReloadStatus::pending};
+    /** Programs that reopened and are running again. */
+    std::uint32_t reopened{};
+    std::array<char, 192> message{};
+};
+
+/** Checks requester lifetime before commit; it must not call any reload API. */
+using ReloadRequester = bool (*)(std::uint64_t ticket) noexcept;
+
+/**
+ * Prepares replacements from disk and adopts them together at their next safe point.
+ * Safe means no delivery, intent, input, timer or script event is in flight.
+ * @param modId Reopens this mod's controllers and library users, including its dependents.
+ * Empty means every program.
+ * @return The ticket `reload_result` answers; a newer request replaces an unanswered one.
+ */
+[[nodiscard]] std::uint64_t request_reload(std::string_view modId,
+                                           ReloadRequester requester = nullptr) noexcept;
+/** Cancels only this pending ticket; a committed or newer request is untouched. */
+[[nodiscard]] bool cancel_reload(std::uint64_t ticket) noexcept;
+/** @return The answer for one ticket; `pending` until the server thread has answered it. */
+[[nodiscard]] ReloadResult reload_result(std::uint64_t ticket) noexcept;
 /** Closes every per-activity Lua state and clears its event cursor. */
 void shutdown() noexcept;
 

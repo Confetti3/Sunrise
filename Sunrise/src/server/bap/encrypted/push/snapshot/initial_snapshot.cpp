@@ -68,9 +68,8 @@ bool prepare_initial(
             middleware::queuez::kFullSnapshotFlag,
             {},
         };
-        success = true;
     }
-    if (!success || !commit(staged, prepared)) {
+    if (!commit(staged, prepared)) {
         // Clear the rejected staging tails but keep any prior published payload prefix.
         clear_after(scratch, reservation);
         return false;

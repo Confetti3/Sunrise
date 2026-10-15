@@ -28,7 +28,7 @@ using patterns::signature_length;
  */
 constexpr std::string_view kValidatorSignatureText =
     "40 53 48 83 EC 20 80 7C 24 58 00 44 0F B7 DA 4C 8B D1 BB 01 00 00 00 "
-    "75 0D BB A3 FF FF FF 8B C3 48 83 C4 20 5B C3";
+    "75 ? BB A3 FF FF FF 8B C3 48 83 C4 20 5B C3";
 /** Masked form of the validator text, which is the form the image scan takes. */
 constexpr auto kValidatorSignature =
     signature<signature_length(kValidatorSignatureText)>(kValidatorSignatureText);
@@ -210,11 +210,6 @@ bool uninstall() noexcept {
     }
     const bool detached = !g_handle.attached || hooking::detour::uninstall(g_handle);
     return restored && detached;
-}
-
-/** @return True while the validator detour is attached. */
-bool is_installed() noexcept {
-    return g_handle.attached && g_extendedHeaderResult != nullptr && g_cachedDataBranch != nullptr;
 }
 
 } // namespace sunrise::client::hooks::package_trust

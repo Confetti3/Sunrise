@@ -138,7 +138,6 @@ struct Storage {
     DetailRequests detailRequests{};
     std::array<std::uint16_t, kDetailCapacity> requestedDetailIndices{};
     std::vector<state::build_data::items::details::Definition> details{};
-    AuthoredHashes authoredHashes{};
     std::vector<std::byte> abilityTable{};
     std::vector<std::byte> abilityPool{};
     std::array<state::build_data::abilities::Definition,

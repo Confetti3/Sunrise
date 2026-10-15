@@ -1,37 +1,70 @@
 /**
  * Opcode 601 is a loot pickup. The Client sends it when it cannot pick the loot up on its own.
  * The reply is 165 bits and no field can be left out, so the bare echo under-runs the decoder.
- * Nothing reads the three tail fields. The request carries no completion handle.
+ * The reply's tail is the request's loot identity, echoed unchanged.
  */
 
 #include "opcode601_codec.h"
 
 #include <array>
 
+#include "../../../encoding/bit_reader.h"
 #include "../../status_fields.h"
 
 namespace sunrise::middleware::web_service::messages::opcode601 {
 namespace {
 
-/** The three tail integers after the status pair are 32, 64 and 32 bits. */
-constexpr std::uint8_t kTailIntegerWidth = 32;
-constexpr std::uint8_t kTailLongWidth = 64;
-/** Required fields nothing reads still take their width. Zero is the neutral value. */
-constexpr std::uint64_t kUnusedValue = 0;
+/** The pickup kind is a 5-bit value biased by one. */
+constexpr std::uint8_t kPickupKindWidth = 5;
+/** The loot identity is a 32-bit part, a 64-bit part and a 32-bit auxiliary, in that order. */
+constexpr std::uint8_t kIdentityPartAWidth = 32;
+constexpr std::uint8_t kIdentityPartBWidth = 64;
+constexpr std::uint8_t kIdentityAuxWidth = 32;
+/** A payload is whole bytes, so at most this many bits of it can be trailing pad. */
+constexpr std::size_t kBitsPerByte = 8;
+
+/** Wire values of the loot identity. Request and reply share one bias, so raw bits echo. */
+struct LootIdentity {
+    std::uint64_t partA{};
+    std::uint64_t partB{};
+    std::uint64_t aux{};
+};
+
+/**
+ * Reads the complete 133-bit request.
+ * @param message Opcode-601 request.
+ * @param identity Receives the loot identity's wire values.
+ * @return True when the opcode matches and the body is exactly one request.
+ */
+[[nodiscard]] bool read_request(const Message& message, LootIdentity& identity) noexcept {
+    identity = {};
+    if (message.opcode != kOpcode) {
+        return false;
+    }
+    encoding::bits::Reader reader(message.payload);
+    std::uint64_t pickupKind = 0;
+    return reader.read(kPickupKindWidth, pickupKind)
+           && reader.read(kIdentityPartAWidth, identity.partA)
+           && reader.read(kIdentityPartBWidth, identity.partB)
+           && reader.read(kIdentityAuxWidth, identity.aux)
+           && reader.remaining_bits() < kBitsPerByte;
+}
 
 } // namespace
 
-/** Reports whether this request is the remote loot pickup. */
+/** Reports whether this request is one complete remote loot pickup. */
 bool parse_request(const Message& message) noexcept {
-    return message.opcode == kOpcode;
+    LootIdentity identity{};
+    return read_request(message, identity);
 }
 
-/** Encodes the status pair and its three-field tail in descriptor order. */
+/** Encodes the status pair and the echoed loot identity in descriptor order. */
 bool encode_response(const Message& message,
                      std::span<std::byte> output,
                      std::size_t& written) noexcept {
     written = 0;
-    if (!parse_request(message)) {
+    LootIdentity identity{};
+    if (!read_request(message, identity)) {
         return false;
     }
 
@@ -42,9 +75,9 @@ bool encode_response(const Message& message,
     StatusResponse status{};
     status.value = kNoFamily4Publication;
     const bool encoded = status::write_fields(writer, ResponseShape::statusPair, status)
-                         && writer.write(kUnusedValue, kTailIntegerWidth)
-                         && writer.write(kUnusedValue, kTailLongWidth)
-                         && writer.write(kUnusedValue, kTailIntegerWidth);
+                         && writer.write(identity.partA, kIdentityPartAWidth)
+                         && writer.write(identity.partB, kIdentityPartBWidth)
+                         && writer.write(identity.aux, kIdentityAuxWidth);
     return finish_response(writer, encoded, staged, output, written);
 }
 

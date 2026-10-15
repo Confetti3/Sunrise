@@ -61,7 +61,7 @@ struct BuildState final {
     std::unordered_map<std::uint32_t, SequenceOwner> sequenceOwners{};
 };
 
-/** Actual reader callback context. */
+/** One package row already read into memory, with its physical class. */
 struct PrefetchedTag final {
     std::vector<std::byte> bytes{};
     std::uint32_t classId{};

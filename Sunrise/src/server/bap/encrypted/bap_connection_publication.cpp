@@ -17,13 +17,7 @@ namespace {
 // refused. TODO: send on the client's record-state report; svc-12 decodes only subscribe.
 /** Delay before the second Family-4 snapshot. */
 constexpr std::uint64_t kFamily4RepushDelayMs = 400;
-/** The banner pair lands the same unsolicited way and hits the same record-state race. */
-constexpr std::uint64_t kBannerRepushDelayMs = 400;
-/**
- * Delay before the ability-icon re-derivation owed by a subclass selection.
- * The Client content-extraction pump that rebuilds the invalidated ability buckets runs on the
- * next few RunCallbacks pumps, well under this window.
- */
+/** Delay before the ability-icon refresh; the Client rebuilds the buckets well inside it. */
 constexpr std::uint64_t kAbilityRefreshDelayMs = 500;
 
 /** Process-lifetime generation that rejects delayed epochs after a BAP slot is reused. */
@@ -156,15 +150,6 @@ void publish_connection_fields(Session& session,
     if (fields.receivesClientIdentity) {
         session.activityClientIdentitySeenGeneration = session.activity.bindingGeneration;
     }
-    // A join resets the roster container. Its first post-region state change rebuilds the
-    // participation component against the published membership.
-    if (fields.joinsActivity) {
-        session.activityRosterSends = 0;
-        session.activityRosterGroupLeases = {};
-        session.activityRosterBubbleOrderCount = 0;
-        session.activityRosterBubbleKeyOrderCount = {};
-        session.activityRosterRegionBubble = -1;
-    }
     // A private join burst delivered the seed membership body; commit the matching identity so
     // State and the delivered-body record agree with what the client now holds.
     if (fields.joinsActivity && session.activity.role == ActivityClientRole::privateCurrent) {
@@ -237,7 +222,7 @@ void release_activity_connection(Session& session) noexcept {
     session.activityRosterDecode = {};
 }
 
-/** Arms the owed Family-4 and banner re-pushes when the queuez publication asks for them. */
+/** Arms the owed ability refresh and Family-4 and family-two re-pushes the publication names. */
 void arm_repushes(Session& session, const queuez::StagedPublication& queuezPublication) noexcept {
     const std::uint64_t now = GetTickCount64();
     if (queuezPublication.armsAbilityRefresh) {
@@ -250,13 +235,6 @@ void arm_repushes(Session& session, const queuez::StagedPublication& queuezPubli
         session.family4RepushDueTick = now + kFamily4RepushDelayMs;
         session.family4RepushRoot = queuezPublication.family4RepushRoot;
         session.family4RepushArmed = true;
-    }
-    // Armed on its own signal, not on family four's. Family zero re-subscribes on every record
-    // cycle, and each subscribe needs a delayed copy because the immediate answer arrives too soon.
-    if (queuezPublication.armsBannerRepush && queuezPublication.bannerRepushRoot != 0) {
-        session.bannerRepushDueTick = now + kBannerRepushDelayMs;
-        session.bannerRepushRoot = queuezPublication.bannerRepushRoot;
-        session.bannerRepushArmed = true;
     }
     // Root zero means the peer never subscribed to family two, so it is owed no re-push.
     if (queuezPublication.socialRosterRepushRoot != 0) {

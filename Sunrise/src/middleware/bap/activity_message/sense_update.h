@@ -149,6 +149,8 @@ struct SenseUpdate {
     patch_epoch::PatchEpoch epoch{};
     /** Bits left after the literal zero. The prefix diagnostic reports this. */
     std::uint32_t tailBits{};
+    /** Bits the mirrored roster delta used after its root bit; zero when the root bit was clear. */
+    std::uint32_t rosterDeltaBits{};
     /** Declared width of the first emitted group, when its root and header were readable. */
     std::uint32_t firstGroupBits{};
     /** Registry key of the first emitted group and first ClientRef. */
@@ -162,17 +164,6 @@ struct SenseUpdate {
     /** Complete typed result when every selected slot has an authored native decoder. */
     DecodedPacket decoded{};
 };
-
-/**
- * Parses a sensor sense update as far as its known grammar reaches.
- * @param input Activity payload after the envelope.
- * @param update Cleared first, then filled with the epoch and the tail size.
- * @param consumedBits Receives the bits the known prefix used.
- * @return True when the epoch and the literal zero were both present and the zero read zero.
- */
-[[nodiscard]] bool parse_sense_update(std::span<const std::byte> input,
-                                      SenseUpdate& update,
-                                      std::size_t& consumedBits) noexcept;
 
 /**
  * Decodes the complete slot-selected msg-6 grammar without retaining input storage.

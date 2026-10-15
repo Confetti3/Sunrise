@@ -9,8 +9,8 @@ namespace sunrise::client::hooks::egress {
 [[nodiscard]] bool is_installed() noexcept;
 
 /**
- * Reports the guard's attach result per export. The guard installs from DllMain, before Core
- * logging exists, so the result is recorded there and logged here.
+ * Reports the guard's attach result per export. The guard installs before Core logging exists,
+ * so the result is recorded at install and logged here.
  */
 void report_installation() noexcept;
 

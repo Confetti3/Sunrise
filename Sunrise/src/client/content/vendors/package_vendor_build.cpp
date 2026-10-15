@@ -35,6 +35,17 @@ struct Storage {
     std::size_t conditionalRows{};
     /** Sale rows whose cost array did not read, kept but never charged. */
     std::size_t unreadableRows{};
+
+    /** Only published prefixes are visible; extraction fully assigns each new row. */
+    void reset() noexcept {
+        blob.clear();
+        indexCount = 0;
+        definitionCount = 0;
+        saleRowCount = 0;
+        installedRowCount = 0;
+        conditionalRows = 0;
+        unreadableRows = 0;
+    }
 };
 
 /** One array a definition or a sale row declares, reduced to what the catalog stores. */
@@ -93,11 +104,9 @@ read(std::span<const std::byte> blob, std::size_t offset, Value& value) noexcept
 }
 
 /**
- * Reads what one sale row charges: every entry of its cost array, and whether those entries are
- * the price. An entry is static only when both of its expression arrays are empty and its
- * trailing word is the plain value. One carrying an expression, or another word, makes the row
- * conditional: its price then depends on state this build does not evaluate, so the entries are
- * kept for the record and the row is never charged.
+ * Reads one sale row's cost entries and whether they are its price.
+ * An entry is static only with both expression arrays empty and the plain trailing word. Any other
+ * entry makes the row conditional: its entries are kept and the row is never charged.
  * @param blob Whole definition blob.
  * @param at Sale row offset inside the blob.
  * @param value Receives the entries and the row's price state.
@@ -337,7 +346,7 @@ bool build(const reader::Source& source, reader::Scratch& scratch) noexcept {
         return true;
     }
     static Storage storage{};
-    storage = {};
+    storage.reset();
     if (!read_index(source, scratch, storage)) {
         report(storage, 0, "index");
         return false;

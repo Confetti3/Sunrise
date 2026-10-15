@@ -78,6 +78,8 @@ const char* event_name(EventKind kind) noexcept {
         return "device state";
     case EventKind::regionChanged:
         return "region changed";
+    case EventKind::sceneOutput:
+        return "scene output";
     case EventKind::objectState:
         return "object state";
     case EventKind::objectInteracted:

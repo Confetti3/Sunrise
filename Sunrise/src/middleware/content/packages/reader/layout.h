@@ -25,12 +25,43 @@ inline constexpr std::uint32_t kTableArrayMarker = 0x80809FBDU;
 inline constexpr std::uint32_t kEntryTableElementClass = 0x80809EF3U;
 /** Block-record element class stored eight bytes before the block data. */
 inline constexpr std::uint32_t kBlockTableElementClass = 0x80809EEEU;
+/** The header's metadata digest is one SHA-1. */
+inline constexpr std::size_t kMetadataDigestSize = 20;
 /** Tag handles start at this base. */
 inline constexpr std::uint32_t kTagBase = 0x80800000;
 /** The package id sits in the bits above the entry index. */
 inline constexpr std::uint32_t kTagEntryBits = 13;
 /** Entry indices sit in the low bits of a tag handle. */
 inline constexpr std::uint32_t kTagEntryMask = (1U << kTagEntryBits) - 1U;
+/** Element class of a typed array of u32 words. */
+inline constexpr std::uint32_t kU32ArrayClass = 0x8080000BU;
+/** Element class of a typed array of u16 values. */
+inline constexpr std::uint32_t kU16ArrayClass = 0x8080000AU;
+
+/** @return The tag handle of entry `entry` in package `packageId`. */
+[[nodiscard]] constexpr std::uint32_t tag_of(std::uint16_t packageId,
+                                             std::uint32_t entry) noexcept {
+    return kTagBase + (std::uint32_t{packageId} << kTagEntryBits) + entry;
+}
+
+/** @return The package bits of a tag handle; the caller checks the tag is at least kTagBase. */
+[[nodiscard]] constexpr std::uint32_t package_of(std::uint32_t tag) noexcept {
+    return (tag - kTagBase) >> kTagEntryBits;
+}
+
+/** @return The entry index of a tag handle. */
+[[nodiscard]] constexpr std::uint32_t entry_of_tag(std::uint32_t tag) noexcept {
+    return tag & kTagEntryMask;
+}
+
+/** Typed array header inside an entry; its rows follow it. */
+struct TypedArrayHeader {
+    // Offsets from the header start: marker before it, then {u64 count, u32 class, u32 pad}.
+    static constexpr std::size_t kMarkerBack = 4;
+    static constexpr std::size_t kCount = 0;
+    static constexpr std::size_t kClass = 8;
+    static constexpr std::size_t kSize = 16;
+};
 
 /** Header fields read by their fixed public offsets. */
 struct HeaderOffsets {

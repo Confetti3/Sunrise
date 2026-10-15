@@ -11,6 +11,8 @@
 #include "../../core/filesystem/path.h"
 #include "../../core/ui/busy/busy.h"
 #include "cache/internal.h"
+#include "content_manifest_row_validation.h"
+#include "fingerprint/content_manifest_fingerprint.h"
 #include "scanner/internal.h"
 
 namespace sunrise::state::content_manifest {
@@ -27,6 +29,8 @@ struct Storage final {
     std::array<Row, kRowCapacity> rows{};
     std::size_t rowCount{};
     Fingerprint buildFingerprint{};
+    /** Installed rows only; the mod overlay leaves it unchanged. */
+    Fingerprint installedFingerprint{};
     Guid guid{};
     bool ready{};
 };
@@ -41,6 +45,7 @@ void clear_storage() noexcept {
     SecureZeroMemory(g_storage.rows.data(), sizeof g_storage.rows);
     g_storage.rowCount = 0;
     g_storage.buildFingerprint = {};
+    g_storage.installedFingerprint = {};
     g_storage.guid = {};
     g_storage.ready = false;
 }
@@ -75,15 +80,18 @@ cache_paths(void* module, core::path::Buffer& directory, core::path::Buffer& pat
  * Publishes one fully checked staged catalog into State in one step.
  * @param rows Canonical staged rows.
  * @param buildFingerprint Public selected-build identity.
+ * @param installedFingerprint Identity of the installed rows alone.
  * @param guid Fixed UUID text built from the selected rows.
  */
 void publish(std::span<const Row> rows,
              const Fingerprint& buildFingerprint,
+             const Fingerprint& installedFingerprint,
              const Guid& guid) noexcept {
     clear_storage();
     std::copy(rows.begin(), rows.end(), g_storage.rows.begin());
     g_storage.rowCount = rows.size();
     g_storage.buildFingerprint = buildFingerprint;
+    g_storage.installedFingerprint = installedFingerprint;
     g_storage.guid = guid;
     g_storage.ready = true;
 }
@@ -140,11 +148,47 @@ bool initialize(void* module, std::wstring_view packagesDirectory) noexcept {
         core::ui::busy::end(core::ui::busy::Task::manifestBuild);
     }
     if (complete) {
-        publish(std::span(g_stagedRows).first(rowCount), buildFingerprint, guid);
+        publish(std::span(g_stagedRows).first(rowCount), buildFingerprint, buildFingerprint, guid);
     }
     clear_scratch();
     ReleaseSRWLockExclusive(&g_storage.lock);
     return complete;
+}
+
+/** Adds rows for package files outside the installed folder and replaces the GUID. */
+bool apply_overlay(std::span<const Row> rows, const Fingerprint& overlayFingerprint) noexcept {
+    if (rows.empty()) {
+        return true;
+    }
+    AcquireSRWLockExclusive(&g_storage.lock);
+    const std::span<const Row> installed = std::span(g_storage.rows).first(g_storage.rowCount);
+    Fingerprint catalogFingerprint{};
+    bool applied =
+        g_storage.ready && installed.size() + rows.size() <= kRowCapacity
+        && fingerprint::overlay(g_storage.buildFingerprint, overlayFingerprint, catalogFingerprint);
+    if (applied) {
+        const auto end = std::merge(installed.begin(),
+                                    installed.end(),
+                                    rows.begin(),
+                                    rows.end(),
+                                    g_stagedRows.begin(),
+                                    &row_less);
+        const std::span<const Row> combined(g_stagedRows.data(),
+                                            static_cast<std::size_t>(end - g_stagedRows.begin()));
+        // Strict name order also proves no added row reuses an installed name.
+        applied = valid(combined);
+        if (applied) {
+            Guid guid{};
+            fingerprint::guid(catalogFingerprint, guid);
+            // publish() clears storage first, so the installed identity is copied out before it.
+            const Fingerprint installedFingerprint = g_storage.installedFingerprint;
+            // The server reads mod packages too, so content keyed on this fingerprint follows them.
+            publish(combined, catalogFingerprint, installedFingerprint, guid);
+        }
+    }
+    SecureZeroMemory(g_stagedRows.data(), sizeof g_stagedRows);
+    ReleaseSRWLockExclusive(&g_storage.lock);
+    return applied;
 }
 
 /** Clears the generated manifest, fingerprints, GUID, and extraction scratch. */
@@ -169,11 +213,34 @@ bool visit_snapshot(SnapshotVisitor visitor, void* context) noexcept {
         std::span(g_storage.rows).first(g_storage.rowCount),
         std::string_view(g_storage.guid.data(), kGuidCapacity - 1),
         std::span<const std::byte, kFingerprintSize>(g_storage.buildFingerprint),
+        std::span<const std::byte, kFingerprintSize>(g_storage.installedFingerprint),
     };
     // The view cannot escape because State releases the read lock after this callback returns.
     const bool result = visitor(context, view);
     ReleaseSRWLockShared(&g_storage.lock);
     return result;
+}
+
+/** Copies the installed-rows fingerprint under the shared lock. */
+bool installed_fingerprint(Fingerprint& output) noexcept {
+    AcquireSRWLockShared(&g_storage.lock);
+    const bool ready = g_storage.ready;
+    if (ready) {
+        output = g_storage.installedFingerprint;
+    }
+    ReleaseSRWLockShared(&g_storage.lock);
+    return ready;
+}
+
+/** Copies the catalog fingerprint under the shared lock. */
+bool build_fingerprint(Fingerprint& output) noexcept {
+    AcquireSRWLockShared(&g_storage.lock);
+    const bool ready = g_storage.ready;
+    if (ready) {
+        output = g_storage.buildFingerprint;
+    }
+    ReleaseSRWLockShared(&g_storage.lock);
+    return ready;
 }
 
 } // namespace sunrise::state::content_manifest

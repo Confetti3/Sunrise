@@ -11,12 +11,6 @@ namespace {
 
 namespace catalog = state::build_data::scriptables;
 
-[[nodiscard]] std::string_view checked_key(lua_State* state) {
-    std::size_t length = 0;
-    const char* const value = luaL_checklstring(state, 2, &length);
-    return {value, length};
-}
-
 /** @return The Lua-facing name of one world build status. */
 [[nodiscard]] const char* build_status_name(std::uint32_t value) noexcept {
     switch (static_cast<catalog::BuildStatus>(value)) {
@@ -61,15 +55,6 @@ namespace catalog = state::build_data::scriptables;
     return nullptr;
 }
 
-void push_u64(lua_State* state, std::uint64_t value) {
-    std::array<char, 32> text{};
-    const auto result = std::to_chars(text.data(), text.data() + text.size(), value);
-    if (result.ec != std::errc{}) {
-        luaL_error(state, "world identity conversion failed");
-    }
-    lua_pushlstring(state, text.data(), static_cast<std::size_t>(result.ptr - text.data()));
-}
-
 } // namespace
 
 void push_coverage_collection(lua_State* state, const WorldGenerationIdentity& generation) {
@@ -109,7 +94,7 @@ void push_coverage_collection(lua_State* state, const WorldGenerationIdentity& g
     if (owner == nullptr || !current(*owner, collection->generation)) {
         return luaL_error(state, "generated-world coverage is stale");
     }
-    const std::string_view key = checked_key(state);
+    const std::string_view key = lua_string_view(state, 2);
     if (key == "count") {
         lua_pushinteger(state,
                         static_cast<lua_Integer>(owner->definitions.world.coverageCount(
@@ -133,7 +118,7 @@ void push_coverage_collection(lua_State* state, const WorldGenerationIdentity& g
             owner->definitions.world.context, handle->generation, handle->localRow, row)) {
         return luaL_error(state, "generated-world coverage row is stale");
     }
-    const std::string_view key = checked_key(state);
+    const std::string_view key = lua_string_view(state, 2);
     if (key == "row") {
         lua_pushinteger(state, row.row);
     } else if (key == "family") {
@@ -170,7 +155,7 @@ void push_coverage_collection(lua_State* state, const WorldGenerationIdentity& g
             owner->definitions.world.context, handle->generation, row)) {
         return luaL_error(state, "generated-world diagnostics are stale");
     }
-    const std::string_view key = checked_key(state);
+    const std::string_view key = lua_string_view(state, 2);
 #define WORLD_DIAGNOSTIC_U64(lua_key, member)                                                      \
     if (key == (lua_key)) {                                                                        \
         push_u64(state, row.member);                                                               \

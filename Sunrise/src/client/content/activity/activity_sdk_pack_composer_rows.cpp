@@ -1,7 +1,7 @@
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <span>
 #include <string_view>
 
 #include "activity_sdk_activity_inventory.h"
@@ -17,7 +17,7 @@
 namespace sunrise::client::content::activity::sdk_generation::pack_composer {
 namespace {
 
-/** Format-v9 state rows use bits zero and one for enabled and extraction-complete state. */
+/** State rows use bit zero for enabled and bit one for extraction-complete. */
 constexpr std::uint32_t kStateEnabled = 0x1U;
 constexpr std::uint32_t kStateExtractionComplete = 0x2U;
 static_assert((kStateEnabled | kStateExtractionComplete) == format::kStateFlagMask);
@@ -63,39 +63,6 @@ template <typename Text>
                                     format::StringRef& output) noexcept {
     std::string_view value{};
     return policy_text_view(source, input, value) && strings.resolve(value, output);
-}
-
-[[nodiscard]] int hexadecimal_digit(char value) noexcept {
-    if (value >= '0' && value <= '9') {
-        return value - '0';
-    }
-    if (value >= 'a' && value <= 'f') {
-        return value - 'a' + 10;
-    }
-    return -1;
-}
-
-/** Decodes the generated lowercase SHA-256 spelling without accepting a partial digest. */
-[[nodiscard]] bool decode_digest(std::string_view input,
-                                 std::array<std::byte, 32>& output) noexcept {
-    output = {};
-    if (input.size() != output.size() * 2U) {
-        return false;
-    }
-    for (std::size_t index = 0; index < output.size(); ++index) {
-        const int high = hexadecimal_digit(input[index * 2U]);
-        const int low = hexadecimal_digit(input[index * 2U + 1U]);
-        if (high < 0 || low < 0) {
-            output = {};
-            return false;
-        }
-        output[index] = static_cast<std::byte>((high << 4) | low);
-    }
-    return true;
-}
-
-template <typename Enum> [[nodiscard]] std::uint32_t semantic_ordinal(Enum value) noexcept {
-    return static_cast<std::uint32_t>(value) + 1U;
 }
 
 /** Appends one canonical tag set and returns its exact range in the shared tag section. */

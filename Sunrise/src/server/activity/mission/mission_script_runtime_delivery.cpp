@@ -253,7 +253,6 @@ void clear_delivery(RuntimeInstance& instance) noexcept {
     instance.expectedScriptableRevision = 0;
     instance.deliveryDeadline = 0;
     instance.firstIntentAttempt = 0;
-    instance.nextIntentAttempt = 0;
     instance.intentAttempts = 0;
     instance.lastIntentStatus = (std::numeric_limits<std::uint16_t>::max)();
     instance.deliveryStage = DeliveryStage::idle;
@@ -364,7 +363,6 @@ void complete_delivery(RuntimeInstance& instance) noexcept {
                 return;
             }
             instance.deliveryDeadline = 0;
-            instance.nextIntentAttempt = 0;
             instance.lastIntentStatus = (std::numeric_limits<std::uint16_t>::max)();
             instance.deliveryStage = DeliveryStage::idle;
             return;
@@ -393,7 +391,6 @@ void complete_delivery(RuntimeInstance& instance) noexcept {
                 return;
             }
             instance.deliveryDeadline = 0;
-            instance.nextIntentAttempt = 0;
             instance.lastIntentStatus = (std::numeric_limits<std::uint16_t>::max)();
             instance.deliveryStage = DeliveryStage::idle;
             return;
@@ -707,9 +704,6 @@ void retire_script_event(RuntimeInstance& instance) noexcept {
             instance.scriptEventRead = 0;
         }
     }
-    instance.firstScriptEventAttempt = 0;
-    instance.nextScriptEventAttempt = 0;
-    instance.scriptEventAttempts = 0;
 }
 
 /**

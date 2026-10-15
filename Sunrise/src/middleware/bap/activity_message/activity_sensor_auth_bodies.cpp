@@ -123,8 +123,8 @@ constexpr std::size_t kSpawnKeyCount = 32;
            && writer.write(1, kPresenceWidth) && writer.write(snapshot.playerKey, 64)
            && writer.write(0, 5) && writer.write(3, 6) && writer.write(0, 6)
            && writer.write(0, 6)
-           // Byte 736 skips the late spawn-location hold. Byte 737 holds the spawn while the
-           // client loads. The revive delay stays authored unless a darkness policy is set.
+           // Byte 736 bypasses the respawn countdown. Byte 737 holds the spawn while the client
+           // loads. The revive delay stays authored unless a darkness policy is set.
            && writer.write(1, kPresenceWidth)
            && writer.write(snapshot.awaitClientSync ? kAwaitingClientSync : 0U, 4)
            && writer.write(0, kPresenceWidth)

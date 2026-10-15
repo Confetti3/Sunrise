@@ -36,8 +36,6 @@ struct StringResolver final {
                                   Storage& output);
 
 /** Checks section counts fit u32 and the prepared per-parent range vectors match. */
-[[nodiscard]] bool validate_storage(const Inputs& inputs,
-                                    const PreparedRanges& prepared,
-                                    const Storage& value) noexcept;
+[[nodiscard]] bool validate_storage(const PreparedRanges& prepared, const Storage& value) noexcept;
 
 } // namespace sunrise::client::content::activity::sdk_generation::pack_composer::detail

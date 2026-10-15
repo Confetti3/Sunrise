@@ -85,8 +85,6 @@ valid_authored_scene_dependencies(const AuthoredSceneDependencies& value) noexce
                                               std::uint32_t& generation) noexcept;
 /** The widest statically bounded Auth body is type 19, at 53,150 bits. */
 inline constexpr std::size_t kAuthOverrideByteCapacity = (53'150U + 7U) / 8U;
-/** Lifetime states that pass the player-spawn gate. */
-inline constexpr std::array<std::uint8_t, 3> kSpawnGateLifetimeStates = {3, 6, 10};
 /** Highest lifetime state inside the client's jump table. */
 inline constexpr std::uint8_t kMaximumLifetimeState = 10;
 /** The lifetime field stores its value plus one in four bits. */
@@ -284,6 +282,7 @@ inline constexpr std::uint16_t kMaximumSlotIndex = 32767;
  */
 inline constexpr std::array<std::uint8_t, 5> kWireFaultSlotTypes = {1, 8, 17, 38, 68};
 
+// TODO: apply as the fail-closed backstop on natively produced Auth overrides; no caller yet.
 /**
  * @param slotType Slot type an Auth override names.
  * @return True when no schema-compiled Auth body may carry that slot type.
@@ -296,9 +295,6 @@ inline constexpr std::array<std::uint8_t, 5> kWireFaultSlotTypes = {1, 8, 17, 38
     }
     return false;
 }
-
-/** Elements in the slot-type-1 requested-count array. Its wire count lane is wider. */
-inline constexpr std::size_t kSquadRequestedCountArrayLength = 8;
 
 /** The per-entry state byte is stored biased, so the wire value never goes negative. */
 inline constexpr std::uint32_t kStateByteBias = 0x80;
@@ -415,7 +411,7 @@ auth_body_bits(const Snapshot& snapshot, std::uint8_t slotType, bool carriesPlay
  * @param objectTag Package object tag of the owning group.
  * @param key Registry key of the owning group.
  * @param slotType Slot type from the group's slot array.
- * @param slotIndex Slot ordinal, which is also the slot's index.
+ * @param slotIndex Slot index from the group's descriptor, not its ordinal.
  * @param flags Sense and auth emit bits for that slot type.
  * @param missionSeedOnly True to suppress the authored typed body unless an override matches.
  * @param carriesPlayerKey True for the one type-13 block that binds the player.

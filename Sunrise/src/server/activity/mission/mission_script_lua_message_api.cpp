@@ -39,10 +39,12 @@ lua_client_message_status_name(host::ClientMessageStatus status) noexcept {
 [[nodiscard]] int message_matches(lua_State* state) {
     const auto* const handle =
         static_cast<const MessageHandle*>(luaL_checkudata(state, 1, kMessageMetatable));
-    // Named arguments this call accepts. Any other key is refused.
-    static constexpr std::array<std::string_view, 1> kDeclared{"event"};
-    refuse_unknown_arguments(state, kDeclared);
-    static_cast<void>(push_argument(state, "event"));
+    // The table entry of message:matches.
+    constexpr const api::MemberSpec& kMatches =
+        api::member(api::Receiver::activityMessage, "matches");
+    refuse_unknown_arguments(state, kMatches);
+    static_cast<void>(
+        push_argument(state, required_key(kMatches, "event", api::ValueKind::handle)));
     const host::Event& event = check_event(state, lua_gettop(state));
     ActivityMessageDefinition definition{};
     namespace communication = middleware::bap::activity_message::wire_schema::communication;
@@ -60,10 +62,9 @@ lua_client_message_status_name(host::ClientMessageStatus status) noexcept {
                             : 0);
         return 1;
     }
-    const std::string_view eventName = event_kind_name(state, event.kind);
+    const std::string_view eventName = event_kind_name(event.kind);
     bool matches = false;
-    for (std::size_t index = 0; !eventName.empty() && index < definition.ingressSurfaceCount;
-         ++index) {
+    for (std::size_t index = 0; index < definition.ingressSurfaceCount; ++index) {
         matches = matches || definition.ingressSurfaces[index].luaName == eventName;
     }
     lua_pushboolean(state, matches ? 1 : 0);

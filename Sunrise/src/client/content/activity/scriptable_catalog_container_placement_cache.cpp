@@ -80,47 +80,6 @@ void copy_config_row(const catalog::ContainerPlacementConfig& source,
     }
 }
 
-/** Replays one exact evidence slice or leaves both destination banks unchanged. */
-[[nodiscard]] CacheReplay
-replay_evidence(BuildContext& context,
-                const ContainerPlacementCacheAccess::Evidence& cached) noexcept {
-    if (cancelled(context)) {
-        return CacheReplay::cancelled;
-    }
-    catalog::Snapshot& output = *context.output;
-    // Snapshot rows are published as u32, so a bank stops at that maximum.
-    constexpr std::size_t maximum = (std::numeric_limits<std::uint32_t>::max)();
-    const std::size_t firstInlineName = output.inlineNameCandidates.size();
-    const std::size_t firstInlineByte = output.inlineNameBytes.size();
-    if (firstInlineName > maximum || cached.rows.size() > maximum - firstInlineName
-        || firstInlineByte > maximum || cached.bytes.size() > maximum - firstInlineByte) {
-        return CacheReplay::unavailable;
-    }
-    try {
-        output.inlineNameCandidates.reserve(firstInlineName + cached.rows.size());
-        output.inlineNameBytes.reserve(firstInlineByte + cached.bytes.size());
-    } catch (...) {
-        return CacheReplay::unavailable;
-    }
-    output.inlineNameBytes.insert(
-        output.inlineNameBytes.end(), cached.bytes.begin(), cached.bytes.end());
-    for (catalog::InlineNameCandidate row : cached.rows) {
-        if (cancelled(context)) {
-            output.inlineNameCandidates.resize(firstInlineName);
-            output.inlineNameBytes.resize(firstInlineByte);
-            return CacheReplay::cancelled;
-        }
-        row.firstByte += static_cast<std::uint32_t>(firstInlineByte);
-        output.inlineNameCandidates.push_back(row);
-    }
-    if (cancelled(context)) {
-        output.inlineNameCandidates.resize(firstInlineName);
-        output.inlineNameBytes.resize(firstInlineByte);
-        return CacheReplay::cancelled;
-    }
-    return CacheReplay::complete;
-}
-
 /** @return True when a cached complete graph fits every remaining scenario bank. */
 [[nodiscard]] bool graph_fits(const catalog::Snapshot& output,
                               const ContainerPlacementCacheAccess::Value& cached) noexcept {

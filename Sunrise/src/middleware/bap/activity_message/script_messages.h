@@ -7,9 +7,6 @@
 
 namespace sunrise::middleware::bap::activity_message::script_messages {
 
-/** Message type and schema the client accepts for the script-state table. */
-inline constexpr std::uint32_t kStateMessageType = 40;
-inline constexpr std::uint32_t kStateSchema = 0x80809B27U;
 /** The ten-bit record count caps the table, and the blob keeps the server-side ceiling. */
 inline constexpr std::size_t kStateMaximumRecords = 512;
 inline constexpr std::size_t kStateMaximumBlobBytes = 8'000;
@@ -58,9 +55,6 @@ encode_state(const StateBody& body, std::span<std::byte> output, std::size_t& wr
 /** Checks one exact message-40 body without retaining decoded state. */
 [[nodiscard]] bool validate_state(std::span<const std::byte> input) noexcept;
 
-/** Message type and schema the client accepts for one script event. */
-inline constexpr std::uint32_t kEventMessageType = 41;
-inline constexpr std::uint32_t kEventSchema = 0x8080866CU;
 /** The nine-bit payload length caps the event tail, and the header is fixed width. */
 inline constexpr std::size_t kEventMaximumPayloadBytes = 256;
 inline constexpr std::size_t kEventHeaderBits = 107;
@@ -90,8 +84,5 @@ encode_event(const EventBody& body, std::span<std::byte> output, std::size_t& wr
 
 /** Decodes one exact message-41 body with the declared array clamp. */
 [[nodiscard]] bool decode_event(std::span<const std::byte> input, EventBody& body) noexcept;
-
-/** Checks one exact message-41 body without retaining decoded state. */
-[[nodiscard]] bool validate_event(std::span<const std::byte> input) noexcept;
 
 } // namespace sunrise::middleware::bap::activity_message::script_messages

@@ -22,7 +22,7 @@ std::atomic_bool g_forcedSeen{false};
  * state and only the unusable bubble applies.
  * @param stage Which event this is.
  */
-void report_once(const char* stage) noexcept {
+__declspec(noinline) void report_once(const char* stage) noexcept {
     std::array<char, 96> line{};
     const int written =
         std::snprintf(line.data(), line.size(), "ev=bubbleauth stage=%s result=ok", stage);
@@ -36,6 +36,8 @@ void report_once(const char* stage) noexcept {
 using Decoder = bool(__fastcall*)(void*, void*, void*);
 using ContentUntracked = bool(__fastcall*)();
 
+#pragma code_seg(push, bubble_guard_body, ".srguard")
+
 /**
  * Runs the native roster-prefix decoder inside one thread-local authority scope.
  * @param roster Client roster container borrowed by the native decoder.
@@ -46,7 +48,7 @@ using ContentUntracked = bool(__fastcall*)();
 __declspec(noinline) bool __fastcall decoder_body(void* roster,
                                                   void* bitStream,
                                                   void* event) noexcept {
-    coordinator::CallLease lease{};
+    coordinator::CallLease lease;
     coordinator::g_callIngress(
         lease, HookSlot::bubbleAuthorityDecoder, coordinator::ConsumerKind::none);
     const auto call = reinterpret_cast<Decoder>(lease.original);
@@ -76,7 +78,7 @@ __declspec(noinline) bool __fastcall decoder_body(void* roster,
  * @return Native state, or true only inside an admitted authority decoder call.
  */
 __declspec(noinline) bool __fastcall content_untracked_body() noexcept {
-    coordinator::CallLease lease{};
+    coordinator::CallLease lease;
     coordinator::g_callIngress(
         lease, HookSlot::contentUntrackedGetter, coordinator::ConsumerKind::none);
     const auto call = reinterpret_cast<ContentUntracked>(lease.original);
@@ -95,6 +97,8 @@ __declspec(noinline) bool __fastcall content_untracked_body() noexcept {
     }
     return result;
 }
+
+#pragma code_seg(pop, bubble_guard_body)
 
 } // namespace
 

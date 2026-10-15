@@ -204,33 +204,26 @@ std::size_t point_count() noexcept {
 bool find(std::string_view name, Stem& stem) noexcept {
     stem = {};
     const std::shared_lock guard(g_lock);
-    const std::span<const Stem> rows = g_stems.rows();
-    const auto found =
-        std::lower_bound(rows.begin(), rows.end(), name, [](const Stem& row, auto key) {
-            return name_of(row) < key;
-        });
-    const bool present = found != rows.end() && name_of(*found) == name;
-    if (present) {
-        stem = *found;
+    std::size_t index = 0;
+    if (!stem_index_locked(name, index)) {
+        return false;
     }
-    return present;
+    stem = g_stems.rows()[index];
+    return true;
 }
 
 /** Finds one spawn-name hash inside one stem. */
 bool find_hash(std::string_view stem, std::uint32_t value, NameHash& nameHash) noexcept {
     nameHash = {};
     const std::shared_lock guard(g_lock);
-    const std::span<const Stem> stemRows = g_stems.rows();
-    const auto foundStem =
-        std::lower_bound(stemRows.begin(), stemRows.end(), stem, [](const Stem& row, auto key) {
-            return name_of(row) < key;
-        });
-    if (foundStem == stemRows.end() || name_of(*foundStem) != stem) {
+    std::size_t stemIndex = 0;
+    if (!stem_index_locked(stem, stemIndex)) {
         return false;
     }
+    const Stem& foundStem = g_stems.rows()[stemIndex];
     const std::span<const NameHash> bank = g_nameHashes.rows();
-    const auto first = bank.begin() + static_cast<std::ptrdiff_t>(foundStem->nameHashOffset);
-    const auto last = first + static_cast<std::ptrdiff_t>(foundStem->nameHashCount);
+    const auto first = bank.begin() + static_cast<std::ptrdiff_t>(foundStem.nameHashOffset);
+    const auto last = first + static_cast<std::ptrdiff_t>(foundStem.nameHashCount);
     const auto found = std::lower_bound(
         first, last, value, [](const NameHash& row, auto key) { return row.value < key; });
     const bool present = found != last && found->value == value;

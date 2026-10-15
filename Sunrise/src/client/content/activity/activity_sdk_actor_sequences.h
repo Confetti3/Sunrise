@@ -408,7 +408,7 @@ inline bool scan_tables(const reader::Source& source, std::vector<SequenceTableS
                            format::kActorSequenceLocalDefinitionClass}) {
         ScanContext context{&output, cls};
         reader::ScanResult result{};
-        if (!reader::scan_class(source.directory, cls, &visit_table, &context, result)) {
+        if (!reader::scan_class(source, cls, &visit_table, &context, result)) {
             return false;
         }
     }

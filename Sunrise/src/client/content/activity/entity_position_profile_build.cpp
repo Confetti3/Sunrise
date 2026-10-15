@@ -144,13 +144,6 @@ read_at(HANDLE file, std::uint64_t offset, std::span<std::byte> output) noexcept
     }
     return true;
 }
-/** The manifest identity includes the installed package builds. */
-bool fingerprint(void* opaque, const state::content_manifest::View& view) noexcept {
-    std::copy(view.buildFingerprint.begin(),
-              view.buildFingerprint.end(),
-              static_cast<profiles::Fingerprint*>(opaque)->begin());
-    return true;
-}
 /** Same-patch name conflicts cannot select an arbitrary package. */
 bool collect_name(void* opaque, const named::Entry& entry) noexcept {
     try {
@@ -370,7 +363,7 @@ bool read(void* opaque, std::uint32_t tag, std::uint32_t expected, Blob& bytes) 
 } // namespace
 bool ready() noexcept {
     profiles::Fingerprint identity{};
-    if (!state::content_manifest::visit_snapshot(&fingerprint, &identity)) {
+    if (!state::content_manifest::build_fingerprint(identity)) {
         return false;
     }
     const bool positions = profiles::confirm(identity);
@@ -381,7 +374,8 @@ bool ready() noexcept {
 bool build(const reader::Source& source, reader::Scratch& scratch) noexcept {
     try {
         profiles::Fingerprint identity{};
-        if (!state::content_manifest::visit_snapshot(&fingerprint, &identity)) {
+        // The catalog identity includes the installed package builds.
+        if (!state::content_manifest::build_fingerprint(identity)) {
             return false;
         }
         const bool positions = profiles::confirm(identity);

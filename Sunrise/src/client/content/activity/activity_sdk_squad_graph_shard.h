@@ -11,6 +11,7 @@ namespace sunrise::client::content::activity::sdk_generation::squad_inventory {
  * Appends only scenario-owned authored-squad graph contexts to one otherwise-built shard.
  * Estate-global definitions deliberately remain outside per-scenario shards.
  */
+// TODO: no generation path calls this yet, so every shard publishes empty squad graph contexts.
 [[nodiscard]] bool
 append_scenario_graph_contexts(std::uint32_t scenarioIndex,
                                const GraphSnapshot& graph,

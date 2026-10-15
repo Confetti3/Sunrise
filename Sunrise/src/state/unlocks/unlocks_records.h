@@ -68,13 +68,6 @@ void revoke(std::uint16_t recordIndex) noexcept;
 [[nodiscard]] GrantOutcome grant_chapter(std::uint16_t recordIndex) noexcept;
 
 /**
- * Advances one counted lore chapter by one objective unit.
- * @param recordIndex Native record row of the chapter.
- * @return What the advance changed, or why it changed nothing.
- */
-[[nodiscard]] GrantOutcome advance_chapter(std::uint16_t recordIndex) noexcept;
-
-/**
  * Advances the single-objective record that owns one completion flag.
  * @param flagIndex Account flag bank row.
  * @return What the advance changed, or why it changed nothing.

@@ -12,17 +12,8 @@ constexpr std::uint64_t kNodeSize = 40;
 /** A dynamic container places its payload 16 bytes after a 16-aligned header. */
 constexpr std::uint64_t kDynamicAlignment = 16;
 constexpr std::uint64_t kDynamicHeader = 16;
-/** Serialized rows align to the largest power of two below their size, capped at 16. */
+/** Serialized rows align to the next power of two at or above their size, capped at 16. */
 constexpr std::uint64_t kAlignmentCap = 8;
-
-template <typename T>
-[[nodiscard]] bool read_at(std::span<const std::byte> bytes, std::uint64_t at, T& value) noexcept {
-    if (at > bytes.size() || bytes.size() - at < sizeof(T)) {
-        return false;
-    }
-    std::memcpy(&value, bytes.data() + static_cast<std::size_t>(at), sizeof(T));
-    return true;
-}
 
 /** Rounds up to a power-of-two alignment; zero or a non power of two is refused. */
 [[nodiscard]] bool

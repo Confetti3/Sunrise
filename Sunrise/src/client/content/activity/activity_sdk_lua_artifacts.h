@@ -95,6 +95,8 @@ struct Bundle final {
     std::string activitySdkModule{};
     std::string behaviorModule{};
     std::string manifestJson{};
+    /** The mission Lua API schema, rendered from the table the VM dispatches from. */
+    std::string missionApiJson{};
     std::vector<SourceModule> activityModules{};
     std::vector<SourceModule> missionModules{};
 };
@@ -115,10 +117,6 @@ struct Result final {
 /** Publishes complete files below sdkDirectory/lua and commits activities.lua last. */
 [[nodiscard]] Status
 publish_bundle(const wchar_t* sdkDirectory, const Bundle& bundle, Result& output) noexcept;
-
-/** Builds then publishes one complete declaration transaction. */
-[[nodiscard]] Status
-publish(const wchar_t* sdkDirectory, const Source& source, Result& output) noexcept;
 
 /** @return True when the committed Lua manifest exactly matches the loaded SDK. */
 [[nodiscard]] bool is_current(const wchar_t* sdkDirectory,

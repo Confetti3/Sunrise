@@ -115,7 +115,7 @@ bool read_account(AccountState& output) noexcept {
         output = {};
         return false;
     }
-    if (!account::valid_authored(output)) {
+    if (!account::valid(output)) {
         output = {};
         return false;
     }
@@ -131,7 +131,7 @@ AccountState account() noexcept {
 
 /** The session overlay changes only after every durable account row commits. */
 bool write_account(const AccountState& value) noexcept {
-    if (!account::valid_authored(value)) {
+    if (!account::valid(value)) {
         return false;
     }
     Transaction transaction;

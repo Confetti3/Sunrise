@@ -29,6 +29,16 @@ constexpr std::array<std::byte, 23> kCatalogDomain{
     std::byte{'a'}, std::byte{'t'},    std::byte{'a'},        std::byte{'l'}, std::byte{'o'},
     std::byte{'g'}, kDomainTerminator, kCatalogDomainVersion,
 };
+/** Overlay version 1 binds the installed catalog to the files added over it. */
+constexpr std::byte kOverlayDomainVersion{1};
+/** This domain separates the overlaid catalog identity from the installed one. */
+constexpr std::array<std::byte, 23> kOverlayDomain{
+    std::byte{'S'}, std::byte{'u'},    std::byte{'n'},        std::byte{'r'}, std::byte{'i'},
+    std::byte{'s'}, std::byte{'e'},    std::byte{'C'},        std::byte{'o'}, std::byte{'n'},
+    std::byte{'t'}, std::byte{'e'},    std::byte{'n'},        std::byte{'t'}, std::byte{'O'},
+    std::byte{'v'}, std::byte{'e'},    std::byte{'r'},        std::byte{'l'}, std::byte{'a'},
+    std::byte{'y'}, kDomainTerminator, kOverlayDomainVersion,
+};
 /** UUID version 8 reserves the payload bits for this deterministic public hash. */
 constexpr std::uint8_t kUuidVersionBits = 0x80;
 /** RFC UUID variants set the high 2 bits of byte 8 to binary 10. */
@@ -188,6 +198,16 @@ bool catalog(std::span<const Row> manifestRows,
     return rows(manifestRows, rowFingerprint) && hasher.update(kCatalogDomain)
            && hasher.update(directoryFingerprint) && hasher.update(rowFingerprint)
            && hasher.finish(output);
+}
+
+/** Builds the identity of the installed catalog plus files added over it. */
+bool overlay(const Fingerprint& buildFingerprint,
+             const Fingerprint& overlayFingerprint,
+             Fingerprint& output) noexcept {
+    output = {};
+    Hasher hasher;
+    return hasher.update(kOverlayDomain) && hasher.update(buildFingerprint)
+           && hasher.update(overlayFingerprint) && hasher.finish(output);
 }
 
 /** Formats an application-defined UUID from a public row fingerprint. */

@@ -1,12 +1,26 @@
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <limits>
 #include <string_view>
 
+#include "../../patterns/registry.h"
+#include "../../patterns/signature_text.h"
 #include "activity_sdk_decode_plans_internal.h"
 
 namespace sunrise::client::content::activity::sdk_generation::decode_plans::internal {
 namespace {
+
+// Matches the codec walk's primitive size lookup: movsx rcx, r9b; lea rdx, [table];
+// mov edx, [rdx+rcx*4]. The table address comes from the wildcarded lea operand.
+constexpr std::string_view kPrimitiveSizeLoadText =
+    "49 0F BE C9 48 8D 15 ? ? ? ? 8B 14 8A 03 D3 3B D6";
+/** Compiled pattern bytes of the signature text above. */
+constexpr auto kPrimitiveSizeLoad =
+    patterns::signature<patterns::signature_length(kPrimitiveSizeLoadText)>(kPrimitiveSizeLoadText);
+/** The lea operand and the end of the lea, from the start of the match. */
+constexpr std::size_t kPrimitiveSizeOperand = 7;
+constexpr std::size_t kPrimitiveSizeNext = 11;
 
 /** PE32+ header layout the slot index depends on. */
 constexpr std::size_t kNewHeaderOffsetAt = 0x3C;
@@ -19,6 +33,7 @@ constexpr std::size_t kSizeOfImageAt = 56;
 /** The headers and section table of a mapped module fit in its first page. */
 constexpr std::size_t kPeHeaderSpan = 4096;
 constexpr std::size_t kSectionRowSize = 40;
+constexpr std::size_t kSectionCharacteristicsAt = 36;
 constexpr std::size_t kSectionLimit = 96;
 /** A tagdefs slot is 32 bytes: handle, zero pad, record pointer, 16 more bytes. */
 constexpr std::size_t kSlotSize = 32;
@@ -26,15 +41,6 @@ constexpr std::size_t kSlotStep = 8;
 /** Every bound handle sits in the 0x8080xxxx space. */
 constexpr std::uint32_t kHandleSpaceMask = 0xFFFF0000U;
 constexpr std::uint32_t kHandleSpace = 0x80800000U;
-
-template <typename T>
-[[nodiscard]] bool read_at(std::span<const std::byte> bytes, std::size_t at, T& value) noexcept {
-    if (at > bytes.size() || bytes.size() - at < sizeof(T)) {
-        return false;
-    }
-    std::memcpy(&value, bytes.data() + at, sizeof(T));
-    return true;
-}
 
 } // namespace
 
@@ -88,7 +94,7 @@ Status Image::open(const wchar_t* path, const void* module) noexcept {
     data_ = module == nullptr ? view_ : static_cast<const std::byte*>(module);
     size_ = module == nullptr ? viewSize_ : kPeHeaderSpan;
     try {
-        if (!parse_headers(module != nullptr) || !index_slots()) {
+        if (!parse_headers(module != nullptr) || !index_slots() || !resolve_primitive_sizes()) {
             return Status::executableInvalid;
         }
     } catch (...) {
@@ -145,9 +151,11 @@ bool Image::parse_headers(bool mapped) noexcept {
         std::uint32_t virtualAddress = 0;
         std::uint32_t rawSize = 0;
         std::uint32_t rawOffset = 0;
+        std::uint32_t characteristics = 0;
         if (row > image.size() || image.size() - row < kSectionRowSize
             || !read_at(image, row + 8, virtualSize) || !read_at(image, row + 12, virtualAddress)
-            || !read_at(image, row + 16, rawSize) || !read_at(image, row + 20, rawOffset)) {
+            || !read_at(image, row + 16, rawSize) || !read_at(image, row + 20, rawOffset)
+            || !read_at(image, row + kSectionCharacteristicsAt, characteristics)) {
             return false;
         }
         const std::string_view name(reinterpret_cast<const char*>(image.data() + row), 8);
@@ -157,7 +165,8 @@ bool Image::parse_headers(bool mapped) noexcept {
                         virtualSize,
                         mapped ? virtualAddress : rawOffset,
                         mapped ? virtualSize : rawSize,
-                        trimmed == ".data"};
+                        trimmed == ".data",
+                        (characteristics & IMAGE_SCN_MEM_EXECUTE) != 0};
         if (trimmed == ".vmp0" && !vmp0) {
             vmp0 = true;
             vmp0Low_ = imageBase_ + virtualAddress;
@@ -198,6 +207,49 @@ bool Image::index_slots() noexcept {
         }
     }
     return true;
+}
+
+/**
+ * Finds the primitive size table through the one code site that indexes it.
+ * @return False when the site is missing or not unique in the executable sections.
+ */
+bool Image::resolve_primitive_sizes() noexcept {
+    const std::span<const std::byte> image = bytes();
+    std::array<patterns::ImageRange, kSectionLimit> ranges{};
+    std::array<const Section*, kSectionLimit> owners{};
+    std::size_t count = 0;
+    for (const Section& section : sections_) {
+        if (!section.code || section.rawSize == 0 || section.rawOffset >= image.size()) {
+            continue;
+        }
+        const std::size_t length =
+            static_cast<std::size_t>((std::min)(section.rawSize, image.size() - section.rawOffset));
+        // The scan only reads; the range type is mutable because hook targets share it.
+        auto* const start = const_cast<std::byte*>(image.data() + section.rawOffset);
+        ranges[count] = patterns::ImageRange{std::span(start, length)};
+        owners[count++] = &section;
+    }
+    const std::array definitions{patterns::Pattern{"primitive_size_load", kPrimitiveSizeLoad}};
+    std::array<patterns::Match, 1> matches{};
+    if (!patterns::resolve_all(std::span(ranges.data(), count), definitions, matches)
+        || matches[0].status != patterns::MatchStatus::unique) {
+        return false;
+    }
+    for (std::size_t index = 0; index < count; ++index) {
+        const std::span<std::byte> range = ranges[index].bytes;
+        if (matches[0].address < range.data()
+            || matches[0].address >= range.data() + range.size()) {
+            continue;
+        }
+        const auto inside = static_cast<std::uint64_t>(matches[0].address - range.data());
+        std::int32_t displacement = 0;
+        std::memcpy(&displacement, matches[0].address + kPrimitiveSizeOperand, sizeof displacement);
+        const std::uint64_t site = imageBase_ + owners[index]->virtualAddress + inside;
+        primitiveSizes_ = site + kPrimitiveSizeNext
+                          + static_cast<std::uint64_t>(static_cast<std::int64_t>(displacement));
+        return true;
+    }
+    return false;
 }
 
 /**

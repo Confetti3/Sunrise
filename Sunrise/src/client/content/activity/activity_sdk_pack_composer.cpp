@@ -30,11 +30,6 @@ namespace {
 
 namespace evidence = state::build_data::scriptables::inline_name_evidence;
 
-/** Format-v9 state rows use bits zero and one for enabled and extraction-complete state. */
-constexpr std::uint32_t kStateEnabled = 0x1U;
-constexpr std::uint32_t kStateExtractionComplete = 0x2U;
-static_assert((kStateEnabled | kStateExtractionComplete) == format::kStateFlagMask);
-
 using detail::PreparedRanges;
 
 /** UTF-8 text is ordered by bytes, independent of the signedness of `char`. */
@@ -289,39 +284,59 @@ template <typename Text> [[nodiscard]] bool keep_legacy(StringLinker& linker, co
     return text_view(input, value) && linker.keep_legacy(value);
 }
 
-template <typename Text>
-[[nodiscard]] bool keep_extension(StringLinker& linker, const Text& input) {
-    std::string_view value{};
-    return text_view(input, value) && linker.keep_extension(value);
-}
-
-template <typename Text>
-[[nodiscard]] bool
-link_text(const StringLinker& linker, const Text& input, format::StringRef& output) noexcept {
-    std::string_view value{};
-    return text_view(input, value) && linker.reference(value, output);
-}
-
-[[nodiscard]] bool link_string(const StringLinker& linker,
-                               std::string_view input,
-                               format::StringRef& output) noexcept {
-    return valid_text(input) && linker.reference(input, output);
-}
-
-[[nodiscard]] bool link_policy_text(const StringLinker& linker,
-                                    const policy_inventory::Snapshot& source,
-                                    policy_inventory::Text input,
-                                    format::StringRef& output) noexcept {
-    std::string_view value{};
-    return policy_text_view(source, input, value) && linker.reference(value, output);
-}
-
 [[nodiscard]] bool all_inputs_present(const Inputs& inputs) noexcept {
     return inputs.activityInventory != nullptr && inputs.activityEnrichment != nullptr
            && inputs.topology != nullptr && inputs.topologyEnrichment != nullptr
            && inputs.policy != nullptr && inputs.actorRsat != nullptr
            && inputs.squadFacts != nullptr && inputs.squads != nullptr
            && inputs.authoredScenes != nullptr && inputs.behaviors != nullptr;
+}
+
+/**
+ * Builds every parent range the row translation reads.
+ * @param topology Topology rows that own bubbles, states, occurrences and slots.
+ * @param policy Policy rows that own capabilities.
+ * @param ranges Receives the ranges; partial on failure.
+ * @return True when every owner index and range is valid.
+ */
+[[nodiscard]] bool make_ranges(const topology_inventory::Snapshot& topology,
+                               const policy_inventory::Snapshot& policy,
+                               PreparedRanges& ranges) {
+    return make_owner_ranges(
+               std::span<const topology_inventory::Bubble>(topology.bubbles),
+               topology.scenarios.size(),
+               [](const topology_inventory::Bubble& row) { return row.scenarioIndex; },
+               ranges.scenarioBubbles)
+           && make_owner_ranges(
+               std::span<const topology_inventory::State>(topology.states),
+               topology.scenarios.size(),
+               [](const topology_inventory::State& row) { return row.scenarioIndex; },
+               ranges.scenarioStates)
+           && make_owner_ranges(
+               std::span<const topology_inventory::Occurrence>(topology.occurrences),
+               topology.scenarios.size(),
+               [](const topology_inventory::Occurrence& row) { return row.scenarioIndex; },
+               ranges.scenarioOccurrences)
+           && make_owner_ranges(
+               std::span<const topology_inventory::State>(topology.states),
+               topology.bubbles.size(),
+               [](const topology_inventory::State& row) { return row.bubbleIndex; },
+               ranges.bubbleStates)
+           && make_owner_ranges(
+               std::span<const topology_inventory::Slot>(topology.slots),
+               topology.objects.size(),
+               [](const topology_inventory::Slot& row) { return row.objectIndex; },
+               ranges.objectSlots)
+           && make_capability_ranges(policy,
+                                     format::SubjectKind::activity,
+                                     topology.activities.size(),
+                                     ranges.activityCapabilities)
+           && make_capability_ranges(
+               policy, format::SubjectKind::slot, topology.slots.size(), ranges.slotCapabilities)
+           && make_capability_ranges(policy,
+                                     format::SubjectKind::hostApi,
+                                     policy.hostSubjects.size(),
+                                     ranges.hostCapabilities);
 }
 
 /** Checks accepted-snapshot markers, fixed counts, and cross-inventory parent identity. */
@@ -437,41 +452,7 @@ link_text(const StringLinker& linker, const Text& input, format::StringRef& outp
         }
     }
 
-    if (!make_owner_ranges(
-            std::span<const topology_inventory::Bubble>(topology.bubbles),
-            topology.scenarios.size(),
-            [](const topology_inventory::Bubble& row) { return row.scenarioIndex; },
-            ranges.scenarioBubbles)
-        || !make_owner_ranges(
-            std::span<const topology_inventory::State>(topology.states),
-            topology.scenarios.size(),
-            [](const topology_inventory::State& row) { return row.scenarioIndex; },
-            ranges.scenarioStates)
-        || !make_owner_ranges(
-            std::span<const topology_inventory::Occurrence>(topology.occurrences),
-            topology.scenarios.size(),
-            [](const topology_inventory::Occurrence& row) { return row.scenarioIndex; },
-            ranges.scenarioOccurrences)
-        || !make_owner_ranges(
-            std::span<const topology_inventory::State>(topology.states),
-            topology.bubbles.size(),
-            [](const topology_inventory::State& row) { return row.bubbleIndex; },
-            ranges.bubbleStates)
-        || !make_owner_ranges(
-            std::span<const topology_inventory::Slot>(topology.slots),
-            topology.objects.size(),
-            [](const topology_inventory::Slot& row) { return row.objectIndex; },
-            ranges.objectSlots)
-        || !make_capability_ranges(policy,
-                                   format::SubjectKind::activity,
-                                   topology.activities.size(),
-                                   ranges.activityCapabilities)
-        || !make_capability_ranges(
-            policy, format::SubjectKind::slot, topology.slots.size(), ranges.slotCapabilities)
-        || !make_capability_ranges(policy,
-                                   format::SubjectKind::hostApi,
-                                   policy.hostSubjects.size(),
-                                   ranges.hostCapabilities)) {
+    if (!make_ranges(topology, policy, ranges)) {
         return false;
     }
 
@@ -507,49 +488,11 @@ link_text(const StringLinker& linker, const Text& input, format::StringRef& outp
 
 /** Derives only the parent ranges required to translate generation-owned rows. */
 [[nodiscard]] bool prepare_generated_ranges(const Inputs& inputs, PreparedRanges& ranges) {
-    if (!all_inputs_present(inputs)) {
-        return false;
-    }
-    const topology_inventory::Snapshot& topology = *inputs.topology;
-    const policy_inventory::Snapshot& policy = *inputs.policy;
-    return make_owner_ranges(
-               std::span<const topology_inventory::Bubble>(topology.bubbles),
-               topology.scenarios.size(),
-               [](const topology_inventory::Bubble& row) { return row.scenarioIndex; },
-               ranges.scenarioBubbles)
-           && make_owner_ranges(
-               std::span<const topology_inventory::State>(topology.states),
-               topology.scenarios.size(),
-               [](const topology_inventory::State& row) { return row.scenarioIndex; },
-               ranges.scenarioStates)
-           && make_owner_ranges(
-               std::span<const topology_inventory::Occurrence>(topology.occurrences),
-               topology.scenarios.size(),
-               [](const topology_inventory::Occurrence& row) { return row.scenarioIndex; },
-               ranges.scenarioOccurrences)
-           && make_owner_ranges(
-               std::span<const topology_inventory::State>(topology.states),
-               topology.bubbles.size(),
-               [](const topology_inventory::State& row) { return row.bubbleIndex; },
-               ranges.bubbleStates)
-           && make_owner_ranges(
-               std::span<const topology_inventory::Slot>(topology.slots),
-               topology.objects.size(),
-               [](const topology_inventory::Slot& row) { return row.objectIndex; },
-               ranges.objectSlots)
-           && make_capability_ranges(policy,
-                                     format::SubjectKind::activity,
-                                     topology.activities.size(),
-                                     ranges.activityCapabilities)
-           && make_capability_ranges(
-               policy, format::SubjectKind::slot, topology.slots.size(), ranges.slotCapabilities)
-           && make_capability_ranges(policy,
-                                     format::SubjectKind::hostApi,
-                                     policy.hostSubjects.size(),
-                                     ranges.hostCapabilities);
+    return all_inputs_present(inputs) && make_ranges(*inputs.topology, *inputs.policy, ranges);
 }
 
-/** Collects only strings referenced by legacy sections zero through twenty-two. */
+/** Collects the strings the pack rows reference. Actor sequence entries go in the extension tier.
+ */
 [[nodiscard]] bool collect_legacy_strings(const Inputs& inputs, StringLinker& linker) {
     const topology_inventory::Snapshot& topology = *inputs.topology;
     const topology_enrichment::Snapshot& enrichment = *inputs.topologyEnrichment;
@@ -808,7 +751,7 @@ bool compose(const Inputs& inputs, Storage& output) noexcept {
         if (!detail::translate_rows(inputs, ranges, strings, pending)) {
             return false;
         }
-        if (!detail::validate_storage(inputs, ranges, pending)) {
+        if (!detail::validate_storage(ranges, pending)) {
             return false;
         }
         output = std::move(pending);
@@ -840,7 +783,7 @@ bool compose_generated(const Inputs& inputs, Storage& output) noexcept {
 }
 
 /**
- * Builds a format-v12 image without changing outputs on failure.
+ * Builds a pack image without changing outputs on failure.
  * @param identity Required pack identity.
  * @param inputs Complete accepted inventories.
  * @param tables Owned final rows.

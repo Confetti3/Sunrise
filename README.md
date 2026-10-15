@@ -159,6 +159,8 @@ Pull Requests are welcome. Please follow these rules:
 - https://github.com/cohaereo/destinydocs
 - https://github.com/MontagueM/DestinyUnpacker
 - https://github.com/nblockbuster/bungie-lua-decompiler
+- https://github.com/Blam-Network/tiger
+- https://github.com/Blam-Network/api-tiger
 
 ### Other:
 

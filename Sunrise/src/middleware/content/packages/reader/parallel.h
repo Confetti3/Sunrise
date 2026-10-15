@@ -12,6 +12,37 @@ namespace sunrise::middleware::content::packages::reader::parallel {
 /** Readers one batch may run at once, whatever the machine reports. */
 inline constexpr std::size_t kMaxWorkers = 4;
 
+/** Selects the Lease constructor that does not wait. */
+struct TryAcquire {};
+/** Selects a nonblocking lease request. */
+inline constexpr TryAcquire kTryAcquire{};
+
+/**
+ * Exclusive use of the parallel reader for the calling thread.
+ * Hold one across every read, every use of kept blobs, and release(). Never nest them.
+ */
+class Lease final {
+public:
+    /** Waits for the reader. A thread that already holds it gets a lease that is not held. */
+    Lease() noexcept;
+    /** Takes the reader only if it is free. */
+    explicit Lease(TryAcquire) noexcept;
+    ~Lease() noexcept;
+
+    Lease(const Lease&) = delete;
+    Lease& operator=(const Lease&) = delete;
+    Lease(Lease&&) = delete;
+    Lease& operator=(Lease&&) = delete;
+
+    /** @return True when this lease owns the reader. */
+    [[nodiscard]] bool held() const noexcept {
+        return held_;
+    }
+
+private:
+    bool held_{};
+};
+
 /**
  * Called on the reader's own thread for one tag that read.
  * The reader index picks the caller's storage, and no two readers are ever given the same one,
@@ -42,14 +73,14 @@ using Visitor = void (*)(void* context,
  * @param tags Tags to read, in order.
  * @param visitor Required consumer, called on the reader thread.
  * @param context Caller context passed to the visitor.
- * @return True when the batch ran. False means the reader storage could not be prepared.
+ * @return True when the batch ran. False when this thread holds no lease or storage failed.
  */
 [[nodiscard]] bool read_tags(const Source& source,
                              std::span<const std::uint32_t> tags,
                              Visitor visitor,
                              void* context) noexcept;
 
-/** One blob a batch kept, valid until the next batch. */
+/** One blob a batch kept, valid until the next batch, release(), or the end of the lease. */
 struct Held {
     std::uint32_t tag{};
     std::span<const std::byte> blob;
@@ -62,13 +93,28 @@ struct Held {
  * @param source Package directory and borrowed block keys.
  * @param tags Tags to read, in order.
  * @param kept Receives one row per tag that read. Its blobs live until the next call.
- * @return True when the batch ran.
+ * @return True when the batch ran. False when this thread holds no lease.
  */
 [[nodiscard]] bool read_kept(const Source& source,
                              std::span<const std::uint32_t> tags,
                              std::vector<Held>& kept) noexcept;
 
-/** Closes every reader's files and frees the batch storage. */
+/** Closes every reader's files and frees the batch storage. Does nothing without the lease. */
 void release() noexcept;
+
+/** A lease that also calls release() when it ends, before the lease itself is dropped. */
+class ScopedRead final {
+public:
+    ScopedRead() noexcept = default;
+    ~ScopedRead() noexcept {
+        release();
+    }
+
+    ScopedRead(const ScopedRead&) = delete;
+    ScopedRead& operator=(const ScopedRead&) = delete;
+
+private:
+    Lease lease_{};
+};
 
 } // namespace sunrise::middleware::content::packages::reader::parallel

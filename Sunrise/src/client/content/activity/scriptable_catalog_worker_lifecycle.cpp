@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "../../../core/filesystem/path.h"
+#include "../../../middleware/content/packages/reader/overlay.h"
 #include "../../../state/build_data/scriptables/scriptable_catalog.h"
 #include "../items/packages/internal.h"
 #include "activity_sdk_generation_worker.h"
@@ -124,7 +125,9 @@ DWORD WINAPI thread_main(void* opaque) noexcept {
     std::shared_ptr<catalog::Snapshot> output{};
     std::shared_ptr<catalog::Snapshot> cached{};
     try {
-        if (sdk_generation::load_cached_scenario(
+        // SDK shards hold installed content only; with mod package files the server builds its own.
+        if (package_reader::overlay::files().empty()
+            && sdk_generation::load_cached_scenario(
                 work->request.scenarioTag,
                 std::string_view(work->request.name.data(), work->request.nameLength),
                 cached)) {

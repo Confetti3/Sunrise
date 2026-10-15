@@ -17,7 +17,7 @@ bool encode(const items::catalysts::Definition& value, ExoticCatalystRecord& rec
     record.completedPlugDefinitionIndex = value.completedPlugDefinitionIndex;
     record.progressPlugDefinitionIndex = value.progressPlugDefinitionIndex;
     record.effectDefinitionIndex = value.effectDefinitionIndex;
-    record.acquisitionDefinitionIndex = value.acquisitionDefinitionIndex;
+    record.acquisitionFlag = value.acquisitionFlag;
     record.completionAccountFlagIndices = value.completionAccountFlagIndices;
     record.completionFlagDefinitionIndices = value.completion.flags;
     for (std::size_t index = 0; index < value.completion.values.size(); ++index) {
@@ -49,7 +49,7 @@ bool decode(const ExoticCatalystRecord& record, items::catalysts::Definition& va
     value.completedPlugDefinitionIndex = record.completedPlugDefinitionIndex;
     value.progressPlugDefinitionIndex = record.progressPlugDefinitionIndex;
     value.effectDefinitionIndex = record.effectDefinitionIndex;
-    value.acquisitionDefinitionIndex = record.acquisitionDefinitionIndex;
+    value.acquisitionFlag = record.acquisitionFlag;
     value.completionAccountFlagIndices = record.completionAccountFlagIndices;
     value.completion.flags = record.completionFlagDefinitionIndices;
     for (std::size_t index = 0; index < value.completion.values.size(); ++index) {

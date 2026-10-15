@@ -310,6 +310,4 @@ edit(PacketDraft& draft, std::uint16_t fieldIndex, std::uint32_t element, ValueR
                                         std::uint32_t fieldRow,
                                         std::uint32_t occurrence) noexcept;
 
-[[nodiscard]] const char* codec_status_name(CodecStatus status) noexcept;
-
 } // namespace sunrise::middleware::bap::activity_message::wire_schema

@@ -37,7 +37,6 @@ enum class Status : std::uint8_t {
     luaBuild,
     publication,
     luaPublication,
-    reload,
 };
 
 /** Real pack-building boundaries exposed to presentation without changing generation state. */
@@ -69,7 +68,6 @@ struct Result final {
     state::activity_sdk::identity::Expected identity{};
     pack::Digest payloadSha256{};
     std::uint64_t fileBytes{};
-    std::uint64_t luaBytes{};
     std::uint32_t luaFiles{};
 };
 
@@ -95,23 +93,5 @@ struct Result final {
                            ProgressProbe progress,
                            void* progressContext,
                            Result& output) noexcept;
-
-/**
- * Builds and publishes the format-v13 activity and panel SDK from installed content.
- * The topology is consumed as mutable one-shot generation state because activity enrichment adds
- * its final names and exactness bit before later joins run.
- */
-[[nodiscard]] Status publish(void* module,
-                             const wchar_t* sdkDirectory,
-                             const wchar_t* packPath,
-                             const middleware::content::packages::reader::Source& source,
-                             const pack::Digest& sourceFingerprint,
-                             const activity_inventory::Snapshot& activities,
-                             topology_inventory::Snapshot& topology,
-                             const external_placements::Index& externalPlacements,
-                             bool luaDeclarations,
-                             CancelProbe cancel,
-                             void* cancelContext,
-                             Result& output) noexcept;
 
 } // namespace sunrise::client::content::activity::sdk_generation::native_pack_pipeline

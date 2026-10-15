@@ -10,29 +10,29 @@ namespace sunrise::state::activity_sdk::format {
 /** Eight-byte identity at the start of every runtime SDK pack. */
 inline constexpr std::array<char, 8> kMagic{'S', 'R', 'S', 'D', 'K', 'P', '0', '1'};
 /** Runtime-pack schema version accepted by this reader. */
-inline constexpr std::uint32_t kVersion = 42;
+inline constexpr std::uint32_t kVersion = 43;
 /** The ABI contains only activity identity, topology, placement, and panel metadata. */
 inline constexpr std::uint32_t kSectionCount = 51;
 #if defined(SUNRISE_ACTIVITY_SDK_TESTING)
 /** The runtime accepts only the checked generated SDK build. Each pin is a SHA-256 digest. */
 inline constexpr std::array<std::byte, 32> kExpectedSdkBuildDigest{
-    std::byte{0x13}, std::byte{0x1A}, std::byte{0xA4}, std::byte{0x2D}, std::byte{0xE2},
-    std::byte{0x8E}, std::byte{0xBF}, std::byte{0x73}, std::byte{0x90}, std::byte{0xA1},
-    std::byte{0xBD}, std::byte{0x47}, std::byte{0x7C}, std::byte{0xC0}, std::byte{0x16},
-    std::byte{0xBF}, std::byte{0x93}, std::byte{0x0E}, std::byte{0x1B}, std::byte{0x00},
-    std::byte{0x45}, std::byte{0x9F}, std::byte{0x89}, std::byte{0xDD}, std::byte{0xF4},
-    std::byte{0x9F}, std::byte{0xBE}, std::byte{0xED}, std::byte{0x3B}, std::byte{0x42},
-    std::byte{0xA3}, std::byte{0x20},
+    std::byte{0x07}, std::byte{0xF5}, std::byte{0xB4}, std::byte{0x50}, std::byte{0xC3},
+    std::byte{0x8F}, std::byte{0x2E}, std::byte{0xD5}, std::byte{0x46}, std::byte{0x71},
+    std::byte{0x0C}, std::byte{0xD7}, std::byte{0xE6}, std::byte{0x5A}, std::byte{0x74},
+    std::byte{0xD1}, std::byte{0x49}, std::byte{0xF0}, std::byte{0xC9}, std::byte{0x79},
+    std::byte{0xDB}, std::byte{0x47}, std::byte{0x8D}, std::byte{0xF5}, std::byte{0x0F},
+    std::byte{0xB9}, std::byte{0xD7}, std::byte{0x8A}, std::byte{0x90}, std::byte{0x53},
+    std::byte{0xDB}, std::byte{0xD3},
 };
 /** The runtime accepts only the full generated row projection for this build. */
 inline constexpr std::array<std::byte, 32> kExpectedPayloadDigest{
-    std::byte{0x39}, std::byte{0xE9}, std::byte{0x03}, std::byte{0x03}, std::byte{0x9B},
-    std::byte{0xB6}, std::byte{0x0C}, std::byte{0x08}, std::byte{0xCA}, std::byte{0x1E},
-    std::byte{0xCB}, std::byte{0x7D}, std::byte{0x19}, std::byte{0x9A}, std::byte{0x39},
-    std::byte{0x24}, std::byte{0xE8}, std::byte{0x3A}, std::byte{0x3F}, std::byte{0xBF},
-    std::byte{0x05}, std::byte{0x49}, std::byte{0x41}, std::byte{0x7B}, std::byte{0x7D},
-    std::byte{0xDB}, std::byte{0x53}, std::byte{0xC2}, std::byte{0x3F}, std::byte{0x98},
-    std::byte{0x0A}, std::byte{0x65},
+    std::byte{0xC6}, std::byte{0x68}, std::byte{0xCC}, std::byte{0x09}, std::byte{0x0C},
+    std::byte{0xE8}, std::byte{0x54}, std::byte{0xAB}, std::byte{0x43}, std::byte{0xA1},
+    std::byte{0x6E}, std::byte{0xD3}, std::byte{0xBA}, std::byte{0x17}, std::byte{0x6A},
+    std::byte{0xBA}, std::byte{0xBA}, std::byte{0x46}, std::byte{0xE3}, std::byte{0x18},
+    std::byte{0xF0}, std::byte{0x55}, std::byte{0x03}, std::byte{0x16}, std::byte{0x53},
+    std::byte{0xFE}, std::byte{0x14}, std::byte{0xA5}, std::byte{0x81}, std::byte{0x02},
+    std::byte{0xCF}, std::byte{0x42},
 };
 /** The runtime pins the independently replayed package and executable identity. */
 inline constexpr std::array<std::byte, 32> kExpectedContentKeyDigest{
@@ -46,13 +46,13 @@ inline constexpr std::array<std::byte, 32> kExpectedContentKeyDigest{
 };
 /** The runtime pins the complete normalized logical-IR identity. */
 inline constexpr std::array<std::byte, 32> kExpectedLogicalIrDigest{
-    std::byte{0x1E}, std::byte{0x91}, std::byte{0xDC}, std::byte{0xBB}, std::byte{0x7D},
-    std::byte{0xCD}, std::byte{0x5E}, std::byte{0xE0}, std::byte{0xE5}, std::byte{0x39},
-    std::byte{0x2A}, std::byte{0xF9}, std::byte{0xF6}, std::byte{0x79}, std::byte{0x0B},
-    std::byte{0x03}, std::byte{0x68}, std::byte{0xA0}, std::byte{0x61}, std::byte{0x93},
-    std::byte{0xDB}, std::byte{0xA2}, std::byte{0xC8}, std::byte{0xB8}, std::byte{0xD5},
-    std::byte{0xFA}, std::byte{0xC6}, std::byte{0x0A}, std::byte{0x88}, std::byte{0xEB},
-    std::byte{0xF6}, std::byte{0x62},
+    std::byte{0xA9}, std::byte{0x7E}, std::byte{0x2A}, std::byte{0x04}, std::byte{0xF4},
+    std::byte{0x0D}, std::byte{0x31}, std::byte{0x56}, std::byte{0xDD}, std::byte{0x6C},
+    std::byte{0x47}, std::byte{0xFD}, std::byte{0x83}, std::byte{0x59}, std::byte{0xB4},
+    std::byte{0x50}, std::byte{0x3C}, std::byte{0xAC}, std::byte{0x81}, std::byte{0xC9},
+    std::byte{0x84}, std::byte{0x33}, std::byte{0x60}, std::byte{0x89}, std::byte{0xB4},
+    std::byte{0xD4}, std::byte{0x39}, std::byte{0xAA}, std::byte{0x81}, std::byte{0xE4},
+    std::byte{0xD7}, std::byte{0x46},
 };
 #endif
 /** UINT32_MAX is the only out-of-band row or optional-string index. */
@@ -307,8 +307,26 @@ inline constexpr std::uint32_t kAuthoredSceneGateKeyOffset = 0x10U;
 inline constexpr std::uint32_t kAuthoredSceneGateOrdinalOffset = 0x58U;
 /** More gates than any installed scene declares; a larger count is a misread graph. */
 inline constexpr std::uint32_t kAuthoredSceneGateCapacity = 64U;
+/** A gate body's own connection list names the blocks that wait on the gate. */
+inline constexpr std::uint32_t kAuthoredSceneGateConnectionOffset = 0x20U;
+inline constexpr std::uint32_t kAuthoredSceneGateListenerCountOffset = 0x30U;
+/**
+ * A connection list names the ports a pin fires: a 64-bit count, then a relative pointer to u32
+ * ports, then one port or -1. Ports 0 to gates-2 are the gate ordinals.
+ */
+inline constexpr std::uint32_t kAuthoredSceneConnectionClass = 0x80806359U;
+inline constexpr std::uint32_t kAuthoredSceneConnectionCountOffset = 0x10U;
+inline constexpr std::uint32_t kAuthoredSceneConnectionListOffset = 0x18U;
+inline constexpr std::uint32_t kAuthoredSceneConnectionSingleOffset = 0x20U;
+/** Element class of a package array of u32 values. */
+inline constexpr std::uint32_t kPackageU32ArrayClass = 0x80800007U;
 inline constexpr std::uint32_t kAuthoredSceneEventKeyExact = 0x1U;
-inline constexpr std::uint32_t kAuthoredSceneEventKeyFlagMask = kAuthoredSceneEventKeyExact;
+/** A graph block waits on the gate. */
+inline constexpr std::uint32_t kAuthoredSceneEventKeyListened = 0x2U;
+/** A graph block fires the gate, so the scene sets it itself. */
+inline constexpr std::uint32_t kAuthoredSceneEventKeyFired = 0x4U;
+inline constexpr std::uint32_t kAuthoredSceneEventKeyFlagMask =
+    kAuthoredSceneEventKeyExact | kAuthoredSceneEventKeyListened | kAuthoredSceneEventKeyFired;
 /** Scene-to-squad rows retain one exact same-object package reference. */
 inline constexpr std::uint32_t kAuthoredSceneSquadSameObjectExact = 0x1U;
 /** A type-42 performance sensor names the same-object squad it drives at descriptor +0x58. */

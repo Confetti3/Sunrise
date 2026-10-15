@@ -184,7 +184,7 @@ completeness_name(manifest::BindingCompletenessStatus value) noexcept {
     return 0;
 }
 
-/** Reads one named field of a scenario record. @return False when the key is unknown. */
+/** Reads one named field of a scenario record; an unknown key reads absent, `row` is refused. */
 [[nodiscard]] bool scenario_field(const manifest::ScenarioRecord& row,
                                   std::string_view key,
                                   lua_vm::ManifestFieldDefinition& output) noexcept {
@@ -204,7 +204,7 @@ completeness_name(manifest::BindingCompletenessStatus value) noexcept {
     return true;
 }
 
-/** Reads one named field of an activity root record. @return False when the key is unknown. */
+/** Reads one named field of an activity root record; an unknown key reads absent. */
 [[nodiscard]] bool root_field(const manifest::ActivityRootRecord& row,
                               std::string_view key,
                               lua_vm::ManifestFieldDefinition& output) noexcept {
@@ -261,7 +261,7 @@ evidence_tag_first(std::span<const manifest::ActivityVariantRecord> rows,
     return result;
 }
 
-/** Reads one named field of an activity variant row. @return False when the key is unknown. */
+/** Reads one named field of an activity variant row; an unknown key reads absent. */
 [[nodiscard]] bool variant_field(std::span<const manifest::ActivityVariantRecord> rows,
                                  std::size_t index,
                                  std::string_view key,
@@ -329,7 +329,7 @@ evidence_tag_first(std::span<const manifest::ActivityVariantRecord> rows,
     return true;
 }
 
-/** Reads one named field of a binding-completeness row. @return False when the key is unknown. */
+/** Reads one named field of a binding-completeness row; an unknown key reads absent. */
 [[nodiscard]] bool completeness_field(const manifest::BindingCompleteness& row,
                                       std::string_view key,
                                       lua_vm::ManifestFieldDefinition& output) noexcept {
@@ -407,7 +407,7 @@ variant_tags(const manifest::ActivityVariantRecord& row,
                : 0;
 }
 
-/** Resolves the package tag of one 1-based activity variant row. */
+/** Resolves one tag of one activity variant row; both rows are zero-based. */
 [[nodiscard]] bool resolve_variant_tag(const void* context,
                                        const lua_vm::WorldGenerationIdentity& generation,
                                        std::uint32_t row,
@@ -438,7 +438,7 @@ variant_tags(const manifest::ActivityVariantRecord& row,
                : 0;
 }
 
-/** Resolves the payload locator of one 1-based activity variant row. */
+/** Resolves one payload locator of one activity variant row; both rows are zero-based. */
 [[nodiscard]] bool resolve_variant_locator(const void* context,
                                            const lua_vm::WorldGenerationIdentity& generation,
                                            std::uint32_t row,

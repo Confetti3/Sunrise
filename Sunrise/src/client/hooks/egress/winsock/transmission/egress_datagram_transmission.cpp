@@ -13,13 +13,6 @@ namespace {
 /** A null destination picks the connected peer only when the address length is 0. */
 constexpr int kConnectedDestinationLength = 0;
 
-/** Clears an optional send count before a denial. */
-void clear_bytes(LPDWORD bytes) noexcept {
-    if (bytes != nullptr) {
-        *bytes = 0;
-    }
-}
-
 /**
  * Redirects an explicit IPv4 destination, or checks a connected redirect-target peer.
  * @param socket Socket used when the destination is omitted.

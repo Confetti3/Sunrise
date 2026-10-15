@@ -10,12 +10,6 @@ namespace {
 
 namespace manifest = state::activity_sdk::generated_world::manifest;
 
-[[nodiscard]] std::string_view checked_key(lua_State* state) {
-    std::size_t length = 0;
-    const char* const value = luaL_checklstring(state, 2, &length);
-    return {value, length};
-}
-
 [[nodiscard]] bool current(const Impl& owner, const WorldGenerationIdentity& generation) noexcept {
     const ManifestDefinitionApi& api = owner.definitions.manifest;
     return api.context != nullptr && api.validate != nullptr && api.count != nullptr
@@ -23,19 +17,6 @@ namespace manifest = state::activity_sdk::generated_world::manifest;
            && api.resolveVariantTag != nullptr && api.variantLocatorCount != nullptr
            && api.resolveVariantLocator != nullptr && api.generation == generation
            && api.validate(api.context, generation);
-}
-
-/** Pushes one 32-byte digest as 64 lowercase hex characters. */
-void push_digest(lua_State* state, const std::array<std::byte, 32>& value) {
-    // Lowercase hex digits; every digest and byte field is spelled this way.
-    constexpr char digits[] = "0123456789abcdef";
-    std::array<char, 64> text{};
-    for (std::size_t index = 0; index < value.size(); ++index) {
-        const auto byte = static_cast<std::uint8_t>(value[index]);
-        text[index * 2U] = digits[byte >> 4U];
-        text[index * 2U + 1U] = digits[byte & 0xFU];
-    }
-    lua_pushlstring(state, text.data(), text.size());
 }
 
 void push_u64_text(lua_State* state, std::uint64_t value) {
@@ -140,7 +121,7 @@ void push_locator_collection(lua_State* state,
     if (owner == nullptr || !current(*owner, handle->generation)) {
         return luaL_error(state, "manifest collection is stale");
     }
-    const std::string_view key = checked_key(state);
+    const std::string_view key = lua_string_view(state, 2);
     if (key == "count") {
         lua_pushinteger(
             state,
@@ -176,7 +157,7 @@ void push_locator_collection(lua_State* state,
     if (owner == nullptr || !current(*owner, handle->generation)) {
         return luaL_error(state, "manifest row is stale");
     }
-    const std::string_view key = checked_key(state);
+    const std::string_view key = lua_string_view(state, 2);
     if (key == "row") {
         lua_pushinteger(state, static_cast<lua_Integer>(handle->row) + 1);
         return 1;
@@ -238,7 +219,7 @@ void push_locator_collection(lua_State* state,
     if (owner == nullptr || !current(*owner, handle->generation)) {
         return luaL_error(state, "manifest tag collection is stale");
     }
-    const std::string_view key = checked_key(state);
+    const std::string_view key = lua_string_view(state, 2);
     if (key == "count") {
         lua_pushinteger(state,
                         static_cast<lua_Integer>(owner->definitions.manifest.variantTagCount(
@@ -284,7 +265,7 @@ void push_locator_collection(lua_State* state,
     if (owner == nullptr || !current(*owner, handle->generation)) {
         return luaL_error(state, "manifest locator collection is stale");
     }
-    const std::string_view key = checked_key(state);
+    const std::string_view key = lua_string_view(state, 2);
     if (key == "count") {
         lua_pushinteger(
             state,
@@ -314,7 +295,7 @@ void push_locator_collection(lua_State* state,
                                                            locator)) {
         return luaL_error(state, "manifest locator is unavailable");
     }
-    const std::string_view key = checked_key(state);
+    const std::string_view key = lua_string_view(state, 2);
     if (key == "row") {
         lua_pushinteger(state, locator.localRow);
     } else if (key == "tag") {
@@ -349,7 +330,7 @@ void push_locator_collection(lua_State* state,
     if (owner == nullptr || !current(*owner, handle->generation)) {
         return luaL_error(state, "manifest view is stale");
     }
-    const std::string_view key = checked_key(state);
+    const std::string_view key = lua_string_view(state, 2);
     if (key == "format_version") {
         lua_pushinteger(state, manifest::kVersion);
     } else if (key == "source_fingerprint") {

@@ -12,7 +12,10 @@
 #include "../../../state/activity_sdk/generated_world/catalog_manifest.h"
 #include "../../../state/activity_sdk/generated_world/format.h"
 #include "../../../state/activity_sdk/generation/definition.h"
+#include "../../../state/build_data/hash_names/definition.h"
 #include "../../../state/build_data/scriptables/definition.h"
+#include "../../../state/content/content_catalog.h"
+#include "../scenarios/scenario_build.h"
 #include "activity_sdk_activity_inventory.h"
 #include "activity_sdk_external_placements.h"
 #include "activity_sdk_generation_worker.h"
@@ -64,6 +67,14 @@ struct Work final {
     std::vector<lua_artifacts::ScenarioWorldSource> scenarioWorldSources{};
     /** Placements the scenarios load from container lists and type-4 descriptors. */
     external_placements::Index externalPlacements{};
+    /** Layouts read from installed packages only. Built only when a mod serves package files. */
+    std::unique_ptr<::sunrise::client::content::scenarios::LayoutSet> installedLayouts{};
+    /** Named definitions read from installed packages only, built with the layouts. */
+    std::vector<state::content::Definition> installedDefinitions{};
+    /** Identifier names read from installed packages only, sorted by hash. */
+    std::vector<state::build_data::hash_names::Name> installedHashNames{};
+    /** Tables the scenario builds read. Null members read the ones State publishes. */
+    builder::BuildTables tables{};
     generated::Digest payloadSha256{};
     std::uint64_t packBytes{};
     std::uint32_t luaFiles{};
@@ -108,6 +119,16 @@ void publish_progress(state::activity_sdk::generation::Status status,
 /** Converts and checks the package-backed activity inventory used by every later stage. */
 [[nodiscard]] bool build_inventory(Work& work, const package_reader::Source& source) noexcept;
 
+/**
+ * Builds the destination layouts, named definitions and identifier names from installed packages.
+ * Needed when a mod serves package files, because the tables State publishes then include them.
+ * @param work Pass whose scenario builds read the tables; its tables stay empty on failure.
+ * @param source Installed-only package source with block keys.
+ * @return True when all three tables are complete.
+ */
+[[nodiscard]] bool build_installed_tables(Work& work,
+                                          const package_reader::Source& source) noexcept;
+
 /** Emits transparent positional trigger declarations for one mission module. */
 [[nodiscard]] bool build_world_source(const catalog::Snapshot& snapshot,
                                       lua_artifacts::ScenarioWorldSource& result);
@@ -119,10 +140,6 @@ void publish_progress(state::activity_sdk::generation::Status status,
 /** @return True when the persisted binding partition is safe to consume. */
 [[nodiscard]] bool binding_ready(const manifest::BindingCompleteness& completeness,
                                  std::size_t activityCount) noexcept;
-
-/** Converts the checked native binding partition to its persistent form. */
-[[nodiscard]] bool convert_binding_completeness(const inventory::BindingCompleteness& input,
-                                                manifest::BindingCompleteness& output) noexcept;
 
 /** Formats the content-addressed path for one exact scenario payload. */
 [[nodiscard]] bool shard_path(const std::wstring& directory,

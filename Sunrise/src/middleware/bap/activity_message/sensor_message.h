@@ -11,11 +11,9 @@ namespace sunrise::middleware::bap::activity_message::sensor_message {
 /** Message type and the schemas the client accepts for the sensor envelope. */
 inline constexpr std::uint32_t kMessageType = 7;
 inline constexpr std::uint32_t kClientReferenceSchema = 0x80809C42U;
-inline constexpr std::uint32_t kSchemaHandleSchema = 0x80800046U;
 /** All-ones names no selected body; the client then reads only the short header. */
 inline constexpr std::uint32_t kAbsentSchema = 0xFFFFFFFFU;
 /** Header sizes with and without a selected body, in bits then bytes. */
-inline constexpr std::size_t kClientReferenceBits = 55;
 inline constexpr std::size_t kAbsentHeaderBits = 56;
 inline constexpr std::size_t kPresentHeaderBits = 88;
 inline constexpr std::size_t kAbsentByteCount = kAbsentHeaderBits / 8U;

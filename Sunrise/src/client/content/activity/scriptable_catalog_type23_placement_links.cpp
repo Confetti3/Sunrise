@@ -206,8 +206,8 @@ descriptor_object(const catalog::Snapshot& source, const catalog::Descriptor& de
         active = scenarioActive;
     }
     link.candidateCount = static_cast<std::uint32_t>(retained);
-    link.activeCandidateCount = static_cast<std::uint32_t>((
-        std::min)(active, static_cast<std::uint64_t>((std::numeric_limits<std::uint32_t>::max)())));
+    link.activeCandidateCount = static_cast<std::uint32_t>((std::min)(
+        active, static_cast<std::uint64_t>((std::numeric_limits<std::uint32_t>::max)())));
     if (active == 0) {
         ++output.type23PlacementDiagnostics.zeroActiveCandidates;
     } else if (active > 1) {

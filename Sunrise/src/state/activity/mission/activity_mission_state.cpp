@@ -31,12 +31,7 @@ namespace sunrise::state::activity::mission {
 }
 
 [[nodiscard]] bool same_program(const ProgramKey& left, const ProgramKey& right) noexcept {
-    return left.sdkBuildSha256 == right.sdkBuildSha256
-           && left.worldGenerationSha256 == right.worldGenerationSha256
-           && left.scriptSourceSha256 == right.scriptSourceSha256
-           && left.activityDefinition == right.activityDefinition
-           && left.worldScenarioTag == right.worldScenarioTag
-           && left.activityIndex == right.activityIndex && left.publicTarget == right.publicTarget;
+    return left == right;
 }
 
 [[nodiscard]] SessionRecord* find_record(ActivityState& state,
@@ -69,6 +64,7 @@ namespace sunrise::state::activity::mission {
         return false;
     }
     output.activityStateRevision = activity.stateRevision;
+    output.recordRevision = record.recordRevision;
     return true;
 }
 
@@ -376,6 +372,83 @@ namespace {
 
 } // namespace
 
+/** Builds the replacement record; publishes nothing. */
+Status prepare_reload(const Snapshot& current,
+                      const ProgramKey& program,
+                      const CommitCandidate& transaction,
+                      Snapshot& output) noexcept {
+    output = {};
+    const MissionState& prior = current.state;
+    if (!valid_program(program) || !prior.programBound || !prior.started) {
+        return Status::invalidProgram;
+    }
+    if (!prior.pendingIntents.empty()) {
+        return Status::intentMismatch;
+    }
+    if (!prior.faulted && prior.inputSequence != prior.issuedInputSequence) {
+        return Status::inputSequenceMismatch;
+    }
+    if (transaction.nextInputSequence != prior.inputSequence
+        || (transaction.nextRevision != prior.revision
+            && (prior.revision == (std::numeric_limits<std::uint64_t>::max)()
+                || transaction.nextRevision != prior.revision + 1))
+        || !transaction.started) {
+        return Status::invalidTransition;
+    }
+    if (transaction.variables.size() > kVariableCapacity) {
+        return Status::variableCapacity;
+    }
+    if (transaction.timers.size() > kTimerCapacity) {
+        return Status::timerCapacity;
+    }
+    if (!valid_variables(transaction.variables)) {
+        return Status::invalidVariable;
+    }
+    MissionState baseline{};
+    if (!copy_mission_state(prior, baseline)) {
+        return Status::outOfMemory;
+    }
+    baseline.faulted = false;
+    baseline.issuedInputSequence = baseline.inputSequence;
+    const Status transition = transition_status(baseline, transaction);
+    if (transition != Status::ready) {
+        return transition;
+    }
+    const Status merged =
+        merge_intents(baseline, transaction.nextRevision, transaction.pendingIntents, output.state);
+    if (merged != Status::ready) {
+        return merged;
+    }
+    MissionState& next = output.state;
+    const bool changed = prior.phase != transaction.phase || !transaction.pendingIntents.empty()
+                         || !same_variables(prior, transaction.variables)
+                         || !same_timers(prior, transaction.timers)
+                         || prior.nextTimerSequence != transaction.nextTimerSequence
+                         || prior.nextIntentKey != transaction.nextIntentKey;
+    if (changed && transaction.nextRevision == prior.revision) {
+        output = {};
+        return Status::invalidTransition;
+    }
+    std::copy(transaction.variables.begin(), transaction.variables.end(), next.variables.begin());
+    std::fill(next.variables.begin() + static_cast<std::ptrdiff_t>(transaction.variables.size()),
+              next.variables.end(),
+              ScriptVariable{});
+    std::copy(transaction.timers.begin(), transaction.timers.end(), next.timers.begin());
+    std::fill(next.timers.begin() + static_cast<std::ptrdiff_t>(transaction.timers.size()),
+              next.timers.end(),
+              MissionTimer{});
+    next.program = program;
+    next.revision = transaction.nextRevision;
+    next.nextTimerSequence = transaction.nextTimerSequence;
+    next.nextIntentKey = transaction.nextIntentKey;
+    next.phase = transaction.phase;
+    next.variableCount = transaction.variables.size();
+    next.timerCount = transaction.timers.size();
+    output.recordRevision = current.recordRevision;
+    output.activityStateRevision = current.activityStateRevision;
+    return Status::ready;
+}
+
 /** Binds a program once, or reads the existing exact program state. */
 Status bind(const SessionBinding& binding, const ProgramKey& program, Snapshot& output) noexcept {
     output = {};
@@ -405,44 +478,6 @@ Status bind(const SessionBinding& binding, const ProgramKey& program, Snapshot& 
             candidate.inputSequence = candidate.issuedInputSequence;
             record->mission = std::move(candidate);
         }
-    }
-    if (status == Status::ready && !copy_snapshot(activity, binding, *record, output)) {
-        status = Status::outOfMemory;
-    }
-    ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
-    return status;
-}
-
-/** Replaces the bound program identity while keeping the mission record. */
-Status rebind_program(const SessionBinding& binding,
-                      const ProgramKey& expected,
-                      const ProgramKey& replacement,
-                      Snapshot& output) noexcept {
-    output = {};
-    if (!valid_program(expected) || !valid_program(replacement)) {
-        return Status::invalidProgram;
-    }
-    if (same_program(expected, replacement)) {
-        return Status::invalidTransition;
-    }
-    AcquireSRWLockExclusive(&runtime::storage::g_stateLock);
-    ActivityState& activity = runtime::storage::g_state.activity;
-    SessionRecord* const record = find_record(activity, binding);
-    Status status = Status::ready;
-    if (record == nullptr) {
-        status = Status::invalidBinding;
-    } else if (!record->mission.programBound || !same_program(record->mission.program, expected)) {
-        status = Status::programMismatch;
-    } else if (record->mission.faulted) {
-        status = Status::invalidTransition;
-    } else if (!record->mission.pendingIntents.empty()) {
-        status = Status::intentMismatch;
-    } else if (record->mission.inputSequence != record->mission.issuedInputSequence) {
-        status = Status::inputSequenceMismatch;
-    } else if (!publish(activity, *record)) {
-        status = Status::revisionExhausted;
-    } else {
-        record->mission.program = replacement;
     }
     if (status == Status::ready && !copy_snapshot(activity, binding, *record, output)) {
         status = Status::outOfMemory;
@@ -698,48 +733,6 @@ Status fault(const SessionBinding& binding,
             status = Status::revisionExhausted;
         } else {
             record->mission.faulted = true;
-        }
-    }
-    if (status == Status::ready && !copy_snapshot(activity, binding, *record, output)) {
-        status = Status::outOfMemory;
-    }
-    ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
-    return status;
-}
-
-/** Clears one exact program fault when no durable output remains. */
-Status recover(const SessionBinding& binding,
-               const ProgramKey& program,
-               std::uint64_t expectedRevision,
-               Snapshot& output) noexcept {
-    output = {};
-    if (!valid_program(program)) {
-        return Status::invalidProgram;
-    }
-    AcquireSRWLockExclusive(&runtime::storage::g_stateLock);
-    ActivityState& activity = runtime::storage::g_state.activity;
-    SessionRecord* const record = find_record(activity, binding);
-    Status status = Status::ready;
-    if (record == nullptr) {
-        status = Status::invalidBinding;
-    } else if (!record->mission.programBound || !same_program(record->mission.program, program)) {
-        status = Status::programMismatch;
-    } else if (record->mission.revision != expectedRevision) {
-        status = Status::revisionMismatch;
-    } else if (!record->mission.pendingIntents.empty()) {
-        status = Status::intentMismatch;
-    } else if (record->mission.faulted) {
-        MissionState candidate{};
-        if (!copy_mission_state(record->mission, candidate)) {
-            status = Status::outOfMemory;
-        } else {
-            candidate.faulted = false;
-            candidate.issuedInputSequence = candidate.inputSequence;
-            if (!publish(activity, *record)) {
-                status = Status::revisionExhausted;
-            } else {
-                record->mission = std::move(candidate);
-            }
         }
     }
     if (status == Status::ready && !copy_snapshot(activity, binding, *record, output)) {

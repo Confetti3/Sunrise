@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <imgui.h>
 
+#include "../../../core/settings/settings.h"
 #include "../../../core/ui/components/label/ui_label_component.h"
 #include "../../../core/ui/components/toggle/ui_toggle_component.h"
 #include "../../movement/movement_settings_store.h"
@@ -128,6 +129,12 @@ key_picker(const char* id, CaptureTarget target, std::uint32_t& virtualKey, floa
 
 /** Draws the movement module inside the active Core UI frame. */
 void draw() noexcept {
+    if (!core::settings::get().client.cheats) {
+        ImGui::TextDisabled("Locked (cheats off)");
+        ImGui::SetItemTooltip("Set client.cheats to true in settings.json and restart. "
+                              "Progress is not saved while cheats are on.");
+        return;
+    }
     client::movement::Settings settings = client::movement::get();
     bool changed = false;
 

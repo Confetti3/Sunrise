@@ -89,8 +89,7 @@ lease_counts(std::uint64_t sessionId, std::size_t& held, std::size_t& reserved) 
 
 /**
  * Copies both lease masks one session currently holds.
- * The physics replica context needs the bits, not the counts: an allocation picks one exact index
- * out of the server reserve, and State refuses a context whose two masks overlap.
+ * TODO: no caller yet. The physics replica context needs the bits to pick an exact reserve index.
  * @param sessionId Activity session id.
  * @param held Receives the slots the client leases.
  * @param reserved Receives the slots the host held back for itself.

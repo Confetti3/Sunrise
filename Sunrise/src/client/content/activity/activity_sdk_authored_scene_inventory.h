@@ -24,7 +24,7 @@ struct Text final {
     std::uint16_t length{};
 };
 
-/** One exact format-v12 type-43 package resource before its ID is linked. */
+/** One exact type-43 package resource before its ID is linked. */
 struct Resource final {
     Text id{};
     std::uint32_t slotIndex{};
@@ -50,7 +50,7 @@ struct EventKey final {
     std::uint32_t reserved{};
 };
 
-/** One exact format-v12 same-object scene-to-squad edge before its ID is linked. */
+/** One exact same-object scene-to-squad edge before its ID is linked. */
 struct SquadEdge final {
     Text id{};
     std::uint32_t sceneSlotIndex{};

@@ -1,10 +1,12 @@
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <string_view>
 
+#include "mission_script_lua_dispatch.h"
 #include "mission_script_lua_internal.h"
 
 namespace sunrise::server::activity::mission::lua_vm::detail {
@@ -145,6 +147,23 @@ void push_variable_value(lua_State* state, const VariableValue& value) {
     return 1;
 }
 
+/** State view members in table order. */
+constexpr std::array<Binding<Impl>, std::size(api::kStateMembers)> kStateBindings{{
+    {"phase",
+     nullptr,
+     [](lua_State* state, const Impl& impl) {
+         const CallFrame& frame = active_frame(state);
+         lua_pushinteger(state, frame.candidate.phaseChanged ? frame.candidate.phase : impl.phase);
+     }},
+    {"revision",
+     nullptr,
+     [](lua_State* state, const Impl& impl) { push_u64_string(state, impl.stateRevision); }},
+    {"variable", &state_variable},
+    {"has_variable", &state_has_variable},
+    {"timer", &state_timer},
+}};
+static_assert(bound_to<Impl>(api::kStateMembers, kStateBindings));
+
 } // namespace
 
 /** Stages a phase change that commits with the enclosing callback. */
@@ -271,23 +290,8 @@ void push_variable_value(lua_State* state, const VariableValue& value) {
 /** Reads one StateView member: phase, revision, or an authorized query. */
 [[nodiscard]] int state_index(lua_State* state) {
     static_cast<void>(luaL_checkudata(state, 1, kStateMetatable));
-    Impl* const impl = impl_from_state(state);
-    const std::string_view key = lua_string_view(state, 2);
-    if (key == "phase") {
-        const CallFrame& frame = active_frame(state);
-        lua_pushinteger(state, frame.candidate.phaseChanged ? frame.candidate.phase : impl->phase);
-    } else if (key == "revision") {
-        push_u64_string(state, impl->stateRevision);
-    } else if (key == "variable") {
-        lua_pushcfunction(state, &state_variable);
-    } else if (key == "has_variable") {
-        lua_pushcfunction(state, &state_has_variable);
-    } else if (key == "timer") {
-        lua_pushcfunction(state, &state_timer);
-    } else {
-        lua_pushnil(state);
-    }
-    return 1;
+    const Impl* const impl = impl_from_state(state);
+    return dispatch<Impl>(state, kStateBindings, lua_string_view(state, 2), *impl);
 }
 
 void register_state_metatables(lua_State* state) {

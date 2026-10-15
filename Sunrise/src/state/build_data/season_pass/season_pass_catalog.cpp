@@ -96,10 +96,4 @@ std::size_t count() noexcept {
     return g_rewards.count();
 }
 
-/** @return The wrapper package count, read under the lock. */
-std::size_t package_count() noexcept {
-    const std::shared_lock guard(g_lock);
-    return g_packages.count();
-}
-
 } // namespace sunrise::state::build_data::season_pass

@@ -30,12 +30,8 @@ bool encode_response(const Message& request,
     if (output.size() < kEnvelopeHeaderSize) {
         return false;
     }
-    encoding::write_u16_be(output.first<encoding::kU16Size>(), request.opcode);
-    encoding::write_u32_be(output.subspan<encoding::kU16Size, encoding::kU32Size>(),
-                           request.transactionId);
-
-    encoding::bits::Writer writer(output.subspan(kEnvelopeHeaderSize));
-    bool encoded = sunrise::middleware::web_service::status::write_fields(writer, shape, status);
+    encoding::bits::Writer writer = begin_response(request, output);
+    bool encoded = status::write_fields(writer, shape, status);
     encoded = encoded && writer.write(0, kAbsentTrailerWidth);
 
     std::size_t payloadSize = 0;

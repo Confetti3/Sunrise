@@ -28,24 +28,8 @@ enum class MigrationMessageId : std::uint8_t {
     electionRefuse = 28,
 };
 
-/** Declared decoded sizes the registry holds for those ids. */
-inline constexpr std::uint32_t kHostHandoffSize = 100;
-/** See kHostHandoffSize. */
-inline constexpr std::uint32_t kPeerHandoffSize = 100;
-/** See kHostHandoffSize. */
-inline constexpr std::uint32_t kHostTransitionSize = 16;
-/** See kHostHandoffSize. */
+/** Declared decoded size the registry holds for the host-reestablish id. */
 inline constexpr std::uint32_t kHostReestablishSize = 136;
-/** See kHostHandoffSize. */
-inline constexpr std::uint32_t kReestablishPendingSize = 8;
-/** See kHostHandoffSize. */
-inline constexpr std::uint32_t kHostDeclineSize = 98;
-/** See kHostHandoffSize. */
-inline constexpr std::uint32_t kPeerReestablishSize = 8;
-/** See kHostHandoffSize. */
-inline constexpr std::uint32_t kElectionSize = 2992;
-/** See kHostHandoffSize. */
-inline constexpr std::uint32_t kElectionRefuseSize = 100;
 
 /** Handoff progress is a percentage and never exceeds this. */
 inline constexpr std::uint8_t kMaximumHandoffProgress = 100;

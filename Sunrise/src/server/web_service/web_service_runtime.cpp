@@ -3,10 +3,10 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
-#include <chrono>
 #include <cstdio>
 
 #include "../../core/logging/log.h"
+#include "../../core/runtime/server_clock.h"
 #include "../../middleware/web_service/messages/opcode1801.h"
 #include "../../middleware/web_service/messages/opcode1821.h"
 #include "../../middleware/web_service/messages/opcode1901.h"
@@ -43,12 +43,8 @@ constexpr std::uint16_t kItemStateOpcode = 406;
 constexpr std::uint16_t kItemDismantleOpcode = 402;
 /** Web Service opcode used by Collections to create one item instance. */
 constexpr std::uint16_t kItemAcquisitionOpcode = 1820;
-/**
- * Logical status of a refused action. The descriptor biases logical zero to the wire success the
- * Client expects, so any other logical value reports a refusal. Its five bits hold no error
- * taxonomy, so one code covers every reason and the log line names the actual one.
- */
-constexpr std::int32_t kRefusedStatus = 1;
+/** One refusal code covers every reason; the log line names the actual one. */
+constexpr std::int32_t kRefusedStatus = middleware::web_service::kRefusedStatusCode;
 
 /**
  * Opcodes whose reply may name a resident the client no longer holds.
@@ -67,20 +63,10 @@ constexpr std::int32_t kArtifactResetGlimmerCost = 20'000;
 /** The artifact vendor's reset row. Every lower row unlocks one mod tier. */
 constexpr std::uint16_t kArtifactResetSaleIndex = 5;
 
-/**
- * Reads the server's own clock for the purchase clock rule.
- * The system clock counts from the Unix epoch, which is the same base the request field uses.
- * @return Current time in Unix seconds.
- */
-[[nodiscard]] std::int64_t server_clock_seconds() noexcept {
-    const auto sinceEpoch = std::chrono::system_clock::now().time_since_epoch();
-    return std::chrono::duration_cast<std::chrono::seconds>(sinceEpoch).count();
-}
-
 /** Issues a strictly increasing family-5 clock, including multiple requests in one second. */
 std::uint64_t next_family5_clock() noexcept {
     static std::atomic<std::uint64_t> issued{0};
-    const auto wall = static_cast<std::uint64_t>(server_clock_seconds());
+    const auto wall = static_cast<std::uint64_t>(core::runtime::server_clock_seconds());
     std::uint64_t previous = issued.load(std::memory_order_relaxed);
     std::uint64_t next = 0;
     do {

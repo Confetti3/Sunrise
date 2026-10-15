@@ -55,7 +55,7 @@ public:
         return algorithm_ != nullptr && hash_ != nullptr;
     }
 
-    /** Adds one span to the running hash. @return False when the hash is not ready or too long. */
+    /** Hashes one whole span. @return False when the hash is not ready or the span is too long. */
     [[nodiscard]] bool hash(std::span<const std::byte> input, crypto::Digest& output) noexcept {
         return ready() && input.size() <= (std::numeric_limits<ULONG>::max)()
                && BCryptHashData(hash_,
@@ -93,53 +93,10 @@ struct PendingSquad final {
     std::vector<SquadAnchor> anchors{};
 };
 
-/** @return True when one topology text owns exactly its declared bytes. */
-[[nodiscard]] bool text_view(const topology::Text& text, std::string_view& output) noexcept {
-    output = {};
-    if (text.length >= text.value.size()) {
-        return false;
-    }
-    output = std::string_view(text.value.data(), text.length);
-    return text.value[text.length] == '\0';
-}
-
-/** Formats one bounded identity string. */
-template <typename... Values>
-[[nodiscard]] bool format_text(std::string& output, const char* pattern, Values... values) {
-    std::array<char, 192> bytes{};
-    const int count = std::snprintf(bytes.data(), bytes.size(), pattern, values...);
-    if (count < 0 || static_cast<std::size_t>(count) >= bytes.size()) {
-        return false;
-    }
-    output.assign(bytes.data(), static_cast<std::size_t>(count));
-    return true;
-}
-
-/** Appends one unsigned integer in little-endian order. */
-template <typename Value>
-[[nodiscard]] bool append_little(std::vector<std::byte>& output, Value value) {
-    static_assert(std::is_unsigned_v<Value>);
-    if (output.size() > (std::numeric_limits<std::size_t>::max)() - sizeof(Value)) {
-        return false;
-    }
-    for (std::size_t index = 0; index < sizeof(Value); ++index) {
-        output.push_back(static_cast<std::byte>((value >> (index * 8U)) & Value{0xFFU}));
-    }
-    return true;
-}
-
-/** Appends one length-prefixed byte string to a domain hash input. */
-[[nodiscard]] bool append_hash_part(std::vector<std::byte>& output, std::string_view value) {
-    if (!append_little(output, static_cast<std::uint64_t>(value.size()))
-        || value.size() > (std::numeric_limits<std::size_t>::max)() - output.size()) {
-        return false;
-    }
-    output.reserve(output.size() + value.size());
-    for (const unsigned char byte : value) {
-        output.push_back(static_cast<std::byte>(byte));
-    }
-    return true;
-}
+using detail::append_hash_part;
+using detail::append_little;
+using detail::format_text;
+using detail::text_view;
 
 /** Replays the SDK builder's typed SHA-256 domain hash. */
 [[nodiscard]] bool domain_hash(SquadIdHasher& hasher,

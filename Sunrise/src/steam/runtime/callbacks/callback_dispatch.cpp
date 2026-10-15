@@ -19,40 +19,6 @@
 namespace sunrise::steam::runtime::callbacks {
 namespace {
 
-/** The server's own tick, matching the frame cadence the pump used to give it. */
-constexpr std::uint64_t kServerTickMs = 10;
-std::atomic_bool g_serverThreadStarted{false};
-
-/**
- * Runs the server on its own thread. The game frame can block on a loopback send until the
- * server answers, so the game must never be the server's clock.
- */
-DWORD WINAPI server_thread(LPVOID) noexcept {
-    for (;;) {
-        Sleep(static_cast<DWORD>(kServerTickMs));
-        // The service's two-second timing report is also the thread's proof of life.
-        server::service(GetTickCount64());
-    }
-}
-
-/** Starts the server thread once, after the first activated slice. */
-void start_server_thread_once() noexcept {
-    if (g_serverThreadStarted.exchange(true, std::memory_order_acq_rel)) {
-        return;
-    }
-    const HANDLE thread = CreateThread(nullptr, 0, &server_thread, nullptr, 0, nullptr);
-    if (thread != nullptr) {
-        CloseHandle(thread);
-        core::log::write(core::log::Channel::server,
-                         core::log::Level::info,
-                         "ev=core stage=pump result=server_thread");
-    } else {
-        core::log::write(core::log::Channel::server,
-                         core::log::Level::error,
-                         "ev=core stage=pump result=server_thread_fail");
-    }
-}
-
 /** Steam callback vtable slots for its two Run overloads. */
 enum class CallbackMethod : std::size_t {
     callResult = 0,
@@ -187,7 +153,7 @@ void run_slice() noexcept {
         // Samples the healthy cadence. The assert observer samples it again once this tick stops.
         client::hooks::net_tick_probe::sample();
         // Everything below must run on the game's thread; the server gets its own from here on.
-        runtime::callbacks::start_server_thread_once();
+        server::start_service();
         client::content::investment::worker::service(now);
         client::content::activity::sdk_generation::service();
         client::content::activity::scriptables::service();

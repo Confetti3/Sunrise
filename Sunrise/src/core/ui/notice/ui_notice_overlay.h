@@ -7,6 +7,8 @@ namespace sunrise::core::ui::notice {
 
 /** Longest notice text kept. It does not include a null. */
 inline constexpr std::size_t kTextCapacity = 128;
+/** Notices shown at once. 4 covers a burst without hiding the first one. */
+inline constexpr std::size_t kNoticeCapacity = 4;
 
 /**
  * Raises one user-visible notice about a Sunrise failure. Never blocks, so a fault handler can

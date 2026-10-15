@@ -35,8 +35,6 @@ constexpr auto kMemberRecord = signature<signature_length(kMemberRecordText)>(kM
 constexpr std::size_t kManagerCallOffset = 8;
 /** A near call is its opcode and a 4-byte displacement. */
 constexpr std::size_t kNearCallBytes = 5;
-/** Intel's direct near-call opcode guards a decoded target against layout drift. */
-constexpr std::byte kNearCallOpcode{0xE8};
 
 // Matches the membership-revision test; the exact field offset is what makes it unique.
 constexpr std::string_view kSessionReadyText = "83 B9 6C 08 00 00 00 0F 95 C0 C3";
@@ -395,8 +393,7 @@ bool install() noexcept {
         scan_main_image_unique(kCommitSelection, "mission_launch_commit_selection");
     if (record == nullptr || sessionReady == nullptr || memberReady == nullptr
         || construct == nullptr || valid == nullptr || name == nullptr || clearSite == nullptr
-        || select == nullptr || commit == nullptr || record[kManagerCallOffset] != kNearCallOpcode
-        || clearSite[0] != kNearCallOpcode) {
+        || select == nullptr || commit == nullptr) {
         core::log::write(core::log::Channel::client,
                          core::log::Level::warn,
                          "ev=mission_launch stage=install result=fail reason=target");

@@ -53,7 +53,7 @@ extern SRWLOCK g_hookLock;
 extern std::atomic_uint g_activeHookCalls;
 /** Per-thread depth stops an SRW upgrade from inside an original SDK call chain. */
 extern thread_local std::size_t g_hookCallDepth;
-/** Shared-lock state that allows renderer work only while both hooks are attached. */
+/** Shared-lock state that allows renderer work only while all three hooks are attached. */
 extern bool g_acceptRendererCalls;
 
 /** @return True only when no outer replacement call can still use retained hook state. */

@@ -24,6 +24,21 @@ namespace {
 /** Templates need a positive counter; the native reducer chooses the transported value. */
 constexpr std::int32_t kUncommittedCounter = 1;
 
+// Table entries of the slot members this file implements.
+constexpr const api::MemberSpec& kOccupancy = api::slot_member("set_occupancy_condition");
+constexpr const api::MemberSpec& kDarknessZone = api::slot_member("set_darkness_zone");
+constexpr const api::MemberSpec& kObjectFilter = api::slot_member("set_object_filter");
+constexpr const api::MemberSpec& kWatchDamage = api::slot_member("watch_damage");
+constexpr const api::MemberSpec& kInteractable = api::slot_member("set_interactable_object");
+constexpr const api::MemberSpec& kSetGhostLink = api::slot_member("set_ghost_link");
+constexpr const api::MemberSpec& kGhostLink = api::slot_member("ghost_link");
+constexpr const api::MemberSpec& kObjectActive = api::slot_member("set_object_active");
+constexpr const api::MemberSpec& kSetChannel = api::slot_member("set_channel");
+constexpr const api::MemberSpec& kTransition = api::slot_member("transition");
+constexpr const api::MemberSpec& kFireTrigger = api::slot_member("fire_trigger");
+constexpr const api::MemberSpec& kDisarmTrigger = api::slot_member("disarm_trigger");
+constexpr const api::MemberSpec& kApplied = api::slot_member("applied");
+
 /** @return True when one live Slot row is an exact type-23 device. */
 [[nodiscard]] bool exact_device_slot(const SlotDefinition& definition) noexcept {
     return definition.slotType == format::kDeviceSlotType
@@ -74,7 +89,7 @@ constexpr std::int32_t kUncommittedCounter = 1;
  * @return False with the Lua error already raised.
  */
 [[nodiscard]] bool parse_object_burst(lua_State* state, Intent& intent) {
-    lua_getfield(state, 2, "with");
+    lua_getfield(state, 2, optional_key(kObjectActive, "with", api::ValueKind::list));
     if (lua_isnoneornil(state, -1)) {
         lua_pop(state, 1);
         return true;
@@ -131,12 +146,15 @@ constexpr std::int8_t kFilterModeInside = 1;
 [[nodiscard]] int slot_set_occupancy_condition(lua_State* state) {
     const auto* const handle =
         static_cast<const SlotHandle*>(luaL_checkudata(state, 1, kSlotMetatable));
-    // Named arguments this call accepts. Any other key is refused.
-    static constexpr std::array<std::string_view, 2> kDeclared{"filter", "value"};
-    refuse_unknown_arguments(state, kDeclared);
+    refuse_unknown_arguments(state, kOccupancy);
     SlotHandle reference{};
-    const bool filtered = optional_argument(state, "filter", kSlotMetatable, reference);
-    const lua_Integer value = checked_integer_argument(state, "value");
+    const bool filtered =
+        optional_argument(state,
+                          optional_key(kOccupancy, "filter", api::ValueKind::handle),
+                          kSlotMetatable,
+                          reference);
+    const lua_Integer value =
+        checked_integer_argument(state, required_key(kOccupancy, "value", api::ValueKind::integer));
     SlotDefinition slot{};
     SlotDefinition playerSet{};
     if (!current_slot(state, *handle, slot)
@@ -172,20 +190,21 @@ constexpr std::int8_t kFilterModeInside = 1;
     namespace darkness = middleware::bap::activity_message::darkness_zone;
     const auto* const handle =
         static_cast<const SlotHandle*>(luaL_checkudata(state, 1, kSlotMetatable));
-    // Only these named arguments belong to this API.
-    static constexpr std::array<std::string_view, 2> kDeclared{"enabled", "wipe_seconds"};
-    refuse_unknown_arguments(state, kDeclared);
+    refuse_unknown_arguments(state, kDarknessZone);
     SlotDefinition slot{};
     if (!current_slot(state, *handle, slot) || slot.slotType != darkness::kSlotType
         || slot.componentClass != darkness::kComponentClass || slot.authSchema != darkness::kSchema
         || (slot.flags & format::kSlotSchemaJoinExact) == 0) {
         return luaL_error(state, "darkness zone requires the exact hard-wipe globals sensor");
     }
-    const lua_Integer wipe = optional_integer_argument(state, "wipe_seconds", darkness::kNoWipe);
+    const lua_Integer wipe =
+        optional_integer_argument(state, integer_option(kDarknessZone, "wipe_seconds"));
     std::array<std::byte, darkness::kBytes> body{};
     if (wipe < darkness::kNoWipe || wipe > darkness::kMaximumWipeSeconds
         || !darkness::encode(
-            optional_boolean_argument(state, "enabled", false), body, static_cast<int>(wipe))) {
+            optional_boolean_argument(state, boolean_option(kDarknessZone, "enabled")),
+            body,
+            static_cast<int>(wipe))) {
         return luaL_error(state, "darkness zone encoder failed");
     }
     return queue_slot_auth(state, slot, darkness::kSchema, darkness::kBits, body);
@@ -196,17 +215,14 @@ constexpr std::int8_t kFilterModeInside = 1;
     namespace auth = scriptable_auth;
     const auto* const handle =
         static_cast<const SlotHandle*>(luaL_checkudata(state, 1, kSlotMetatable));
-    // Only these named arguments belong to this API.
-    static constexpr std::array<std::string_view, 4> kDeclared{
-        "players", "target", "inside", "inside_any"};
-    refuse_unknown_arguments(state, kDeclared);
+    refuse_unknown_arguments(state, kObjectFilter);
     SlotDefinition slot{};
     if (!current_slot(state, *handle, slot) || slot.slotType != auth::kType34SlotType
         || slot.authSchema != auth::kType34Schema) {
         return luaL_error(state, "object filter requires an authored type-34 sensor");
     }
     auth::Type34Body body{};
-    lua_getfield(state, 2, "inside_any");
+    lua_getfield(state, 2, optional_key(kObjectFilter, "inside_any", api::ValueKind::list));
     const bool volumes = !lua_isnil(state, -1);
     if (volumes) {
         luaL_checktype(state, -1, LUA_TTABLE);
@@ -233,19 +249,25 @@ constexpr std::int8_t kFilterModeInside = 1;
         }
     }
     lua_pop(state, 1);
-    if (optional_boolean_argument(state, "players", false)) {
+    if (optional_boolean_argument(state, boolean_option(kObjectFilter, "players"))) {
         body.predicates[body.count++] =
             auth::Type34ModeOnlyB{static_cast<std::int8_t>(volumes ? 1 : 0)};
     }
     auth::Type2LaneClientRef target{};
-    if (!optional_slot_reference(state, "target", auth::kType4SlotType, target)) {
+    if (!optional_slot_reference(state,
+                                 optional_key(kObjectFilter, "target", api::ValueKind::handle),
+                                 auth::kType4SlotType,
+                                 target)) {
         return luaL_error(state, "filter target must be an authored type-4 object");
     }
     if (target.slotIndex >= 0) {
         body.predicates[body.count++] = auth::Type34ModeSlotRefC{kFilterModeDirect, target};
     }
     auth::Type2LaneClientRef inside{};
-    if (!optional_slot_reference(state, "inside", auth::kType60SlotType, inside)) {
+    if (!optional_slot_reference(state,
+                                 optional_key(kObjectFilter, "inside", api::ValueKind::handle),
+                                 auth::kType60SlotType,
+                                 inside)) {
         return luaL_error(state, "filter inside must be an authored type-60 volume");
     }
     if (inside.slotIndex >= 0) {
@@ -266,15 +288,13 @@ constexpr std::int8_t kFilterModeInside = 1;
     namespace damage = middleware::bap::activity_message::damage_monitor;
     const auto* const handle =
         static_cast<const SlotHandle*>(luaL_checkudata(state, 1, kSlotMetatable));
-    // Only these named arguments belong to this API.
-    static constexpr std::array<std::string_view, 1> kDeclared{"target"};
-    refuse_unknown_arguments(state, kDeclared);
+    refuse_unknown_arguments(state, kWatchDamage);
     SlotDefinition slot{};
     if (!current_slot(state, *handle, slot) || slot.slotType != damage::kSlotType
         || slot.authSchema != damage::kAuthSchema) {
         return luaL_error(state, "damage watch requires an authored type-20 monitor");
     }
-    lua_getfield(state, 2, "target");
+    lua_getfield(state, 2, required_key(kWatchDamage, "target", api::ValueKind::handle));
     const auto* const targetHandle =
         static_cast<const SlotHandle*>(luaL_checkudata(state, -1, kSlotMetatable));
     SlotDefinition target{};
@@ -301,22 +321,21 @@ constexpr std::int8_t kFilterModeInside = 1;
     namespace object = middleware::bap::activity_message::interactable_object;
     const auto* const handle =
         static_cast<const SlotHandle*>(luaL_checkudata(state, 1, kSlotMetatable));
-    // Only these named arguments belong to this API.
-    static constexpr std::array<std::string_view, 3> kDeclared{"track_owner", "active", "used"};
-    refuse_unknown_arguments(state, kDeclared);
+    refuse_unknown_arguments(state, kInteractable);
     SlotDefinition slot{};
     if (!current_slot(state, *handle, slot) || !exact_object_slot(slot)) {
         return luaL_error(state, "interaction requires an exact authored object");
     }
-    const bool trackOwner = optional_boolean_argument(state, "track_owner", false);
+    const bool trackOwner =
+        optional_boolean_argument(state, boolean_option(kInteractable, "track_owner"));
     std::array<std::byte, object::kOwnerBytes> body{};
     std::size_t written = 0;
     if (!object::encode(kUncommittedCounter,
                         body,
                         written,
                         trackOwner,
-                        optional_boolean_argument(state, "active", true),
-                        optional_boolean_argument(state, "used", false))) {
+                        optional_boolean_argument(state, boolean_option(kInteractable, "active")),
+                        optional_boolean_argument(state, boolean_option(kInteractable, "used")))) {
         return luaL_error(state, "interactable object encoder failed");
     }
     return queue_slot_auth(state,
@@ -332,17 +351,17 @@ constexpr std::int8_t kFilterModeInside = 1;
     namespace ghost = middleware::bap::activity_message::ghost_link;
     const auto* const handle =
         static_cast<const SlotHandle*>(luaL_checkudata(state, 1, kSlotMetatable));
-    // Only this named argument belongs to this API.
-    static constexpr std::array<std::string_view, 1> kDeclared{"active"};
-    refuse_unknown_arguments(state, kDeclared);
+    refuse_unknown_arguments(state, kSetGhostLink);
     SlotDefinition slot{};
     if (!current_slot(state, *handle, slot) || !exact_ghost_link_slot(slot)) {
         return luaL_error(state, "activity slot is not an exact type-65 Ghost-link sensor");
     }
     std::array<std::byte, ghost::kByteCount> body{};
     std::size_t written = 0;
-    if (!ghost::encode(
-            kUncommittedCounter, optional_boolean_argument(state, "active", true), body, written)) {
+    if (!ghost::encode(kUncommittedCounter,
+                       optional_boolean_argument(state, boolean_option(kSetGhostLink, "active")),
+                       body,
+                       written)) {
         return luaL_error(state, "Ghost-link encoder failed");
     }
     return queue_slot_auth(state,
@@ -361,8 +380,7 @@ constexpr std::int8_t kFilterModeInside = 1;
     const auto* const handle =
         static_cast<const SlotHandle*>(luaL_checkudata(state, 1, kSlotMetatable));
     // The read has no parameters, so an unsafe call cannot be spelled.
-    static constexpr std::array<std::string_view, 0> kDeclared{};
-    refuse_unknown_arguments(state, kDeclared);
+    refuse_unknown_arguments(state, kGhostLink);
     SlotDefinition slot{};
     if (!current_slot(state, *handle, slot) || !exact_ghost_link_slot(slot)) {
         return luaL_error(state, "activity slot is not an exact type-65 Ghost-link sensor");
@@ -396,15 +414,13 @@ constexpr std::int8_t kFilterModeInside = 1;
     if (!current_slot(state, *handle, definition) || !exact_object_slot(definition)) {
         return luaL_error(state, "activity slot is not an exact type-4 authored object");
     }
-    // Named arguments this call accepts. Any other key is refused.
-    static constexpr std::array<std::string_view, 2> kDeclared{"active", "with"};
-    refuse_unknown_arguments(state, kDeclared);
+    refuse_unknown_arguments(state, kObjectActive);
     CallFrame& frame = active_frame(state);
     Intent intent{};
     intent.kind = IntentKind::setObjectActive;
     intent.firstRow = definition.nativeRow;
     intent.entryIndex = 0;
-    intent.active = optional_boolean_argument(state, "active", true);
+    intent.active = optional_boolean_argument(state, boolean_option(kObjectActive, "active"));
     if (!parse_object_burst(state, intent)) {
         return 0;
     }
@@ -423,13 +439,14 @@ constexpr std::int8_t kFilterModeInside = 1;
         return luaL_error(state, "activity slot is not an exact type-23 device");
     }
     // Both parameters carry their own bound, so neither the lane nor the range is tested here.
-    static constexpr std::array<std::string_view, 3> kDeclared{"channel", "value", "snap"};
-    refuse_unknown_arguments(state, kDeclared);
-    const DeviceChannelHandle channel =
-        checked_argument<DeviceChannelHandle>(state, "channel", kDeviceChannelMetatable);
-    const UnitScalarHandle value =
-        checked_argument<UnitScalarHandle>(state, "value", kUnitScalarMetatable);
-    const bool snap = optional_boolean_argument(state, "snap", false);
+    refuse_unknown_arguments(state, kSetChannel);
+    const DeviceChannelHandle channel = checked_argument<DeviceChannelHandle>(
+        state,
+        required_key(kSetChannel, "channel", api::ValueKind::enumValue),
+        kDeviceChannelMetatable);
+    const UnitScalarHandle value = checked_argument<UnitScalarHandle>(
+        state, required_key(kSetChannel, "value", api::ValueKind::handle), kUnitScalarMetatable);
+    const bool snap = optional_boolean_argument(state, boolean_option(kSetChannel, "snap"));
 
     CallFrame& frame = active_frame(state);
     Intent intent{};
@@ -453,11 +470,12 @@ constexpr std::int8_t kFilterModeInside = 1;
         return luaL_error(state, "activity slot is not an exact type-23 device");
     }
     // The handle is a row of the closed vocabulary, so no word is matched here.
-    static constexpr std::array<std::string_view, 2> kDeclared{"transition", "snap"};
-    refuse_unknown_arguments(state, kDeclared);
-    const DeviceTransitionHandle requested =
-        checked_argument<DeviceTransitionHandle>(state, "transition", kDeviceTransitionMetatable);
-    const bool snap = optional_boolean_argument(state, "snap", false);
+    refuse_unknown_arguments(state, kTransition);
+    const DeviceTransitionHandle requested = checked_argument<DeviceTransitionHandle>(
+        state,
+        required_key(kTransition, "transition", api::ValueKind::enumValue),
+        kDeviceTransitionMetatable);
+    const bool snap = optional_boolean_argument(state, boolean_option(kTransition, "snap"));
     const DeviceTransition& transition = kDeviceTransitions[requested.row];
     CallFrame& frame = active_frame(state);
     Intent intent{};
@@ -485,8 +503,7 @@ constexpr std::int8_t kFilterModeInside = 1;
         return luaL_error(state, "activity slot is not an exact type-31 trigger");
     }
     // The pulse has no parameters, so an unsafe call cannot be spelled.
-    static constexpr std::array<std::string_view, 0> kDeclared{};
-    refuse_unknown_arguments(state, kDeclared);
+    refuse_unknown_arguments(state, kFireTrigger);
     CallFrame& frame = active_frame(state);
     Intent intent{};
     intent.kind = IntentKind::fireTrigger;
@@ -504,8 +521,7 @@ constexpr std::int8_t kFilterModeInside = 1;
         return luaL_error(state, "activity slot is not an exact type-31 trigger");
     }
     // The disarm has no parameters, so any named argument is refused.
-    static constexpr std::array<std::string_view, 0> kDeclared{};
-    refuse_unknown_arguments(state, kDeclared);
+    refuse_unknown_arguments(state, kDisarmTrigger);
     Intent intent{};
     intent.kind = IntentKind::fireTrigger;
     intent.firstRow = definition.nativeRow;
@@ -520,11 +536,11 @@ constexpr std::int8_t kFilterModeInside = 1;
  */
 int slot_applied(lua_State* state) {
     const auto* handle = static_cast<const SlotHandle*>(luaL_checkudata(state, 1, kSlotMetatable));
-    // Only these named arguments belong to this API.
-    static constexpr std::array<std::string_view, 1> kDeclared{"channel"};
-    refuse_unknown_arguments(state, kDeclared);
-    const auto channel =
-        checked_argument<DeviceChannelHandle>(state, "channel", kDeviceChannelMetatable);
+    refuse_unknown_arguments(state, kApplied);
+    const auto channel = checked_argument<DeviceChannelHandle>(
+        state,
+        required_key(kApplied, "channel", api::ValueKind::enumValue),
+        kDeviceChannelMetatable);
     SlotDefinition slot{};
     if (!current_slot(state, *handle, slot)
         || slot.slotType != ::sunrise::state::activity_sdk::format::kDeviceSlotType) {

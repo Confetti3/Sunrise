@@ -16,7 +16,7 @@ INT WSAAPI address_info_w(PCWSTR node,
                           const ADDRINFOW* hints,
                           PADDRINFOW* result) noexcept;
 
-/** Blocks extended ANSI address resolution. */
+/** Resolves extended ANSI names to the numeric redirect target. */
 INT WSAAPI address_info_ex_a(PCSTR name,
                              PCSTR service,
                              DWORD nameSpace,
@@ -28,7 +28,7 @@ INT WSAAPI address_info_ex_a(PCSTR name,
                              LPLOOKUPSERVICE_COMPLETION_ROUTINE completion,
                              LPHANDLE nameHandle) noexcept;
 
-/** Blocks extended wide address resolution. */
+/** Resolves extended wide names to the numeric redirect target. */
 INT WSAAPI address_info_ex_w(PCWSTR name,
                              PCWSTR service,
                              DWORD nameSpace,
@@ -43,10 +43,10 @@ INT WSAAPI address_info_ex_w(PCWSTR name,
 /** Resolves supported legacy forward names to the IPv4 redirect target. */
 hostent* WSAAPI host_by_name(const char* name) noexcept;
 
-/** Blocks legacy reverse host lookup. */
+/** Answers a legacy reverse host lookup for the redirect target. */
 hostent* WSAAPI host_by_address(const char* address, int length, int type) noexcept;
 
-/** Blocks ANSI reverse name lookup. */
+/** Answers an ANSI reverse name lookup from the redirect-target endpoint. */
 INT WSAAPI name_info_a(const SOCKADDR* address,
                        socklen_t addressLength,
                        PCHAR node,
@@ -55,7 +55,7 @@ INT WSAAPI name_info_a(const SOCKADDR* address,
                        DWORD serviceSize,
                        INT flags) noexcept;
 
-/** Blocks wide reverse name lookup. */
+/** Answers a wide reverse name lookup from the redirect-target endpoint. */
 INT WSAAPI name_info_w(const SOCKADDR* address,
                        socklen_t addressLength,
                        PWCHAR node,

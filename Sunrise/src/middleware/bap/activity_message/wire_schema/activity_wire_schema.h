@@ -164,7 +164,4 @@ struct FieldDocumentation final {
 [[nodiscard]] LayoutKind
 layout_of(std::uint32_t messageId, DefinitionState state, Coverage coverage) noexcept;
 
-[[nodiscard]] const char* layout_name(LayoutKind layout) noexcept;
-[[nodiscard]] const char* call_form_name(CallForm form) noexcept;
-
 } // namespace sunrise::middleware::bap::activity_message::wire_schema

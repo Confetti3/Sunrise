@@ -1,6 +1,5 @@
-#include <cstring>
-
 #include "definition_index_table.h"
+#include "internal.h"
 #include "items.h"
 
 namespace sunrise::middleware::content::packages::tables::items {
@@ -23,17 +22,6 @@ constexpr std::size_t kSandboxPerkDescriptor = 16;
 constexpr std::size_t kSandboxPerkStride = 24;
 /** All bits set marks a declared-empty sandbox perk entry. */
 constexpr std::uint16_t kUnavailableSandboxPerk = 0xFFFF;
-
-/** @param blob Source bytes. @param offset Field offset. @param value Receives the field. */
-template <typename Value>
-[[nodiscard]] bool
-read(std::span<const std::byte> blob, std::size_t offset, Value& value) noexcept {
-    if (offset > blob.size() || blob.size() - offset < sizeof value) {
-        return false;
-    }
-    std::memcpy(&value, blob.data() + offset, sizeof value);
-    return true;
-}
 
 /**
  * Turns a self-relative block offset a definition declares into a blob offset.

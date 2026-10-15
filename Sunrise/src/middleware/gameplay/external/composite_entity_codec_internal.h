@@ -91,9 +91,6 @@ runtime_schema(const CompositeEntityCodecContext& context, std::uint32_t handle)
 [[nodiscard]] const format::SobjectRsat* sobject_rsat(const CompositeEntityCodecContext& context,
                                                       std::uint32_t tag) noexcept;
 
-/** Checks the complete 17-bit entity-token domain. */
-[[nodiscard]] bool valid_token(const EntityToken& token) noexcept;
-
 /** Validates and opens one callback-owned canonical mirror. */
 [[nodiscard]] bool load_mirror(const TypePayload& payload, MirrorView& output) noexcept;
 

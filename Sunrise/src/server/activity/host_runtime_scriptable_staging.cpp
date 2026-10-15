@@ -431,21 +431,13 @@ bool scriptable_auth_estate(const state::activity::SessionBinding& binding,
         return false;
     }
     AcquireSRWLockShared(&g_lock);
-    const Instance* instance = nullptr;
-    for (const Instance& candidate : g_instances) {
-        if (candidate.occupied && same_binding(candidate.view.binding, binding)) {
-            instance = &candidate;
-            break;
-        }
-    }
+    const Instance* const instance = find_instance(binding);
     bool copied = true;
     if (instance != nullptr && instance->view.active) {
         try {
             output.reserve(instance->scriptableAuthEstate.size());
             for (const PendingScriptableOverride& retained : instance->scriptableAuthEstate) {
-                // The ActivityClient generation is a transport revision that advances on ordinary
-                // region advertisements, and the SessionBinding already owns estate lifetime.
-                // Filtering retained mission state by it erases every non-squad Auth lane.
+                // Never filter by ActivityClient generation: it advances on region advertisements.
                 output.push_back(retained);
             }
         } catch (const std::bad_alloc&) {

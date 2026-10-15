@@ -290,12 +290,6 @@ constexpr std::array<RowSpec, 40> kRows{{
      "u64:writer_evidence_address;u64:reader_evidence_address"},
 }};
 
-void sort_keys(Value::Object& value) {
-    std::sort(value.begin(), value.end(), [](const auto& first, const auto& second) {
-        return first.first < second.first;
-    });
-}
-
 /** Splits the semicolon list into type:name pairs; false on a bad token or a refusing callback. */
 template <typename Callback>
 [[nodiscard]] bool for_each_field(std::string_view fields, Callback&& callback) {

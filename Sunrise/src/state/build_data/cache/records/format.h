@@ -31,7 +31,7 @@ namespace sunrise::state::build_data::cache::records {
 /** These 8 ASCII bytes mark a Sunrise build-data file. */
 inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', 'E', 'B'};
 /** Bump when stored layouts or extracted values change; other versions are rebuilt. */
-inline constexpr std::uint32_t kCacheFormatVersion = 66;
+inline constexpr std::uint32_t kCacheFormatVersion = 67;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */
@@ -68,6 +68,7 @@ struct Header {
     std::uint32_t imageTimestamp{};
     std::uint32_t imageSize{};
     std::uint64_t configuredEquipmentHash{};
+    std::uint64_t contentHash{};
     std::uint32_t namedCount{};
     std::uint32_t itemCount{};
     std::uint32_t collectibleCount{};
@@ -248,7 +249,7 @@ struct ExoticCatalystRecord {
     std::uint16_t completedPlugDefinitionIndex{};
     std::uint16_t progressPlugDefinitionIndex{};
     std::uint16_t effectDefinitionIndex{};
-    std::uint16_t acquisitionDefinitionIndex{};
+    std::uint16_t acquisitionFlag{};
     std::array<std::uint16_t, items::catalysts::kCompletionFlagCapacity>
         completionAccountFlagIndices{};
     std::array<std::uint16_t, items::catalysts::kCompletionFlagCapacity>
@@ -589,7 +590,7 @@ static_assert(sizeof(Prefix) == kCacheMagic.size() + sizeof(std::uint32_t));
 static_assert(sizeof(InvestmentConstants)
               == constants::kCharacterStatRowCount + 3 * sizeof(std::uint8_t));
 static_assert(sizeof(Header)
-              == kCacheMagic.size() + 39 * sizeof(std::uint32_t) + 2 * sizeof(std::uint64_t)
+              == kCacheMagic.size() + 39 * sizeof(std::uint32_t) + 3 * sizeof(std::uint64_t)
                      + sizeof(InvestmentConstants)
                      + sizeof(gameplay::entity_position_profiles::Fingerprint));
 static_assert(sizeof(SpawnPointRecord)

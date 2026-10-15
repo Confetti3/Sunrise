@@ -26,7 +26,7 @@ void push_bap_service(lua_State* state, std::uint32_t row) {
     return static_cast<std::uint16_t>(value);
 }
 
-/** Resolves one static catalog pointer back to its one-based Lua row. */
+/** Resolves one static catalog pointer back to its zero-based catalog row. */
 [[nodiscard]] bool bap_service_row(const bap_catalog::Service* service,
                                    std::uint32_t& output) noexcept {
     output = 0;

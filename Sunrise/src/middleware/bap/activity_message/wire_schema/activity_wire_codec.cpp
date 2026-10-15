@@ -109,31 +109,4 @@ DraftValue* edit_selected(PacketDraft& draft,
     return &value;
 }
 
-/** Returns the operator-facing explanation for one codec boundary or result. */
-const char* codec_status_name(CodecStatus status) noexcept {
-    switch (status) {
-    case CodecStatus::complete:
-        return "complete";
-    case CodecStatus::completeWithPadding:
-        return "complete + byte padding";
-    case CodecStatus::needsPackageSchema:
-        return "needs package-selected schema";
-    case CodecStatus::needsRuntimeSchema:
-        return "needs runtime-selected schema";
-    case CodecStatus::mixedRawTail:
-        return "reflection + raw tail";
-    case CodecStatus::noDefinition:
-        return "no wire definition";
-    case CodecStatus::unsupportedField:
-        return "field codec unavailable";
-    case CodecStatus::unsafeCount:
-        return "count exceeds native capacity";
-    case CodecStatus::malformed:
-        return "malformed or trailing data";
-    case CodecStatus::outputTooSmall:
-        return "output buffer too small";
-    }
-    return "unknown";
-}
-
 } // namespace sunrise::middleware::bap::activity_message::wire_schema

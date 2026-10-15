@@ -99,27 +99,9 @@ read_value(std::span<const std::byte> blob, std::size_t offset, Value& output) n
     return true;
 }
 
-/** @return True when one topology text owns exactly its declared bytes. */
-[[nodiscard]] bool text_view(const topology::Text& text, std::string_view& output) noexcept {
-    output = {};
-    if (text.length >= text.value.size()) {
-        return false;
-    }
-    output = std::string_view(text.value.data(), text.length);
-    return text.value[text.length] == '\0';
-}
-
-/** Formats one bounded identity string. */
-template <typename... Values>
-[[nodiscard]] bool format_text(std::string& output, const char* pattern, Values... values) {
-    std::array<char, 192> bytes{};
-    const int count = std::snprintf(bytes.data(), bytes.size(), pattern, values...);
-    if (count < 0 || static_cast<std::size_t>(count) >= bytes.size()) {
-        return false;
-    }
-    output.assign(bytes.data(), static_cast<std::size_t>(count));
-    return true;
-}
+using detail::descriptor_id;
+using detail::format_text;
+using detail::text_view;
 
 /** @return True when a float is finite and its raw lane is retained. */
 [[nodiscard]] bool position_bits(const std::array<float, 3>& position,
@@ -138,28 +120,6 @@ template <typename... Values>
 [[nodiscard]] bool bubble_applies(std::int32_t declared, std::uint32_t entryIndex) noexcept {
     return declared == tables::kGlobalBubbleIndex
            || (declared >= 0 && static_cast<std::uint32_t>(declared) == entryIndex);
-}
-
-/** Derives one descriptor identity from its exact object and slot tuple. */
-[[nodiscard]] bool descriptor_id(const topology::Snapshot& topology,
-                                 const DescriptorFact& descriptor,
-                                 std::string& output) {
-    if (descriptor.objectIndex >= topology.objects.size()
-        || descriptor.slotIndex >= topology.slots.size()) {
-        return false;
-    }
-    const topology::Object& object = topology.objects[descriptor.objectIndex];
-    const topology::Slot& slot = topology.slots[descriptor.slotIndex];
-    if (slot.objectIndex != descriptor.objectIndex) {
-        return false;
-    }
-    return format_text(output,
-                       "descriptor/%08x/%08x/%08x/%04x/%04x",
-                       static_cast<unsigned>(descriptor.configTag),
-                       static_cast<unsigned>(object.objectTag),
-                       static_cast<unsigned>(descriptor.descriptorOffset),
-                       static_cast<unsigned>(slot.slotIndex),
-                       static_cast<unsigned>(slot.slotType));
 }
 
 /** Inserts one exact parsed spawner or rejects a repeated mismatch. */
@@ -701,27 +661,6 @@ bool append_external_placements(const topology::Snapshot& topology,
         return false;
     }
     return true;
-}
-
-/** Runs package extraction and linking without retaining an intermediate copy. */
-bool build(const topology::Snapshot& topology,
-           TagReader reader,
-           void* readerContext,
-           std::span<const SlotSchemaFact> slotSchemas,
-           ActorResolver actorResolver,
-           void* actorContext,
-           Snapshot& output) noexcept {
-    output = {};
-    Facts facts{};
-    if (!collect_facts(topology, reader, readerContext, facts)) {
-        return false;
-    }
-    try {
-        facts.slotSchemas.assign(slotSchemas.begin(), slotSchemas.end());
-    } catch (...) {
-        return false;
-    }
-    return link(topology, facts, actorResolver, actorContext, output);
 }
 
 } // namespace sunrise::client::content::activity::sdk_generation::squad_inventory

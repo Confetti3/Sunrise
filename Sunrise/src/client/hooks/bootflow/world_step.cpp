@@ -15,11 +15,11 @@ namespace {
 
 /**
  * The current boot-flow step accessor, `BootFlow_GetStep_NoBubbleArg`*.
- * Decrypts the manager global and returns `mgr + 912`, or -1 when it is null. Only the call's
- * displacement is wildcarded; the `mgr + 912` field offset makes the pattern unique.
+ * Decrypts the manager global and returns `mgr + 912`, or -1 when it is null. The call and branch
+ * displacements are wildcarded; the `mgr + 912` field offset makes the pattern unique.
  */
 constexpr std::string_view kStepSignatureText =
-    "48 83 EC 28 E8 ? ? ? ? 48 85 C0 74 0B 8B 80 90 03 00 00 48 83 C4 28 C3 83 C8 FF 48 83 C4 28 "
+    "48 83 EC 28 E8 ? ? ? ? 48 85 C0 74 ? 8B 80 90 03 00 00 48 83 C4 28 C3 83 C8 FF 48 83 C4 28 "
     "C3";
 /** Compiled pattern bytes of the signature text above. */
 constexpr auto kStepSignature = signature<signature_length(kStepSignatureText)>(kStepSignatureText);

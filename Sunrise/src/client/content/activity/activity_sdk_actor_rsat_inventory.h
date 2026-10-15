@@ -42,7 +42,7 @@ struct Text final {
     std::uint16_t length{};
 };
 
-/** One exact format-v12 actor-class row before its id is linked. */
+/** One exact actor-class row before its id is linked. */
 struct ActorClass final {
     Text id{};
     std::uint32_t definitionTag{};
@@ -60,7 +60,7 @@ struct ActorClass final {
     std::array<std::int8_t, 4> authoredSpawnProfile{};
 };
 
-/** One exact format-v12 RSAT descriptor row before its id is linked. */
+/** One exact RSAT descriptor row before its id is linked. */
 struct RsatDescriptor final {
     Text id{};
     std::uint32_t actorClassIndex{};
@@ -79,7 +79,7 @@ struct RsatDescriptor final {
     std::array<std::byte, state::activity_sdk::format::kRsatDescriptorRawRowSize> rawRow{};
 };
 
-/** One exact format-v12 RSAT schema row before its id is linked. */
+/** One exact RSAT schema row before its id is linked. */
 struct RsatSchema final {
     Text id{};
     std::uint32_t schemaTag{};
@@ -96,7 +96,7 @@ struct RsatSchema final {
     state::activity_sdk::format::Range fields{};
 };
 
-/** One exact format-v12 RSAT field row. */
+/** One exact RSAT field row. */
 struct RsatField final {
     std::array<std::byte, state::activity_sdk::format::kRsatSchemaFieldRawRowSize> rawRow{};
 };
@@ -268,13 +268,6 @@ build_from_tags_and_rsats(std::span<const std::uint32_t> actorTags,
                           void* cancelContext,
                           Snapshot& output,
                           std::span<const SequenceTableSource> sequenceTables = {}) noexcept;
-
-/** Builds a structurally complete installed inventory for an upstream exact actor tag set. */
-[[nodiscard]] bool build(const middleware::content::packages::reader::Source& source,
-                         std::span<const std::uint32_t> actorTags,
-                         CancelProbe cancel,
-                         void* cancelContext,
-                         Snapshot& output) noexcept;
 
 /** Builds actor joins against one complete sorted installed RSAT tag set. */
 [[nodiscard]] bool build_with_rsats(const middleware::content::packages::reader::Source& source,

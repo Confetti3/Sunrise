@@ -33,7 +33,7 @@ namespace {
 
 } // namespace
 
-/** Finds and installs both system DXGI hooks in one transaction. */
+/** Finds and installs the three system DXGI hooks in one transaction. */
 bool install() noexcept {
     const core::ui::runtime::VisibilitySnapshot visibility = core::ui::runtime::snapshot();
     if (!visibility.initialized || !visibility.enabled) {
@@ -139,14 +139,6 @@ bool uninstall() noexcept {
     ReleaseSRWLockExclusive(&g_hookLock);
     renderer::dispatch_pending_input_release();
     return true;
-}
-
-/** @return True only when both system DXGI method hooks are attached. */
-bool is_installed() noexcept {
-    AcquireSRWLockShared(&g_hookLock);
-    const bool installed = all_installed();
-    ReleaseSRWLockShared(&g_hookLock);
-    return installed;
 }
 
 } // namespace sunrise::client::hooks::graphics

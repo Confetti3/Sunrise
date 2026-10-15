@@ -45,30 +45,6 @@ bool set_account_flag(std::uint16_t index, std::uint8_t value) noexcept;
 [[nodiscard]] std::int32_t objective_value(std::uint16_t index) noexcept;
 
 /**
- * Writes one account objective value.
- * @param index Account value bank row.
- * @param value Replicated value.
- * @return False when the row is outside the bank.
- */
-bool set_objective_value(std::uint16_t index, std::int32_t value) noexcept;
-
-/**
- * Adds to one account objective value.
- * @param index Account value bank row.
- * @param amount Signed delta.
- * @return False when the row is outside the bank or the sum would overflow.
- */
-bool add_objective_value(std::uint16_t index, std::int32_t amount) noexcept;
-
-/**
- * Writes one selected-character object flag.
- * @param index Character object flag bank row.
- * @param value Biased flag value.
- * @return False when the row is outside the bank.
- */
-bool set_character_object_flag(std::uint16_t index, std::uint8_t value) noexcept;
-
-/**
  * Writes one selected-character object value.
  * @param index Character object value bank row.
  * @param value Replicated value.

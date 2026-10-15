@@ -39,14 +39,11 @@ bool requires_package_sweep() noexcept {
 /** Publishes every installed equipment mapping domain. */
 bool refresh() noexcept {
     if (ready()) {
-        // The same lock as the extraction path. A cache write holds its own lock across file
-        // calls, so a held thread stopped inside one would deadlock the freeze below.
         const std::lock_guard lock(g_refreshLock);
         const bool persisted = state::ensure_profile_item_identities()
                                && state::ensure_character_subclasses() && emote_collection_settled()
                                && state::build_data::persist();
-        // Nothing reads a package again until the next boot, so the open files and the held
-        // tables go back now rather than at process exit.
+        // Nothing reads a package again until the next boot, so release the files and tables here.
         middleware::content::packages::reader::release_caches();
         core::ui::busy::end(core::ui::busy::Task::contentExtraction);
         return persisted;

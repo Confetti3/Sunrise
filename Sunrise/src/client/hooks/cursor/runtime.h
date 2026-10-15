@@ -12,9 +12,6 @@ namespace sunrise::client::hooks::cursor {
 /** Detaches both guards and restores the confinement the game last asked for. */
 void uninstall() noexcept;
 
-/** @return True while both cursor guards are attached. */
-[[nodiscard]] bool is_installed() noexcept;
-
 /**
  * Applies the cursor policy for the current interface visibility.
  * Must run outside every presentation lock because it calls Win32.

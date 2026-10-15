@@ -9,17 +9,17 @@
 #include "../../../middleware/bap/activity_message/damage_monitor_auth.h"
 #include "../../../middleware/bap/activity_message/ghost_link_auth.h"
 #include "../../../middleware/bap/activity_message/scriptable_auth_body.h"
+#include "../../../state/activity_sdk/scene_triggers.h"
 #include "../activity_sdk_mission_runtime.h"
 #include "mission_script_runtime_internal.h"
 #include "mission_script_runtime_objective.h"
+#include "mission_script_slot_index.h"
 
 // Sense events retain levels within the owning mission attempt.
 
 namespace sunrise::server::activity::mission {
 namespace {
 
-/** Trigger volume occupancy publishes on this Sense slot type. */
-constexpr std::uint8_t kTriggerOccupancySlotType = 30;
 /** Values in one occupancy body: any, all, intersection count, and copied Auth value. */
 constexpr std::size_t kTriggerOccupancyValueCount = 4;
 constexpr std::uint16_t kTriggerAnyOrdinal = 0;
@@ -36,10 +36,6 @@ constexpr std::uint16_t kDamageRevisionOrdinal = 2;
 constexpr std::uint16_t kSceneTokenOrdinal = 0;
 /** Root ordinal of the authored scene's completion latch. A zero-width boolean. */
 constexpr std::uint16_t kSceneCompletionOrdinal = 1;
-/** Objective sensors publish on this Sense slot type. */
-constexpr std::uint8_t kObjectiveSlotType = 3;
-/** Objective sensor Sense root schema. */
-constexpr std::uint32_t kObjectiveSenseSchema = 0x80807F04U;
 /** The block's ordinal 1 is its one-bit client flag, which separates it from the task list. */
 constexpr std::uint16_t kObjectiveBlockFlagOrdinal = 1;
 constexpr std::uint8_t kObjectiveBlockFlagWidth = 1;
@@ -220,7 +216,7 @@ void push_trigger_edges(RuntimeInstance& instance,
                         const host::SenseObservationSnapshot& sense) noexcept {
     for (std::size_t index = 0; index < sense.observationCount; ++index) {
         const host::SenseObservation& observation = sense.observations[index];
-        if (observation.key.slotType != kTriggerOccupancySlotType
+        if (observation.key.slotType != format::kOccupancySlotType
             || observation.valueCount < kTriggerOccupancyValueCount
             || observation.firstValue + kTriggerOccupancyValueCount > sense.valueCount) {
             continue;
@@ -267,6 +263,8 @@ void push_trigger_edges(RuntimeInstance& instance,
     }
 }
 
+namespace {
+
 /** @return True when the observation is one complete body of the given slot type and schema. */
 [[nodiscard]] bool observation_of(const host::SenseObservation& observation,
                                   const host::SenseObservationSnapshot& sense,
@@ -284,31 +282,7 @@ observation_values(const host::SenseObservation& observation,
     return std::span(sense.values).subspan(observation.firstValue, observation.valueCount);
 }
 
-/**
- * Finds the retained row for one slot, allocating a free row on a first observation.
- * @return Null when every row is in use.
- */
-template <typename Row, std::size_t N>
-[[nodiscard]] Row* find_slot_row(std::array<Row, N>& rows,
-                                 const host::SenseObservationKey& key) noexcept {
-    Row* spare = nullptr;
-    for (Row& retained : rows) {
-        if (retained.used && retained.registryKey == key.registryKey
-            && retained.objectTag == key.objectTag && retained.slotIndex == key.slotIndex) {
-            return &retained;
-        }
-        if (!retained.used && spare == nullptr) {
-            spare = &retained;
-        }
-    }
-    if (spare != nullptr) {
-        spare->used = true;
-        spare->registryKey = key.registryKey;
-        spare->objectTag = key.objectTag;
-        spare->slotIndex = key.slotIndex;
-    }
-    return spare;
-}
+} // namespace
 
 /** Raises one event per named actor whose movement or delivery level changed. */
 void push_actor_path_edges(RuntimeInstance& instance,
@@ -622,10 +596,66 @@ void push_squad_edges(RuntimeInstance& instance,
     }
 }
 
+/** @return The scene's gate rows; empty when its slot does not resolve. */
+[[nodiscard]] std::span<const format::AuthoredSceneEventKey>
+scene_gate_rows(const RuntimeInstance& instance, const host::SenseObservationKey& key) noexcept {
+    if (instance.view.catalog == nullptr) {
+        return {};
+    }
+    const slot_index::SenseKey indexKey{.registryKey = key.registryKey,
+                                        .objectTag = key.objectTag,
+                                        .senseSchema = key.senseSchema,
+                                        .slotIndex = key.slotIndex,
+                                        .slotType = key.slotType};
+    slot_index::Found found{};
+    if (!slot_index::by_sense(instance.view, indexKey, found)) {
+        return {};
+    }
+    return sdk::scene_gates(instance.view.catalog->authored_scene_event_keys(), found.nativeRow);
+}
+
 /**
- * Raises one event per watched authored scene that latched complete.
- * The completion field is a latch, so only the false to true edge is a finish. A scene seen for
- * the first time records its level and raises nothing.
+ * Records the output keys a scene body lists, raising one event per key new to this run.
+ * Any root value equal to an output key counts; the keys are name hashes, so no other field
+ * carries one.
+ */
+void record_scene_outputs(RuntimeInstance& instance,
+                          const host::SenseObservation& observation,
+                          std::span<const sense_values::DecodedValue> body,
+                          std::uint32_t root,
+                          SceneObservation& scene,
+                          bool raise) noexcept {
+    const auto gates = scene_gate_rows(instance, observation.key);
+    for (const sense_values::DecodedValue& value : body) {
+        const auto key = static_cast<std::uint32_t>(value.unsignedValue);
+        if (value.schemaRow != root || !value.present
+            || std::find(scene.outputs.begin(), scene.outputs.begin() + scene.outputCount, key)
+                   != scene.outputs.begin() + scene.outputCount
+            || std::none_of(gates.begin(), gates.end(), [key](const auto& gate) {
+                   return gate.key == key && sdk::scene_trigger_is_output(gate);
+               })) {
+            continue;
+        }
+        if (scene.outputCount == scene.outputs.size()) {
+            log_line(core::log::Level::warn, &instance, "scene", "output_capacity");
+            return;
+        }
+        scene.outputs[scene.outputCount++] = key;
+        if (!raise) {
+            continue;
+        }
+        host::Event event = sense_edge_event(instance, observation);
+        event.sceneActivationToken = scene.token;
+        event.sceneOutputKey = key;
+        event.kind = host::EventKind::sceneOutput;
+        push_script_event(instance, event);
+    }
+}
+
+/**
+ * Raises one event per watched authored scene that latched complete, and one per output gate a
+ * scene newly lists. The completion field is a latch, so only the false to true edge is a finish.
+ * A scene seen for the first time records its level and outputs and raises nothing.
  */
 void push_scene_edges(RuntimeInstance& instance,
                       const host::SenseObservationSnapshot& sense) noexcept {
@@ -640,10 +670,9 @@ void push_scene_edges(RuntimeInstance& instance,
             &sense.values[observation.firstValue], observation.valueCount);
         const std::uint32_t root = observation.key.schemaRow;
         // An unchanged scene sends an empty delta, which must not read as a completion of false.
-        if (sense_value(body, root, kSceneCompletionOrdinal) == nullptr) {
-            continue;
-        }
+        const bool hasCompletion = sense_value(body, root, kSceneCompletionOrdinal) != nullptr;
         const bool completed = sense_flag(body, root, kSceneCompletionOrdinal);
+        const sense_values::DecodedValue* const token = sense_value(body, root, kSceneTokenOrdinal);
         SceneObservation* slot = nullptr;
         SceneObservation* spare = nullptr;
         for (SceneObservation& retained : instance.sceneObservations) {
@@ -662,11 +691,24 @@ void push_scene_edges(RuntimeInstance& instance,
                 log_line(core::log::Level::warn, &instance, "scene", "watch_capacity");
                 continue;
             }
+            *spare = {};
             spare->registryKey = observation.key.registryKey;
             spare->objectTag = observation.key.objectTag;
             spare->slotIndex = observation.key.slotIndex;
             spare->completed = completed;
+            spare->token = sense_number(body, root, kSceneTokenOrdinal);
             spare->used = true;
+            record_scene_outputs(instance, observation, body, root, *spare, false);
+            continue;
+        }
+        // A new activation token is a new run of the scene, whose outputs start empty.
+        if (token != nullptr && token->present
+            && static_cast<std::int32_t>(token->signedValue) != slot->token) {
+            slot->token = static_cast<std::int32_t>(token->signedValue);
+            slot->outputCount = 0;
+        }
+        record_scene_outputs(instance, observation, body, root, *slot, true);
+        if (!hasCompletion) {
             continue;
         }
         const bool rising = completed && !slot->completed;
@@ -690,8 +732,8 @@ void push_objective_edges(RuntimeInstance& instance,
                           const host::SenseObservationSnapshot& sense) noexcept {
     for (std::size_t index = 0; index < sense.observationCount; ++index) {
         const host::SenseObservation& observation = sense.observations[index];
-        if (observation.key.slotType != kObjectiveSlotType
-            || observation.key.senseSchema != kObjectiveSenseSchema
+        if (observation.key.slotType != format::kObjectiveSlotType
+            || observation.key.senseSchema != format::kObjectiveSenseSchema
             || observation.firstValue + observation.valueCount > sense.valueCount) {
             continue;
         }

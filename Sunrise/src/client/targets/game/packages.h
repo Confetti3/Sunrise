@@ -13,8 +13,7 @@ inline constexpr std::size_t kNonceSize = 12;
 
 /**
  * Installed key table read by the package block decoder.
- * Its bytes are proprietary. They are read at use time and never copied into State, cache, capture
- * or logs.
+ * Borrowed copies must be erased after use. Only an explicit package-key export writes them.
  */
 struct KeyTable {
     std::array<std::byte, kBlockKeySize> alternateKey{};

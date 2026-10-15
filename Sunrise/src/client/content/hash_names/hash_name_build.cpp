@@ -2,8 +2,10 @@
 
 #include <Windows.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdio>
+#include <memory>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -17,6 +19,7 @@
 namespace sunrise::client::content::hash_names {
 namespace {
 
+namespace layouts = state::build_data::scenarios;
 namespace packages = middleware::content::packages;
 namespace reader = middleware::content::packages::reader;
 
@@ -36,26 +39,38 @@ constexpr std::uint32_t kNamedObjectClass = 0x80809C36U;
 using Rows = std::array<names_state::Name, names_state::kNameCapacity>;
 
 /**
- * One row set per reader, kept across batches so a reader builds up its own best names.
- * Each is a quarter of a megabyte, so they are allocated rather than declared. The pass frees
- * them when it publishes.
+ * One row set per reader for the boot pass, kept across batches so a reader builds up its own
+ * best names. Each is a quarter of a megabyte, so they are allocated. Freed on publish.
  */
 std::vector<Rows> g_rows{};
 
 /** What the readers need to reach the pass. Every reader reads it and none writes it. */
 struct BatchContext {
     Storage* storage{};
+    /** One row set per reader index. */
+    std::vector<Rows>* rows{};
 };
 
-/** @param storage Pass storage. @param workers Readers wanted. @return True when rows are ready. */
-[[nodiscard]] bool prepare_rows(const Storage& storage, std::size_t workers) noexcept {
+/**
+ * Sizes the reader rows for a pass.
+ * @param storage Pass storage.
+ * @param rows Row sets to size.
+ * @param workers Readers wanted.
+ * @return True when rows are ready.
+ */
+[[nodiscard]] bool
+prepare_rows(const Storage& storage, std::vector<Rows>& rows, std::size_t workers) noexcept {
     if (storage.targetCount > names_state::kNameCapacity) {
         return false;
     }
-    if (g_rows.size() < workers) {
-        g_rows.resize(workers);
+    try {
+        if (rows.size() < workers) {
+            rows.resize(workers);
+        }
+    } catch (...) {
+        return false;
     }
-    return g_rows.size() >= workers;
+    return rows.size() >= workers;
 }
 
 /** Frees the reader rows. */
@@ -75,12 +90,13 @@ void collect_blob(void* context,
                   std::size_t worker,
                   std::uint32_t,
                   std::span<const std::byte> blob) noexcept {
-    const Storage& storage = *static_cast<BatchContext*>(context)->storage;
-    if (worker >= g_rows.size()) {
+    const auto& batch = *static_cast<BatchContext*>(context);
+    const Storage& storage = *batch.storage;
+    if (worker >= batch.rows->size()) {
         return;
     }
     MatchState state{{storage.targets.data(), storage.targetCount},
-                     {g_rows[worker].data(), storage.targetCount}};
+                     {(*batch.rows)[worker].data(), storage.targetCount}};
     offer_blob(state, blob);
 }
 
@@ -165,18 +181,25 @@ bool build(const reader::Source& source, reader::Scratch&) noexcept {
     if (!storage.collected) {
         reset(storage);
         storage.startedTick = GetTickCount64();
-        if (!collect_targets(storage)) {
+        // One whole domain of fixed rows, so the snapshot is static rather than a local.
+        static std::array<layouts::Definition, layouts::kDefinitionCapacity> scratch{};
+        std::size_t rows = 0;
+        if (!state::build_data::snapshot_scenario_layouts(scratch, rows)) {
             report(storage, "targets");
             reset(storage);
             return false;
+        }
+        // Nothing to name still publishes an empty table; the SDK generator waits for one.
+        if (!collect_targets(storage, std::span(scratch).first(rows))) {
+            return publish(storage, "no_targets");
         }
         // The package directory names cost no blob read, so they are taken first and a pass that
         // cannot sweep still publishes them.
         packages::named_tags::DirectoryResult directory{};
         (void)packages::named_tags::extract_directory(
-            source.directory, &collect_named, &storage, directory);
+            source.directory, source.installedOnly, &collect_named, &storage, directory);
         reader::ScanResult scan{};
-        if (!reader::scan_class(source.directory, kNamedObjectClass, &collect_tag, &storage, scan)
+        if (!reader::scan_class(source, kNamedObjectClass, &collect_tag, &storage, scan)
             || scan.matches != storage.tagCount) {
             return publish(storage, "sweep");
         }
@@ -189,11 +212,16 @@ bool build(const reader::Source& source, reader::Scratch&) noexcept {
     // and one reader per share overlaps those waits. The call returns once all of them have
     // joined, so nothing outlives the batch.
     const std::size_t workers = reader::parallel::worker_count();
-    if (!prepare_rows(storage, workers)) {
+    if (!prepare_rows(storage, g_rows, workers)) {
         return publish(storage, "readers");
     }
+    // A boot slice never waits for the reader; the next slice tries again.
+    const reader::parallel::Lease lease{reader::parallel::kTryAcquire};
+    if (!lease.held()) {
+        return false;
+    }
     const std::size_t batch = (std::min)(kBatchTags, storage.tagCount - storage.cursor);
-    BatchContext context{&storage};
+    BatchContext context{&storage, &g_rows};
     if (!reader::parallel::read_tags(
             source, {storage.tags.data() + storage.cursor, batch}, &collect_blob, &context)) {
         return publish(storage, "readers");
@@ -211,6 +239,54 @@ bool build(const reader::Source& source, reader::Scratch&) noexcept {
         reader::parallel::release();
     }
     return published;
+}
+
+/** Finds the names of the given hashes from installed packages only, in one call. */
+bool build_private(const reader::Source& source,
+                   std::span<const layouts::Definition> definitions,
+                   std::vector<names_state::Name>& output) noexcept {
+    output.clear();
+    const reader::Source installed{source.directory, source.keys, true};
+    try {
+        // Over a megabyte, so it lives on the heap.
+        const auto storage = std::make_unique<Storage>();
+        if (!collect_targets(*storage, definitions)) {
+            return true;
+        }
+        packages::named_tags::DirectoryResult directory{};
+        (void)packages::named_tags::extract_directory(
+            installed.directory, installed.installedOnly, &collect_named, storage.get(), directory);
+        reader::ScanResult scan{};
+        if (!reader::scan_class(installed, kNamedObjectClass, &collect_tag, storage.get(), scan)
+            || scan.matches != storage->tagCount) {
+            return false;
+        }
+        std::vector<Rows> rows{};
+        if (!prepare_rows(*storage, rows, reader::parallel::worker_count())) {
+            return false;
+        }
+        BatchContext context{storage.get(), &rows};
+        bool read = false;
+        {
+            const reader::parallel::ScopedRead lease{};
+            read = reader::parallel::read_tags(
+                installed, {storage->tags.data(), storage->tagCount}, &collect_blob, &context);
+        }
+        if (!read) {
+            return false;
+        }
+        for (const Rows& worker : rows) {
+            merge(*storage, {worker.data(), storage->targetCount});
+        }
+        finish(*storage);
+        output.assign(storage->resolved.begin(),
+                      storage->resolved.begin()
+                          + static_cast<std::ptrdiff_t>(storage->resolvedCount));
+        return true;
+    } catch (...) {
+        output.clear();
+        return false;
+    }
 }
 
 } // namespace sunrise::client::content::hash_names

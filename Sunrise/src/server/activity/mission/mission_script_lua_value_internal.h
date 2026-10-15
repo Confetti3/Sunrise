@@ -29,7 +29,7 @@ struct UnitScalarHandle final {
     float value{};
 };
 
-/** One squad placement mode. The wire lane is wider than the two named values. */
+/** One squad placement mode. The wire lane is wider than the named values. */
 struct SquadModeHandle final {
     std::uint8_t mode{};
 };

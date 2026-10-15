@@ -8,7 +8,4 @@ namespace sunrise::client::hooks::graphics {
 /** @return True when graphics hooks and every owned UI resource are released. */
 [[nodiscard]] bool uninstall() noexcept;
 
-/** @return True when both DXGI method detours are attached. */
-[[nodiscard]] bool is_installed() noexcept;
-
 } // namespace sunrise::client::hooks::graphics

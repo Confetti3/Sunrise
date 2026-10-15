@@ -3,6 +3,8 @@
 #include <Windows.h>
 
 #include <array>
+#include <cstddef>
+#include <cstring>
 #include <detours.h>
 
 #include "detour/transaction/detour_thread_transaction.h"
@@ -10,8 +12,9 @@
 namespace sunrise::client::hooking::detour {
 namespace {
 
-/** 32 hook slots bound each fixed-storage Detours transaction. */
-constexpr std::size_t kBatchLimit = 32;
+using transaction::clear_handles;
+using transaction::kBatchLimit;
+using transaction::queue_detach;
 
 /**
  * Checks every detour description and output slot before transaction setup.
@@ -30,79 +33,6 @@ constexpr std::size_t kBatchLimit = 32;
             return false;
         }
     }
-    return true;
-}
-
-/**
- * Checks every detour handle before a removal transaction begins.
- * @param handles Handles that must all describe attached detours.
- * @return True when every handle can take part in one fixed transaction.
- */
-[[nodiscard]] bool valid_uninstall_batch(std::span<const Handle> handles) noexcept {
-    if (handles.empty() || handles.size() > kBatchLimit) {
-        return false;
-    }
-    for (const Handle& handle : handles) {
-        if (!handle.attached || handle.original == nullptr || handle.replacement == nullptr) {
-            return false;
-        }
-    }
-    return true;
-}
-
-/**
- * Queues every detour removal against temporary trampoline pointers.
- * @param handles Attached handles in stable transaction order.
- * @param originals Receives pointer values used by Detours through commit.
- * @return True when every removal was accepted by the active transaction.
- */
-[[nodiscard]] bool queue_detach(std::span<const Handle> handles,
-                                std::array<void*, kBatchLimit>& originals) noexcept {
-    originals = {};
-    for (std::size_t index = 0; index < handles.size(); ++index) {
-        originals[index] = handles[index].original;
-        if (DetourDetach(&originals[index], handles[index].replacement) != NO_ERROR) {
-            return false;
-        }
-    }
-    return true;
-}
-
-/**
- * Clears handle state only after a removal transaction commits.
- * @param handles Removed handles to clear.
- */
-void clear_handles(std::span<Handle> handles) noexcept {
-    for (Handle& handle : handles) {
-        handle = {};
-    }
-}
-
-/**
- * Detaches a batch without checking caller-owned protected functions.
- * @param handles Checked attached handles.
- * @return True when every hook was removed and its handle was cleared.
- */
-[[nodiscard]] bool uninstall_unprotected(std::span<Handle> handles) noexcept {
-    if (!valid_uninstall_batch(handles)) {
-        return false;
-    }
-
-    transaction::Threads threads;
-    if (!transaction::begin(threads)) {
-        return false;
-    }
-
-    std::array<void*, kBatchLimit> originals{};
-    if (!queue_detach(handles, originals)) {
-        (void)transaction::abort(threads);
-        return false;
-    }
-    if (!transaction::commit(threads)) {
-        return false;
-    }
-
-    clear_handles(handles);
     return true;
 }
 
@@ -140,7 +70,7 @@ bool uninstall(Handle& handle, bool& replacementActive) noexcept {
 /**
  * Attaches a checked detour batch in one transaction, all or nothing.
  * @param specs Target and replacement pairs in stable slot order.
- * @param outputs Receives trampolines only after a successful commit.
+ * @param outputs Stable slots that Detours fills before resuming patched threads.
  * @return True when every detour is attached.
  */
 bool install(std::span<const Spec> specs, std::span<Handle> outputs) noexcept {
@@ -153,22 +83,22 @@ bool install(std::span<const Spec> specs, std::span<Handle> outputs) noexcept {
         return false;
     }
 
-    std::array<void*, kBatchLimit> originals{};
     for (std::size_t index = 0; index < specs.size(); ++index) {
-        originals[index] = specs[index].target;
-        if (DetourAttach(&originals[index], specs[index].replacement) != NO_ERROR) {
+        outputs[index].original = specs[index].target;
+        outputs[index].replacement = specs[index].replacement;
+        if (DetourAttach(&outputs[index].original, specs[index].replacement) != NO_ERROR) {
             // Abort keeps every output detached when one attachment is rejected.
             (void)transaction::abort(threads);
+            clear_handles(outputs);
             return false;
         }
     }
     if (!transaction::commit(threads)) {
+        clear_handles(outputs);
         return false;
     }
 
     for (std::size_t index = 0; index < specs.size(); ++index) {
-        outputs[index].original = originals[index];
-        outputs[index].replacement = specs[index].replacement;
         outputs[index].attached = true;
     }
     return true;
@@ -180,7 +110,26 @@ bool install(std::span<const Spec> specs, std::span<Handle> outputs) noexcept {
  * @return True when every detour is removed and every handle is cleared.
  */
 bool uninstall(std::span<Handle> handles) noexcept {
-    return uninstall_unprotected(handles);
+    if (!transaction::valid_detach_batch(handles)) {
+        return false;
+    }
+
+    transaction::Threads threads;
+    if (!transaction::begin(threads)) {
+        return false;
+    }
+
+    std::array<void*, kBatchLimit> originals{};
+    if (!queue_detach(handles, originals)) {
+        (void)transaction::abort(threads);
+        return false;
+    }
+    if (!transaction::commit(threads)) {
+        return false;
+    }
+
+    clear_handles(handles);
+    return true;
 }
 
 /**
@@ -202,6 +151,38 @@ bool uninstall(std::span<Handle> handles, bool& replacementActive) noexcept {
     const UninstallResult result = uninstall(handles, std::span(entries.data(), handles.size()));
     replacementActive = result == UninstallResult::protectedCodeActive;
     return result == UninstallResult::removed;
+}
+
+/**
+ * Reads the section table of this module's own headers.
+ * @param name Section name, at most 8 characters.
+ * @return Section bounds, or an empty span so removal fails closed.
+ */
+ProtectedCodeSpan section_span(const char* name) noexcept {
+    HMODULE self{};
+    // From this function's own address, so it names this DLL, not the game.
+    if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS
+                               | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           reinterpret_cast<LPCWSTR>(&section_span),
+                           &self)
+            == FALSE
+        || self == nullptr) {
+        return {};
+    }
+    const auto* const base = reinterpret_cast<const std::byte*>(self);
+    const auto* const dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+    const auto* const nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
+    const auto* const first = reinterpret_cast<const IMAGE_SECTION_HEADER*>(
+        reinterpret_cast<const std::byte*>(&nt->OptionalHeader)
+        + nt->FileHeader.SizeOfOptionalHeader);
+    for (const IMAGE_SECTION_HEADER& section : std::span(first, nt->FileHeader.NumberOfSections)) {
+        const auto* const sectionName = reinterpret_cast<const char*>(section.Name);
+        if (std::strncmp(sectionName, name, IMAGE_SIZEOF_SHORT_NAME) == 0) {
+            const std::byte* const begin = base + section.VirtualAddress;
+            return {begin, begin + section.Misc.VirtualSize};
+        }
+    }
+    return {};
 }
 
 } // namespace sunrise::client::hooking::detour

@@ -3,6 +3,7 @@
 
 #include "../../encoding/bit_reader.h"
 #include "../../encoding/byte_order.h"
+#include "sense_roster_delta.h"
 #include "sense_update.h"
 
 namespace sunrise::middleware::bap::activity_message::sense_update {
@@ -723,9 +724,14 @@ bool decode_sense_update(std::span<const std::byte> input,
         return false;
     }
     update.tailBits = static_cast<std::uint32_t>(reader.remaining_bits() + 1);
+    // The groups follow the mirrored roster delta, so a set root bit means skip its body first.
     if (root != 0) {
-        finish(update, reader, total, DecodeStatus::schemaUnavailable, consumed);
-        return true;
+        const std::size_t before = reader.remaining_bits();
+        if (!skip_roster_delta(reader)) {
+            finish(update, reader, total, DecodeStatus::schemaUnavailable, consumed);
+            return true;
+        }
+        update.rosterDeltaBits = static_cast<std::uint32_t>(before - reader.remaining_bits());
     }
     bool partial = false;
     for (;;) {

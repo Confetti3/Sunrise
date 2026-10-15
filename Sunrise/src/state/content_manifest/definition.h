@@ -37,12 +37,14 @@ struct View final {
     std::span<const Row> rows;
     std::string_view guid;
     std::span<const std::byte, kFingerprintSize> buildFingerprint;
+    /** Installed rows only. Mod packages never change it, so the generated SDK keys on it. */
+    std::span<const std::byte, kFingerprintSize> installedFingerprint;
 };
 
 /**
  * Visits one immutable content-manifest view while State holds its shared lock.
  * @param context Caller context passed through without ownership.
- * @param view Borrowed rows, UUID, and public build fingerprint.
+ * @param view Borrowed rows, UUID, and the build and installed fingerprints.
  * @return True when the caller consumes the complete view.
  */
 using SnapshotVisitor = bool (*)(void* context, const View& view) noexcept;

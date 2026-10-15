@@ -44,8 +44,8 @@ void clear_targets() noexcept;
  */
 [[nodiscard]] bool install() noexcept;
 
-/** Detaches both teleport hooks. */
-void uninstall() noexcept;
+/** Stops Studio observers and detaches both teleport hooks; false requires a retry. */
+[[nodiscard]] bool uninstall() noexcept;
 
 /** Publishes the camera pose for the frame and the forward vector for the next physics tick. */
 void capture_camera_pose(std::uint32_t playerIndex) noexcept;
@@ -92,6 +92,13 @@ void apply_pending(void* component) noexcept;
  * on the player's own tick needs the same test this module already runs.
  */
 [[nodiscard]] bool owns_local_player(void* component) noexcept;
+
+/**
+ * Reads the handle of the object the local player controls.
+ * @param handle Receives the full handle, or the invalid sentinel.
+ * @return False before the getter is found or while the player controls nothing.
+ */
+[[nodiscard]] bool controlled_handle(std::uint32_t& handle) noexcept;
 
 /**
  * Reads the world position of the body a physics component drives.

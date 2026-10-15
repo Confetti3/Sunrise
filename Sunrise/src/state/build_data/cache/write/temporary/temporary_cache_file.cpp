@@ -106,6 +106,7 @@ enum class WriteStatus {
         build.imageTimestamp,
         build.imageSize,
         build.configuredEquipmentHash,
+        build.contentHash,
         static_cast<std::uint32_t>(domains.named.size()),
         static_cast<std::uint32_t>(domains.items.size()),
         static_cast<std::uint32_t>(domains.collectibles.size()),

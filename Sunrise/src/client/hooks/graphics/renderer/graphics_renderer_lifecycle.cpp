@@ -285,14 +285,6 @@ bool shutdown() noexcept {
     return released;
 }
 
-/** Reads renderer readiness under the shared state lock. */
-bool active() noexcept {
-    AcquireSRWLockShared(&g_rendererLock);
-    const bool initialized = fully_active_locked();
-    ReleaseSRWLockShared(&g_rendererLock);
-    return initialized;
-}
-
 /** Picks one usable swap chain and draws the UI frame on it. */
 void present(IDXGISwapChain* swapChain) noexcept {
     AcquireSRWLockExclusive(&g_rendererLock);

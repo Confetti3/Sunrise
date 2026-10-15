@@ -8,11 +8,11 @@
 
 namespace sunrise::client::content::activity::sdk_generation::lua_artifacts::internal {
 
-/** Emits only generated activity identity and panel-data declarations. */
+/** Emits the manifest, the mission API schema, the LuaLS declarations and the behavior module. */
 bool render_contract_files(const Source& source, Bundle& output) noexcept {
     try {
         const Value manifest = object({
-            {"schema", string("sunrise-activity-sdk-v8")},
+            {"schema", string("sunrise-activity-sdk-v11")},
             {"format_version", number(format::kVersion)},
             {"sdk_build_id", string(digest_hex(source.sdkBuildSha256, true))},
             {"sdk_payload_sha256", string(digest_hex(source.sdkPayloadSha256, false))},
@@ -56,177 +56,17 @@ bool render_contract_files(const Source& source, Bundle& output) noexcept {
             return false;
         }
         output.manifestJson.push_back('\n');
+        Value missionApi{};
+        if (!build_mission_api_value(missionApi)
+            || !render_json(missionApi, 0, output.missionApiJson)) {
+            return false;
+        }
+        output.missionApiJson.push_back('\n');
         output.activitySdkModule =
-            R"lua(-- Generated LuaLS declarations and stable SDK enums. Do not edit.
----@enum SunriseEventKind
-local EventKind = {
-    SENSOR_SENSE_UPDATED = 0,
-    CLIENT_STATE_CHANGED = 1,
-    CLIENT_MESSAGE_RECEIVED = 2,
-    AUTH_STATE_COMMITTED = 3,
-    AUTH_STATE_TRANSPORT_STAGED = 4,
-    AUTH_STATE_CANCELED = 5,
-    INCIDENT_RECEIVED = 6,
-    INCIDENT_QUEUED = 7,
-    INCIDENT_TRANSPORT_STAGED = 8,
-    INCIDENT_CANCELED = 9,
-    INCIDENT_REFUSED = 10,
-    SCRIPTABLE_OVERRIDE_COMMITTED = 11,
-    SCRIPTABLE_OVERRIDE_TRANSPORT_STAGED = 12,
-    SCRIPTABLE_OVERRIDE_CANCELED = 13,
-    OPERATOR_REFUSED = 14,
-    TIMER_ELAPSED = 15,
-    EFFECT_RESULT = 16,
-    PHASE_ENTERED = 17,
-    TRIGGER_ENTERED = 18,
-    TRIGGER_EXITED = 19,
-    SQUAD_STATE = 20,
-    ENTITY_SPAWNED = 21,
-    ENTITY_DIED = 22,
-    SCENE_FINISHED = 23,
-    OBJECTIVE_PROGRESS = 24,
-    ENTITY_SLOTS_REQUESTED = 25,
-    SESSION_JOINED = 26,
-    SESSION_LEFT = 27,
-    PLAYER_TRIGGER = 28,
-    CINEMATIC_STARTED = 29,
-    CINEMATIC_TERMINATED = 30,
-    GHOST_LINK_STATE = 31,
-    ACTOR_PATH_STATE = 32,
-    OBJECT_INTERACTED = 33,
-    CINEMATIC_SKIP_REQUESTED = 34,
-    FIRETEAM_STATE = 35,
-    OBJECT_STATE = 36,
-    DAMAGE_STATE = 37,
-    SQUAD_PROVOKED = 38,
-    DEVICE_STATE = 39,
-    REGION_CHANGED = 40,
-}
-
----@class SunriseEvent
----@field kind SunriseEventKind
----@field sequence string
----@field source_generation string
----@field attempt_generation string
----@field mission_sequence string? Input order; absent on delivery lifecycle events.
----@field slot SunriseSlot?
-
----@alias SunriseEventHandler fun(context: any, state: SunriseState, event: SunriseEvent)
-
----@class SunrisePlayerTriggerEvent: SunriseEvent
----@field registry_key integer
----@field object_tag integer
----@field slot_type integer
----@field slot_index integer
----@field volume_registry_key integer
----@field volume_slot_type integer
----@field volume_slot_index integer
----@field resolved_object_id integer
-
----@class SunriseCinematicEvent: SunriseEvent
----@field registry_key integer
----@field object_tag integer
----@field slot_type integer
----@field slot_index integer
----@field runtime_object_id string
----@field event_value number
-
----@class SunriseEntitySlotsRequestedEvent: SunriseEvent
----@field requested_count integer
-
----@class SunriseObjectStateEvent: SunriseEvent
----@field generation integer
----@field present boolean
----@field alive boolean
----@field interaction_open boolean
----@field owner_known boolean
----@field has_owner boolean
----@field owner_key string?
-
----@class SunriseGhostLinkLevel
----@field generation integer
----@field progress number
----@field active boolean
-
----@class SunriseRegionChangedEvent: SunriseEvent
----@field region_index integer
----@field previous_region_index integer?
-
----@class SunriseSquadStateEvent: SunriseEvent
----@field task_cost fun(self: SunriseSquadStateEvent, )lua"
-            R"lua(args: {group: SunriseCombatTaskGroup}): number|nil, boolean
----@field task_group fun(self: SunriseSquadStateEvent, )lua"
-            R"lua(args: {objective: SunriseSlot}): SunriseCombatTaskGroup|nil, boolean
-
----@class SunriseDeviceStateEvent: SunriseEvent
----@field registry_key integer
----@field object_tag integer
----@field slot_type integer
----@field slot_index integer
----@field position number?
----@field power number?
----@field lock number?
----@field position_sequence integer?
----@field power_sequence integer?
----@field lock_sequence integer?
----@field first_report boolean
----@field reset boolean
----@field applied_request fun(self: SunriseDeviceStateEvent, )lua"
-            R"lua(args: {channel: any}): SunriseRequestKey|nil
-
----@class SunriseProgram
----@field on_start? fun(context: any, state: SunriseState)
----@field on_load? fun(context: any, state: SunriseState)
----@field on_event_sensor_sense_updated? SunriseEventHandler
----@field on_event_client_state_changed? SunriseEventHandler
----@field on_event_client_message_received? SunriseEventHandler
----@field on_event_auth_state_committed? SunriseEventHandler
----@field on_event_auth_state_transport_staged? SunriseEventHandler
----@field on_event_auth_state_canceled? SunriseEventHandler
----@field on_event_incident_received? SunriseEventHandler
----@field on_event_incident_queued? SunriseEventHandler
----@field on_event_incident_transport_staged? SunriseEventHandler
----@field on_event_incident_canceled? SunriseEventHandler
----@field on_event_incident_refused? SunriseEventHandler
----@field on_event_scriptable_override_committed? SunriseEventHandler
----@field on_event_scriptable_override_transport_staged? SunriseEventHandler
----@field on_event_scriptable_override_canceled? SunriseEventHandler
----@field on_event_operator_refused? SunriseEventHandler
----@field on_event_timer_elapsed? SunriseEventHandler
----@field on_event_effect_result? SunriseEventHandler
----@field on_event_phase_entered? SunriseEventHandler
----@field on_event_trigger_entered? SunriseEventHandler
----@field on_event_trigger_exited? SunriseEventHandler
----@field on_event_squad_state? SunriseEventHandler
----@field on_event_squad_provoked? SunriseEventHandler
----@field on_event_region_changed? fun(ctx: any, state: SunriseState, )lua"
-            R"lua(event: SunriseRegionChangedEvent)
----@field on_event_device_state? fun(ctx: any, state: SunriseState, event: SunriseDeviceStateEvent)
----@field on_event_entity_spawned? fun(context: any, state: SunriseState, event: SunriseEvent)
----@field on_event_entity_died? fun(context: any, state: SunriseState, event: SunriseEvent)
----@field on_event_scene_finished? fun(context: any, state: SunriseState, event: SunriseEvent)
----@field on_event_objective_progress? fun(context: any, state: SunriseState, event: SunriseEvent)
----@field on_event_entity_slots_requested? fun(context: any, state: SunriseState, )lua"
-            R"lua(event: SunriseEntitySlotsRequestedEvent)
----@field on_event_session_joined? fun(context: any, state: SunriseState, event: SunriseEvent)
----@field on_event_session_left? fun(context: any, state: SunriseState, event: SunriseEvent)
----@field on_event_player_trigger? fun(context: any, state: SunriseState, )lua"
-            R"lua(event: SunrisePlayerTriggerEvent)
----@field on_event_cinematic_started? fun(context: any, state: SunriseState, )lua"
-            R"lua(event: SunriseCinematicEvent)
----@field on_event_cinematic_terminated? fun(context: any, state: SunriseState, )lua"
-            R"lua(event: SunriseCinematicEvent)
----@field on_event_actor_path_state? SunriseEventHandler
----@field on_event_ghost_link_state? SunriseEventHandler
----@field on_event_object_interacted? fun(context: any, state: SunriseState, )lua"
-            R"lua(event: SunriseObjectStateEvent)
----@field on_event_fireteam_state? SunriseEventHandler
----@field on_event_object_state? fun(context: any, state: SunriseState, )lua"
-            R"lua(event: SunriseObjectStateEvent)
----@field on_event_damage_state? SunriseEventHandler
----@field on_event_cinematic_skip_requested? fun(context: any, state: SunriseState, )lua"
-            R"lua(event: SunriseCinematicEvent)
-
+            "-- Generated LuaLS declarations and stable SDK enums. Do not edit.\n";
+        append_mission_api_luals(output.activitySdkModule);
+        output.activitySdkModule +=
+            R"lua(
 ---@class SunriseVector3
 ---@field x number
 ---@field y number
@@ -247,98 +87,17 @@ local EventKind = {
 ---@field auth_dynamic boolean|nil
 ---@field auth_writable boolean|nil
 ---@field unresourced boolean|nil
----@field set_object_active fun(SunriseSlot, SunriseObjectArguments?): SunriseRequestKey
----@field applied fun(self: SunriseSlot, args: {channel: any}): boolean
----@field run_atoms fun(self: SunriseSlot, )lua"
-            R"lua(args: {spawn: boolean?, atoms: table[]}): SunriseRequestKey
----@field assign_combat_objective fun(self: SunriseSlot, )lua"
-            R"lua(args: {objective: SunriseSlot, )lua"
-            R"lua(task_group: SunriseCombatTaskGroup?, reconsider: boolean?, )lua"
-            R"lua(reserved: boolean?, )lua"
-            R"lua(refresh_player_awareness: boolean?}): SunriseRequestKey
----@field play_actor_path fun(self: SunriseSlot, )lua"
-            R"lua(args: {path: SunriseSlot, spawn: boolean?}): SunriseRequestKey
----@field play_actor_action fun(self: SunriseSlot, )lua"
-            R"lua(args: {ability: SunriseActorAbility, )lua"
-            R"lua(target: SunriseSlot?, spawn: boolean?}): SunriseRequestKey
----@field retire_actor fun(self: SunriseSlot, args: table?): SunriseRequestKey
----@field set_darkness_zone fun(self: SunriseSlot, args: {enabled: boolean, )lua"
-            R"lua(wipe_seconds: integer?}): SunriseRequestKey
----@field set_interactable_object fun(self: SunriseSlot, args: {track_owner: boolean?, )lua"
-            R"lua(active: boolean?, used: boolean?}): SunriseRequestKey
----@field set_ghost_link fun(self: SunriseSlot, args: {active: boolean?}): SunriseRequestKey
----@field ghost_link fun(self: SunriseSlot, args: table?): SunriseGhostLinkLevel|nil
----@field set_music_section fun(self: SunriseSlot, args: {section: integer, )lua"
-            R"lua(enabled: boolean?}): SunriseRequestKey
----@field watch_damage fun(self: SunriseSlot, args: {target: SunriseSlot}): SunriseRequestKey
----@field set_occupancy_condition fun(self: SunriseSlot, )lua"
-            R"lua(args: {value: integer, filter: SunriseSlot?}): SunriseRequestKey
----@field generate_map fun(self: SunriseSlot, args: {record: integer?, seed: integer?, )lua"
-            R"lua(mode: integer?, enabled: boolean?, anchors: table[]?, values: integer[]?, )lua"
-            R"lua(reals: number[]?, state_key: integer?}): SunriseRequestKey
----@field set_object_filter fun(self: SunriseSlot, args: {players: boolean?, )lua"
-            R"lua(target: SunriseSlot?, inside: SunriseSlot?, )lua"
-            R"lua(inside_any: SunriseSlot[]?}): SunriseRequestKey
----@field bind_combatant_to_squad fun(self: SunriseSlot): SunriseRequestKey
----@field transition fun(SunriseSlot, SunriseDeviceTransitionArguments): SunriseRequestKey
----@field set_channel fun(self: SunriseSlot, )lua"
-            R"lua(args: {channel: any, value: any, snap: boolean?}): SunriseRequestKey
----@field fire_trigger fun(self: SunriseSlot): SunriseRequestKey
----@field disarm_trigger fun(self: SunriseSlot): SunriseRequestKey
----@field sequences fun(self: SunriseSlot): SunriseActorSequences
----@field play_sequence fun(self: SunriseSlot, args: {sequence: SunriseActorSequence}?): )lua"
-            R"lua(SunriseRequestKey
----@field set_cinematic_active fun(SunriseSlot, SunriseCinematicArguments?): SunriseRequestKey
----@field reset_objectives fun(self: SunriseSlot): SunriseRequestKey
----@field advance_task fun(self: SunriseSlot): SunriseRequestKey
----@field play_performance fun(self: SunriseSlot, args: {state: table?}?): SunriseRequestKey
----@field play_dialogue_cue fun(SunriseSlot, SunriseDialogueCueArguments): SunriseRequestKey
----@field set_directive fun(SunriseSlot, SunriseDirectiveArguments): SunriseRequestKey
----@field clear_directives fun(self: SunriseSlot): SunriseRequestKey
----@field set_public_event_state fun(SunriseSlot, SunrisePublicEventArguments): SunriseRequestKey
-
----@class SunriseRequestKey
-
----@class SunriseCinematicArguments
----@field active? boolean
-
----@class SunriseObjectArguments
----@field active? boolean
----@field with? string[] Up to 63 more type-4 slots sent on the same request.
-
-
----@class SunriseDialogueCueArguments
----@field cue integer
----@field filter? SunriseSlot
-
----@class SunriseDeviceTransitionArguments
----@field transition any Generated device transition value.
----@field snap? boolean Jump to the end value instead of moving.
 
 ---@class SunriseDirective
 ---@field id string
 ---@field slot_row integer
+---@field sensor string The directive sensor's mission.Slot value.
 ---@field name_hash integer
 ---@field element integer
 ---@field title string
 ---@field description string Empty when the element was authored without one.
 ---@field progress string|nil Label shown before the counter, when authored.
 ---@field counter boolean|nil True when the HUD shows the lane's progress values.
-
----@class SunriseDirectiveArguments
----@field directive SunriseDirective Generated mission directive declaration.
----@field state? integer Defaults to 0, the native enter state.
----@field progress? integer[] One to four lane values, current then maximum; counter elements only.
----@field audience? SunriseSlot Authored type-70 engagement sensor for the mission banner.
----@field navpoint? SunriseSlot Authored type-47 navigation marker.
----@field waypoint? SunriseSlot Authored type-60 volume; inside it the HUD marker hides.
-
-
----@class SunrisePublicEventArguments
----@field state? integer Shown unchanged by the HUD directive that names this sensor. Defaults to 0.
----@field player? string Decimal player key of the watched player. Defaults to context.player_key.
----@field area SunriseSlot The object whose zone list bounds the event area.
----@field leave_seconds number Seconds outside that area before the client reports Sense 1.
 
 ---@class SunriseState
 ---@field id string
@@ -369,9 +128,6 @@ local EventKind = {
 ---@field slot integer
 ---@field config_tag integer
 ---@field resource_tag integer
----@field activate fun(self: SunriseScene, args: {spawn: boolean?}?): SunriseRequestKey
----@field stop fun(self: SunriseScene, args: table?): SunriseRequestKey
----@field send_event fun(self: SunriseScene, args: {key: integer}): SunriseRequestKey
 ---@field event_keys integer[]|nil
 
 ---@class SunriseTaskTarget
@@ -417,11 +173,16 @@ local EventKind = {
 ---@field Auth table<string, table<string, string>> Auth slots grouped by their native Auth type.
 ---@field Squad table<string, string>
 ---@field Scene table<string, string> Exact occurrence-bound authored scene identities.
+---@field SceneInput table<string, table<string, integer>> Keys a scene waits on, by trigger name.
+---@field SceneOutput table<string, table<string, integer>> Keys a scene reports, by trigger name.
 ---@field Task table<string, string>
 ---@field TaskGroup table<string, table<string, SunriseCombatTaskGroup>>
 ---@field ActorAbility table<string, table<string, table<string, SunriseActorAbility>>>
 ---@field TriggerVolume table<string, SunriseTriggerVolume>
 ---@field Directive table<string, SunriseDirective>
+---@field PerformanceState table<string, table<string, {slot_row: integer, )lua"
+            R"lua(name_hash: integer, ordinal: integer}>>
+---@field DialogueCue table<string, table<string, integer>>
 
 ---@class SunriseActivity
 ---@field client_teleport_reset integer
@@ -727,6 +488,7 @@ sdk.ObjectFilterPredicateSchema = {
         return true;
     } catch (...) {
         output.manifestJson.clear();
+        output.missionApiJson.clear();
         output.activitySdkModule.clear();
         output.behaviorModule.clear();
         return false;

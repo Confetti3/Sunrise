@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include "../../../state/activity_sdk/format.h"
+#include "../../../state/mods/definition.h"
 #include "../host_runtime.h"
 #include "mission_script_catalog_sdk.h"
 #include "mission_script_ghost_sense.h"
@@ -28,8 +29,7 @@ inline constexpr std::size_t kStateKeyByteCapacity =
 /** One variable string may not outgrow the durable slot the state holds it in. */
 inline constexpr std::size_t kVariableStringByteCapacity =
     state::activity::mission::kVariableStringByteCapacity;
-/** Squad Auth accepts at most fifteen authored member counts. */
-inline constexpr std::size_t kSquadMemberCapacity = 15;
+inline constexpr std::size_t kSquadMemberCapacity = state::activity::mission::kSquadMemberCapacity;
 /** Script source is bounded before it reaches the parser. */
 inline constexpr std::size_t kSourceByteCapacity = 128U * 1024U;
 /** One callback is stopped after this many approximate VM instructions. */
@@ -38,17 +38,32 @@ inline constexpr std::uint32_t kInstructionBudget = 5'000'000;
 inline constexpr std::uint32_t kInitializationInstructionBudget = 100'000'000;
 /** Stable storage holds everything but the arena block, which the open program owns. */
 inline constexpr std::size_t kVmStorageByteCapacity = 512U * 1024U;
+/** The require path holds the two base roots and two roots per loaded mod. */
+inline constexpr std::size_t kSearchPathByteCapacity = 32U * 1024U;
+
+/** Reads the current value of one config entry a mod declares; false when it declares none. */
+using ModConfigReader = bool (*)(std::string_view modId,
+                                 std::string_view key,
+                                 state::mods::ConfigValue& output) noexcept;
+
+/** Resolves a loaded file's mod id; empty means unowned and false refuses attribution. */
+using ModuleOwnerReader = bool (*)(std::string_view path, std::span<char> modId) noexcept;
 
 /** Current generated identity selected by the runtime before a program attaches. */
 struct ProgramIdentity final {
     std::array<char, 72> sdkBuildId{};
     std::array<char, 64> activityId{};
     /** The only filesystem search path available to generated-module require calls. */
-    std::array<char, 1024> sdkLuaSearchPath{};
+    std::array<char, kSearchPathByteCapacity> sdkLuaSearchPath{};
     std::uint32_t activityRow{};
     std::uint32_t definitionHash{};
     /** The player key the bound link's message 5 binds; the client matches it on its own datum. */
     std::uint64_t playerKey{};
+    /** Id of the mod that supplied the controller; empty for a base or generated script. */
+    std::array<char, state::mods::kIdCapacity> modId{};
+    /** Reads `context.mod_config`; null leaves every entry nil. */
+    ModConfigReader readModConfig{};
+    ModuleOwnerReader readModuleOwner{};
     /** Exact ActivityClient directory selected for this VM. */
     bool publicTarget{};
 };
@@ -408,7 +423,7 @@ struct DefinitionApi final {
     ResolveSlotRow resolveSlotRow{};
     ResolveSlotId resolveSlotId{};
     ResolveSenseSlot resolveSenseSlot{};
-    // These resolvers expose generated task and directive rows without script-owned identifiers.
+    // TODO: add the Lua task and directive row bindings; only resolveDirectiveElement is read.
     ResolveTaskSensorRow resolveTaskSensorRow{};
     ResolveTaskSensorId resolveTaskSensorId{};
     ResolveDirectiveElementRow resolveDirectiveElementRow{};
@@ -491,42 +506,18 @@ public:
 
 private:
     friend struct detail::VmAccess;
-    friend OpenStatus
-    open(Vm&, const ProgramIdentity&, const DefinitionApi&, std::span<const char>) noexcept;
-    friend bool rebind(Vm&, const ProgramIdentity&, const DefinitionApi&) noexcept;
-    friend bool restore_state(Vm&,
-                              std::uint32_t,
-                              std::uint64_t,
-                              std::span<const ScriptVariable>,
-                              std::span<const MissionTimer>,
-                              std::uint64_t,
-                              std::span<const Intent>) noexcept;
-    friend CallStatus start(Vm&, std::uint64_t) noexcept;
-    friend CallStatus load(Vm&, std::uint64_t) noexcept;
-    friend CallStatus
-    dispatch(Vm&, const host::Event&, const host::ClientMessageSnapshot*, std::uint64_t) noexcept;
-    friend bool handles_event(const Vm&, host::EventKind) noexcept;
-    friend bool initial_state_region(const Vm&, std::int32_t&) noexcept;
-    friend bool initial_state_spawn_set(const Vm&, std::uint32_t&) noexcept;
-    friend bool initial_state_omissions(const Vm&,
-                                        std::span<state::activity::mission::MissionSeedOmission>,
-                                        std::size_t&) noexcept;
-    friend bool pending_intent(const Vm&, Intent&) noexcept;
-    friend bool snapshot_intents(const Vm&, std::vector<Intent>&) noexcept;
-    friend bool snapshot_durable_state(const Vm&,
-                                       std::span<ScriptVariable>,
-                                       std::size_t&,
-                                       std::span<MissionTimer>,
-                                       std::size_t&,
-                                       std::uint64_t&) noexcept;
-    friend void consume_intent(Vm&) noexcept;
-    friend void discard_intents(Vm&) noexcept;
-    friend void fault(Vm&, std::string_view) noexcept;
-    friend void snapshot(const Vm&, Snapshot&) noexcept;
-    friend void close(Vm&) noexcept;
 
     alignas(std::max_align_t) std::array<std::byte, kVmStorageByteCapacity> storage_{};
 };
+
+/**
+ * Compiles one text chunk in a scratch state and discards it. Runs no script code.
+ * @param chunkName Null-terminated name the error message quotes.
+ * @param error Receives the null-terminated compiler message on failure.
+ * @return False when the chunk does not compile.
+ */
+[[nodiscard]] bool
+check_syntax(std::span<const char> source, const char* chunkName, std::span<char> error) noexcept;
 
 /** Opens one text-only, build-matched program in a fresh sandbox. */
 [[nodiscard]] OpenStatus open(Vm& vm,
@@ -608,14 +599,19 @@ initial_state_omissions(const Vm& vm,
                                           std::uint64_t& nextIntentKey) noexcept;
 /** Removes the oldest action after a native adapter accepted it. */
 void consume_intent(Vm& vm) noexcept;
-/** Discards every committed action after a terminal native-delivery failure. */
-void discard_intents(Vm& vm) noexcept;
 /** Stops callbacks after an unrecoverable event or action failure. */
 void fault(Vm& vm, std::string_view reason) noexcept;
 /** Copies bounded diagnostics without invoking script code. */
 void snapshot(const Vm& vm, Snapshot& output) noexcept;
 /** Closes one state and releases every allocation back to its fixed arena. */
 void close(Vm& vm) noexcept;
+
+/** Exchanges prepared states only between callbacks; Lua ownership follows each moved arena. */
+[[nodiscard]] bool exchange(Vm& first, Vm& second) noexcept;
+/** Copies the attempt, ghost levels and peers into a prepared VM. */
+[[nodiscard]] bool copy_inputs(const Vm& source, Vm& prepared) noexcept;
+/** True only for a mod whose file successfully loaded in this VM. */
+[[nodiscard]] bool uses_mod(const Vm& vm, std::string_view modId) noexcept;
 
 [[nodiscard]] const char* status_name(OpenStatus status) noexcept;
 [[nodiscard]] const char* status_name(CallStatus status) noexcept;

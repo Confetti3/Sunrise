@@ -250,20 +250,20 @@ constexpr std::uint8_t kType2AtomFieldMaximum = 0x3F;
 }
 
 /** Child schema the client selects for each type-34 predicate tag, in tag order. */
-constexpr std::array<std::uint32_t, 13> kType34PredicateSchemas{
-    0x80809571U,
-    0x80809572U,
-    0x80809573U,
-    0x80809574U,
-    0x80809575U,
-    0x80809576U,
-    0x80809577U,
-    0x80809578U,
-    0x80809579U,
-    0x8080957AU,
-    0x8080957BU,
-    0x8080957CU,
-    0x8080957DU,
+constexpr std::array<Type34PredicateSchema, 13> kType34PredicateSchemas{
+    Type34PredicateSchema::modeU32A,
+    Type34PredicateSchema::modeU32B,
+    Type34PredicateSchema::modeOnlyA,
+    Type34PredicateSchema::unregisteredModeSlotRef,
+    Type34PredicateSchema::modeU32C,
+    Type34PredicateSchema::modeFlagSlotRef,
+    Type34PredicateSchema::modeSlotRefA,
+    Type34PredicateSchema::modeSlotRefB,
+    Type34PredicateSchema::modeSlotRefC,
+    Type34PredicateSchema::modeI32,
+    Type34PredicateSchema::modeSlotRefD,
+    Type34PredicateSchema::modeU32D,
+    Type34PredicateSchema::modeOnlyB,
 };
 
 /** Bits each predicate child body occupies, in the same tag order. */
@@ -346,7 +346,8 @@ template <typename Value>
                                           const Type34Predicate& predicate) noexcept {
     const std::size_t selector = predicate.index();
     return selector < kType34PredicateSchemas.size() && writer.write(1, kBoolWidth)
-           && writer.write(kType34PredicateSchemas[selector], kSigned32Width)
+           && writer.write(static_cast<std::uint32_t>(kType34PredicateSchemas[selector]),
+                           kSigned32Width)
            && write_type34_child(writer, predicate);
 }
 

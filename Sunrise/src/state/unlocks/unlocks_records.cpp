@@ -46,8 +46,6 @@ std::array<bool, kAccountFlagCapacity> g_counterGranted{};
 /** Both caches are read and written only under the unlock banks' exclusive lock. */
 bool g_cacheReady{};
 
-/** The authored lore values still stand; they are replaced once the catalogs first load. */
-
 /** @return True when that lore node's book counts bars instead of claims. */
 [[nodiscard]] constexpr bool counter_granted_node(std::uint16_t nodeIndex) noexcept {
     return std::find(kCounterGrantedLoreNodes.begin(), kCounterGrantedLoreNodes.end(), nodeIndex)
@@ -643,31 +641,6 @@ GrantOutcome grant_chapter(std::uint16_t recordIndex) noexcept {
         request.outcome = grant_locked(table, request.recordIndex);
     });
     return saved ? operation.outcome : GrantOutcome::refused;
-}
-
-/** Advances one counted lore chapter by one objective unit. */
-GrantOutcome advance_chapter(std::uint16_t recordIndex) noexcept {
-    catalog::Definition record{};
-    if (!build_data::find_record_definition(recordIndex, record)) {
-        return GrantOutcome::recordNotFound;
-    }
-    if (record.completionFlagIndex == catalog::kUnavailableFlagIndex) {
-        return GrantOutcome::noFlag;
-    }
-    if (record.loreRow == catalog::kUnavailableLoreRow) {
-        return GrantOutcome::notAChapter;
-    }
-    switch (advance_objective(record.completionFlagIndex)) {
-    case ObjectiveAdvance::advanced:
-        return GrantOutcome::progressed;
-    case ObjectiveAdvance::completed:
-        return GrantOutcome::granted;
-    case ObjectiveAdvance::alreadyHeld:
-        return GrantOutcome::alreadyHeld;
-    case ObjectiveAdvance::unavailable:
-    default:
-        return GrantOutcome::refused;
-    }
 }
 
 /** Advances the single-objective record that owns one completion flag. */

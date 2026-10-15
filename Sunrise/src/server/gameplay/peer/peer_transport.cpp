@@ -19,26 +19,6 @@ namespace wire = middleware::gameplay::peer;
 /** Bit position of the payload marker inside its first byte. */
 constexpr unsigned kMarkerShift = 7;
 
-/**
- * Resolves the session a message that does not name one belongs to.
- * A link carrying more than one session leaves it unresolved rather than guessing.
- * @param peer Link the message arrived on.
- * @return The session id, or zero when the link carries none or several.
- */
-[[nodiscard]] std::uint64_t sole_session_locked(const gp::PeerLink& peer) noexcept {
-    std::uint64_t only = 0;
-    for (const std::uint64_t held : peer.sessions) {
-        if (held == 0) {
-            continue;
-        }
-        if (only != 0) {
-            return 0;
-        }
-        only = held;
-    }
-    return only;
-}
-
 } // namespace
 
 SRWLOCK g_lock{SRWLOCK_INIT};
@@ -127,8 +107,7 @@ void reset_entity_source(const gp::entity_identity::Source& source) noexcept {
 
 /**
  * Copies the admitted source while its peer is locked.
- * @param peer Peer whose lifecycle is
- * being read or changed.
+ * @param peer Peer whose lifecycle is being read or changed.
  * @return Exact current entity source.
  */
 gp::entity_identity::Source entity_source(const gp::PeerLink& peer) noexcept {
@@ -192,15 +171,6 @@ gp::PeerLink* find_external_group_locked(std::uint64_t groupSessionId) noexcept 
         }
     }
     return nullptr;
-}
-
-/** Resolves the session an out-of-band message at one endpoint belongs to. */
-std::uint64_t session_for_endpoint(const gp::Endpoint& from) noexcept {
-    AcquireSRWLockShared(&g_lock);
-    const gp::PeerLink* const peer = find_locked(from);
-    const std::uint64_t only = peer == nullptr ? 0 : sole_session_locked(*peer);
-    ReleaseSRWLockShared(&g_lock);
-    return only;
 }
 
 /** @return A free peer slot, or null. Callers already hold the lock. */

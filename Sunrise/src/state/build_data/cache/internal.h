@@ -24,10 +24,12 @@ enum class WriteDisposition {
 /**
  * Reads the build identity from this process's executable image.
  * @param configuredEquipmentHash Hash of the authored equipment and the score rules.
- * @param identity Receives the PE fields and the configured-equipment hash.
+ * @param contentHash Identity of the installed and mod packages the mappings come from.
+ * @param identity Receives the PE fields and both hashes.
  * @return True when the main executable is a valid Windows PE image.
  */
 [[nodiscard]] bool current_build_identity(std::uint64_t configuredEquipmentHash,
+                                          std::uint64_t contentHash,
                                           BuildIdentity& identity) noexcept;
 
 /**

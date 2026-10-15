@@ -83,7 +83,6 @@ void apply_incident(const IncidentInput& input, std::uint64_t now) noexcept {
         return;
     }
     touch(*instance);
-    ++instance->view.incidentsReceived;
     Event event{};
     event.attemptGeneration = input.attemptGeneration;
     event.binding = input.binding;
@@ -147,7 +146,6 @@ void apply_incident_control(const IncidentRequest& request, std::uint64_t now) n
     } else {
         touch(*instance);
         ++instance->view.incidentRevision;
-        ++instance->view.incidentsQueued;
         ++instance->view.incidentsPending;
         instance->view.outputPending = true;
         instance->view.outputKind = OutputKind::incident;

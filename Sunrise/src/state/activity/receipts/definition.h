@@ -12,7 +12,7 @@ namespace sunrise::state::activity::receipts {
  * adds below the same ceiling. A type above it is counted in the overflow row instead of dropped.
  */
 inline constexpr std::size_t kReceiptCapacity = 64;
-/** Row every message type at or above the capacity is counted in. */
+/** Row every message type at or above this index is counted in. */
 inline constexpr std::size_t kOverflowRow = kReceiptCapacity - 1;
 
 /** How completely one arriving activity message was framed. */

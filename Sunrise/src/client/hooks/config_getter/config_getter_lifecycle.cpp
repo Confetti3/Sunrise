@@ -74,12 +74,4 @@ bool uninstall() noexcept {
     return removed;
 }
 
-/** @return True while both getters answer. */
-bool is_installed() noexcept {
-    AcquireSRWLockShared(&g_lock);
-    const bool installed = attached();
-    ReleaseSRWLockShared(&g_lock);
-    return installed;
-}
-
 } // namespace sunrise::client::hooks::config_getter

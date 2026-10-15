@@ -12,11 +12,6 @@ constexpr std::uint8_t kSlotTypeParticipation = 13;
 /** The participation region rides a signed field, so this is the widest index it accepts. */
 constexpr std::uint32_t kMaximumRegion = 0x7FFFFFFF;
 
-/** @return True when the packed counts and body width close one complete type-43 shape. */
-/**
- * @return True when an SDK-compiled body has one exact, non-truncated physical extent.
- * This arm pins no slot type and no schema, so it refuses every slot type with a faulting lane.
- */
 /**
  * Checks the per-bubble sub-blocks against what the client's own arrays hold.
  * An empty sub-block would publish a zero count and a zero mask, which registers nothing and
@@ -171,9 +166,7 @@ constexpr std::uint32_t kMaximumRegion = 0x7FFFFFFF;
     for (std::size_t index = 0; index < snapshot.authOverrides.size(); ++index) {
         const AuthOverride& value = snapshot.authOverrides[index];
         const std::size_t requiredBytes = (value.bitCount + 7U) / 8U;
-        // A body's shape is not re-derived here: its own encoder owns it, and a second copy of
-        // that sum drifted once and refused every squad body Sunrise sent. Only the row's own
-        // consistency is checked, which no encoder owns.
+        // The body's own encoder owns its shape. Check only the row's own consistency.
         if (!value.present || value.byteCount != requiredBytes
             || requiredBytes > value.body.size()) {
             return false;

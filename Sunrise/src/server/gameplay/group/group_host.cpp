@@ -437,12 +437,12 @@ void drop_session(std::uint64_t sessionId) noexcept {
     }
     ReleaseSRWLockExclusive(&g_admittedLock);
     report(queued ? core::log::Level::info : core::log::Level::debug,
-           "ev=gameplay stage=join result=%s session=0x%llX machine=0x%llX update=%u",
+           "ev=gameplay stage=join result=%s session=0x%llX join=0x%llX update=%u",
            queued              ? "completed"
            : record == nullptr ? "fail"
                                : "deferred",
            static_cast<unsigned long long>(body.sessionId),
-           static_cast<unsigned long long>(body.machineId),
+           static_cast<unsigned long long>(body.joinId),
            body.joinSequence);
     return true;
 }
@@ -786,11 +786,6 @@ bool publish_join_parameters(std::uint64_t sessionId) noexcept {
            static_cast<unsigned>(update.releasedMask),
            wire::parameter_names(update.releasedMask, names.data(), names.size()));
     return sent;
-}
-
-/** Reports whether replication may produce entity output for one peer. */
-bool view_accepted(std::uint64_t sessionId) noexcept {
-    return peer::view_bound(sessionId);
 }
 
 /** Copies every admitted group-session record. */

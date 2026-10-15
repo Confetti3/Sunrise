@@ -77,27 +77,4 @@ LayoutKind layout_of(std::uint32_t messageId, DefinitionState state, Coverage co
     return state == DefinitionState::authored ? LayoutKind::authored : LayoutKind::reflection;
 }
 
-/** Returns the operator-facing name of one message layout family. */
-const char* layout_name(LayoutKind layout) noexcept {
-    switch (layout) {
-    case LayoutKind::reflection:
-        return "reflection";
-    case LayoutKind::authored:
-        return "authored";
-    case LayoutKind::packageSelected:
-        return "package-selected";
-    case LayoutKind::runtimeSelected:
-        return "runtime-selected";
-    case LayoutKind::reflectionWithRawTail:
-        return "reflection + raw tail";
-    case LayoutKind::absent:
-        return "no wire definition";
-    }
-    return "unknown";
-}
-
-const char* call_form_name(CallForm form) noexcept {
-    return form == CallForm::deltaRootBit ? "delta root bit" : "direct";
-}
-
 } // namespace sunrise::middleware::bap::activity_message::wire_schema

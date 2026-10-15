@@ -14,9 +14,6 @@ namespace sunrise::client::hooks::polled_input {
 /** Detaches both polled key guards. */
 void uninstall() noexcept;
 
-/** @return True while both polled key guards are attached. */
-[[nodiscard]] bool is_installed() noexcept;
-
 /**
  * Applies the polled-input policy for the current interface visibility.
  * @param visible Current Core visibility state.

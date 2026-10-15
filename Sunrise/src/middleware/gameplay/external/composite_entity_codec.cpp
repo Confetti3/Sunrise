@@ -408,11 +408,6 @@ runtime_schema(const CompositeEntityCodecContext& context, std::uint32_t handle)
     return found != context.sobjectRsats.end() && found->rsatTag == tag ? &*found : nullptr;
 }
 
-/** Checks the complete 17-bit entity-token domain. */
-[[nodiscard]] bool valid_token(const EntityToken& token) noexcept {
-    return token.slot <= kMaximumEntitySlot && token.incarnation <= kMaximumEntityIncarnation;
-}
-
 /** Validates and opens one callback-owned canonical mirror. */
 [[nodiscard]] bool load_mirror(const TypePayload& payload, MirrorView& output) noexcept {
     if (payload.byteCount < sizeof(MirrorHeader) || payload.byteCount > payload.state.size()) {
@@ -654,14 +649,6 @@ bool composite_sobject_rsat(const TypePayload& payload, std::uint32_t& output) n
     }
     output = view.header.semanticTag;
     return true;
-}
-
-/** Binds the currently published authenticated SDK. */
-bool initialize_composite_entity_codec(CompositeEntityCodecContext& context,
-                                       EntityBaselineRegistry& registry,
-                                       SobjectPositionCompression positionCompression) noexcept {
-    state::activity_sdk::Snapshot catalog = state::activity_sdk::snapshot();
-    return detail::bind_context(context, registry, catalog, positionCompression);
 }
 
 /** Binds one caller-pinned authenticated SDK. */

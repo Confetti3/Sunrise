@@ -52,7 +52,7 @@ bool build(const reader::Source& source,
     try {
         Context context{source, scratch, {}};
         reader::ScanResult result{};
-        if (!reader::scan_class(source.directory, kRsatClass, &collect, &context, result)) {
+        if (!reader::scan_class(source, kRsatClass, &collect, &context, result)) {
             return false;
         }
         std::sort(context.rows.begin(), context.rows.end(), [](const auto& a, const auto& b) {

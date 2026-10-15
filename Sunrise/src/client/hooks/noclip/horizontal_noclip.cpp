@@ -32,8 +32,8 @@ namespace {
 
 /** hkpSimulation::stepDeltaTime, which encloses Havok integration and collision resolution. */
 constexpr std::string_view kHavokStepText =
-    "40 53 48 83 EC 20 83 79 38 01 48 8B D9 77 06 48 8B 01 FF 50 20 F7 43 38 FD FF FF FF "
-    "75 09 48 8B 03 48 8B CB FF 50 28";
+    "40 53 48 83 EC 20 83 79 38 01 48 8B D9 77 ? 48 8B 01 FF 50 20 F7 43 38 FD FF FF FF "
+    "75 ? 48 8B 03 48 8B CB FF 50 28";
 /** Masked form of the step text. This is the form the image scan takes. */
 constexpr auto kHavokStep =
     patterns::signature<patterns::signature_length(kHavokStepText)>(kHavokStepText);
@@ -317,10 +317,8 @@ std::int32_t __fastcall havok_step(std::byte* simulation, float deltaTime) noexc
         nativeVelocity = field<std::array<float, kVectorLanes>>(before, kBodyVelocity);
         nativePosition = field<std::array<float, kVectorLanes>>(before, kBodyPosition);
     }
-    // Flying through geometry, the body does not have to carry the speed through the step: this
-    // hook writes the position itself. It is put to rest instead, because damage taken inside
-    // geometry scales with contact speed and a resting body makes no fast contacts. The speed is
-    // held above and put back after the step.
+    // Rest the body through the step: this hook writes the position, and contact damage scales
+    // with speed. The held velocity goes back after the step.
     const bool rested = enabledBeforeStep && flying && hasBody;
     if (rested) {
         field<std::array<float, kVectorLanes>>(before, kBodyVelocity) = {};
@@ -441,11 +439,17 @@ bool install() noexcept {
 
 /** Detaches the simulation-step detour, then clears the key state. */
 void uninstall() noexcept {
-    if (!g_installed.exchange(false, std::memory_order_acq_rel)) {
+    if (!g_installed.load(std::memory_order_acquire)) {
         return;
     }
-    (void)hooking::detour::uninstall(g_stepHandle);
-    g_stepHandle = {};
+    // A failed detach keeps the handle, so the detour still reaches the original.
+    if (!hooking::detour::uninstall(g_stepHandle)) {
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::warn,
+                         "ev=noclip stage=uninstall result=fail");
+        return;
+    }
+    g_installed.store(false, std::memory_order_release);
     // The switch is a stored setting, so detaching clears only the key state.
     g_toggleDown.store(false, std::memory_order_release);
 }

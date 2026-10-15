@@ -3,17 +3,28 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string_view>
 
 namespace sunrise::state::build_data::scriptables::inline_name_evidence {
 
+/** FNV-1 32-bit offset basis and prime. The packages hash names with FNV-1, not FNV-1a. */
+inline constexpr std::uint32_t kHashBasis = 0x811C9DC5U;
+inline constexpr std::uint32_t kHashPrime = 0x01000193U;
+
 /** @return The authored 32-bit FNV-1 hash of one exact byte string. */
 [[nodiscard]] inline std::uint32_t hash(std::span<const std::byte> bytes) noexcept {
-    // FNV-1 32-bit offset basis and prime, as the packages hash their names.
-    constexpr std::uint32_t kBasis = 0x811C9DC5U;
-    constexpr std::uint32_t kPrime = 0x01000193U;
-    std::uint32_t output = kBasis;
+    std::uint32_t output = kHashBasis;
     for (const std::byte byte : bytes) {
-        output = (output * kPrime) ^ std::to_integer<std::uint8_t>(byte);
+        output = (output * kHashPrime) ^ std::to_integer<std::uint8_t>(byte);
+    }
+    return output;
+}
+
+/** @return The authored 32-bit FNV-1 hash of one exact name. */
+[[nodiscard]] constexpr std::uint32_t hash(std::string_view text) noexcept {
+    std::uint32_t output = kHashBasis;
+    for (const char character : text) {
+        output = (output * kHashPrime) ^ static_cast<std::uint8_t>(character);
     }
     return output;
 }

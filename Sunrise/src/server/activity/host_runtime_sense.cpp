@@ -1,5 +1,5 @@
 /**
- * Type-43 Sense retention, tracing and scalar selection.
+ * Msg-6 Sense retention, type-43 tracing and scalar selection.
  * Helpers here need the Host runtime lock; the entry points take it themselves.
  */
 
@@ -342,8 +342,7 @@ void trace_scene_sense(Instance& instance, const SenseInput& input) noexcept {
     }
 }
 
-/** Replaces only fully decoded keys in an accepted packet; omitted or unsupported keys stay
- * retained. */
+/** Replaces only fully decoded keys; omitted or unsupported keys stay retained. */
 [[nodiscard]] bool
 retain_sense_observations(Instance& instance, const SenseInput& input, std::uint64_t now) noexcept {
     namespace sense = middleware::bap::activity_message::sense_update;

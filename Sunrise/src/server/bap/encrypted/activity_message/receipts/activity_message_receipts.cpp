@@ -7,6 +7,7 @@
 
 #include "activity_message_receipts.h"
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cstdarg>
@@ -141,6 +142,39 @@ void report(core::log::Level level, const char* format, ...) noexcept {
     return Verdict::malformed;
 }
 
+/**
+ * Logs a body the decoder could not follow as hex, split across lines to fit the line cap.
+ * @param stage Short stable stage name for the log line.
+ * @param request Validated envelope.
+ */
+void report_payload(const char* stage, const message::Request& request) noexcept {
+    if (!core::log::accepts(core::log::Channel::server, core::log::Level::debug)) {
+        return;
+    }
+    // Two hex digits per byte, leaving room for the key prefix.
+    constexpr std::size_t kChunkBytes = 448;
+    const std::span<const std::byte> payload = request.payload;
+    for (std::size_t offset = 0; offset < payload.size(); offset += kChunkBytes) {
+        std::array<char, core::log::kLineCapacity> line{};
+        const int written =
+            std::snprintf(line.data(),
+                          line.size(),
+                          "ev=activity stage=%s_raw type=%u bytes=%zu offset=%zu hex=",
+                          stage,
+                          request.messageType,
+                          payload.size(),
+                          offset);
+        if (written <= 0 || static_cast<std::size_t>(written) >= line.size()) {
+            return;
+        }
+        auto length = static_cast<std::size_t>(written);
+        const std::size_t count = (std::min)(kChunkBytes, payload.size() - offset);
+        static_cast<void>(core::log::append_hex(line, length, payload.subspan(offset, count)));
+        core::log::write(
+            core::log::Channel::server, core::log::Level::debug, {line.data(), length});
+    }
+}
+
 } // namespace
 
 /** Records the synchronous schema-selected sensor decode. */
@@ -150,16 +184,20 @@ Framed frame_sense_update(const message::Request& request,
         return {report_malformed("sense", request), update.decoded.bitsConsumed};
     }
     report(core::log::Level::debug,
-           "ev=activity stage=sense result=%s epoch=0x%016llX%016llX groups=%u "
+           "ev=activity stage=sense result=%s epoch=0x%016llX%016llX roster_bits=%u groups=%u "
            "decoded_groups=%u skipped_groups=%u objects=%u decoded_objects=%u",
            sense::decode_status_name(update.decoded.status),
            static_cast<unsigned long long>(update.epoch.first),
            static_cast<unsigned long long>(update.epoch.second),
+           update.rosterDeltaBits,
            update.decoded.groupsSeen,
            update.decoded.groupsDecoded,
            update.decoded.groupsSkipped,
            update.decoded.objectsSeen,
            update.decoded.objectsDecoded);
+    if (update.decoded.status == sense::DecodeStatus::schemaUnavailable) {
+        report_payload("sense", request);
+    }
     for (std::size_t index = 0; index < update.decoded.objectCount; ++index) {
         const sense::DecodedObject& object = update.decoded.objects[index];
         report(core::log::Level::debug,

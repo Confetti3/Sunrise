@@ -10,6 +10,7 @@
 #include <string_view>
 #include <utility>
 
+#include "../../../core/filesystem/path.h"
 #include "../../../state/content_manifest/content_manifest_state_runtime.h"
 #include "../items/packages/internal.h"
 #include "activity_sdk_estate_validation.h"
@@ -29,16 +30,6 @@ volatile LONG g_stageSequence{};
 
 [[nodiscard]] bool cancelled(OfflineCancelProbe probe, void* context) noexcept {
     return probe != nullptr && probe(context);
-}
-
-[[nodiscard]] bool copy_fingerprint(void* opaque,
-                                    const state::content_manifest::View& view) noexcept {
-    if (opaque == nullptr || view.buildFingerprint.size() != generated::Digest{}.size()) {
-        return false;
-    }
-    auto& output = *static_cast<generated::Digest*>(opaque);
-    std::copy(view.buildFingerprint.begin(), view.buildFingerprint.end(), output.begin());
-    return true;
 }
 
 void report(OfflineProgressSink sink,
@@ -162,9 +153,8 @@ void report(OfflineProgressSink sink,
             if (written != 0 && written < needed) {
                 buffer.resize(written);
                 // Windows returns the extended prefix; callers store the plain path.
-                constexpr std::wstring_view kExtended = L"\\\\?\\";
-                if (buffer.starts_with(kExtended)) {
-                    buffer.erase(0, kExtended.size());
+                if (buffer.starts_with(core::path::kExtendedPrefix)) {
+                    buffer.erase(0, core::path::kExtendedPrefix.size());
                 }
                 while (buffer.size() > 3U && (buffer.back() == L'\\' || buffer.back() == L'/')) {
                     buffer.pop_back();
@@ -380,7 +370,8 @@ Status run_process_local(std::wstring_view packageDirectory,
     static_cast<void>(cacheArtifactDirectory);
     generated::Digest fingerprint{};
     middleware::content::packages::reader::BlockKeys keys{};
-    if (!state::content_manifest::visit_snapshot(&copy_fingerprint, &fingerprint)
+    // The SDK keys on the installed identity; mods never change it.
+    if (!state::content_manifest::installed_fingerprint(fingerprint)
         || !items::packages::collect_keys(keys)) {
         SecureZeroMemory(&keys, sizeof keys);
         return Status::invalidInput;

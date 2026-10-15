@@ -7,8 +7,8 @@
 
 namespace sunrise::state::build_data::vendors {
 
-/** Rows of the installed vendor index. The live table has 511. */
-inline constexpr std::size_t kIndexCapacity = 512;
+/** Hash scans increment a signed 16-bit cursor before comparing the row count. */
+inline constexpr std::size_t kIndexCapacity = 0x7FFF;
 /** Every index row gets a definition, so the two capacities are the same. */
 inline constexpr std::size_t kDefinitionCapacity = kIndexCapacity;
 /** Sale rows across every definition. The live total is 15,768 and one vendor declares 1,044. */

@@ -7,7 +7,14 @@
 
 #include "../../../middleware/gameplay/external/composite_entity_codec.h"
 
+namespace sunrise::state::activity_sdk {
+class Catalog;
+} // namespace sunrise::state::activity_sdk
+
 namespace sunrise::state::gameplay::rsat_decode_plans {
+/** The compiler, publisher, and loader share this cache pair beside the SDK pack. */
+inline constexpr std::wstring_view kCacheSuffix = L"\\rsat_decode_plans.cache";
+inline constexpr std::wstring_view kManifestSuffix = L".json";
 using Digest = std::array<std::byte, 32>;
 namespace external = middleware::gameplay::external;
 struct PlanRow final {
@@ -65,6 +72,8 @@ private:
     std::vector<AdditionalField> additionalFields_;
     bool ready_{};
 };
+/** Checks both stored decoder files against one validated catalog. */
+[[nodiscard]] bool valid_installed_pair(const activity_sdk::Catalog& catalog) noexcept;
 [[nodiscard]] bool
 resolve_plan(const void*, std::uint32_t, std::uint32_t, external::SobjectDecodePlan&) noexcept;
 [[nodiscard]] bool resolve_schema_layout(const void*, std::uint32_t, std::uint32_t&) noexcept;

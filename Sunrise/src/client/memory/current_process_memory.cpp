@@ -23,4 +23,23 @@ bool read_current_process([[maybe_unused]] void* context,
            && copied == output.size();
 }
 
+/** A fault inside the copy fails this read only; the caller's buffer may be partly written. */
+bool copy_current_process([[maybe_unused]] void* context,
+                          std::uintptr_t address,
+                          std::span<std::byte> output) noexcept {
+    if (address == 0) {
+        return false;
+    }
+    const void* source = nullptr;
+    static_assert(sizeof source == sizeof address);
+    // Copy every address bit without an implementation-defined integer conversion.
+    std::memcpy(&source, &address, sizeof source);
+    __try {
+        std::memcpy(output.data(), source, output.size());
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
 } // namespace sunrise::client::memory

@@ -411,7 +411,7 @@ bool request_state_local_sequence_override(
     return enqueue_request(request, reservation);
 }
 
-/** Queues one state-local cinematic override, but only for an exact type-5 target. */
+/** Queues one state-local cinematic override, but only for an exact type-6 target. */
 bool request_state_local_cinematic_override(
     const state::activity::SessionBinding& binding,
     const ScriptableTarget& target,

@@ -67,12 +67,19 @@ bool build_container_index(const package_reader::Source& source,
     SweepContext context{&output, cancel, false};
     package_reader::ScanResult scan{};
     const bool scanned = package_reader::scan_class_entries(
-        source.directory, tables::kContainerClass, &collect_entry, &context, scan);
+        source, tables::kContainerClass, &collect_entry, &context, scan);
     if (context.failed || cancelled(cancel)) {
         return false;
     }
     output.complete = scanned;
     return true;
+}
+
+/** Authoritative generation refuses partial scans and unbound package stems. */
+bool build_complete_container_index(const package_reader::Source& source,
+                                    ContainerIndex& output,
+                                    ContainerIndexCancelCheck cancel) noexcept {
+    return build_container_index(source, output, cancel) && output.complete && output.stemsComplete;
 }
 
 } // namespace sunrise::client::content::activity::scriptables::internal

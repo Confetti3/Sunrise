@@ -12,6 +12,7 @@
 #include "../../../core/ui/busy/busy.h"
 #include "../../../state/activity_sdk/internal.h"
 #include "../../../state/activity_sdk/runtime.h"
+#include "../../../state/gameplay/external/rsat_decode_plans.h"
 #include "activity_sdk_decode_plans.h"
 #include "activity_sdk_generation_worker_internal.h"
 #include "activity_sdk_live_publication.h"
@@ -264,12 +265,9 @@ void log_decoder_cache(decode_plans::Status status,
     }
 }
 
-/**
- * Compiles the decoder cache pair beside the final pack for the staged catalog's identity.
- * The entity transport loads nothing without it, so a refusal fails the pass.
- * @return False with `failureDetail` set when the cache was not written.
- */
+/** Keeps the decoder pair beside the pack whose identity it uses. */
 [[nodiscard]] bool build_decoder_cache(const Work& work,
+                                       std::wstring_view packPath,
                                        const package_reader::Source& source,
                                        const state::activity_sdk::Catalog& catalog,
                                        const char*& failureDetail) noexcept {
@@ -277,10 +275,11 @@ void log_decoder_cache(decode_plans::Status status,
     decode_plans::Result result{};
     decode_plans::Status status = decode_plans::Status::invalidInput;
     try {
-        const std::size_t separator = work.packPath.find_last_of(L'\\');
+        const std::size_t separator = packPath.find_last_of(L"\\/");
         const std::wstring cachePath =
-            (separator == std::wstring::npos ? std::wstring{} : work.packPath.substr(0, separator))
-            + L"\\rsat_decode_plans.cache";
+            (separator == std::wstring_view::npos ? std::wstring{}
+                                                  : std::wstring(packPath.substr(0, separator)))
+            + std::wstring(state::gameplay::rsat_decode_plans::kCacheSuffix);
         decode_plans::Request request{};
         request.executablePath = work.executablePath;
         request.executableModule = work.executableModule;
@@ -380,7 +379,7 @@ bool publish_estate(Work& work,
     }
     if (complete) {
         report_publication_progress(progress, "building decoder cache");
-        complete = build_decoder_cache(work, source, *stagedCatalog, failureDetail);
+        complete = build_decoder_cache(work, packPath, source, *stagedCatalog, failureDetail);
     }
     stagedCatalog.reset();
     if (complete) {

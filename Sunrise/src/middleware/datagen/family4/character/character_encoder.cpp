@@ -10,6 +10,7 @@
 #include "../../../../state/unlocks/unlocks_records.h"
 #include "../../../../state/unlocks/unlocks_runtime.h"
 #include "../../character_record/layout.h"
+#include "../../definitions.h"
 #include "../instance/layout.h"
 #include "../progression/progression_bank_keys.h"
 #include "equipment_summary_builder.h"
@@ -18,8 +19,6 @@
 namespace sunrise::middleware::datagen::family4::character {
 namespace {
 
-/** Every bit set is the native empty biased 16-bit definition index. */
-constexpr std::uint16_t kEmptyDefinitionIndex = (std::numeric_limits<std::uint16_t>::max)();
 /** Every bit set is the native absent activity index. 0 is the orbit activity, not absent. */
 constexpr std::uint16_t kAbsentActivityIndex = (std::numeric_limits<std::uint16_t>::max)();
 /** Every set bit marks all default per-character messages as already seen. */

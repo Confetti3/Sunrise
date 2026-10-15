@@ -8,6 +8,7 @@
 
 #include "../../../../state/build_data/runtime.h"
 #include "../../../../state/unlocks/unlocks_runtime.h"
+#include "../../definitions.h"
 #include "../progression/progression_bank_keys.h"
 #include "layout.h"
 #include "preferences/preferences_encoder.h"
@@ -15,8 +16,6 @@
 namespace sunrise::middleware::datagen::family4::account {
 namespace {
 
-/** Every bit set is the native empty biased 16-bit definition index. */
-constexpr std::uint16_t kEmptyDefinitionIndex = (std::numeric_limits<std::uint16_t>::max)();
 /** Signed 32-bit maximum keeps publicity deadlines beyond a normal session clock. */
 constexpr std::uint64_t kSuppressedPublicityDeadline =
     static_cast<std::uint64_t>((std::numeric_limits<std::int32_t>::max)());

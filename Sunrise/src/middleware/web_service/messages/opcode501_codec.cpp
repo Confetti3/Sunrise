@@ -1,7 +1,6 @@
 #include "opcode501_codec.h"
 
 #include "../../encoding/bit_writer.h"
-#include "../../encoding/byte_order.h"
 #include "../status_fields.h"
 
 namespace sunrise::middleware::web_service::messages::opcode501 {
@@ -21,11 +20,7 @@ bool encode_response(const Message& message,
     if (output.size() < kEnvelopeHeaderSize) {
         return false;
     }
-    encoding::write_u16_be(output.first<encoding::kU16Size>(), message.opcode);
-    encoding::write_u32_be(output.subspan<encoding::kU16Size, encoding::kU32Size>(),
-                           message.transactionId);
-
-    encoding::bits::Writer writer(output.subspan(kEnvelopeHeaderSize));
+    encoding::bits::Writer writer = begin_response(message, output);
     // The reply names a character the roster already holds, so no revision publishes it.
     StatusResponse status{};
     status.value = kNoFamily4Publication;

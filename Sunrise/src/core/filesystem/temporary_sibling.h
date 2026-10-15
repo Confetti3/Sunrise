@@ -1,6 +1,18 @@
 #pragma once
 
+#include <string_view>
+
+#include "path.h"
+
 namespace sunrise::core::path {
+
+/**
+ * Builds a writer-owned sibling name: final.process.thread.sequence.tmp.
+ * @param finalPath Final file path.
+ * @param output Receives the sibling path.
+ * @return False when the name does not fit.
+ */
+[[nodiscard]] bool temporary_sibling(std::wstring_view finalPath, Buffer& output) noexcept;
 
 /**
  * Removes bounded, old writer-owned temporary siblings whose process has stopped.

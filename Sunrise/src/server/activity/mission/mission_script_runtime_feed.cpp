@@ -26,14 +26,11 @@
 namespace sunrise::server::activity::mission {
 namespace {
 
-/** One queued mission event and the retry bookkeeping the drain uses. */
+/** One queued mission event, dispatched once when the drain reaches it. */
 struct PendingMissionEvent final {
     host::Event event{};
     host::SenseObservationSnapshot sense{};
     host::ClientMessageSnapshot clientMessage{};
-    std::uint64_t firstAttempt{};
-    std::uint64_t nextAttempt{};
-    std::uint32_t attempts{};
     bool missionSequenceObserved{};
     bool senseAvailable{};
     bool clientMessageAvailable{};
@@ -86,6 +83,7 @@ void clear_pending_event(PendingMissionEvent& pending) noexcept {
     case host::EventKind::entitySpawned:
     case host::EventKind::entityDied:
     case host::EventKind::sceneFinished:
+    case host::EventKind::sceneOutput:
     case host::EventKind::objectiveProgress:
     case host::EventKind::sessionJoined:
     case host::EventKind::sessionLeft:
@@ -131,6 +129,7 @@ void clear_pending_event(PendingMissionEvent& pending) noexcept {
            || event.kind == host::EventKind::entitySpawned
            || event.kind == host::EventKind::entityDied
            || event.kind == host::EventKind::sceneFinished
+           || event.kind == host::EventKind::sceneOutput
            || event.kind == host::EventKind::objectiveProgress
            || event.kind == host::EventKind::entitySlotsRequested
            || event.kind == host::EventKind::sessionJoined
@@ -219,7 +218,6 @@ void clear_pending_event(PendingMissionEvent& pending) noexcept {
         pending->clientMessageAvailable =
             host::mission_input_client_message_snapshot(input.sequence, pending->clientMessage);
     }
-    pending->nextAttempt = 0;
     pending->event = input.event;
     pending->occupied = true;
     return true;
@@ -268,8 +266,7 @@ void drain_pending_mission_events(std::uint64_t now) noexcept {
     do {
         progressed = false;
         for (PendingMissionEvent& pending : g_pendingMissionEvents) {
-            if (!pending.occupied || now < pending.nextAttempt
-                || has_earlier_pending_event(pending)) {
+            if (!pending.occupied || has_earlier_pending_event(pending)) {
                 continue;
             }
             RuntimeInstance* const instance = find_instance(pending.event.binding);
@@ -337,11 +334,6 @@ void drain_pending_mission_events(std::uint64_t now) noexcept {
                 || lua_vm::pending_intent(instance->vm, intent)) {
                 continue;
             }
-            const bool firstAttempt = pending.attempts == 0;
-            if (firstAttempt) {
-                pending.firstAttempt = now;
-            }
-            ++pending.attempts;
             const host::SenseObservationSnapshot* const sense =
                 pending.event.kind == host::EventKind::senseUpdate && pending.senseAvailable
                     ? &pending.sense
@@ -351,8 +343,7 @@ void drain_pending_mission_events(std::uint64_t now) noexcept {
                         && pending.clientMessageAvailable
                     ? &pending.clientMessage
                     : nullptr;
-            static_cast<void>(
-                dispatch_event(*instance, pending.event, sense, clientMessage, firstAttempt, now));
+            static_cast<void>(dispatch_event(*instance, pending.event, sense, clientMessage, now));
             clear_pending_event(pending);
             progressed = true;
         }
@@ -378,8 +369,7 @@ void drain_pending_mission_events(std::uint64_t now) noexcept {
     return false;
 }
 
-/** @return True when every accepted but uncommitted sequence is present in this read or local
- * queue. */
+/** @return True when every uncommitted sequence is in this read or the local queue. */
 [[nodiscard]] bool
 outstanding_input_interval_complete(const state::activity::SessionBinding& binding,
                                     const mission_state::InputSequenceSnapshot& state,
@@ -503,7 +493,7 @@ void clear_pending_events(const state::activity::SessionBinding& binding) noexce
     }
 }
 
-/** Retires every queued mission event that belongs to one binding. */
+/** Retires every queued mission event of every binding and frees the queue. */
 void clear_all_pending_events() noexcept {
     std::vector<PendingMissionEvent>{}.swap(g_pendingMissionEvents);
 }
@@ -514,9 +504,6 @@ void reset_pending_events_for_reattach(const state::activity::SessionBinding& bi
         if (!pending.occupied || !same_binding(pending.event.binding, binding)) {
             continue;
         }
-        pending.firstAttempt = 0;
-        pending.nextAttempt = 0;
-        pending.attempts = 0;
         pending.missionSequenceObserved = false;
     }
 }
@@ -568,14 +555,12 @@ void clear_feed_cursors() noexcept {
  * Runs one event through the VM, commits what it changed, and faults on a script failure.
  * @param sense Values owned by a Sense row, or null.
  * @param clientMessage Envelope snapshot owned by a client-message row, or null.
- * @param firstAttempt True on the first delivery attempt, which is the one that counts it.
  * @return The VM call status; `inactive` when no callback could take the event.
  */
 lua_vm::CallStatus dispatch_event(RuntimeInstance& instance,
                                   const host::Event& event,
                                   const host::SenseObservationSnapshot* sense,
                                   const host::ClientMessageSnapshot* clientMessage,
-                                  bool firstAttempt,
                                   std::uint64_t now) noexcept {
     if (instance.programStatus == ProgramStatus::missing
         && event.kind == host::EventKind::senseUpdate && sense != nullptr) {
@@ -585,14 +570,11 @@ lua_vm::CallStatus dispatch_event(RuntimeInstance& instance,
     if (instance.programStatus != ProgramStatus::loaded || !eligible_event(instance, event)) {
         return lua_vm::CallStatus::inactive;
     }
-    if (firstAttempt) {
-        ++instance.eventsSeen;
-        instance.lastEventSequence = event.sequence;
-    }
+    ++instance.eventsSeen;
     // The three region numbers the script is about to read. A report restates only the leg it
     // moved, so `pending` and `current` read -1 on most reports and `held` is the one that says
     // where the client is standing.
-    if (firstAttempt && event.kind == host::EventKind::clientStateChanged) {
+    if (event.kind == host::EventKind::clientStateChanged) {
         std::array<char, 64> legs{};
         const int written =
             std::snprintf(legs.data(),
@@ -621,19 +603,17 @@ lua_vm::CallStatus dispatch_event(RuntimeInstance& instance,
             instance.activeRegion = event.currentRegionIndex;
         }
         host::Event changed{};
-        if (firstAttempt && make_region_changed(event, changed)) {
+        if (make_region_changed(event, changed)) {
             push_script_event(instance, changed);
         }
     }
-    if (firstAttempt && event.kind == host::EventKind::incidentReceived) {
+    if (event.kind == host::EventKind::incidentReceived) {
         push_player_trigger(instance, event);
         push_cinematic(instance, event);
     }
     if (event.kind == host::EventKind::senseUpdate && sense != nullptr) {
-        if (firstAttempt) {
-            observe_player_life(instance, *sense);
-            publish_fireteam_life(now);
-        }
+        observe_player_life(instance, *sense);
+        publish_fireteam_life(now);
         push_trigger_edges(instance, *sense);
         push_ghost_edges(instance, *sense);
         push_object_interaction_edges(instance, *sense);
@@ -648,7 +628,7 @@ lua_vm::CallStatus dispatch_event(RuntimeInstance& instance,
     instance.dispatchAttemptGeneration = 0;
     instance.dispatchInputSequence = 0;
     note_vm_status(instance, "event", lua_vm::status_name(status));
-    if (firstAttempt && instance.eventsSeen == 1) {
+    if (instance.eventsSeen == 1) {
         log_line(core::log::Level::info,
                  &instance,
                  "dispatch",

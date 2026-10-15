@@ -93,8 +93,8 @@ void clear_game_range() noexcept {
     g_gameRange = diagnostics::ModuleRange{};
 }
 
-/** Records an interface visibility change for the polled reads. */
-void apply_policy(bool visible) noexcept {
+/** Applies the polled-input policy for the current interface visibility. */
+void apply_visibility(bool visible) noexcept {
     g_interfaceOpen.store(visible, std::memory_order_relaxed);
 }
 
@@ -106,11 +106,6 @@ void hold_key(std::uint32_t virtualKey) noexcept {
 /** Stops reporting any key held on the game's behalf. */
 void release_key() noexcept {
     g_forcedKey.store(kNoForcedKey, std::memory_order_relaxed);
-}
-
-/** Applies the polled-input policy for the current interface visibility. */
-void apply_visibility(bool visible) noexcept {
-    apply_policy(visible);
 }
 
 } // namespace sunrise::client::hooks::polled_input

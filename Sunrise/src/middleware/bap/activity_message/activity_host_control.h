@@ -10,13 +10,9 @@
 namespace sunrise::middleware::bap::activity_message::host_control {
 
 /** Exact Activity Message IDs for this host-to-client codec group. */
-inline constexpr std::uint32_t kClaimAuthorityMessageType = 24;
 inline constexpr std::uint32_t kPurgeAuthorityMessageType = 25;
 inline constexpr std::uint32_t kResetAuthorityMaskMessageType = 28;
 inline constexpr std::uint32_t kQueryAuthorityMaskMessageType = 30;
-inline constexpr std::uint32_t kReservationsFailedMessageType = 45;
-inline constexpr std::uint32_t kPerfRequestKillMessageType = 56;
-inline constexpr std::uint32_t kPerfRequestReflectMessageType = 57;
 
 /** Fixed and bounded wire sizes, one per root definition. */
 inline constexpr std::size_t kClaimAuthorityBitCount = 8 + entity_slots::kSlotCount + 3;
@@ -28,7 +24,6 @@ inline constexpr std::size_t kCorrelationByteCount = kCorrelationBitCount / 8;
 inline constexpr std::size_t kReservationCapacity = 32;
 inline constexpr std::size_t kReservationKeySize = 8;
 inline constexpr std::size_t kReservationCountBitCount = 6;
-inline constexpr std::size_t kReservationsFailedMinimumBitCount = kReservationCountBitCount;
 inline constexpr std::size_t kReservationsFailedMaximumBitCount =
     kReservationCountBitCount + kReservationCapacity * kReservationKeySize * 8;
 /** Message-45 grows with its key count; this bounds the body at full capacity. */

@@ -28,7 +28,7 @@ constexpr std::size_t kExtendedBufferSize = 16;
 [[nodiscard]] bool encode_extended(std::span<std::byte> output, std::size_t& size) noexcept {
     size = 0;
     Writer writer(output);
-    if (!writer.varint(kNetworkIdField, kNetworkId)) {
+    if (!writer.write_varint(kNetworkIdField, kNetworkId)) {
         return false;
     }
     size = writer.size();
@@ -42,7 +42,8 @@ bool append(Writer& success) noexcept {
     std::array<std::byte, kExtendedBufferSize> extended{};
     std::size_t extendedSize = 0;
     return encode_extended(extended, extendedSize)
-           && success.bytes(kExtendedField, std::span(extended).first(extendedSize));
+           && success.write_length_delimited(kExtendedField,
+                                             std::span(extended).first(extendedSize));
 }
 
 } // namespace sunrise::middleware::signon::extended

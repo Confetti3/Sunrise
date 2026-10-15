@@ -75,11 +75,11 @@ struct CallerSite final {
     return operation == NameOperation::dns ? "dns" : "control";
 }
 
-} // namespace
-
 /** Datagram-send and connect targets reported per run, enough to show every channel dialed. */
 constexpr unsigned kMaxSendTargets = 400;
 std::atomic<unsigned> g_sendTargetsReported{0};
+
+} // namespace
 
 /** Logs the destination one datagram send or connect actually targets, capped per process. */
 void log_send_target(SocketOperation operation,

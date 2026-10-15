@@ -40,6 +40,7 @@ std::atomic<std::uint64_t> g_translatedIdentity{0};
     sunrise::server::web_service::resolve_response_shape(message.opcode, shape);
     middleware::web_service::StatusResponse status{};
     status.code = 1;
+    status.value = middleware::web_service::kNoFamily4Publication;
     return middleware::web_service::encode_response(message, shape, status, output, written);
 }
 

@@ -10,8 +10,6 @@ namespace bits = encoding::bits;
 
 /** Both sequence fields are 32-bit value fields. */
 constexpr std::uint8_t kSequenceWidth = 32;
-/** The refuse reason is three bits. */
-constexpr std::uint8_t kRefuseReasonWidth = 3;
 /** The close reason is five bits. */
 constexpr std::uint8_t kCloseReasonWidth = 5;
 /** The ping sequence is a 16-bit value field. */
@@ -66,26 +64,9 @@ bool write_response(bits::Writer& writer, const ConnectResponse& body) noexcept 
            && bits::write_raw(writer, body.address);
 }
 
-/** Reads a connect establish body. */
-bool read_establish(bits::Reader& reader, ConnectEstablish& output) noexcept {
-    return read_sequences(reader, output.remoteChannelId, output.channelId);
-}
-
 /** Writes a connect establish body. */
 bool write_establish(bits::Writer& writer, const ConnectEstablish& body) noexcept {
     return write_sequences(writer, body.remoteChannelId, body.channelId);
-}
-
-/** Writes a connect refuse body. */
-bool write_refuse(bits::Writer& writer, const ConnectEnd& body) noexcept {
-    return write_sequences(writer, body.remoteChannelId, body.remoteSequence)
-           && writer.write(body.reason, kRefuseReasonWidth);
-}
-
-/** Writes a connect closed body. */
-bool write_closed(bits::Writer& writer, const ConnectEnd& body) noexcept {
-    return write_sequences(writer, body.remoteChannelId, body.remoteSequence)
-           && writer.write(body.reason, kCloseReasonWidth);
 }
 
 /** Reads a connect closed body. */

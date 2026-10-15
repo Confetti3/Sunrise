@@ -28,6 +28,12 @@ state::gameplay::rsat_decode_plans::Cache g_entityPlans;
 bool g_entityIngressReady{};
 volatile LONG g_lane0DecodeFailures{};
 
+/** The transport lock pins the catalog and plans; publication may only revoke their admission. */
+[[nodiscard]] bool current_catalog() noexcept {
+    return state::activity_sdk::same_identity(g_entitySessions.catalog,
+                                              state::activity_sdk::snapshot());
+}
+
 /** The installed plan cache must match the admitted SDK and its extraction manifest. */
 [[nodiscard]] bool load_entity_plans() noexcept {
     namespace plans = state::gameplay::rsat_decode_plans;
@@ -211,7 +217,8 @@ void reset_lane0_adapter(const void*, std::uint64_t groupSessionId) noexcept {
     auto& store = *const_cast<external::CompositeEntitySessionStore*>(
         static_cast<const external::CompositeEntitySessionStore*>(context));
     AcquireSRWLockExclusive(&g_transportLock);
-    const bool accepted = external::read_scoped_entity_batch(store, source, reader, batch);
+    const bool accepted =
+        current_catalog() && external::read_scoped_entity_batch(store, source, reader, batch);
     ReleaseSRWLockExclusive(&g_transportLock);
     return accepted;
 }
@@ -230,8 +237,9 @@ void reset_lane0_adapter(const void*, std::uint64_t groupSessionId) noexcept {
     auto& store = *const_cast<external::CompositeEntitySessionStore*>(
         static_cast<const external::CompositeEntitySessionStore*>(context));
     AcquireSRWLockExclusive(&g_transportLock);
-    const bool accepted = external::prepare_scoped_entity_batch(
-        store, source, batch, sequence, hasSequence, ordinal, mutation);
+    const bool accepted = current_catalog()
+                          && external::prepare_scoped_entity_batch(
+                              store, source, batch, sequence, hasSequence, ordinal, mutation);
     ReleaseSRWLockExclusive(&g_transportLock);
     return accepted;
 }
@@ -247,6 +255,7 @@ commit_entity_adapter(const void* context,
     auto& store = *const_cast<external::CompositeEntitySessionStore*>(
         static_cast<const external::CompositeEntitySessionStore*>(context));
     AcquireSRWLockExclusive(&g_transportLock);
+    // The peer gate pins this prepared store until every packet lane has committed.
     const bool accepted = external::commit_scoped_entity_batch(store, source, mutation);
     ReleaseSRWLockExclusive(&g_transportLock);
     return accepted;
@@ -360,7 +369,7 @@ void reset_entity_adapter(const void* context,
 
 bool internal::entity_transport_ready() noexcept {
     AcquireSRWLockShared(&g_transportLock);
-    const bool ready = g_entityIngressReady;
+    const bool ready = g_entityIngressReady && current_catalog();
     ReleaseSRWLockShared(&g_transportLock);
     return ready;
 }
@@ -371,6 +380,7 @@ void internal::shutdown_entity_transport() noexcept {
     AcquireSRWLockExclusive(&g_transportLock);
     g_entityIngressReady = false;
     external::reset_composite_entity_sessions(g_entitySessions);
+    g_entityPlans = {};
     ReleaseSRWLockExclusive(&g_transportLock);
     entity_identities::reset();
 }
@@ -379,12 +389,16 @@ void internal::shutdown_entity_transport() noexcept {
 bool install_entity_transport() noexcept {
     (void)InterlockedExchange(&g_lane0DecodeFailures, 0);
     peer::install_entity_transport({});
+    peer::install_entity_codec({}, nullptr, nullptr);
     entity_identities::reset();
     AcquireSRWLockExclusive(&g_transportLock);
     g_entityIngressReady = false;
+    // The peer callback gate has drained before any borrowed plan or baseline is released.
+    external::reset_composite_entity_sessions(g_entitySessions);
+    g_entityPlans = {};
     const bool initialized = external::initialize_composite_entity_sessions(
                                  g_entitySessions, external::SobjectPositionCompression::disabled)
-                             && load_entity_plans();
+                             && load_entity_plans() && current_catalog();
     if (initialized) {
         g_entitySessions.resolvePosition = &resolve_entity_position_profile;
         g_entitySessions.positionContext = nullptr;

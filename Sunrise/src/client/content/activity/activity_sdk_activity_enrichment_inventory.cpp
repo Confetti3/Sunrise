@@ -47,7 +47,7 @@ struct UniqueTag final {
     UniqueTag match{};
     reader::ScanResult result{};
     if (source.directory.empty()
-        || !reader::scan_class(source.directory, classId, &collect_unique_tag, &match, result)
+        || !reader::scan_class(source, classId, &collect_unique_tag, &match, result)
         || match.count != 1 || result.matches != 1 || match.value == 0) {
         return false;
     }
@@ -234,7 +234,7 @@ bool build(const reader::Source& source,
             }
             pending.rows.push_back(row);
         }
-        if (!validate(pending) || !validate_source(activities, pending)) {
+        if (!validate_source(activities, pending)) {
             return false;
         }
         output = std::move(pending);

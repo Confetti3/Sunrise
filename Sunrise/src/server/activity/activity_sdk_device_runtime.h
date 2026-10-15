@@ -144,14 +144,6 @@ set_objects_active_reserved(const state::activity_sdk::BoundView& view,
                             bool active,
                             const host::ScriptableOutputReservation& reservation) noexcept;
 
-/** Writes one named float channel into an authored actor when it attaches or restores. */
-[[nodiscard]] Status
-set_combatant_channel_reserved(const state::activity_sdk::BoundView& view,
-                               std::uint32_t slotRow,
-                               std::uint32_t channelHash,
-                               float value,
-                               const host::ScriptableOutputReservation& reservation) noexcept;
-
 /** Arms one generated combatant for its scene's squad member spawn. */
 [[nodiscard]] Status
 bind_combatant_to_squad_reserved(const state::activity_sdk::BoundView& view,

@@ -22,7 +22,7 @@ __declspec(noinline) void ingress_body(CallLease& lease, HookSlot slot) noexcept
     // this body, and the paused call is what proves it.
     if (quiescence::consume_arm(g_pauseGate)) {
         for (unsigned attempt = 0;
-             attempt < quiescence::kIngressPauseAttempts && quiescence::held(g_pauseGate);
+             attempt < quiescence::kIngressPauseAttempts && g_pauseGate.released == 0;
              ++attempt) {
             YieldProcessor();
         }
@@ -32,6 +32,7 @@ __declspec(noinline) void ingress_body(CallLease& lease, HookSlot slot) noexcept
     if (outerCall) {
         (void)InterlockedIncrement(&g_activeCalls);
     }
+    lease = {};
     AcquireSRWLockShared(&g_lifecycleLock);
     if (g_trackCalls) {
         lease.original = g_originals[index(slot)];

@@ -29,20 +29,21 @@ constexpr std::uint64_t kIdentityLowMask = 0xFFFFFFFFULL;
 
 /**
  * Copies one roster group into the encoder's fixed input.
- * @param tableIndex Roster table index the destination row names.
+ * @param source Complete canonical table captured for this reference.
  * @param scratch Lock-owned roster group storage the spans point into.
  * @param slot Storage and input slot to fill, which are the same ordinal.
  * @param roster Receives the group.
  * @return True when the named group was found.
  */
-[[nodiscard]] bool fill_group(std::uint16_t tableIndex,
+[[nodiscard]] bool fill_group(const layouts::RosterGroup& source,
                               Scratch& scratch,
                               std::size_t slot,
                               message::Roster& roster) noexcept {
     layouts::RosterGroup& group = scratch.rosterGroups[slot];
-    if (!state::build_data::find_roster_group(tableIndex, group)) {
+    if (!layouts::valid_roster_group(source)) {
         return false;
     }
+    group = source;
     roster.groups[slot].objectTag = group.objectTag;
     roster.groups[slot].key = group.registryKey;
     roster.groups[slot].slotTypes =
@@ -299,39 +300,60 @@ same_retained_scope(const RetainedSquadGroup& group,
     roster = {};
     const std::size_t groupCount =
         std::size_t{layout.rosterGroupCount} + std::size_t{layout.bubbleGroupCount};
-    if (layout.rosterGroupCount == 0 || groupCount > scratch.rosterGroups.size()
-        || groupCount > roster.groups.size()) {
+    if (layout.rosterGroupCount == 0 || layout.rosterGroupCount > layout.rosterGroups.size()
+        || layout.bubbleGroupCount > layout.bubbleGroups.size()
+        || layout.bubbleGroupCount > layout.bubbleGroupMasks.size()
+        || groupCount > scratch.rosterGroups.size() || groupCount > roster.groups.size()) {
         return false;
     }
-    for (std::size_t index = 0; index < layout.rosterGroupCount; ++index) {
-        if (!fill_group(layout.rosterGroups[index], scratch, index, roster)) {
+    const auto append = [&](std::uint16_t tableIndex, std::size_t& position) {
+        layouts::RosterGroup candidate{};
+        if (!state::build_data::find_roster_group(tableIndex, candidate)) {
             return false;
         }
-        // Positions stay, so overrides and the mission seed still find the group.
-        roster.groups[index].retired = !publishTopLevel;
+        const ExistingGroup existing = find_existing_group(candidate, scratch, roster, position);
+        if (existing == ExistingGroup::conflict) {
+            return false;
+        }
+        if (existing == ExistingGroup::exact) {
+            return true;
+        }
+        position = roster.groupCount;
+        if (!fill_group(candidate, scratch, position, roster)) {
+            return false;
+        }
+        ++roster.groupCount;
+        return true;
+    };
+    for (std::size_t index = 0; index < layout.rosterGroupCount; ++index) {
+        std::size_t position = 0;
+        if (!append(layout.rosterGroups[index], position)) {
+            return false;
+        }
+        roster.groups[position].retired = !publishTopLevel;
     }
+    roster.topLevelGroupCount = roster.groupCount;
     // The per-bubble groups follow the top-level ones in the same array. Phase 2 seeds every
     // group the body registers, and the client holds its apply back until they are all in.
     std::array<std::uint64_t, layouts::kDestinationBubbleGroupCapacity> bubbleMasks{};
-    std::size_t bubbleGroupCount = 0;
     for (std::size_t index = 0; index < layout.bubbleGroupCount; ++index) {
         const std::uint64_t mask = layout.bubbleGroupMasks[index] & hostedBubbles;
         if (mask == 0) {
             continue;
         }
-        if (!fill_group(layout.bubbleGroups[index],
-                        scratch,
-                        layout.rosterGroupCount + bubbleGroupCount,
-                        roster)) {
+        std::size_t position = 0;
+        if (!append(layout.bubbleGroups[index], position)) {
             return false;
         }
-        bubbleMasks[bubbleGroupCount] = mask;
-        ++bubbleGroupCount;
+        // A global registration already covers every bubble and keeps its original link owner.
+        if (position >= roster.topLevelGroupCount) {
+            bubbleMasks[position - roster.topLevelGroupCount] |= mask;
+        }
     }
-    roster.topLevelGroupCount = layout.rosterGroupCount;
-    roster.groupCount = std::size_t{layout.rosterGroupCount} + bubbleGroupCount;
     roster.bubbleSubBlocks =
-        fill_sub_blocks(std::span(bubbleMasks).first(bubbleGroupCount), scratch, roster);
+        fill_sub_blocks(std::span(bubbleMasks).first(roster.groupCount - roster.topLevelGroupCount),
+                        scratch,
+                        roster);
     // Only a top-level group can bind the player: its object is in every slice set, so the gate
     // reads it wherever the player is.
     for (std::size_t index = 0; index < roster.topLevelGroupCount && roster.playerKeyGroup == 0;
@@ -574,49 +596,21 @@ make_retained_squad_auth(const server::activity::host::PendingScriptableOverride
                                          std::uint16_t tableIndex,
                                          std::uint16_t slotOffset,
                                          bool stateLocalRosterTarget) noexcept {
+    if (!stateLocalRosterTarget
+        && canonical_group_status(layout, region, tableIndex) != CanonicalGroupStatus::active) {
+        return false;
+    }
+    // The roster merges same-key groups, so the position comes from the key, not the layout row.
     std::size_t rosterPosition = snapshot.roster.groupCount;
-    if (stateLocalRosterTarget) {
-        for (std::size_t index = 0; index < snapshot.roster.groupCount; ++index) {
-            const message::Group& group = snapshot.roster.groups[index];
-            if (group.key != value.key || group.objectTag != value.objectTag) {
-                continue;
-            }
-            if (rosterPosition != snapshot.roster.groupCount) {
-                return false;
-            }
-            rosterPosition = index;
-        }
-    }
-    for (std::size_t index = 0; !stateLocalRosterTarget && index < layout.rosterGroupCount;
-         ++index) {
-        if (layout.rosterGroups[index] == tableIndex) {
-            if (rosterPosition != snapshot.roster.groupCount) {
-                return false;
-            }
-            rosterPosition = index;
-        }
-    }
-    const std::uint32_t bubble =
-        region.index >= 0 ? static_cast<std::uint32_t>(region.index)
-                                / middleware::content::packages::tables::kSliceSetIndexFactor
-                          : layouts::kBubbleCapacity;
-    for (std::size_t index = 0; !stateLocalRosterTarget && index < layout.bubbleGroupCount;
-         ++index) {
-        if (layout.bubbleGroups[index] != tableIndex || bubble >= layouts::kBubbleCapacity
-            || (layout.bubbleGroupMasks[index] & (std::uint64_t{1} << bubble)) == 0) {
+    for (std::size_t index = 0; index < snapshot.roster.groupCount; ++index) {
+        const message::Group& group = snapshot.roster.groups[index];
+        if (group.key != value.key || group.objectTag != value.objectTag) {
             continue;
         }
         if (rosterPosition != snapshot.roster.groupCount) {
             return false;
         }
-        // Unhosted bubble groups are left out of the roster, so the position comes from the key.
-        for (std::size_t row = snapshot.roster.topLevelGroupCount; row < snapshot.roster.groupCount;
-             ++row) {
-            if (snapshot.roster.groups[row].key == value.key) {
-                rosterPosition = row;
-                break;
-            }
-        }
+        rosterPosition = index;
     }
     if (rosterPosition >= snapshot.roster.groupCount) {
         return false;

@@ -6,11 +6,11 @@
 
 namespace sunrise::client::hooks::network::content_config::coordinator {
 
-/** State copied at ingress and kept until egress. */
+/** Ingress sets every field. */
 struct CallLease final {
-    void* original{};
-    bool accepting{};
-    bool tracked{};
+    void* original;
+    bool accepting;
+    bool tracked;
 };
 
 /** The exact ingress ABI every ContentConfig replacement body calls. */

@@ -19,4 +19,7 @@ namespace sunrise::client::content::items::packages {
  */
 [[nodiscard]] bool readable() noexcept;
 
+/** Exports once at Client activation only when the startup setting requests it. */
+void export_keys_if_requested() noexcept;
+
 } // namespace sunrise::client::content::items::packages

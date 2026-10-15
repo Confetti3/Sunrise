@@ -92,7 +92,7 @@ void uninstall() noexcept {
         return;
     }
     // Reads go back to the real state before the trampoline that serves them is gone.
-    apply_policy(false);
+    apply_visibility(false);
     if (!hooking::detour::uninstall(g_handles)) {
         core::log::write(core::log::Channel::client,
                          core::log::Level::warn,
@@ -103,11 +103,6 @@ void uninstall() noexcept {
     g_targets = {};
     clear_game_range();
     release_module();
-}
-
-/** @return True while both polled key guards are attached. */
-bool is_installed() noexcept {
-    return g_installed.load(std::memory_order_acquire);
 }
 
 } // namespace sunrise::client::hooks::polled_input

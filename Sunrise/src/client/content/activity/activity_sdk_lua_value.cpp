@@ -133,7 +133,7 @@ render_value(const Value& value, Dialect dialect, std::uint32_t depth, std::stri
     return append_indent(output, depth, width) && (output.push_back('}'), true);
 }
 
-/** Renders only the six Value alternatives supported by both output dialects. */
+/** Renders only the seven Value alternatives supported by both output dialects. */
 [[nodiscard]] bool
 render_value(const Value& value, Dialect dialect, std::uint32_t depth, std::string& output) {
     return std::visit(
@@ -145,7 +145,8 @@ render_value(const Value& value, Dialect dialect, std::uint32_t depth, std::stri
             } else if constexpr (std::is_same_v<Item, bool>) { // Both dialects share the literals.
                 output.append(item ? "true" : "false");
                 return true;
-            } else if constexpr (std::is_same_v<Item, std::uint64_t>) { // No float form is emitted.
+            } else if constexpr (std::is_same_v<Item, std::uint64_t>
+                                 || std::is_same_v<Item, std::int64_t>) { // No float form.
                 output.append(std::to_string(item));
                 return true;
             } else if constexpr (std::is_same_v<Item, std::string>) { // Non-ASCII is refused.
@@ -159,6 +160,22 @@ render_value(const Value& value, Dialect dialect, std::uint32_t depth, std::stri
         value.data);
 }
 
+/** Appends the seven declared name lanes for one field prefix. */
+void append_name_fields(Value::Object& output, std::string_view prefix) {
+    const auto add = [&output, prefix](std::string_view suffix, std::string_view type) {
+        std::string name(prefix);
+        name.append(suffix);
+        output.push_back({std::move(name), string(type)});
+    };
+    add("_name", "string_or_nil");
+    add("_name_provenance", "unresolved_package_inline_package_path_or_identifier_candidate");
+    add("_name_provenance_code", "u32");
+    add("_name_candidate_count", "u32");
+    add("_name_source_tag", "u32");
+    add("_name_source_class", "u32");
+    add("_name_strongest_tier_overflow", "boolean");
+}
+
 } // namespace
 
 Value null_value() {
@@ -170,6 +187,10 @@ Value boolean(bool value) {
 }
 
 Value number(std::uint64_t value) {
+    return Value{value};
+}
+
+Value signed_number(std::int64_t value) {
     return Value{value};
 }
 
@@ -195,6 +216,58 @@ Value string_array(std::initializer_list<std::string_view> values) {
         output.push_back(string(value));
     }
     return array(std::move(output));
+}
+
+void sort_keys(Value::Object& value) {
+    std::sort(value.begin(), value.end(), [](const auto& first, const auto& second) {
+        return first.first < second.first;
+    });
+}
+
+Value field_map(std::initializer_list<Field> source) {
+    Value::Object output;
+    output.reserve(source.size());
+    for (const auto& [name, type] : source) {
+        output.push_back({std::string(name), string(type)});
+    }
+    sort_keys(output);
+    return object(std::move(output));
+}
+
+/**
+ * Builds one view's declared fields, expanding each prefix into its seven name lanes.
+ * @param source Plain fields.
+ * @param prefixes Field prefixes that each carry the name lanes.
+ * @param rowScope Row scope the view declares.
+ * @return The view object.
+ */
+Value named_view(std::initializer_list<Field> source,
+                 std::initializer_list<std::string_view> prefixes,
+                 std::string_view rowScope) {
+    Value::Object fields;
+    fields.reserve(source.size() + prefixes.size() * 7U);
+    for (const auto& [name, type] : source) {
+        fields.push_back({std::string(name), string(type)});
+    }
+    for (const std::string_view prefix : prefixes) {
+        append_name_fields(fields, prefix);
+    }
+    sort_keys(fields);
+    return object({
+        {"fields", object(std::move(fields))},
+        {"immutable", boolean(true)},
+        {"row_scope", string(rowScope)},
+        {"stale_read", string("throws")},
+    });
+}
+
+Value view(std::initializer_list<Field> fields, std::string_view rowScope) {
+    return object({
+        {"fields", field_map(fields)},
+        {"immutable", boolean(true)},
+        {"row_scope", string(rowScope)},
+        {"stale_read", string("throws")},
+    });
 }
 
 bool render_json(const Value& value, std::uint32_t initialDepth, std::string& output) noexcept {

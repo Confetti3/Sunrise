@@ -26,9 +26,8 @@ inline constexpr std::size_t kRequestedCountBitCount = 32;
 /** The name hash is always sent: an absent field reads as zero, which is a real name. */
 inline constexpr std::size_t kNameHashBitCount = 32;
 /**
- * Spawn references `.11` and `.12`, each one nested 0x80809C42 ClientRef.
- * Both always carry the unset form, which is the sentinel that keeps the package's own
- * authored spawn rule. 32-bit key, 7-bit type, 16-bit index, after one presence bit.
+ * Spawn references `.11` and `.12`, each one nested 0x80809C42 ClientRef after a presence bit.
+ * The unset form keeps the package's authored rule; only `.12` may carry a set spawn rule.
  */
 inline constexpr std::size_t kSpawnReferenceBitCount = 55;
 inline constexpr std::size_t kSpawnReferenceCount = 2;
@@ -36,11 +35,7 @@ inline constexpr std::size_t kSpawnReferenceCount = 2;
 inline constexpr std::size_t kAuthoredProfileBitCount = 13;
 /** A present `.10` destination ClientRef and a present `.17` 31-bit request revision. */
 inline constexpr std::size_t kDestinationBitCount = 55 + 31;
-/**
- * Exact meaningful bit count for one body carrying this many requested counts.
- * It lives here so the sum has one home. A second copy in the roster encoder drifted from this
- * one and refused every squad body Sunrise sent; that copy is gone.
- */
+/** Exact meaningful bit count for one body. This is the only copy of the sum. */
 [[nodiscard]] constexpr std::size_t exact_body_bit_count(std::size_t counts,
                                                          bool destination = false) noexcept {
     return kBaseBitCount + kAuthoredProfileBitCount + kSpawnReferenceBitCount * kSpawnReferenceCount

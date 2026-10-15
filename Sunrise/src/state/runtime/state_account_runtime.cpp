@@ -147,7 +147,6 @@ namespace socket_lists = build_data::socket_entry_lists;
     mutation.accountSoid = snapshot.primarySoid;
     mutation.characterSoid = before.soid;
     mutation.subclassInstanceSoid = subclassInstanceSoid;
-    mutation.subclassDefinitionHash = subclassDefinition.definitionHash;
     mutation.characterIndex = characterIndex;
     mutation.subclassDefinitionIndex = subclassDefinition.definitionIndex;
     mutation.socketEntryListIndex = detail.socketEntryListIndex;
@@ -401,7 +400,6 @@ bool prepare_equipment_swap(std::uint64_t requestedInstanceSoid,
     mutation.characterIndex = characterIndex;
     mutation.equipmentSlotIndex = equipmentSlotIndex;
     mutation.inventoryIndex = inventoryIndex;
-    mutation.movedItemCount = movedItemCount;
     mutation.nativeEquipmentSlot = requestedNativeSlot;
     mutation.kind = EquipmentMutationKind::equip;
     mutation.prepared = true;
@@ -506,7 +504,6 @@ bool prepare_equipment_unequip(std::uint64_t requestedInstanceSoid,
     mutation.characterIndex = characterIndex;
     mutation.equipmentSlotIndex = equipmentSlotIndex;
     mutation.inventoryIndex = inventoryIndex;
-    mutation.movedItemCount = movedItemCount;
     mutation.nativeEquipmentSlot = requestedNativeSlot;
     mutation.kind = EquipmentMutationKind::unequip;
     mutation.prepared = true;

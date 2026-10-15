@@ -6,6 +6,7 @@
 
 #include "../../../../middleware/content/packages/tables/definition_index_table.h"
 #include "../../../../state/build_data/runtime.h"
+#include "../../../../state/unlocks/definition.h"
 
 namespace sunrise::client::content::items::packages {
 namespace {
@@ -31,7 +32,7 @@ constexpr std::uint16_t kTrackerSocketType = 518;
 /** FNV-1a constants make pool fingerprints stable and cheap. */
 constexpr std::uint64_t kHashOffsetBasis = 14695981039346656037ULL;
 constexpr std::uint64_t kHashPrime = 1099511628211ULL;
-/** One acquired-state rule starts with kind 1 and then its item-definition index. */
+/** One acquired-state rule is opcode 1, read an unlock flag, then the flag slot. */
 constexpr std::uint32_t kAcquisitionRuleKind = 1;
 constexpr std::size_t kAcquisitionRuleSize = 8;
 
@@ -108,15 +109,14 @@ bool read_catalyst_acquisition_gates(const reader::Source& source,
             continue;
         }
         std::uint32_t kind = 0;
-        std::uint32_t definitionIndex = 0;
+        std::uint32_t flag = 0;
         if (!read(bytes, rules.dataOffset, kind)
-            || !read(bytes, rules.dataOffset + sizeof kind, definitionIndex)
-            || kind != kAcquisitionRuleKind
-            || definitionIndex >= state::build_data::items::kDefinitionCapacity) {
+            || !read(bytes, rules.dataOffset + sizeof kind, flag) || kind != kAcquisitionRuleKind
+            || flag >= state::unlocks::kUnlockFlagCapacity) {
             gate.state = catalysts::AcquisitionState::ambiguous;
             continue;
         }
-        gate.definitionIndex = static_cast<std::uint16_t>(definitionIndex);
+        gate.flag = static_cast<std::uint16_t>(flag);
         gate.state = catalysts::AcquisitionState::present;
     }
     return true;

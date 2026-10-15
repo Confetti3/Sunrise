@@ -9,6 +9,7 @@
 #include <string_view>
 #include <vector>
 
+#include "../../../core/filesystem/path.h"
 #include "../../../core/logging/log.h"
 #include "../../../state/activity/mission/runtime.h"
 #include "../../../state/activity/runtime.h"
@@ -105,7 +106,7 @@ constexpr std::size_t kObjectiveCapacity = 24;
 constexpr std::size_t kObjectiveTaskCapacity = 24;
 /** How long a committed Host output may take to reach transport before the delivery faults. */
 constexpr std::uint64_t kTransportTimeoutMs = 15'000;
-/** How long an enqueued Host output may take to reach the reducer before the delivery retries. */
+/** How long an enqueued Host output may take to reach the reducer before it is reconciled. */
 constexpr std::uint64_t kHostCommitTimeoutMs = 2'000;
 
 /** Last occupancy seen for one watched volume, so only a change raises an event. */
@@ -187,9 +188,14 @@ struct SquadObservation final {
 };
 /** Last completion latch seen for one watched authored scene, so only the edge raises an event. */
 struct SceneObservation final {
+    /** Output keys this run has reported. A scene's Sense list holds at most 32 keys. */
+    std::array<std::uint32_t, 32> outputs{};
     std::uint32_t registryKey{};
     std::uint32_t objectTag{};
+    /** Activation token of the run the outputs belong to; a new token starts a new run. */
+    std::int32_t token{};
     std::uint16_t slotIndex{};
+    std::uint8_t outputCount{};
     bool completed{};
     bool used{};
 };
@@ -227,7 +233,6 @@ struct RuntimeInstance final {
     std::uint64_t eventsSeen{};
     std::uint64_t eventsCommitted{};
     std::uint64_t intentsTransportStaged{};
-    std::uint64_t lastEventSequence{};
     std::uint64_t lastLoggedRevision{};
     std::uint64_t lastMissionSequence{};
     std::uint64_t missionStateRevision{};
@@ -238,12 +243,7 @@ struct RuntimeInstance final {
     std::uint64_t expectedScriptableRevision{};
     std::uint64_t deliveryDeadline{};
     std::uint64_t firstIntentAttempt{};
-    std::uint64_t nextIntentAttempt{};
-    std::uint64_t firstStartAttempt{};
-    std::uint64_t nextStartAttempt{};
     host::Event pendingTimerEvent{};
-    std::uint64_t firstTimerAttempt{};
-    std::uint64_t nextTimerAttempt{};
     std::array<TriggerOccupancy, kTriggerOccupancyCapacity> triggerOccupancy{};
     std::array<SquadObservation, kSquadObservationCapacity> squadObservations{};
     std::array<GhostObservation, kGhostObservationCapacity> ghostObservations{};
@@ -265,12 +265,8 @@ struct RuntimeInstance final {
     bool fireteamLifePublished{};
     /** Dynamically sized host-state reports waiting for this script, in arrival order. */
     std::vector<host::Event> scriptEvents{};
-    std::uint64_t firstScriptEventAttempt{};
-    std::uint64_t nextScriptEventAttempt{};
     std::uint32_t intentAttempts{};
     std::uint32_t startAttempts{};
-    std::uint32_t timerAttempts{};
-    std::uint32_t scriptEventAttempts{};
     std::size_t durablePendingIntentCount{};
     std::size_t scriptEventRead{};
     std::uint16_t lastIntentStatus{(std::numeric_limits<std::uint16_t>::max)()};
@@ -341,6 +337,32 @@ void publish_ghost_levels(RuntimeInstance& instance) noexcept;
 /** Raises the squad state, spawn and death events derived from one msg 6 body. */
 void push_squad_edges(RuntimeInstance& instance,
                       const host::SenseObservationSnapshot& sense) noexcept;
+
+/**
+ * Finds the retained row for one slot, allocating a free row on a first observation.
+ * @return Null when every row is in use.
+ */
+template <typename Row, std::size_t N>
+[[nodiscard]] Row* find_slot_row(std::array<Row, N>& rows,
+                                 const host::SenseObservationKey& key) noexcept {
+    Row* spare = nullptr;
+    for (Row& retained : rows) {
+        if (retained.used && retained.registryKey == key.registryKey
+            && retained.objectTag == key.objectTag && retained.slotIndex == key.slotIndex) {
+            return &retained;
+        }
+        if (!retained.used && spare == nullptr) {
+            spare = &retained;
+        }
+    }
+    if (spare != nullptr) {
+        spare->used = true;
+        spare->registryKey = key.registryKey;
+        spare->objectTag = key.objectTag;
+        spare->slotIndex = key.slotIndex;
+    }
+    return spare;
+}
 
 /** Retains generation-qualified population facts before the derived squad callback. */
 [[nodiscard]] bool observe_population(
@@ -452,19 +474,54 @@ void clear_instance(RuntimeInstance& instance, bool clearPending = true) noexcep
 void note_vm_status(RuntimeInstance& instance,
                     std::string_view stage,
                     std::string_view status) noexcept;
+/** Native Sense levels cannot cross an attempt or ActivityClient generation boundary. */
+void clear_sense_levels(RuntimeInstance& instance) noexcept;
 /** Commits the VM's phase/revision/start transaction into exact server-owned State. */
 [[nodiscard]] bool commit_mission_state(RuntimeInstance& instance,
                                         bool started,
                                         std::uint64_t nextInputSequence) noexcept;
 
-// The attach unit owns these. The service slice and the lifecycle entry points call into them.
+// The sources unit owns these: where a program's script and its require path come from.
+
+/** How reading one mission script ended. */
+enum class SourceStatus : std::uint8_t {
+    ready,
+    missing,
+    fileError,
+    tooLarge,
+};
 
 /** Resolves the script root and the SDK Lua search path. Logs its own refusal. */
 [[nodiscard]] bool resolve_script_paths() noexcept;
-/** Clears the script buffer, both paths and every reload authorization. */
-void clear_script_paths() noexcept;
-/** @return False when no authorization slot is free, so the reload cannot replace this program. */
-[[nodiscard]] bool authorize_reload(const RuntimeInstance& instance) noexcept;
+/**
+ * Reads the activity's script: a loaded mod's, then the authored one, then the generated one.
+ * @param output Receives the source; it stays valid until the next read.
+ * @param modId Receives the supplying mod's id, or an empty string for a base script.
+ * @return Why no source was read, or ready.
+ */
+[[nodiscard]] SourceStatus read_source(const sdk::Catalog& catalog,
+                                       const format::Activity& activity,
+                                       std::span<const char>& output,
+                                       std::array<char, state::mods::kIdCapacity>& modId) noexcept;
+/**
+ * Appends `<mods>\<folder>` for one mod.
+ * @return False when the path does not fit.
+ */
+[[nodiscard]] bool append_mod_directory(core::path::Buffer& path,
+                                        const state::mods::View& view,
+                                        const state::mods::Record& record) noexcept;
+/** @return The Lua require path every program opens with. */
+[[nodiscard]] const std::array<char, lua_vm::kSearchPathByteCapacity>&
+sdk_lua_search_path() noexcept;
+/** Zeroes the bytes `read_source` returned, once the program no longer needs them. */
+void clear_source(std::span<const char> source) noexcept;
+/** Clears the script buffer and both paths. */
+void clear_script_sources() noexcept;
+/** Resolves a loaded filename to its loaded mod owner; empty output means a base file. */
+[[nodiscard]] bool module_source_owner(std::string_view path, std::span<char> modId) noexcept;
+
+// The attach unit owns these. The service slice and the lifecycle entry points call into them.
+
 /** Drops slots that no longer match, publishes the roster, and attaches active host instances. */
 void synchronize_instances(std::uint64_t now) noexcept;
 /** Advances fresh programs only when their declared state roster has reached transport output. */
@@ -498,9 +555,34 @@ void copy_diagnostics(const RuntimeInstance& instance, InstanceDiagnostics& outp
 /** Copies every retained attach result into the panel-facing snapshot. */
 void snapshot_attach_diagnostics(DiagnosticsSnapshot& output) noexcept;
 
+// The reload unit owns these. The service slice and shutdown call into them.
+
+/** Reopens the programs the mailbox request names once each is at a safe point. */
+void service_reload(std::uint64_t now) noexcept;
+/** Drops any unanswered request and its answer. */
+void clear_reload_mailbox() noexcept;
+/** Copies the committed attempt, revision, cursors, phase and intent head into the instance. */
+void accept_compare_fields(RuntimeInstance& instance,
+                           const mission_state::Snapshot& snapshot) noexcept;
+/** Opens replacement code against the same exact view without changing the running instance. */
+[[nodiscard]] lua_vm::OpenStatus prepare_reload_program(const RuntimeInstance& instance,
+                                                        std::span<const char> source,
+                                                        std::string_view modId,
+                                                        lua_vm::Vm& vm,
+                                                        lua_vm::ProgramIdentity& identity,
+                                                        mission_state::ProgramKey& key) noexcept;
+/** Retargets a prepared VM only while its SDK, world and source identities still match. */
+[[nodiscard]] bool rebind_reload_program(const RuntimeInstance& instance,
+                                         std::span<const char> source,
+                                         lua_vm::Vm& vm,
+                                         lua_vm::ProgramIdentity& identity,
+                                         const mission_state::ProgramKey& key) noexcept;
+/** @return True when mission scripting is on and its paths resolved. Takes the runtime lock. */
+[[nodiscard]] bool runtime_ready() noexcept;
+
 // The feed unit owns these. The service slice and the lifecycle entry points call into them.
 
-/** Retires every queued mission event that belongs to one binding. */
+/** Retires every queued mission event of every binding and frees the queue. */
 void clear_all_pending_events() noexcept;
 /** Keeps accepted values but removes every VM- and ActivityClient-generation-local decision. */
 void reset_pending_events_for_reattach(const state::activity::SessionBinding& binding) noexcept;
@@ -523,14 +605,12 @@ void consume_mission_inputs(std::uint64_t now) noexcept;
  * Runs one event through the VM, commits what it changed, and faults on a script failure.
  * @param sense Values owned by a Sense row, or null.
  * @param clientMessage Envelope snapshot owned by a client-message row, or null.
- * @param firstAttempt True on the first delivery attempt, which is the one that counts it.
  * @return The VM call status; `inactive` when no callback could take the event.
  */
 [[nodiscard]] lua_vm::CallStatus dispatch_event(RuntimeInstance& instance,
                                                 const host::Event& event,
                                                 const host::SenseObservationSnapshot* sense,
                                                 const host::ClientMessageSnapshot* clientMessage,
-                                                bool firstAttempt,
                                                 std::uint64_t now) noexcept;
 
 } // namespace sunrise::server::activity::mission

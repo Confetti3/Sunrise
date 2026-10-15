@@ -414,11 +414,10 @@ struct BuildOwner final {
     if (count == 0 || relative == 0) {
         return false;
     }
-    const std::int64_t headerValue = static_cast<std::int64_t>(relativeField) + relative;
-    if (headerValue < 4) {
+    std::size_t header = 0;
+    if (!relative_target(bytes, relativeField, header) || header < sizeof(std::uint32_t)) {
         return false;
     }
-    const std::size_t header = static_cast<std::size_t>(headerValue);
     std::uint32_t marker = 0;
     std::uint64_t repeated = 0;
     std::uint32_t actualClass = 0;
@@ -521,9 +520,10 @@ struct BuildOwner final {
     if (actorTags.empty()) {
         return true;
     }
+    // Held to the end, since the kept blobs are read up to the owner join.
+    const parallel::ScopedRead read{};
     std::vector<parallel::Held> actors{};
     if (!parallel::read_kept(source, actorTags, actors)) {
-        parallel::release();
         return false;
     }
     output.unreadActors = static_cast<std::uint32_t>(actorTags.size() - actors.size());
@@ -531,7 +531,6 @@ struct BuildOwner final {
     std::vector<std::uint32_t> configTags{};
     for (const parallel::Held& actor : actors) {
         if (cancel != nullptr && cancel(cancelContext)) {
-            parallel::release();
             return false;
         }
         const auto actorTag = std::lower_bound(actorTags.begin(), actorTags.end(), actor.tag);
@@ -555,7 +554,6 @@ struct BuildOwner final {
     configTags.erase(std::unique(configTags.begin(), configTags.end()), configTags.end());
     std::vector<parallel::Held> configs{};
     if (!parallel::read_kept(source, configTags, configs)) {
-        parallel::release();
         return false;
     }
     output.unreadConfigs = static_cast<std::uint32_t>(configTags.size() - configs.size());
@@ -592,7 +590,6 @@ struct BuildOwner final {
             }
         }
     }
-    parallel::release();
     std::sort(
         output.owners.begin(), output.owners.end(), [](const Owner& first, const Owner& second) {
             return std::tie(first.programRow,
@@ -703,7 +700,7 @@ bool build(const reader::Source& source,
     try {
         std::vector<std::uint32_t> tags{};
         reader::ScanResult scan{};
-        if (!reader::scan_class(source.directory, kRootClass, &collect_tag, &tags, scan)
+        if (!reader::scan_class(source, kRootClass, &collect_tag, &tags, scan)
             || (cancel != nullptr && cancel(cancelContext))) {
             output = {};
             return false;
@@ -715,12 +712,14 @@ bool build(const reader::Source& source,
         }
         std::vector<std::vector<ParsedProgram>> workers(parallel::worker_count());
         BuildContext context{cancel, cancelContext, &workers};
-        if (!parallel::read_tags(source, tags, &collect, &context)
-            || context.failed.load(std::memory_order_relaxed)) {
-            parallel::release();
+        bool read = false;
+        {
+            const parallel::ScopedRead lease{};
+            read = parallel::read_tags(source, tags, &collect, &context);
+        }
+        if (!read || context.failed.load(std::memory_order_relaxed)) {
             return false;
         }
-        parallel::release();
         std::vector<ParsedProgram> parsed{};
         for (auto& worker : workers) {
             for (ParsedProgram& row : worker) {

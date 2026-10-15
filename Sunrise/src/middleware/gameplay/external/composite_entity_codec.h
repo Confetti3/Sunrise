@@ -159,7 +159,7 @@ struct CompositeEntityCatalogFixture final {
     const void* planContext{};
 };
 
-/** Builds a codec over deterministic in-memory v32 rows without publishing a pack. */
+/** Builds a codec over deterministic in-memory rows without publishing a pack. */
 [[nodiscard]] bool
 initialize_composite_entity_codec_for_test(CompositeEntityCodecContext& context,
                                            EntityBaselineRegistry& registry,
@@ -191,12 +191,6 @@ struct CompositeEntitySessionStore final {
     ResolveAdditionalField resolveAdditionalField{};
     const void* planContext{};
 };
-
-/** Pins and validates the current v32 entity reflection catalog. */
-[[nodiscard]] bool
-initialize_composite_entity_codec(CompositeEntityCodecContext& context,
-                                  EntityBaselineRegistry& registry,
-                                  SobjectPositionCompression positionCompression) noexcept;
 
 /** Binds one already authenticated SDK snapshot without changing global publication. */
 [[nodiscard]] bool initialize_composite_entity_codec_from_catalog(

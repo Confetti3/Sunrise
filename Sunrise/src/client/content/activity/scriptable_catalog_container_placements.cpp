@@ -19,6 +19,7 @@
 #include "../../../middleware/content/packages/tables/component_container_reader.h"
 #include "../../../middleware/content/packages/tables/container_placement_reader.h"
 #include "../../../state/build_data/runtime.h"
+#include "../scenarios/scenario_build.h"
 #include "../spawn_sets/spawn_set_catalog_builder.h"
 #include "scriptable_catalog_container_placements_internal.h"
 #include "scriptable_catalog_inline_names.h"
@@ -31,6 +32,7 @@ using namespace container_placements;
 
 namespace catalog = state::build_data::scriptables;
 namespace package_reader = middleware::content::packages::reader;
+namespace scenario_layouts = ::sunrise::client::content::scenarios;
 namespace tables = middleware::content::packages::tables;
 
 /** Reads one reached tag and keeps all valid inline-name evidence in its blob. */
@@ -55,6 +57,7 @@ void mark_unresolved(BuildContext& context) noexcept {
 }
 
 /** Records a lossless raw edge whose target meaning remains unresolved. */
+// TODO: no raw-edge path calls this yet, so semanticUnresolved always publishes zero.
 void mark_semantic_unresolved(BuildContext& context) noexcept {
     ++context.output->containerPlacementDiagnostics.semanticUnresolved;
 }
@@ -453,12 +456,13 @@ void append_owner(BuildContext& context,
                                                     package_reader::Scratch& scratch,
                                                     ContainerPlacementCache* cache,
                                                     const ContainerIndex& containers,
+                                                    const scenario_layouts::LayoutSet* layouts,
                                                     std::string_view scenarioName,
                                                     catalog::Snapshot& output,
                                                     ContainerPlacementCancelCheck cancel) noexcept {
     output.containerPlacementDiagnostics = {};
     state::build_data::scenarios::Definition scenario{};
-    if (!state::build_data::find_scenario_layout(scenarioName, scenario)) {
+    if (!scenario_layouts::find_layout(layouts, scenarioName, scenario)) {
         output.containerPlacementDiagnostics.unresolvedReads = 1;
         return true;
     }
@@ -528,11 +532,12 @@ ContainerPlacementCache::~ContainerPlacementCache() = default;
 bool append_container_placements(const package_reader::Source& source,
                                  package_reader::Scratch& scratch,
                                  const ContainerIndex& containers,
+                                 const scenario_layouts::LayoutSet* layouts,
                                  std::string_view scenarioName,
                                  catalog::Snapshot& output,
                                  ContainerPlacementCancelCheck cancel) noexcept {
     return append_container_placements_impl(
-        source, scratch, nullptr, containers, scenarioName, output, cancel);
+        source, scratch, nullptr, containers, layouts, scenarioName, output, cancel);
 }
 
 /** Appends container placements with exact pass-local object-list graph reuse. */
@@ -540,11 +545,12 @@ bool append_container_placements(const package_reader::Source& source,
                                  package_reader::Scratch& scratch,
                                  ContainerPlacementCache& cache,
                                  const ContainerIndex& containers,
+                                 const scenario_layouts::LayoutSet* layouts,
                                  std::string_view scenarioName,
                                  catalog::Snapshot& output,
                                  ContainerPlacementCancelCheck cancel) noexcept {
     return append_container_placements_impl(
-        source, scratch, &cache, containers, scenarioName, output, cancel);
+        source, scratch, &cache, containers, layouts, scenarioName, output, cancel);
 }
 
 } // namespace sunrise::client::content::activity::scriptables::internal

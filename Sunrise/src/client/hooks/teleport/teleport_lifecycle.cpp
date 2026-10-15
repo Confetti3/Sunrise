@@ -12,6 +12,7 @@
 #include <string_view>
 
 #include "../../../core/logging/log.h"
+#include "../../diagnostics/studio/studio_link.h"
 #include "../../hooking/detour.h"
 #include "../../player/player_position.h"
 #include "../bootflow/bootflow_hook_lifecycle.h"
@@ -24,10 +25,16 @@
 namespace sunrise::client::hooks::teleport {
 namespace {
 
-/** Runs per frame on the thread owning the camera and the player, and writes the camera pose. */
+/**
+ * Runs per frame on the thread owning the camera and the player, and writes the camera pose.
+ * The match runs on through the call to the camera singleton getter.
+ */
 constexpr std::string_view kCameraTransformText =
     "48 89 5C 24 10 48 89 74 24 18 48 89 7C 24 20 55 48 8D 6C 24 E0 48 81 EC 20 01 00 00 "
-    "48 8B 05 ? ? ? ? 48 33 C4 48 89 45 10 0F 57 C0 48 63 F9";
+    "48 8B 05 ? ? ? ? 48 33 C4 48 89 45 10 0F 57 C0 48 63 F9 0F 57 ED 66 0F 76 C0 66 0F 72 D0 "
+    "19 0F 57 DB 66 0F 72 F0 17 0F 14 D8 0F 28 D0 0F 14 D5 0F 28 CB 0F 28 E2 0F 16 CD 0F 57 C0 "
+    "0F 16 E5 0F 16 C2 0F 16 EB 0F 29 65 D0 0F 29 4D E0 0F 29 45 F0 0F 29 6D 00 E8 ? ? ? ? "
+    "48 69 DF 50 0C 00 00";
 /** Compiled pattern bytes of the camera transform signature. */
 constexpr auto kCameraTransform =
     signature<signature_length(kCameraTransformText)>(kCameraTransformText);
@@ -35,7 +42,7 @@ constexpr auto kCameraTransform =
 /** Writes the local player's biped object handle, or the invalid handle value. */
 constexpr std::string_view kControlledHandleText =
     "40 53 48 83 EC 20 48 8B D9 C7 01 FF FF FF FF 48 8D 4C 24 30 E8 ? ? ? ? 8B 44 24 30 "
-    "83 F8 FF 74 18 25 FF 1F 00 00 0F AF 05";
+    "83 F8 FF 74 ? 25 FF 1F 00 00 0F AF 05";
 /** Compiled pattern bytes of the controlled-handle signature. */
 constexpr auto kControlledHandlePattern =
     signature<signature_length(kControlledHandleText)>(kControlledHandleText);
@@ -47,10 +54,9 @@ constexpr std::string_view kPhysicsSyncText =
 /** Compiled pattern bytes of the physics sync signature. */
 constexpr auto kPhysicsSync = signature<signature_length(kPhysicsSyncText)>(kPhysicsSyncText);
 
-/** The call to the camera singleton getter, measured from the camera transform's own base. */
+/** The call to the camera singleton getter inside the camera transform match. */
 constexpr std::size_t kSingletonCallOffset = 0x72;
 /** A near call is one opcode byte and a signed displacement. */
-constexpr std::byte kNearCallOpcode{0xE8};
 constexpr std::size_t kNearCallOperand = 1;
 constexpr std::size_t kNearCallLength = 5;
 
@@ -86,6 +92,7 @@ std::int64_t __fastcall camera_transform(std::uint32_t playerIndex) noexcept {
     client::player::position::poll();
     hooks::bootflow::poll_world_step();
     hooks::bootflow::poll_current_slice_set();
+    client::diagnostics::studio::poll();
     return result;
 }
 
@@ -116,14 +123,11 @@ constexpr std::size_t kSyncFlagsCapacity = 256;
 
 /**
  * Decodes the camera singleton getter from the call inside the camera transform.
- * @param transform Base of the camera transform.
- * @return The getter, or null when the expected call is not there.
+ * @param transform Base of the camera transform match.
+ * @return The getter.
  */
 [[nodiscard]] CameraSingleton singleton_from(std::byte* transform) noexcept {
     std::byte* const site = transform + kSingletonCallOffset;
-    if (*site != kNearCallOpcode) {
-        return nullptr;
-    }
     return reinterpret_cast<CameraSingleton>(
         resolve_relative(site + kNearCallOperand, site + kNearCallLength));
 }
@@ -161,9 +165,6 @@ bool install() noexcept {
         return fail("sync");
     }
     const CameraSingleton singleton = singleton_from(transform);
-    if (singleton == nullptr) {
-        return fail("singleton");
-    }
 
     const std::array<hooking::detour::Spec, kHandleCount> specs{
         hooking::detour::Spec{transform, reinterpret_cast<void*>(&camera_transform)},
@@ -173,6 +174,7 @@ bool install() noexcept {
         return fail("attach");
     }
     publish_targets(reinterpret_cast<ControlledHandle>(handle), singleton);
+    client::diagnostics::studio::initialize();
     // The injected press needs the game's key tables. Without them the move still lands, it just
     // stays invisible until the player moves, so we log instead of failing.
     if (!resolve_action_keys()) {
@@ -194,10 +196,14 @@ void invoke_sync(void* component) noexcept {
     (void)next(static_cast<std::byte*>(component), flags.data());
 }
 
-/** Detaches both teleport hooks. */
-void uninstall() noexcept {
-    if (!g_installed.exchange(false, std::memory_order_acq_rel)) {
-        return;
+/** Retained hooks remain tracked and block shutdown until a later detach succeeds. */
+bool uninstall() noexcept {
+    if (!client::diagnostics::studio::close()) {
+        return false;
+    }
+    g_installed.store(false, std::memory_order_release);
+    if (!g_handles[kCameraSlot].attached) {
+        return true;
     }
     clear_targets();
     clear_action_keys();
@@ -212,9 +218,10 @@ void uninstall() noexcept {
                          replacementActive
                              ? "ev=teleport stage=uninstall result=fail reason=active"
                              : "ev=teleport stage=uninstall result=fail reason=detach");
-        return;
+        return false;
     }
     g_handles = {};
+    return true;
 }
 
 } // namespace sunrise::client::hooks::teleport
