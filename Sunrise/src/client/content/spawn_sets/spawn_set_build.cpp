@@ -61,8 +61,7 @@ void prefetch_blobs(void* context, std::span<const std::uint32_t> tags) noexcept
 
 /**
  * Reads one spawn-set tag through the production package reader.
- * A blob the read-ahead already holds is served from it. Anything else reads here, so a tag the
- * read-ahead missed or could not read behaves exactly as it always did.
+ * A blob the read-ahead already holds is served from it. Any other tag is read here.
  * @param context Package source, scratch, output bytes and kept blobs.
  * @param tag Spawn-set tag.
  * @param blob Receives bytes live until the next read.
@@ -132,17 +131,15 @@ bool build(const reader::Source& source, reader::Scratch& scratch) noexcept {
         reset(storage);
         storage.startedTick = GetTickCount64();
         reader::ScanResult result{};
-        // The sweep reads every installed package header and entry table, so it runs once. A pass
-        // that re-swept on each retry cost minutes of boot and read nothing new.
+        // The sweep reads every installed package header and entry table, so it runs once.
         reader::ScanResult components{};
         reader::ScanResult containers{};
-        if (!reader::scan_class_entries(
-                source.directory, tables::kSpawnSetClass, &collect, &storage, result)
+        if (!reader::scan_class_entries(source, tables::kSpawnSetClass, &collect, &storage, result)
             || result.matches != storage.entryCount
             || !reader::scan_class(
-                source.directory, tables::kComponentClass, &collect_component, &storage, components)
+                source, tables::kComponentClass, &collect_component, &storage, components)
             || !reader::scan_class(
-                source.directory, tables::kContainerClass, &collect_container, &storage, containers)
+                source, tables::kContainerClass, &collect_container, &storage, containers)
             || !finish_collection(storage)) {
             // A build that installs no spawn set has a whole empty catalogue, not a failed pass.
             report(storage, storage.entryCount == 0 ? "empty" : "sweep");
@@ -153,6 +150,11 @@ bool build(const reader::Source& source, reader::Scratch& scratch) noexcept {
         report(storage, "collected");
         return false;
     }
+    // A boot slice never waits for the reader; the next slice tries again.
+    const reader::parallel::Lease lease{reader::parallel::kTryAcquire};
+    if (!lease.held()) {
+        return false;
+    }
     static std::vector<reader::parallel::Held> kept{};
     ReadContext context{&source, &scratch, &bytes, &kept, 0};
     const AdvanceResult result = advance(storage,
@@ -161,6 +163,8 @@ bool build(const reader::Source& source, reader::Scratch& scratch) noexcept {
                                          &context,
                                          kReadBudget,
                                          GetTickCount64() >= readDeadlineTick);
+    // Kept blobs are valid only under this lease.
+    kept.clear();
     if (result == AdvanceResult::invalid) {
         // A retry cannot help, and an empty catalogue still finishes the pipeline.
         report(storage, "read");
@@ -178,7 +182,6 @@ bool build(const reader::Source& source, reader::Scratch& scratch) noexcept {
     if (published) {
         bytes.clear();
         bytes.shrink_to_fit();
-        kept.clear();
         kept.shrink_to_fit();
     }
     return published;

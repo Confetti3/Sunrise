@@ -8,6 +8,7 @@
 #include "../config_getter/game_config_getter_targets.h"
 #include "../content.h"
 #include "../network.h"
+#include "../package_path/game_package_path_targets.h"
 #include "../packages/game_package_targets.h"
 #include "../retail_log.h"
 

@@ -14,15 +14,15 @@ struct CurrentSliceSet final {
 };
 
 /**
- * Finds the boot-step accessor and the slice-set sample targets. Nothing is detoured.
- * @return True when both targets were found.
+ * Finds the boot-step accessor and the slice-set sample targets, and attaches the lifetime probe.
+ * @return True when all three are ready.
  */
 [[nodiscard]] bool install() noexcept;
 
-/** Clears both accessors. */
+/** Detaches the probe and clears both accessors. */
 void uninstall() noexcept;
 
-/** @return True while at least one accessor is found. */
+/** @return True while at least one accessor or the probe is installed. */
 [[nodiscard]] bool is_installed() noexcept;
 
 /** Publishes the client's own boot-flow step. Call it per frame, on a game thread. */

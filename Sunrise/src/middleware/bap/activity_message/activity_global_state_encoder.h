@@ -14,8 +14,6 @@ inline constexpr std::size_t kEncodedSize = 146;
 /** Bits the minimum encoding takes before a dynamic descriptor extends it. */
 inline constexpr std::size_t kMeaningfulBitCount = 1'161;
 
-/** Wire bit 0 arms the initial slice set. With it clear the client never reads the pair below. */
-inline constexpr std::size_t kInitialSliceSetArmBit = 0;
 /** The bubble count starts here and is 32 bits wide. */
 inline constexpr std::size_t kBubbleCountBit = 67;
 inline constexpr std::uint8_t kBubbleCountWidth = 32;

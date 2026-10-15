@@ -8,6 +8,8 @@
 
 namespace sunrise::state::unlocks {
 
+/** Unlock expressions name flag slots below this; the native flag reader's bank holds this many. */
+inline constexpr std::size_t kUnlockFlagCapacity = 23'500;
 /** The account acquired-flag bank holds one byte per flag. */
 inline constexpr std::size_t kAccountFlagCapacity = 12'300;
 /** The profile unlock bank holds one byte per flag. */

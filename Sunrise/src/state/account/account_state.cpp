@@ -149,11 +149,6 @@ bool valid(const AccountState& state) noexcept {
     return valid_impl(state);
 }
 
-/** Checks settings-authored State before runtime-only profile stack identities are seeded. */
-bool valid_authored(const AccountState& state) noexcept {
-    return valid_impl(state);
-}
-
 /**
  * Finds the selected character without storing a second account-level key.
  * @param state Account snapshot read under the lock.

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <limits>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -12,6 +13,7 @@
 #include <vector>
 
 #include "../../../middleware/bap/activity_message/auth_schema_catalog.h"
+#include "../../../state/activity_sdk/scene_triggers.h"
 #include "activity_sdk_lua_missions_internal.h"
 
 namespace sunrise::client::content::activity::sdk_generation::lua_artifacts::internal {
@@ -332,6 +334,8 @@ bool render_mission(const Source& source,
     output.append("    },\n    scenes = {\n");
     std::unordered_set<std::string> sceneKeys;
     std::string sceneConstants = "mission.Scene = {\n";
+    std::string sceneInputConstants = "mission.SceneInput = {\n";
+    std::string sceneOutputConstants = "mission.SceneOutput = {\n";
     if (!range_inside(scenario.occurrences, source.occurrences.size())) {
         return false;
     }
@@ -388,26 +392,19 @@ bool render_mission(const Source& source,
             append_hex(output, scene.configTag);
             output.append(", resource_tag = ");
             append_hex(output, scene.resourceTag);
-            // The graph's gates in order: what set_scene_events publishes to run the scene.
-            // The section is sorted by scene slot, so the slot's rows are one range.
-            const auto& gates = source.authoredSceneEventKeys;
-            const auto firstGate = std::lower_bound(
-                gates.begin(), gates.end(), slotRow, [](const auto& row, std::uint32_t index) {
-                    return row.sceneSlotIndex < index;
-                });
-            const auto lastGate = std::upper_bound(
-                firstGate, gates.end(), slotRow, [](std::uint32_t index, const auto& row) {
-                    return index < row.sceneSlotIndex;
-                });
-            if (firstGate != lastGate) {
+            // The graph's gates in order; a script fires one with scene:send_event.
+            const auto gates =
+                state::activity_sdk::scene_gates(source.authoredSceneEventKeys, slotRow);
+            if (!gates.empty()) {
                 output.append(", event_keys = { ");
-                for (auto gate = firstGate; gate != lastGate; ++gate) {
-                    if (gate != firstGate) {
+                for (std::size_t gate = 0; gate < gates.size(); ++gate) {
+                    if (gate != 0) {
                         output.append(", ");
                     }
-                    append_hex(output, gate->key);
+                    append_hex(output, gates[gate].key);
                 }
                 output.append(" }");
+                append_scene_ports(key, gates, sceneInputConstants, sceneOutputConstants);
             }
             output.append(" },\n");
             sceneConstants.append("    ");
@@ -455,6 +452,8 @@ bool render_mission(const Source& source,
     slotConstants.append("}\n");
     squadConstants.append("}\n");
     sceneConstants.append("}\n");
+    sceneInputConstants.append("}\n");
+    sceneOutputConstants.append("}\n");
     taskConstants.append("}\n");
     std::string taskGroupConstants = "mission.TaskGroup = {\n";
     for (const std::uint32_t slot : slots) {
@@ -599,8 +598,7 @@ bool render_mission(const Source& source,
         for (const std::uint32_t rowIndex : found->second) {
             const format::DirectiveElement& row = source.directiveElements[rowIndex];
             const std::string_view progress = text(source, row.progress);
-            // Only a row with no description is new; a described row keeps the title key that
-            // shipped scripts use.
+            // A row with no description is keyed by its progress label; others keep the title key.
             const bool labelKey = !progress.empty() && text(source, row.description).empty();
             (void)append_unique_key(directiveConstants,
                                     directiveKeys,
@@ -610,6 +608,9 @@ bool render_mission(const Source& source,
             append_string(directiveConstants, text(source, row.id));
             directiveConstants.append(", slot_row = ");
             append_uint(directiveConstants, row.slotIndex);
+            // The sensor's mission.Slot value, so a script compares it without a row lookup.
+            directiveConstants.append(", sensor = ");
+            append_string(directiveConstants, text(source, source.slots[slot].id));
             directiveConstants.append(", name_hash = ");
             append_hex(directiveConstants, row.nameHash);
             directiveConstants.append(", element = ");
@@ -707,6 +708,8 @@ bool render_mission(const Source& source,
     append_catalog_constants(source, output);
     output.append(squadConstants);
     output.append(sceneConstants);
+    output.append(sceneInputConstants);
+    output.append(sceneOutputConstants);
     output.append(taskConstants);
     output.append(taskGroupConstants);
     output.append(abilityConstants);

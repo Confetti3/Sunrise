@@ -85,7 +85,7 @@ void uninstall() noexcept {
         return;
     }
     // The game's own bounds go back before the trampoline that applies them is gone.
-    apply_policy(false);
+    apply_visibility(false);
     if (!hooking::detour::uninstall(g_handles)) {
         core::log::write(core::log::Channel::client,
                          core::log::Level::warn,
@@ -95,11 +95,6 @@ void uninstall() noexcept {
     g_installed.store(false, std::memory_order_release);
     g_targets = {};
     release_module();
-}
-
-/** @return True while both cursor guards are attached. */
-bool is_installed() noexcept {
-    return g_installed.load(std::memory_order_acquire);
 }
 
 } // namespace sunrise::client::hooks::cursor

@@ -140,12 +140,6 @@ activity_link_count(const state::activity::SessionBinding& binding) noexcept;
 [[nodiscard]] bool activity_link_view(const state::activity::SessionBinding& binding,
                                       ActivityLinkView& output) noexcept;
 
-/** Checks whether one exact ActivityClient can change its SDK selected-state roster lease. */
-[[nodiscard]] ActivityMissionSeedLeaseStatus
-activity_mission_seed_available(const state::activity::SessionBinding& binding,
-                                std::uint32_t scenarioRow,
-                                std::uint64_t expectedGeneration) noexcept;
-
 /** Reads one exact ActivityClient's connection-scoped SDK selected-state roster lease. */
 [[nodiscard]] ActivityMissionSeedLeaseStatus
 activity_mission_seed_lease(const state::activity::SessionBinding& binding,
@@ -174,10 +168,6 @@ activity_type23_override_available(const state::activity::SessionBinding& bindin
 [[nodiscard]] bool current_activity_link_view(std::int32_t localSliceSet,
                                               CurrentActivityLinkView& output) noexcept;
 
-/** Reads the exact ActivityClient inputs needed by the gameplay common root. */
-[[nodiscard]] bool activity_replication_view(const state::activity::SessionBinding& binding,
-                                             ActivityReplicationView& output) noexcept;
-
 /** Reads the unique ActivityClient whose activity session is the supplied view token. */
 [[nodiscard]] bool activity_replication_view_for_session(std::uint64_t activitySessionId,
                                                          ActivityReplicationView& output) noexcept;
@@ -191,7 +181,10 @@ activity_type23_override_available(const state::activity::SessionBinding& bindin
                                              std::uint64_t expectedGeneration,
                                              std::uint8_t requestedEpoch) noexcept;
 
-/** Queues one msg-30 readback on an exact unique ActivityClient link. */
+/**
+ * Queues one msg-30 readback on an exact unique ActivityClient link.
+ * TODO: no caller until fireteam departure cleanup lands; this and the three below wait on it.
+ */
 [[nodiscard]] ActivityAuthorityQueryStatus
 request_activity_authority_query(const state::activity::SessionBinding& binding,
                                  std::uint64_t expectedGeneration,
@@ -370,10 +363,6 @@ activity_authority_reset_snapshot(const state::activity::SessionBinding& binding
 [[nodiscard]] bool
 cancel_activity_scriptable_override(const state::activity::SessionBinding& binding,
                                     std::uint64_t expectedRevision) noexcept;
-
-/** Cancels a pending raw incident while excluding activity-link publication. */
-[[nodiscard]] bool
-cancel_activity_host_incident(const state::activity::SessionBinding& binding) noexcept;
 
 #if defined(SUNRISE_BAP_FRAME_TEST)
 /**

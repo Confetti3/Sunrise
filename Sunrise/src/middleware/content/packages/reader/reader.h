@@ -11,7 +11,7 @@
 
 namespace sunrise::middleware::content::packages::reader {
 
-/** Block key material borrowed for one read. It is never kept, cached or logged. */
+/** Borrowed block keys must be erased after a read or an explicitly requested export. */
 struct BlockKeys {
     std::array<std::byte, 16> primary{};
     std::array<std::byte, 16> alternate{};
@@ -160,6 +160,8 @@ struct Scratch {
     Path packageDirectory{};
     /** Characters held in packageDirectory. Zero when the directory did not fit. */
     std::size_t packageDirectoryLength{};
+    /** Source mode the locations, headers, tables and blocks were read under. */
+    bool packageInstalledOnly{};
     /** Preserves a successful read if caching its location runs out of memory. */
     PackageLocation packageLocationFallback{};
     /** Rising use counter that sets the block cache's replacement order. */
@@ -196,6 +198,8 @@ struct Scratch {
 struct Source {
     std::wstring_view directory;
     const BlockKeys* keys{};
+    /** Reads installed package files only and ignores every file a mod serves. */
+    bool installedOnly{};
 };
 
 /** Totals from one whole class scan. */
@@ -224,14 +228,14 @@ using ClassEntryVisitor = bool (*)(void* context, const ClassEntry& entry) noexc
  * Reports every installed entry of one tag class.
  * Only the highest patch of each package is scanned, so a tag is reported once.
  * Entry tables are plain file data, so this needs no block keys and runs before any are known.
- * @param directory Installed packages directory.
+ * @param source Installed packages directory and read mode; block keys are not read.
  * @param classId Tag class to report.
  * @param visitor Required non-owning tag consumer.
  * @param context Caller context passed to the visitor.
  * @param result Receives package, entry and match totals.
  * @return True when the walk and every package header and entry table work.
  */
-[[nodiscard]] bool scan_class(std::wstring_view directory,
+[[nodiscard]] bool scan_class(const Source& source,
                               std::uint32_t classId,
                               ClassVisitor visitor,
                               void* context,
@@ -240,14 +244,14 @@ using ClassEntryVisitor = bool (*)(void* context, const ClassEntry& entry) noexc
 /**
  * Reports every installed entry of one tag class with its package family.
  * Only the highest patch of each package is scanned, so a tag is reported once.
- * @param directory Installed packages directory.
+ * @param source Installed packages directory and read mode; block keys are not read.
  * @param classId Tag class to report.
  * @param visitor Required non-owning entry consumer.
  * @param context Caller context passed to the visitor.
  * @param result Receives package, entry, and match totals.
  * @return True when the walk and every visitor call work.
  */
-[[nodiscard]] bool scan_class_entries(std::wstring_view directory,
+[[nodiscard]] bool scan_class_entries(const Source& source,
                                       std::uint32_t classId,
                                       ClassEntryVisitor visitor,
                                       void* context,

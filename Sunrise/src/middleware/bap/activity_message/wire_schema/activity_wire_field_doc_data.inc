@@ -62,7 +62,7 @@ inline constexpr std::array<FieldDocGrant, 742> kFieldDocGrants{{
     {1U, "[0][9][4]", "no reader found", "defs/fields_activity_state.md"},
     {1U, "[0][9][5]", "the origin of a periodic clock", "defs/fields_activity_state.md"},
     {2U, "[0][0]", "no reader found", "defs/fields_activity_state.md"},
-    {2U, "[0][1]", "positive lets the activity's elapsed-time clock run", "defs/fields_activity_state.md"},
+    {2U, "[0][1]", "ms per sim tick; positive lets the activity clock run", "defs/fields_activity_state.md"},
     {3U, "[0]", "4 random bytes from the LCG at `0x7FF7420AB030`. Message 4 must echo it.", "defs/fields_join_and_perf.md"},
     {3U, "[1]", "the soid being joined. Also the send destination and, after accept, `client+16352`.", "defs/fields_join_and_perf.md"},
     {3U, "[2]", "`0x808086BC`, section 2.1.", "defs/fields_join_and_perf.md"},

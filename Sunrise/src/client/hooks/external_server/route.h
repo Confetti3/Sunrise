@@ -25,8 +25,8 @@ namespace sunrise::client::hooks::external_server {
  */
 [[nodiscard]] bool install() noexcept;
 
-/** Detaches the setopt guard. */
-void uninstall() noexcept;
+/** @return True only when the setopt guard has detached and no callback still borrows it. */
+[[nodiscard]] bool uninstall() noexcept;
 
 /** @return True while the setopt guard is attached. */
 [[nodiscard]] bool is_installed() noexcept;

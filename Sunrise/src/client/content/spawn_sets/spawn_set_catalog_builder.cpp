@@ -336,9 +336,8 @@ template <typename Consumer>
                                      std::size_t budget,
                                      bool skipUnreadable,
                                      Consumer consume) noexcept {
-    // The whole window is asked for at once, then parsed one blob at a time exactly as before.
-    // Whether the read-ahead actually held a blob changes nothing here: the reader answers either
-    // way, so the stage reads the same tags in the same order.
+    // Fetch the whole window at once, then parse one blob at a time. The reader answers whether or
+    // not the read-ahead held a blob, so the tag order does not change.
     if (prefetch != nullptr && cursor < tags.size() && reads < budget) {
         const std::size_t window = (std::min)(budget - reads, tags.size() - cursor);
         prefetch(context, tags.subspan(cursor, window));

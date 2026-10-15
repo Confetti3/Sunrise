@@ -455,9 +455,8 @@ static void stage_incident_grants(const message::incident::Incident& incident) n
         state::activity::membership::live_region_session(state::activity::kAbsentSessionId);
     state::activity::destination::DestinationSelection destination{};
     static_cast<void>(state::activity::destination::snapshot(destinationSession, destination));
-    const std::size_t packageLength =
-        (std::min)(static_cast<std::size_t>(destination.packageNameLength),
-                   destination.packageName.size());
+    const std::size_t packageLength = (std::min)(
+        static_cast<std::size_t>(destination.packageNameLength), destination.packageName.size());
     const std::string_view packageName(
         reinterpret_cast<const char*>(destination.packageName.data()), packageLength);
 

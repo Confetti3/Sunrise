@@ -12,8 +12,6 @@ namespace sunrise::state::activity::forced {
 inline constexpr std::uint8_t kMaximumBubble = 63;
 /** The slice-set index is a 10-bit bias-1 wire field, so this is the largest it can hold. */
 inline constexpr std::uint16_t kMaximumSliceSet = 1'022;
-/** The set normal arrivals use. */
-inline constexpr std::uint32_t kDefaultSpawnSetHash = 0x2EA8FB98U;
 /**
  * The hash that names no set, so the Client searches the loaded world itself.
  * A set belongs to the map, not the bubble. Send one the bubble lacks and nothing spawns.
@@ -46,9 +44,6 @@ struct ForcedDestination {
     bool enabled{};
 };
 
-/** The wire field is signed, so an index past this cannot be sent as a selection. */
-inline constexpr std::uint16_t kMaximumActivityIndex = 0x7FFFU;
-
 /**
  * Tests whether a forced destination names enough to replace a client selection.
  * The spawn set is the one optional part. Without it the Client picks its own point.
@@ -72,7 +67,9 @@ inline constexpr std::uint16_t kMaximumActivityIndex = 0x7FFFU;
     return value.packageNameLength <= value.packageName.size()
            && (!value.hasBubble || value.bubble <= kMaximumBubble)
            && (!value.hasSliceSet || value.sliceSet <= kMaximumSliceSet)
-           && (!value.hasActivityIndex || value.activityIndex <= kMaximumActivityIndex);
+           && (!value.hasActivityIndex
+               || value.activityIndex
+                      <= static_cast<std::uint16_t>(destination::kMaximumActivityIndex));
 }
 
 } // namespace sunrise::state::activity::forced

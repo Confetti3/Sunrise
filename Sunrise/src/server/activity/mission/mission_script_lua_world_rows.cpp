@@ -10,21 +10,6 @@
 namespace sunrise::server::activity::mission::lua_vm::detail::world_api {
 namespace {
 
-[[nodiscard]] std::string_view checked_key(lua_State* state) {
-    std::size_t length = 0;
-    const char* const value = luaL_checklstring(state, 2, &length);
-    return {value, length};
-}
-
-void push_u64(lua_State* state, std::uint64_t value) {
-    std::array<char, 32> text{};
-    const auto converted = std::to_chars(text.data(), text.data() + text.size(), value);
-    if (converted.ec != std::errc{}) {
-        luaL_error(state, "world identity conversion failed");
-    }
-    lua_pushlstring(state, text.data(), static_cast<std::size_t>(converted.ptr - text.data()));
-}
-
 void push_i64(lua_State* state, std::int64_t value) {
     std::array<char, 32> text{};
     const auto converted = std::to_chars(text.data(), text.data() + text.size(), value);
@@ -472,7 +457,7 @@ int world_row_index(lua_State* state) {
     if (!resolved_row(state, *handle, row) || row.kind != handle->kind) {
         return luaL_error(state, "generated-world row is stale");
     }
-    const std::string_view key = checked_key(state);
+    const std::string_view key = lua_string_view(state, 2);
     switch (handle->kind) {
     case WorldCollectionKind::squadAnchors:
         return squad_anchor_index(state, *handle, row.squadAnchor, key);
@@ -506,7 +491,7 @@ int trigger_vertex_index(lua_State* state) {
                                                           row)) {
         return luaL_error(state, "trigger vertex is stale");
     }
-    const std::string_view key = checked_key(state);
+    const std::string_view key = lua_string_view(state, 2);
     if (key == "id") {
         push_geometry_id(state, handle->generation, handle->kind, row.row);
     } else if (key == "row") {
@@ -536,7 +521,7 @@ int trigger_triangle_index(lua_State* state) {
                                                             row)) {
         return luaL_error(state, "trigger triangle is stale");
     }
-    const std::string_view key = checked_key(state);
+    const std::string_view key = lua_string_view(state, 2);
     if (key == "id") {
         push_geometry_id(state, handle->generation, handle->kind, row.row);
     } else if (key == "row") {

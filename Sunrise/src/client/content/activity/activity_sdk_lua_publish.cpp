@@ -4,7 +4,6 @@
 #include <array>
 #include <atomic>
 #include <cctype>
-#include <cstdio>
 #include <limits>
 #include <span>
 #include <string>
@@ -25,11 +24,13 @@ constexpr std::wstring_view kLuaSuffix = L"\\lua";
 constexpr std::wstring_view kActivitiesSuffix = L"\\activities";
 constexpr std::wstring_view kMissionsSuffix = L"\\missions";
 constexpr std::wstring_view kSunriseSuffix = L"\\sunrise";
-constexpr std::wstring_view kTemporarySuffix = L".%08lX.%08lX.%08lX.tmp";
+// The mission API schema sits beside activity_sdk.lua.
+constexpr std::wstring_view kMissionApiName = L"\\mission_api.json";
+// Files every estate publishes beside its modules: two indexes, the manifest, the SDK module,
+// the behavior module and the mission API schema.
+constexpr std::size_t kFixedFileCount = 6;
 // Distinct temporary names tried before publication fails.
 constexpr std::size_t kTemporaryAttempts = 16;
-
-volatile LONG g_temporarySequence{};
 
 /** One small handle owner keeps failed publication paths closed. */
 class FileHandle final {
@@ -77,27 +78,11 @@ private:
     return core::path::assign(output, parent) && core::path::append(output, suffix);
 }
 
-/** Forms a process-, thread-, and sequence-scoped sibling name for publication. */
-[[nodiscard]] bool temporary_path(const wchar_t* finalPath, core::path::Buffer& output) noexcept {
-    std::array<wchar_t, 64> suffix{};
-    const DWORD sequence = static_cast<DWORD>(InterlockedIncrement(&g_temporarySequence));
-    const int length = std::swprintf(suffix.data(),
-                                     suffix.size(),
-                                     kTemporarySuffix.data(),
-                                     GetCurrentProcessId(),
-                                     GetCurrentThreadId(),
-                                     sequence);
-    return length > 0 && static_cast<std::size_t>(length) < suffix.size()
-           && core::path::assign(output, finalPath)
-           && core::path::append(output, std::wstring_view(suffix.data(), length));
-}
-
 /** Writes the complete source in DWORD-sized chunks and rejects short writes. */
 [[nodiscard]] bool write_all(HANDLE file, std::string_view source) noexcept {
     while (!source.empty()) {
-        const std::size_t count =
-            (std::min)(source.size(),
-                       static_cast<std::size_t>((std::numeric_limits<DWORD>::max)()));
+        const std::size_t count = (std::min)(
+            source.size(), static_cast<std::size_t>((std::numeric_limits<DWORD>::max)()));
         DWORD transferred = 0;
         if (WriteFile(file, source.data(), static_cast<DWORD>(count), &transferred, nullptr)
                 == FALSE
@@ -114,7 +99,7 @@ private:
     core::path::remove_stale_siblings(finalPath);
     for (std::size_t attempt = 0; attempt < kTemporaryAttempts; ++attempt) {
         core::path::Buffer temporary{};
-        if (!temporary_path(finalPath, temporary)) {
+        if (!core::path::temporary_sibling(finalPath, temporary)) {
             return false;
         }
         const HANDLE raw = CreateFileW(temporary.chars.data(),
@@ -326,7 +311,8 @@ Status publish_bundle(const wchar_t* sdkDirectory, const Bundle& bundle, Result&
     if (sdkDirectory == nullptr || sdkDirectory[0] == L'\0' || bundle.activityIndex.empty()
         || bundle.missionIndex.empty() || bundle.activitySdkModule.empty()
         || bundle.behaviorModule.empty() || bundle.manifestJson.empty()
-        || bundle.activityModules.empty() || bundle.missionModules.empty()) {
+        || bundle.missionApiJson.empty() || bundle.activityModules.empty()
+        || bundle.missionModules.empty()) {
         return Status::invalidInput;
     }
     try {
@@ -348,6 +334,7 @@ Status publish_bundle(const wchar_t* sdkDirectory, const Bundle& bundle, Result&
         if (!publish_named(lua.chars.data(), L"\\manifest.json", bundle.manifestJson, bytes)
             || !publish_named(
                 sunrise.chars.data(), L"\\activity_sdk.lua", bundle.activitySdkModule, bytes)
+            || !publish_named(sunrise.chars.data(), kMissionApiName, bundle.missionApiJson, bytes)
             || !publish_named(
                 sunrise.chars.data(), L"\\behaviors.lua", bundle.behaviorModule, bytes)) {
             return Status::writeFailure;
@@ -363,24 +350,17 @@ Status publish_bundle(const wchar_t* sdkDirectory, const Bundle& bundle, Result&
         }
         const std::size_t sourceFiles =
             bundle.activityModules.size() + bundle.missionModules.size();
-        if (sourceFiles > format::kAbsentIndex - 5U) {
+        if (sourceFiles > format::kAbsentIndex - kFixedFileCount) {
             return Status::writeFailure;
         }
         output.activityCount = static_cast<std::uint32_t>(bundle.activityModules.size());
-        output.fileCount = static_cast<std::uint32_t>(sourceFiles + 5U);
+        output.fileCount = static_cast<std::uint32_t>(sourceFiles + kFixedFileCount);
         output.byteCount = bytes;
         return Status::ready;
     } catch (...) {
         output = {};
         return Status::writeFailure;
     }
-}
-
-Status publish(const wchar_t* sdkDirectory, const Source& source, Result& output) noexcept {
-    output = {};
-    Bundle bundle{};
-    const Status built = build(source, bundle);
-    return built == Status::ready ? publish_bundle(sdkDirectory, bundle, output) : built;
 }
 
 /** @return True when the published Lua modules already match this catalog. */
@@ -433,9 +413,14 @@ bool is_current(const wchar_t* sdkDirectory, const state::activity_sdk::Catalog&
         }
         core::path::Buffer lua{};
         core::path::Buffer manifest{};
+        core::path::Buffer sunrise{};
+        core::path::Buffer missionApi{};
         return child_path(sdkDirectory, kLuaSuffix, lua)
                && child_path(lua.chars.data(), L"\\manifest.json", manifest)
-               && file_equals(manifest.chars.data(), expected.manifestJson);
+               && file_equals(manifest.chars.data(), expected.manifestJson)
+               && child_path(lua.chars.data(), kSunriseSuffix, sunrise)
+               && child_path(sunrise.chars.data(), kMissionApiName, missionApi)
+               && file_equals(missionApi.chars.data(), expected.missionApiJson);
     } catch (...) {
         return false;
     }

@@ -3,12 +3,12 @@
 
 #include "../../encoding/bit_reader.h"
 #include "../../encoding/byte_order.h"
-#include "activity_sense_update_reader.h"
+#include "sense_roster_delta.h"
 #include "sense_update.h"
 
 namespace sunrise::middleware::bap::activity_message::sense_update {
 namespace {
-using namespace decoding;
+namespace bits = middleware::encoding::bits;
 
 /** Field widths of the object header ClientRef, in bits. */
 constexpr std::uint8_t kKeyWidth = 32, kTypeWidth = 7, kIndexWidth = 16;
@@ -45,6 +45,38 @@ constexpr std::uint64_t kPlayerScalarCountMaximum = 4, kPlayerKeyCountMaximum = 
 constexpr std::uint32_t kSpatialMaximumBits = 0x45000000U, kUnitMaximumBits = 0x3F800000U;
 
 enum class NativeStatus : std::uint8_t { complete, unsupported, unsafeCount, malformed };
+
+/** Bit reader with its own budget, so one object cannot consume the whole packet. */
+class Reader final {
+public:
+    Reader(bits::Reader& source, std::size_t budget, std::size_t total) noexcept
+        : source_(source), left_(budget), total_(total) {}
+    [[nodiscard]] bool read(std::uint8_t width, std::uint64_t& value) noexcept {
+        if (width > left_ || !source_.read(width, value)) {
+            return false;
+        }
+        left_ -= width;
+        return true;
+    }
+    [[nodiscard]] bool skip(std::size_t width) noexcept {
+        if (width > left_ || !source_.skip(width)) {
+            return false;
+        }
+        left_ -= width;
+        return true;
+    }
+    [[nodiscard]] std::size_t left() const noexcept {
+        return left_;
+    }
+    [[nodiscard]] std::size_t position() const noexcept {
+        return total_ - source_.remaining_bits();
+    }
+
+private:
+    bits::Reader& source_;
+    std::size_t left_{};
+    std::size_t total_{};
+};
 
 /** @param width Field width in bits. @return Low-bit mask of that width. */
 [[nodiscard]] constexpr std::uint64_t mask(std::uint8_t width) noexcept {
@@ -104,11 +136,20 @@ private:
     DecodedObject* object_{};
 };
 
-/**
- * Reads one optional or required unsigned field and records it.
- * @param optional True when a presence bit precedes the value.
- * @return True when the presence bit and any value were complete.
- */
+/** Required fields are present; optional fields consume one presence bit within the budget. */
+[[nodiscard]] bool present(Reader& reader, bool optional, bool& output) noexcept {
+    output = true;
+    if (!optional) {
+        return true;
+    }
+    std::uint64_t raw = 0;
+    if (!reader.read(1, raw)) {
+        return false;
+    }
+    output = raw != 0;
+    return true;
+}
+/** Records an unsigned value only when its presence bit and selected value fit. */
 [[nodiscard]] bool read_unsigned(Reader& reader,
                                  Values& values,
                                  std::uint32_t schema,
@@ -733,12 +774,14 @@ bool decode_sense_update(std::span<const std::byte> input,
         return false;
     }
     update.tailBits = static_cast<std::uint32_t>(reader.remaining_bits() + 1);
+    // The groups follow the mirrored roster delta, so a set root bit means skip its body first.
     if (root != 0) {
-        Reader rootBody(reader, reader.remaining_bits(), total);
-        if (!consume_root_sense(rootBody)) {
-            finish(update, reader, total, DecodeStatus::malformed, consumed);
-            return false;
+        const std::size_t before = reader.remaining_bits();
+        if (!skip_roster_delta(reader)) {
+            finish(update, reader, total, DecodeStatus::schemaUnavailable, consumed);
+            return true;
         }
+        update.rosterDeltaBits = static_cast<std::uint32_t>(before - reader.remaining_bits());
     }
     bool partial = false;
     for (;;) {

@@ -4,10 +4,10 @@
  * the catch-all for request paths the HTTP executor never sees.
  */
 
+#include <Windows.h>
+
 #include <array>
-#include <atomic>
 #include <cstddef>
-#include <cstdio>
 #include <cstring>
 
 #include "../../../core/logging/log.h"
@@ -21,44 +21,64 @@ namespace {
 using Setopt = int (*)(void*, int, void*) noexcept;
 
 hooking::detour::Handle g_handle{};
-std::atomic<Setopt> g_original{nullptr};
+SRWLOCK g_lock{SRWLOCK_INIT};
+volatile LONG g_activeCalls{};
 
-/** Size of one report line: two URLs. */
-constexpr std::size_t kReportCapacity = 2 * kUrlCapacity;
+/** curl reports a missing easy-setopt implementation with CURLE_FAILED_INIT. */
+constexpr int kFailedInit = 2;
 
-/** @param option Forced curl option id. */
-void report_unpin(int option) noexcept {
-    std::array<char, 96> line{};
-    const int written = std::snprintf(
-        line.data(), line.size(), "ev=external stage=unpin option=%d value=0 result=ok", option);
-    if (written > 0) {
-        core::log::write(core::log::Channel::client,
-                         core::log::Level::debug,
-                         {line.data(), static_cast<std::size_t>(written)});
+#if defined(SUNRISE_SETOPT_TEST)
+volatile LONG g_pauseIngress{};
+volatile LONG g_ingressEntered{};
+volatile LONG g_releaseIngress{1};
+volatile LONG g_pausePublish{};
+volatile LONG g_publishEntered{};
+volatile LONG g_releasePublish{1};
+volatile LONG g_pauseFinally{};
+volatile LONG g_finallyEntered{};
+volatile LONG g_releaseFinally{1};
+/** A failed fixture cannot keep its callback spinning forever. */
+constexpr unsigned kIngressPauseAttempts = 1'000'000'000;
+#endif
+
+#pragma code_seg(push, setopt_guard, ".sropt")
+/**
+ * Count before borrowing; attach publishes the trampoline under the same lock.
+ * @return The trampoline held until egress.
+ */
+[[nodiscard]] __declspec(noinline) Setopt ingress() noexcept {
+#if defined(SUNRISE_SETOPT_TEST)
+    if (InterlockedCompareExchange(&g_pauseIngress, 0, 1) == 1) {
+        (void)InterlockedExchange(&g_ingressEntered, 1);
+        for (unsigned attempt = 0; attempt < kIngressPauseAttempts && g_releaseIngress == 0;
+             ++attempt) {
+            YieldProcessor();
+        }
     }
+#endif
+    (void)InterlockedIncrement(&g_activeCalls);
+    AcquireSRWLockShared(&g_lock);
+    const auto original = reinterpret_cast<Setopt>(g_handle.original);
+    ReleaseSRWLockShared(&g_lock);
+    return original;
 }
 
-/** Reports one URL decision with both forms, so a missed rewrite names its own host. */
-void report_url(std::string_view from, std::string_view to) noexcept {
-    std::array<char, kReportCapacity> line{};
-    const int written = std::snprintf(line.data(),
-                                      line.size(),
-                                      "ev=external stage=setopt_url from=%.*s to=%.*s result=%s",
-                                      static_cast<int>(from.size()),
-                                      from.data(),
-                                      static_cast<int>(to.size()),
-                                      to.data(),
-                                      to.empty() ? "unchanged" : "ok");
-    if (written > 0) {
-        core::log::write(core::log::Channel::client,
-                         core::log::Level::debug,
-                         {line.data(), static_cast<std::size_t>(written)});
-    }
+/** The last decrement stays inside protected code, after every borrowed call has returned. */
+__declspec(noinline) void egress() noexcept {
+    (void)InterlockedDecrement(&g_activeCalls);
+}
+#pragma code_seg(pop, setopt_guard)
+
+/**
+ * Suspended peers may own locks, so this check must not acquire one.
+ * @return True when no counted callback remains.
+ */
+[[nodiscard]] bool idle() noexcept {
+    return InterlockedCompareExchange(&g_activeCalls, 0, 0) == 0;
 }
 
 /**
- * Rewrites the caller's URL into storage that outlives this call on this thread.
- * curl copies the string inside setopt, but only after the replacement returns.
+ * The URL buffer must survive the caller's later trampoline call.
  * @param value Caller-owned null-terminated URL.
  * @return Replacement URL, or the caller's own when it was not rewritten.
  */
@@ -67,25 +87,35 @@ void report_url(std::string_view from, std::string_view to) noexcept {
     const auto* const text = static_cast<const char*>(value);
     const std::string_view original(text, strnlen_s(text, kUrlCapacity));
     const std::size_t size = rewrite_host(original, held);
-    report_url(original, {held.data(), size});
+    core::log::writef(core::log::Channel::client,
+                      core::log::Level::debug,
+                      "ev=external stage=setopt_url from=%.*s to=%.*s result=%s",
+                      static_cast<int>(original.size()),
+                      original.data(),
+                      static_cast<int>(size),
+                      held.data(),
+                      size == 0 ? "unchanged" : "ok");
     return size != 0 ? held.data() : value;
 }
 
 /**
- * Forces the peer-verification options to zero, points URLs at the external server, and passes
- * everything else through.
+ * The borrowed trampoline remains valid through every nested call.
+ * @param original Trampoline borrowed by the current counted call.
  * @param handle Borrowed curl easy handle.
  * @param option curl option id.
  * @param value Caller-supplied option value.
  * @return The original result, or CURLE_FAILED_INIT when there is no trampoline.
  */
-__declspec(noinline) int setopt(void* handle, int option, void* value) noexcept {
-    const Setopt original = g_original.load(std::memory_order_acquire);
+__declspec(noinline) int
+setopt_body(Setopt original, void* handle, int option, void* value) noexcept {
     if (original == nullptr) {
-        return 2; // CURLE_FAILED_INIT
+        return kFailedInit;
     }
     if (option == kSslVerifyPeer || option == kSslVerifyHost) {
-        report_unpin(option);
+        core::log::writef(core::log::Channel::client,
+                          core::log::Level::debug,
+                          "ev=external stage=unpin option=%d value=0 result=ok",
+                          option);
         return original(handle, option, nullptr);
     }
     if (option == kUrl && value != nullptr) {
@@ -94,51 +124,100 @@ __declspec(noinline) int setopt(void* handle, int option, void* value) noexcept 
     return original(handle, option, value);
 }
 
+#pragma code_seg(push, setopt_guard, ".sropt")
+/**
+ * The counted lease covers native callees and unwind through the setter.
+ * @param handle Borrowed curl easy handle.
+ * @param option Curl option id.
+ * @param value Caller-owned option value.
+ * @return The original setter result.
+ */
+__declspec(noinline) int setopt(void* handle, int option, void* value) noexcept {
+    const Setopt original = ingress();
+    int result = kFailedInit;
+    __try {
+        result = setopt_body(original, handle, option, value);
+    } __finally {
+        egress();
+#if defined(SUNRISE_SETOPT_TEST)
+        if (InterlockedCompareExchange(&g_pauseFinally, 0, 1) == 1) {
+            (void)InterlockedExchange(&g_finallyEntered, 1);
+            for (unsigned attempt = 0; attempt < kIngressPauseAttempts && g_releaseFinally == 0;
+                 ++attempt) {
+                YieldProcessor();
+            }
+        }
+#endif
+    }
+    return result;
+}
+#pragma code_seg(pop, setopt_guard)
+
 /** @param reason Key naming the step that failed. @return False, for a direct return. */
 [[nodiscard]] bool fail_install(const char* reason) noexcept {
-    std::array<char, 96> line{};
-    const int written = std::snprintf(
-        line.data(), line.size(), "ev=external stage=install result=fail reason=%s", reason);
-    if (written > 0) {
-        core::log::write(core::log::Channel::client,
-                         core::log::Level::warn,
-                         {line.data(), static_cast<std::size_t>(written)});
-    }
+    core::log::writef(core::log::Channel::client,
+                      core::log::Level::warn,
+                      "ev=external stage=install result=fail reason=%s",
+                      reason);
     return false;
 }
 
 } // namespace
 
-/** Attaches the setopt guard when the external-server switch is on. */
+/** @return False if the enabled guard cannot be attached; unchanged when disabled. */
 bool install() noexcept {
-    if (!enabled() || g_handle.attached) {
+    if (!enabled()) {
+        return true;
+    }
+    AcquireSRWLockExclusive(&g_lock);
+    if (g_handle.attached) {
+        ReleaseSRWLockExclusive(&g_lock);
         return true;
     }
     std::byte* const target = scan_main_image_unique(kSetoptSignature, "curl_easy_setopt");
     if (target == nullptr) {
+        ReleaseSRWLockExclusive(&g_lock);
         return fail_install("target");
     }
     const hooking::detour::Spec spec{target, reinterpret_cast<void*>(&setopt)};
     if (!hooking::detour::install(spec, g_handle)) {
+        ReleaseSRWLockExclusive(&g_lock);
         return fail_install("attach");
     }
-    g_original.store(reinterpret_cast<Setopt>(g_handle.original), std::memory_order_release);
+#if defined(SUNRISE_SETOPT_TEST)
+    if (InterlockedCompareExchange(&g_pausePublish, 0, 1) == 1) {
+        (void)InterlockedExchange(&g_publishEntered, 1);
+        for (unsigned attempt = 0; attempt < kIngressPauseAttempts && g_releasePublish == 0;
+             ++attempt) {
+            YieldProcessor();
+        }
+    }
+#endif
+    ReleaseSRWLockExclusive(&g_lock);
     core::log::write(
         core::log::Channel::client, core::log::Level::info, "ev=external stage=install result=ok");
     return true;
 }
 
-/** Detaches the setopt guard and drops its trampoline. */
-void uninstall() noexcept {
-    if (g_handle.attached) {
-        (void)hooking::detour::uninstall(g_handle);
-    }
-    g_original.store(nullptr, std::memory_order_release);
+/** @return True only after the guard and every borrowed trampoline call are gone. */
+bool uninstall() noexcept {
+    AcquireSRWLockExclusive(&g_lock);
+    // .sropt holds ingress, egress, setopt and its finally block.
+    const std::array spans{hooking::detour::section_span(".sropt")};
+    const bool removed = idle()
+                         && (!g_handle.attached
+                             || hooking::detour::uninstall(g_handle, {}, spans, &idle)
+                                    == hooking::detour::UninstallResult::removed);
+    ReleaseSRWLockExclusive(&g_lock);
+    return removed;
 }
 
 /** @return True while the setopt guard is attached. */
 bool is_installed() noexcept {
-    return g_handle.attached;
+    AcquireSRWLockShared(&g_lock);
+    const bool attached = g_handle.attached;
+    ReleaseSRWLockShared(&g_lock);
+    return attached;
 }
 
 } // namespace sunrise::client::hooks::external_server

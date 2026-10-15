@@ -233,7 +233,7 @@ bool resolve(Targets& output) noexcept {
     return true;
 }
 
-/** @param targets Retained system modules released after both hooks detach. */
+/** @param targets Retained system modules released after the hooks detach. */
 void release(Targets& targets) noexcept {
     if (targets.d3d11Module != nullptr) {
         FreeLibrary(targets.d3d11Module);

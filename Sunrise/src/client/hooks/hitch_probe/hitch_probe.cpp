@@ -2,7 +2,7 @@
  * Read-only dump of the hitch watchdog's job snapshot.
  * The watchdog line names one stalled fiber-phase job and nothing else. The snapshot it is
  * printed from carries every in-flight job record, with the blocked thread id. This probe logs
- * them all at the first hitch, which names the job the in-world freeze blocks on.
+ * them all, rate-limited, which names the job the in-world freeze blocks on.
  */
 
 #include "hitch_probe.h"
@@ -18,6 +18,7 @@
 #include <string_view>
 
 #include "../../../core/logging/log.h"
+#include "../../diagnostics/module_range.h"
 #include "../../hooking/detour.h"
 #include "../../memory/current_process_memory.h"
 #include "../../patterns/image_scan.h"
@@ -33,7 +34,7 @@ using patterns::signature_length;
 
 /** The snapshot fill the watchdog report builds its line from. This is the detour target. */
 constexpr std::string_view kFillText =
-    "89 54 24 10 48 89 4C 24 08 48 83 EC 78 33 C0 85 C0 75 FA 48 83 BC 24 80 00 00 00 00 0F 84 "
+    "89 54 24 10 48 89 4C 24 08 48 83 EC 78 33 C0 85 C0 75 ? 48 83 BC 24 80 00 00 00 00 0F 84 "
     "? ? ? ? 48 8B 8C 24 80 00 00 00 E8";
 /** Compiled form of the pattern above; the scan requires one match. */
 constexpr auto kFill = signature<signature_length(kFillText)>(kFillText);
@@ -153,50 +154,28 @@ std::atomic<unsigned> g_reports{0};
     }
 }
 
-/** One loaded image's address range. */
-struct ModuleRange {
-    std::uintptr_t base{};
-    std::uintptr_t size{};
-};
-
-ModuleRange g_gameRange{};
-ModuleRange g_ownRange{};
-
-/** @param module One loaded module. @return Its image range, from its own PE header. */
-[[nodiscard]] ModuleRange module_range(HMODULE module) noexcept {
-    if (module == nullptr) {
-        return {};
-    }
-    const auto* header = static_cast<const std::byte*>(static_cast<const void*>(module));
-    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(header);
-    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(header + dos->e_lfanew);
-    return {reinterpret_cast<std::uintptr_t>(module), nt->OptionalHeader.SizeOfImage};
-}
+diagnostics::ModuleRange g_gameRange{};
+diagnostics::ModuleRange g_ownRange{};
 
 /** Resolves the game image range and this DLL's own range once. */
 void resolve_module_ranges() noexcept {
-    g_gameRange = module_range(GetModuleHandleW(nullptr));
+    (void)diagnostics::module_range(GetModuleHandleW(nullptr), g_gameRange);
     HMODULE own = nullptr;
     GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS
                            | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
                        reinterpret_cast<LPCWSTR>(&resolve_module_ranges),
                        &own);
-    g_ownRange = module_range(own);
-}
-
-/** @return True when the value lies inside the given image. */
-[[nodiscard]] bool inside(const ModuleRange& range, std::uint64_t value) noexcept {
-    return range.base != 0 && value >= range.base && value < range.base + range.size;
+    (void)diagnostics::module_range(own, g_ownRange);
 }
 
 /** Formats one code address as a module-relative token, or raw hex outside both images. */
 void format_address(std::uint64_t value, char* out, std::size_t size) noexcept {
-    if (inside(g_gameRange, value)) {
+    if (diagnostics::contains(g_gameRange, value)) {
         std::snprintf(
             out, size, "exe+0x%llX", static_cast<unsigned long long>(value - g_gameRange.base));
         return;
     }
-    if (inside(g_ownRange, value)) {
+    if (diagnostics::contains(g_ownRange, value)) {
         std::snprintf(
             out, size, "own+0x%llX", static_cast<unsigned long long>(value - g_ownRange.base));
         return;
@@ -277,7 +256,8 @@ void report_stack(std::uint32_t tid) noexcept {
     for (std::size_t index = 0; index * 8 + 8 <= stackBytes && frames < kFrameLimit; ++index) {
         std::uint64_t value = 0;
         std::memcpy(&value, stack.data() + index * 8, sizeof value);
-        if (!inside(g_gameRange, value) && !inside(g_ownRange, value)) {
+        if (!diagnostics::contains(g_gameRange, value)
+            && !diagnostics::contains(g_ownRange, value)) {
             continue;
         }
         if (onLine == 0) {

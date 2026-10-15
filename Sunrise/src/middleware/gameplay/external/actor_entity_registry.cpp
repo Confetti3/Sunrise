@@ -71,8 +71,7 @@ void bind_catalog(ActorEntityRegistry& registry, const ActorEntityCatalog& catal
 ActorEntityApplyResult apply_actor_entity_record(ActorEntityRegistry& registry,
                                                  const ActorEntityCatalog& catalog,
                                                  const EntityRecord& record) noexcept {
-    if (catalog.classes.empty() || record.token.slot > kMaximumEntitySlot
-        || record.token.incarnation > kMaximumEntityIncarnation) {
+    if (catalog.classes.empty() || !valid_token(record.token)) {
         return ActorEntityApplyResult::invalid;
     }
     const bool catalogChanged = registry.catalog != catalog.owner
@@ -148,36 +147,6 @@ void reset_actor_entity_registry(ActorEntityRegistry& registry) noexcept {
     registry.classData = nullptr;
     registry.classCount = 0;
     registry.slots.fill({});
-}
-
-/**
- * Copies current entity tokens for one SDK actor class into caller-owned storage.
- * @param registry Slot table to scan.
- * @param actorClassIndex Class the caller wants.
- * @param output Caller storage.
- * @param count Receives how many tokens were written, or zero when they did not fit.
- * @return True when the class is known and every live token fit.
- */
-bool actor_entity_targets(const ActorEntityRegistry& registry,
-                          std::uint32_t actorClassIndex,
-                          std::span<EntityToken> output,
-                          std::size_t& count) noexcept {
-    count = 0;
-    if (registry.classData == nullptr || actorClassIndex >= registry.classCount) {
-        return false;
-    }
-    for (std::size_t slotIndex = 0; slotIndex < registry.slots.size(); ++slotIndex) {
-        const ActorEntitySlot& slot = registry.slots[slotIndex];
-        if (!slot.occupied || slot.actorClassIndex != actorClassIndex) {
-            continue;
-        }
-        if (count == output.size()) {
-            count = 0;
-            return false;
-        }
-        output[count++] = EntityToken{static_cast<std::uint16_t>(slotIndex), slot.incarnation};
-    }
-    return true;
 }
 
 } // namespace sunrise::middleware::gameplay::external

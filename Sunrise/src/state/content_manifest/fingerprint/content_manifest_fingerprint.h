@@ -76,6 +76,17 @@ private:
                            Fingerprint& output) noexcept;
 
 /**
+ * Builds the client-visible identity of the installed catalog plus files added over it.
+ * @param buildFingerprint Installed catalog identity.
+ * @param overlayFingerprint Identity of the added rows and their files.
+ * @param output Cleared SHA-256 result.
+ * @return True when both identities are hashed.
+ */
+[[nodiscard]] bool overlay(const Fingerprint& buildFingerprint,
+                           const Fingerprint& overlayFingerprint,
+                           Fingerprint& output) noexcept;
+
+/**
  * Formats an application-defined UUID from a public row fingerprint.
  * @param buildFingerprint SHA-256 identity for the complete row set.
  * @param output Cleared lowercase canonical UUID text.

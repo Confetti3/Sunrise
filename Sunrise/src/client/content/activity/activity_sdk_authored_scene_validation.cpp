@@ -79,6 +79,12 @@ constexpr std::size_t kHashCombineConstant = 0x9E3779B9U;
                 && schema.authSchema == format::kTaskAuthSchema) {
                 projectedOwners[slot.objectIndex] = true;
             }
+            if (slot.slotType == format::kPerformanceSlotType && schema.exact
+                && schema.componentClass == format::kPerformanceComponentClass
+                && schema.senseSchema == format::kAbsentIndex
+                && schema.authSchema == format::kPerformanceAuthSchema) {
+                projectedOwners[slot.objectIndex] = true;
+            }
         }
         for (const squad::DescriptorFact& descriptor : facts.descriptors) {
             std::string expected{};
@@ -243,8 +249,9 @@ bool validate(const topology::Snapshot& topology,
         Text expectedId{};
         if (descriptor == nullptr || resource->resourceTag != row.resourceTag || row.graphTag == 0
             || row.graphTag == format::kAbsentIndex || row.key == 0
-            || row.key == format::kAbsentIndex || row.flags != format::kAuthoredSceneEventKeyExact
-            || row.reserved != 0
+            || row.key == format::kAbsentIndex
+            || (row.flags & format::kAuthoredSceneEventKeyExact) == 0
+            || (row.flags & ~format::kAuthoredSceneEventKeyFlagMask) != 0 || row.reserved != 0
             || !event_key_id(topology, *descriptor, row.graphTag, row.gateOffset, expectedId)
             || expectedId.value != row.id.value || expectedId.length != row.id.length
             || (index != 0

@@ -58,6 +58,11 @@ struct EntityToken {
     std::uint8_t incarnation{};
 };
 
+/** @return True when a token fits its 17-bit wire identity. */
+[[nodiscard]] inline bool valid_token(const EntityToken& token) noexcept {
+    return token.slot <= kMaximumEntitySlot && token.incarnation <= kMaximumEntityIncarnation;
+}
+
 /** Fixed callback-owned semantic state for one type payload. */
 struct TypePayload {
     std::array<std::byte, kTypePayloadStateCapacity> state{};

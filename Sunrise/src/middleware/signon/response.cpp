@@ -70,14 +70,14 @@ bool encode_success(const state::SignOnState& state,
     Writer success(successBuffer);
     /** SignOn field 1 is a fixed zero-filled reserved value. */
     constexpr std::array<std::byte, kReservedSize> reserved{};
-    const bool successEncoded = success.bytes(kReservedField, reserved)
-                                && success.bytes(kEncryptionKeyField, state.encryptionKey)
-                                && success.bytes(kAuthenticationKeyField, state.authenticationKey)
-                                && success.bytes(kSessionTokenField, state.sessionToken)
-                                && success.varint(kExpiryField, expirySeconds)
-                                && success.varint(kRelayAddressField, state.relayAddress)
-                                && success.varint(kRelayPortField, state.relayPort)
-                                && extended::append(success);
+    const bool successEncoded =
+        success.write_length_delimited(kReservedField, reserved)
+        && success.write_length_delimited(kEncryptionKeyField, state.encryptionKey)
+        && success.write_length_delimited(kAuthenticationKeyField, state.authenticationKey)
+        && success.write_length_delimited(kSessionTokenField, state.sessionToken)
+        && success.write_varint(kExpiryField, expirySeconds)
+        && success.write_varint(kRelayAddressField, state.relayAddress)
+        && success.write_varint(kRelayPortField, state.relayPort) && extended::append(success);
     if (!successEncoded) {
         SecureZeroMemory(successBuffer.data(), successBuffer.size());
         return false;
@@ -92,9 +92,10 @@ bool encode_success(const state::SignOnState& state,
         config::build(state.bootstrapToken, configBlob);
     }
     const bool commonInfoEncoded =
-        commonInfo.varint(kCommonInfoIdField, kCommonId)
-        && commonInfo.varint(kCommonInfoSiloField, kSiloId)
-        && (!blobReady || commonInfo.bytes(kCommonInfoConfigBlobField, configBlob));
+        commonInfo.write_varint(kCommonInfoIdField, kCommonId)
+        && commonInfo.write_varint(kCommonInfoSiloField, kSiloId)
+        && (!blobReady
+            || commonInfo.write_length_delimited(kCommonInfoConfigBlobField, configBlob));
 
     std::array<std::byte, ownership::kBufferSize> ownedBuffer{};
     std::size_t ownedSize = 0;
@@ -102,17 +103,21 @@ bool encode_success(const state::SignOnState& state,
 
     Writer response(output);
     const bool responseEncoded =
-        commonInfoEncoded && ownedEncoded && response.varint(kResponseErrorField, kNoError)
-        && response.bytes(kResponseSuccessField, std::span(successBuffer).first(success.size()))
-        && response.bytes(kCommonInfoField, std::span(commonInfoBuffer).first(commonInfo.size()))
-        && response.varint(kSiloIdField, kSiloId)
-        && response.bytes(kContentBuildVersionField, text_bytes(kContentBuildVersion))
-        && response.varint(kCapabilityFlagsField, kCapabilityFlags)
-        && response.bytes(kOwnedEntitlementsField, std::span(ownedBuffer).first(ownedSize))
-        && response.varint(kServerTimeField, serverTimeSeconds)
-        && response.bytes(kEnvironmentField, text_bytes(kEnvironment))
+        commonInfoEncoded && ownedEncoded && response.write_varint(kResponseErrorField, kNoError)
+        && response.write_length_delimited(kResponseSuccessField,
+                                           std::span(successBuffer).first(success.size()))
+        && response.write_length_delimited(kCommonInfoField,
+                                           std::span(commonInfoBuffer).first(commonInfo.size()))
+        && response.write_varint(kSiloIdField, kSiloId)
+        && response.write_length_delimited(kContentBuildVersionField,
+                                           text_bytes(kContentBuildVersion))
+        && response.write_varint(kCapabilityFlagsField, kCapabilityFlags)
+        && response.write_length_delimited(kOwnedEntitlementsField,
+                                           std::span(ownedBuffer).first(ownedSize))
+        && response.write_varint(kServerTimeField, serverTimeSeconds)
+        && response.write_length_delimited(kEnvironmentField, text_bytes(kEnvironment))
         // The client saves field 14 as its own external address, so it is never the relay address.
-        && response.varint(kExternalAddressField, observedClientAddress);
+        && response.write_varint(kExternalAddressField, observedClientAddress);
     SecureZeroMemory(successBuffer.data(), successBuffer.size());
     SecureZeroMemory(commonInfoBuffer.data(), commonInfoBuffer.size());
     if (!responseEncoded) {

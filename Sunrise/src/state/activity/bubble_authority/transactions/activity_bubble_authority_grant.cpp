@@ -25,12 +25,11 @@ bool select_grant(std::uint64_t sessionId,
         const AuthorityState& authority = state.sessions[target].bubbleAuthority;
         const std::uint16_t previous = authority.grantTokens[bubble];
         if (previous == 0 || (enteringBubble && !authority.held[bubble])) {
-            // A bubble handed back and re-entered must be granted a token the client's mirror
-            // has not already seen, so the next one follows the highest ever issued.
+            // A renewed grant must differ from the client's retained token and skip zero.
             const std::uint16_t issued = authority.issuedTokens[bubble];
             grant.bubble = bubble;
             grant.token = issued < kMaximumGrantToken ? static_cast<std::uint16_t>(issued + 1)
-                                                      : kMaximumGrantToken;
+                                                      : kInitialGrantToken;
             owed = true;
         }
     }

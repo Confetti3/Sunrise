@@ -7,7 +7,7 @@
 namespace sunrise::core::settings::parser {
 
 /** @param input Complete JSON text, borrowed and never changed. */
-Parser::Parser(std::string_view input) noexcept : input_(input) {}
+Parser::Parser(std::string_view input) noexcept : json::Reader(input) {}
 
 /** Reads the version without interpreting settings from an older schema. */
 bool Parser::parse_version(std::uint32_t& output) noexcept {
@@ -122,6 +122,7 @@ bool Parser::core(Settings& output) noexcept {
     }
     bool hasLogging = false;
     bool hasActivitySdkGeneration = false;
+    bool hasStudioAttach = false;
     for (;;) {
         std::string_view key;
         if (!string(key) || !consume(':')) {
@@ -132,6 +133,11 @@ bool Parser::core(Settings& output) noexcept {
                 return false;
             }
             hasLogging = true;
+        } else if (key == "studio_attach") {
+            if (hasStudioAttach || !boolean(output.studioAttach)) {
+                return false;
+            }
+            hasStudioAttach = true;
         } else if (key == "activity_sdk_generation") {
             if (hasActivitySdkGeneration
                 || !activity_sdk_generation_settings(output.activitySdkGeneration)) {
@@ -252,6 +258,46 @@ bool Parser::levels(log::Settings& output) noexcept {
             return false;
         }
     }
+}
+
+/** Converts a JSON level token to the logging enum. */
+bool Parser::level_value(std::string_view name, log::Level& output) noexcept {
+    if (name == "error") {
+        output = log::Level::error;
+    } else if (name == "warn") {
+        output = log::Level::warn;
+    } else if (name == "info") {
+        output = log::Level::info;
+    } else if (name == "debug") {
+        output = log::Level::debug;
+    } else if (name == "trace") {
+        output = log::Level::trace;
+    } else if (name == "off") {
+        output = log::Level::off;
+    } else {
+        return false;
+    }
+    return true;
+}
+
+/** Converts a JSON channel token to its settings-array index. */
+std::size_t Parser::channel_index(std::string_view name) noexcept {
+    if (name == "core") {
+        return static_cast<std::size_t>(log::Channel::core);
+    }
+    if (name == "client") {
+        return static_cast<std::size_t>(log::Channel::client);
+    }
+    if (name == "state") {
+        return static_cast<std::size_t>(log::Channel::state);
+    }
+    if (name == "server") {
+        return static_cast<std::size_t>(log::Channel::server);
+    }
+    if (name == "middleware") {
+        return static_cast<std::size_t>(log::Channel::middleware);
+    }
+    return static_cast<std::size_t>(log::Channel::count);
 }
 
 } // namespace sunrise::core::settings::parser

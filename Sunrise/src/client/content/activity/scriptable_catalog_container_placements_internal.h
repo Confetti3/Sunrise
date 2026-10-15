@@ -131,7 +131,6 @@ struct BuildContext final {
     std::vector<std::byte> listBytes{};
     std::vector<std::byte> classBytes{};
     std::vector<std::byte> configBytes{};
-    std::vector<std::byte> resourceBytes{};
     bool failed{};
 };
 

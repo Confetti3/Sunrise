@@ -280,6 +280,9 @@ private:
 
 using Snapshot = std::shared_ptr<const Catalog>;
 
+/** Equal validated content may retain borrowed rows even when its file mapping was reopened. */
+[[nodiscard]] bool same_identity(const Snapshot& left, const Snapshot& right) noexcept;
+
 /** Selection state is captured while the caller owns its ActivityClient lock. */
 struct Selection final {
     state::activity::SessionBinding binding{};

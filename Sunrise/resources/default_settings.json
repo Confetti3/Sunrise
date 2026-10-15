@@ -14,7 +14,8 @@
     },
     "activity_sdk_generation": {
       "lua_declarations": true
-    }
+    },
+    "studio_attach": false
   },
   "steam": {
     "language": "english",
@@ -35,7 +36,9 @@
     },
     "custom_bootflow_textures": true,
     "socket_menu_routing": false,
-    "reveal_lore_books": true
+    "reveal_lore_books": true,
+    "cheats": false,
+    "dump_package_keys": false
   },
   "server": {
     "bap_port": 30974,

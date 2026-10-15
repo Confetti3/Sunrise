@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <charconv>
 #include <cstdint>
 #include <span>
 #include <string_view>
@@ -79,6 +80,16 @@ struct WorldCoverageHandle final {
     std::uint32_t localRow{};
 };
 
+/** Pushes one 64-bit world value as decimal text; a Lua integer cannot hold every one. */
+inline void push_u64(lua_State* state, std::uint64_t value) {
+    std::array<char, 32> text{};
+    const auto result = std::to_chars(text.data(), text.data() + text.size(), value);
+    if (result.ec != std::errc{}) {
+        luaL_error(state, "world identity conversion failed");
+    }
+    lua_pushlstring(state, text.data(), static_cast<std::size_t>(result.ptr - text.data()));
+}
+
 [[nodiscard]] bool current(const Impl& owner, const WorldGenerationIdentity& generation) noexcept;
 void push_vector(lua_State* state, std::span<const float> value);
 void push_world_id(lua_State* state,
@@ -91,7 +102,6 @@ void push_geometry_collection(lua_State* state,
                               std::uint32_t triggerRow);
 void push_coverage_collection(lua_State* state, const WorldGenerationIdentity& generation);
 void push_optional_row(lua_State* state, std::uint32_t value);
-void push_optional_name(lua_State* state, std::string_view value);
 void push_name_field(lua_State* state, std::string_view key, const WorldNameDefinition& value);
 [[nodiscard]] bool
 resolved_row(lua_State* state, const WorldRowHandle& handle, WorldRowDefinition& output);
@@ -113,8 +123,7 @@ void push_field(lua_State* state, const WorldFieldDefinition& value);
 void register_metatables(lua_State* state);
 /** Pushes one recognized ActivityView world member and returns whether the key was owned. */
 [[nodiscard]] bool push_activity_member(lua_State* state, std::string_view key);
-/** Pushes one recognized SquadView world member and returns whether the key was owned. */
-[[nodiscard]] bool
-push_squad_member(lua_State* state, const SquadDefinition& squad, std::string_view key);
+/** Pushes a squad's anchor collection, or nil when the generated world is stale. */
+void push_squad_anchors(lua_State* state, const SquadDefinition& squad);
 
 } // namespace sunrise::server::activity::mission::lua_vm::detail::world_api

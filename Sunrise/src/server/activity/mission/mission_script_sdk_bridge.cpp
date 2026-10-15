@@ -558,18 +558,6 @@ inline constexpr std::size_t kPerformanceStateCapacity = 256;
     return true;
 }
 
-/** Compares every value-owned field captured for one generation-bound Slot handle. */
-[[nodiscard]] bool same_slot_definition(const lua_vm::SlotDefinition& left,
-                                        const lua_vm::SlotDefinition& right) noexcept {
-    return left.id == right.id && left.name == right.name && left.objectId == right.objectId
-           && left.senseSchemaId == right.senseSchemaId && left.authSchemaId == right.authSchemaId
-           && left.nativeRow == right.nativeRow && left.localRow == right.localRow
-           && left.objectTag == right.objectTag && left.registryKey == right.registryKey
-           && left.slotIndex == right.slotIndex && left.slotType == right.slotType
-           && left.componentClass == right.componentClass && left.senseSchema == right.senseSchema
-           && left.authSchema == right.authSchema && left.flags == right.flags;
-}
-
 [[nodiscard]] bool scene_slot(const sdk::Catalog& catalog, const format::Slot& slot) noexcept {
     return slot.slotType == format::kAuthoredSceneSlotType
            && slot.componentClass == format::kAuthoredSceneComponentClass
@@ -742,7 +730,7 @@ template <typename Select>
     return valid_view(view) ? slot_index::count(*view) : 0;
 }
 
-/** @return Sensor count of the bound task, or 0 when nothing is bound. */
+/** @return Task target rows in the bound scenario, or 0 without a valid view. */
 [[nodiscard]] std::size_t task_sensor_count(const void* context) noexcept {
     const sdk::BoundView* const view = context_view(context);
     if (!valid_view(view)) {
@@ -756,7 +744,7 @@ template <typename Select>
                                                   }));
 }
 
-/** @return Element count of the bound directive, or 0 when nothing is bound. */
+/** @return Directive element rows in the bound scenario, or 0 without a valid view. */
 [[nodiscard]] std::size_t directive_element_count(const void* context) noexcept {
     const sdk::BoundView* const view = context_view(context);
     if (!valid_view(view)) {

@@ -12,6 +12,10 @@
 #define DETOURS_INTERNAL
 #include "detours.h"
 
+#if !defined(SUNRISE_DETOURS_ALLOCATOR_PROOF_LEGACY)
+#include "../../src/client/hooking/detour/transaction/detour_transaction_storage.h"
+#endif
+
 #if DETOURS_VERSION != 0x4c0c1   // 0xMAJORcMINORcPATCH
 #error detours.h version mismatch
 #endif
@@ -1605,6 +1609,18 @@ struct DetourThread
 {
     DetourThread *      pNext;
     HANDLE              hThread;
+#if !defined(SUNRISE_DETOURS_ALLOCATOR_PROOF_LEGACY)
+    static void* operator new(size_t size) noexcept
+    {
+        return sunrise::client::hooking::detour::storage::allocate(
+            sunrise::client::hooking::detour::storage::Kind::thread, size);
+    }
+    static void operator delete(void* pointer) noexcept
+    {
+        (void)sunrise::client::hooking::detour::storage::release(
+            sunrise::client::hooking::detour::storage::Kind::thread, pointer);
+    }
+#endif
 };
 
 struct DetourOperation
@@ -1615,7 +1631,26 @@ struct DetourOperation
     PBYTE               pbTarget;
     PDETOUR_TRAMPOLINE  pTrampoline;
     ULONG               dwPerm;
+#if !defined(SUNRISE_DETOURS_ALLOCATOR_PROOF_LEGACY)
+    static void* operator new(size_t size) noexcept
+    {
+        return sunrise::client::hooking::detour::storage::allocate(
+            sunrise::client::hooking::detour::storage::Kind::operation, size);
+    }
+    static void operator delete(void* pointer) noexcept
+    {
+        (void)sunrise::client::hooking::detour::storage::release(
+            sunrise::client::hooking::detour::storage::Kind::operation, pointer);
+    }
+#endif
 };
+
+#if !defined(SUNRISE_DETOURS_ALLOCATOR_PROOF_LEGACY)
+static_assert(sizeof(DetourThread) <= sunrise::client::hooking::detour::storage::kThreadBytes);
+static_assert(sizeof(DetourOperation) <= sunrise::client::hooking::detour::storage::kOperationBytes);
+static_assert(alignof(DetourThread) <= sunrise::client::hooking::detour::storage::kAlignment);
+static_assert(alignof(DetourOperation) <= sunrise::client::hooking::detour::storage::kAlignment);
+#endif
 
 static BOOL                 s_fIgnoreTooSmall       = FALSE;
 static BOOL                 s_fRetainRegions        = FALSE;

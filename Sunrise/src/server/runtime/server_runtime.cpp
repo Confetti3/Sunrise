@@ -6,21 +6,62 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <mutex>
 
 #include "../../client/network/consumer.h"
 #include "../../core/logging/log.h"
+#include "../../core/threading/srw_lock.h"
 #include "../activity/host_runtime.h"
 #include "../activity/mission/mission_script_runtime.h"
 #include "../bap/runtime.h"
 #include "../gameplay/gameplay_runtime.h"
 #include "../http/server_http.h"
+#include "../studio/studio_command_link.h"
 #include "../transport/bap_listener.h"
 #include "../ui/runtime/server_ui_module_runtime.h"
 
 namespace sunrise::server {
+namespace {
+
+// The server clock must answer loopback sends independently of the game frame.
+constexpr DWORD kServerTickMilliseconds = 10;
+core::threading::SrwLock g_lifecycleLock;
+HANDLE g_serviceThread{};
+HANDLE g_serviceStop{};
+bool g_serverInitialized{};
+/** Set after a failed start is logged, so a retry each frame does not log again. */
+bool g_serviceStartFailed{};
+
+/** The worker never takes the lifecycle lock, so shutdown can join it while holding that lock. */
+DWORD WINAPI service_thread(LPVOID) noexcept {
+    while (WaitForSingleObject(g_serviceStop, kServerTickMilliseconds) == WAIT_TIMEOUT) {
+        service(GetTickCount64());
+    }
+    return 0;
+}
+
+/** The caller holds the lifecycle lock until every worker-owned service slice has ended. */
+void stop_service() noexcept {
+    if (g_serviceThread != nullptr) {
+        SetEvent(g_serviceStop);
+        WaitForSingleObject(g_serviceThread, INFINITE);
+        CloseHandle(g_serviceThread);
+        g_serviceThread = nullptr;
+    }
+    if (g_serviceStop != nullptr) {
+        CloseHandle(g_serviceStop);
+        g_serviceStop = nullptr;
+    }
+}
+
+} // namespace
 
 /** Registers Server consumers with the Client networking boundary. */
 bool initialize() noexcept {
+    const std::lock_guard lock(g_lifecycleLock);
+    if (g_serverInitialized) {
+        return true;
+    }
     activity::host::reset();
     activity::mission::initialize();
     if (!client::network::register_http_consumer(&http::consume)) {
@@ -41,6 +82,7 @@ bool initialize() noexcept {
                              "ev=gameplay stage=init result=fail");
         }
         if (ui::runtime::initialize()) {
+            g_serverInitialized = true;
             return true;
         }
         gameplay::shutdown();
@@ -51,6 +93,32 @@ bool initialize() noexcept {
     client::network::unregister_http_consumer(&http::consume);
     activity::mission::shutdown();
     return false;
+}
+
+/** The runtime owns both handles; a failed start leaves the next activated frame able to retry. */
+void start_service() noexcept {
+    const std::lock_guard lock(g_lifecycleLock);
+    if (!g_serverInitialized || g_serviceThread != nullptr) {
+        return;
+    }
+    g_serviceStop = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (g_serviceStop != nullptr) {
+        g_serviceThread = CreateThread(nullptr, 0, &service_thread, nullptr, 0, nullptr);
+    }
+    if (g_serviceThread == nullptr) {
+        stop_service();
+        if (!g_serviceStartFailed) {
+            core::log::write(core::log::Channel::server,
+                             core::log::Level::error,
+                             "ev=core stage=pump result=server_thread_fail");
+        }
+        g_serviceStartFailed = true;
+        return;
+    }
+    g_serviceStartFailed = false;
+    core::log::write(core::log::Channel::server,
+                     core::log::Level::info,
+                     "ev=core stage=pump result=server_thread");
 }
 
 namespace {
@@ -140,7 +208,11 @@ void service(std::uint64_t now) noexcept {
     std::int64_t slice = 0;
     slice += timed_stage(Stage::transport, "transport", [now] { transport::service(now); });
     slice += timed_stage(Stage::host, "host", [now] { activity::host::service(now); });
-    slice += timed_stage(Stage::mission, "mission", [now] { activity::mission::service(now); });
+    slice += timed_stage(Stage::mission, "mission", [now] {
+        // Cancel disconnected requests before a mission can publish its reload.
+        studio::service(now);
+        activity::mission::service(now);
+    });
     slice += timed_stage(Stage::gameplay, "gameplay", [now] { gameplay::service(now); });
     ++g_window.slices;
     g_window.overTick += slice > kTickMicroseconds ? 1U : 0U;
@@ -150,14 +222,20 @@ void service(std::uint64_t now) noexcept {
 
 /** Unregisters Server consumers in reverse registration order. */
 void shutdown() noexcept {
+    const std::lock_guard lock(g_lifecycleLock);
+    g_serverInitialized = false;
+    g_serviceStartFailed = false;
+    stop_service();
     ui::runtime::shutdown();
     gameplay::shutdown();
     transport::shutdown();
     client::network::unregister_bap_consumer(&bap::consume);
     client::network::unregister_http_consumer(&http::consume);
     bap::shutdown();
+    studio::shutdown();
     activity::mission::shutdown();
     activity::host::reset();
+    g_window = {};
 }
 
 } // namespace sunrise::server

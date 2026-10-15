@@ -1,6 +1,6 @@
 #include "protobuf_wire.h"
 
-#include <climits>
+#include "../encoding/byte_order.h"
 
 namespace sunrise::middleware::protobuf {
 namespace {
@@ -23,9 +23,6 @@ constexpr std::uint8_t kVarintContinuationMask = 0x80;
 constexpr std::size_t kMaximumVarintSize = 10;
 /** The 10th uint64 varint byte may carry only bit 63. */
 constexpr std::uint8_t kMaximumFinalVarintByte = 0x01;
-/** Protobuf wire bytes hold 8 bits. */
-constexpr unsigned int kBitsPerByte = 8;
-static_assert(CHAR_BIT == kBitsPerByte);
 
 /** @return True when a number can form a protobuf field key. */
 [[nodiscard]] constexpr bool valid_field_number(std::uint64_t fieldNumber) noexcept {
@@ -102,7 +99,7 @@ bool read_varint(std::span<const std::byte> input,
 std::uint64_t read_fixed(std::span<const std::byte> input) noexcept {
     std::uint64_t value = 0;
     for (std::size_t index = 0; index < input.size(); ++index) {
-        value |= std::to_integer<std::uint64_t>(input[index]) << (index * kBitsPerByte);
+        value |= std::to_integer<std::uint64_t>(input[index]) << (index * encoding::kBitsPerByte);
     }
     return value;
 }

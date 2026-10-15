@@ -15,14 +15,6 @@ inline constexpr std::uint8_t kPlayerAddId = 34;
 inline constexpr std::uint8_t kPlayerRemoveId = 36;
 /** Registry id a member uses to publish a sparse change to its player record. */
 inline constexpr std::uint8_t kPlayerPropertiesId = 37;
-/** Declared decoded size of a peer-properties message. */
-inline constexpr std::uint32_t kPeerPropertiesSize = 408;
-/** Declared decoded size of a player-add message. */
-inline constexpr std::uint32_t kPlayerAddSize = 288;
-/** Declared decoded size of a player-remove message. */
-inline constexpr std::uint32_t kPlayerRemoveSize = 12;
-/** Declared decoded size of a player-properties message. */
-inline constexpr std::uint32_t kPlayerPropertiesSize = 288;
 
 /**
  * Leading fields of a peer-properties message.

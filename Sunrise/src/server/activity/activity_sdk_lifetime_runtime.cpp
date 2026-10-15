@@ -19,11 +19,7 @@ namespace sdk = state::activity_sdk;
         > middleware::bap::activity_message::sensor_auth_update::kMaximumLifetimeState) {
         return Status::invalidValue;
     }
-    const Status live = activity_sdk_devices::live_binding_status(view, link);
-    if (live != Status::ready) {
-        return live;
-    }
-    return Status::ready;
+    return activity_sdk_devices::live_binding_status(view, link);
 }
 
 } // namespace

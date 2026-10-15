@@ -16,7 +16,7 @@ struct BapServiceCollectionHandle final {
     std::uint8_t marker{};
 };
 
-/** One service row, addressed by its one-based catalog row. */
+/** One service row, addressed by its zero-based catalog row. */
 struct BapServiceHandle final {
     std::uint32_t row{};
 };

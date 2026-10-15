@@ -22,7 +22,7 @@ namespace {
 /** Replaces generated State mappings. The extraction is all or nothing. */
 bool load_catalog(std::wstring_view directory, named_tags::DirectoryResult& result) noexcept {
     state::content::clear();
-    if (named_tags::extract_directory(directory, &insert_mapping, nullptr, result)) {
+    if (named_tags::extract_directory(directory, false, &insert_mapping, nullptr, result)) {
         return true;
     }
     state::content::clear();

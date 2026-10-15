@@ -35,17 +35,79 @@ private:
     std::unique_ptr<reader::Scratch> value_{};
 };
 
-/** Releases the process-wide parallel package readers after one inventory build. */
-class ParallelReadOwner final {
-public:
-    ~ParallelReadOwner() noexcept {
-        reader::parallel::release();
+/**
+ * Reads the RSAT blobs and their schema blobs in parallel and copies them into the context.
+ * Kept blobs die with the lease, so each one is copied before this returns.
+ * @param source Package directory and block keys.
+ * @param scratch Reader storage for the class checks.
+ * @param rsatTags RSAT tags to read, sorted.
+ * @param cancel Optional cancellation probe.
+ * @param cancelContext Probe context.
+ * @param context Receives one prefetched row per blob read.
+ * @return False when a read, a class check or a descriptor array fails, or on cancel.
+ */
+[[nodiscard]] bool prefetch_rsats(const reader::Source& source,
+                                  reader::Scratch& scratch,
+                                  std::span<const std::uint32_t> rsatTags,
+                                  CancelProbe cancel,
+                                  void* cancelContext,
+                                  PackageReadContext& context) {
+    const reader::parallel::ScopedRead parallelReads{};
+    std::vector<reader::parallel::Held> held{};
+    if (!reader::parallel::read_kept(source, rsatTags, held)) {
+        return false;
     }
-
-    ParallelReadOwner() = default;
-    ParallelReadOwner(const ParallelReadOwner&) = delete;
-    ParallelReadOwner& operator=(const ParallelReadOwner&) = delete;
-};
+    std::vector<std::uint32_t> schemaTags{};
+    context.prefetched.reserve(held.size());
+    for (const reader::parallel::Held& row : held) {
+        std::uint32_t classId = 0;
+        TypedArray descriptors{};
+        if (!reader::read_tag_class(source, scratch, row.tag, classId) || classId != kActorRsatClass
+            || !typed_array(row.blob,
+                            format::kActorRsatDescriptorArrayOffset,
+                            format::kActorRsatDescriptorClass,
+                            kDescriptorStride,
+                            descriptors)) {
+            return false;
+        }
+        for (std::uint32_t ordinal = 0; ordinal < descriptors.count; ++ordinal) {
+            const std::size_t offset = static_cast<std::size_t>(descriptors.dataOffset)
+                                       + static_cast<std::size_t>(ordinal) * kDescriptorStride;
+            std::uint32_t schemaTag = 0;
+            if (!read_value(row.blob, offset + 4U, schemaTag) || is_absent_tag(schemaTag)) {
+                return false;
+            }
+            schemaTags.push_back(schemaTag);
+        }
+        PrefetchedTag cached{};
+        cached.bytes.assign(row.blob.begin(), row.blob.end());
+        cached.classId = kActorRsatClass;
+        if (!context.prefetched.emplace(row.tag, std::move(cached)).second) {
+            return false;
+        }
+    }
+    std::sort(schemaTags.begin(), schemaTags.end());
+    schemaTags.erase(std::unique(schemaTags.begin(), schemaTags.end()), schemaTags.end());
+    if (is_cancelled(cancel, cancelContext)
+        || !reader::parallel::read_kept(source, schemaTags, held)) {
+        return false;
+    }
+    context.prefetched.reserve(context.prefetched.size() + held.size());
+    for (const reader::parallel::Held& row : held) {
+        std::uint32_t classId = 0;
+        if (!reader::read_tag_class(source, scratch, row.tag, classId)
+            || classId != format::kActorRsatSchemaClass) {
+            return false;
+        }
+        PrefetchedTag cached{};
+        cached.bytes.assign(row.blob.begin(), row.blob.end());
+        cached.classId = format::kActorRsatSchemaClass;
+        if (!context.prefetched.emplace(row.tag, std::move(cached)).second) {
+            return false;
+        }
+    }
+    return true;
+}
 
 } // namespace
 
@@ -340,16 +402,7 @@ bool build_from_tags(std::span<const std::uint32_t> actorTags,
         actorTags, {}, readTag, readContext, cancel, cancelContext, output);
 }
 
-/** Builds the complete current-build inventory for an upstream exact actor tag set. */
-bool build(const reader::Source& source,
-           std::span<const std::uint32_t> actorTags,
-           CancelProbe cancel,
-           void* cancelContext,
-           Snapshot& output) noexcept {
-    return build_with_rsats(source, actorTags, {}, cancel, cancelContext, output);
-}
-
-/** Builds the actor inventory from tags plus already-read RSAT rows. */
+/** Prefetches the sorted installed RSAT rows, then builds the actor inventory from tags. */
 bool build_with_rsats(const reader::Source& source,
                       std::span<const std::uint32_t> actorTags,
                       std::span<const std::uint32_t> rsatTags,
@@ -366,61 +419,9 @@ bool build_with_rsats(const reader::Source& source,
         if (scratch.get() == nullptr) {
             return false;
         }
-        ParallelReadOwner parallelReads{};
         PackageReadContext context{&source, scratch.get()};
-        std::vector<reader::parallel::Held> held{};
-        if (!reader::parallel::read_kept(source, rsatTags, held)) {
+        if (!prefetch_rsats(source, *scratch.get(), rsatTags, cancel, cancelContext, context)) {
             return false;
-        }
-        std::vector<std::uint32_t> schemaTags{};
-        context.prefetched.reserve(held.size());
-        for (const reader::parallel::Held& row : held) {
-            std::uint32_t classId = 0;
-            TypedArray descriptors{};
-            if (!reader::read_tag_class(source, *scratch.get(), row.tag, classId)
-                || classId != kActorRsatClass
-                || !typed_array(row.blob,
-                                format::kActorRsatDescriptorArrayOffset,
-                                format::kActorRsatDescriptorClass,
-                                kDescriptorStride,
-                                descriptors)) {
-                return false;
-            }
-            for (std::uint32_t ordinal = 0; ordinal < descriptors.count; ++ordinal) {
-                const std::size_t offset = static_cast<std::size_t>(descriptors.dataOffset)
-                                           + static_cast<std::size_t>(ordinal) * kDescriptorStride;
-                std::uint32_t schemaTag = 0;
-                if (!read_value(row.blob, offset + 4U, schemaTag) || is_absent_tag(schemaTag)) {
-                    return false;
-                }
-                schemaTags.push_back(schemaTag);
-            }
-            PrefetchedTag cached{};
-            cached.bytes.assign(row.blob.begin(), row.blob.end());
-            cached.classId = kActorRsatClass;
-            if (!context.prefetched.emplace(row.tag, std::move(cached)).second) {
-                return false;
-            }
-        }
-        std::sort(schemaTags.begin(), schemaTags.end());
-        schemaTags.erase(std::unique(schemaTags.begin(), schemaTags.end()), schemaTags.end());
-        if (is_cancelled(cancel, cancelContext)
-            || !reader::parallel::read_kept(source, schemaTags, held)) {
-            return false;
-        }
-        context.prefetched.reserve(context.prefetched.size() + held.size());
-        for (const reader::parallel::Held& row : held) {
-            std::uint32_t classId = 0;
-            if (!reader::read_tag_class(source, *scratch.get(), row.tag, classId)
-                || classId != format::kActorRsatSchemaClass) {
-                return false;
-            }
-            PrefetchedTag cached{};
-            cached.bytes.assign(row.blob.begin(), row.blob.end());
-            cached.classId = format::kActorRsatSchemaClass;
-            if (!context.prefetched.emplace(row.tag, std::move(cached)).second) {
-                return false;
-            }
         }
         std::vector<SequenceTableSource> sequenceTables;
         if (!sequence_inventory::scan_tables(source, sequenceTables)) {

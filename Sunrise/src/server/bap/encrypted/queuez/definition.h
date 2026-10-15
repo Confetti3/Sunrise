@@ -210,22 +210,11 @@ struct StagedPublication {
     /** Root the companion used, kept because an unmapped snapshot records no residents. */
     std::uint64_t family4RepushRoot{};
     /**
-     * A family-zero body went out and owes its delayed second copy.
-     * An answer inside the same exchange reaches the record before it writes its new state, so it
-     * is refused. The delayed copy is the one that lands.
-     */
-    bool armsBannerRepush{};
-    /** Root that copy must use. */
-    std::uint64_t bannerRepushRoot{};
-    /**
      * Root a family-two subscribe was answered against, or zero when this frame answered none.
      * A subscribe is the only moment that root arrives, so the connection keeps the last one.
      */
     std::uint64_t socialRosterRepushRoot{};
-    /**
-     * An emblem equip left the published family-two object stale and it owes a fresh copy.
-     * Its own flag on its own signal; the banner arm is never reused for it.
-     */
+    /** An emblem equip left the published family-two object stale and it owes a fresh copy. */
     bool rearmsSocialRosterRepush{};
     /** A subclass selection just staged and owes a delayed ability-icon refresh. */
     bool armsAbilityRefresh{};

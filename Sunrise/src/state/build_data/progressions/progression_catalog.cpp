@@ -81,12 +81,6 @@ bool snapshot_steps(std::span<Step> output, std::size_t& count) noexcept {
     return g_steps.snapshot(output, count);
 }
 
-/** @return The step bank row count, read under the lock. */
-std::size_t step_count() noexcept {
-    const std::shared_lock guard(g_lock);
-    return g_steps.count();
-}
-
 /** Lists the definition index each slot of one scope's record array carries. */
 bool slots(Scope scope, std::span<std::uint16_t> output, std::size_t& count) noexcept {
     count = 0;

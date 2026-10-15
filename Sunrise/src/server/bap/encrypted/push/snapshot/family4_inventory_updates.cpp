@@ -358,10 +358,9 @@ bool prepare_seasonal_experience_presentation(
         return report_failure("season_xp_account_object");
     }
 
-    staged.rawClearSize =
-        (std::max)(staged.rawClearSize,
-                   reservation.rawWriteOffset
-                       + middleware::datagen::family4::account::layout::kObjectSize);
+    staged.rawClearSize = (std::max)(
+        staged.rawClearSize,
+        reservation.rawWriteOffset + middleware::datagen::family4::account::layout::kObjectSize);
     staged.compressedClearSize = (std::max)(reservation.compressedClearSize, compressedExtent);
     staged.family = middleware::queuez::Family{
         queuez::kAccountFamilyType,

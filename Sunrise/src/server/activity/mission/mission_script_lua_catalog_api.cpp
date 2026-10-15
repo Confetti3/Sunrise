@@ -8,12 +8,6 @@
 namespace sunrise::server::activity::mission::lua_vm::detail::catalog_api {
 namespace {
 
-[[nodiscard]] std::string_view checked_key(lua_State* state) {
-    std::size_t length = 0;
-    const char* const value = luaL_checklstring(state, 2, &length);
-    return {value, length};
-}
-
 /** Maps a Lua collection name to its catalog kind. @return False when the name is unknown. */
 [[nodiscard]] bool collection_kind(std::string_view key, CatalogCollectionKind& output) noexcept {
     struct Entry final {
@@ -51,19 +45,6 @@ namespace {
     }
     output = found->kind;
     return true;
-}
-
-/** Pushes one 32-byte digest as 64 lowercase hex characters. */
-void push_digest(lua_State* state, const std::array<std::byte, 32>& value) {
-    // Lowercase hex digits; every digest and byte field is spelled this way.
-    constexpr char digits[] = "0123456789abcdef";
-    std::array<char, 64> text{};
-    for (std::size_t index = 0; index < value.size(); ++index) {
-        const auto byte = static_cast<std::uint8_t>(value[index]);
-        text[index * 2U] = digits[byte >> 4U];
-        text[index * 2U + 1U] = digits[byte & 0xFU];
-    }
-    lua_pushlstring(state, text.data(), text.size());
 }
 
 void push_catalog(lua_State* state, const CatalogDefinitionApi& api) {
@@ -152,7 +133,7 @@ void push_tag_collection(lua_State* state,
     if (!collection_range(state, *collection, range)) {
         return luaL_error(state, "catalog collection is stale");
     }
-    const std::string_view key = checked_key(state);
+    const std::string_view key = lua_string_view(state, 2);
     if (key == "count") {
         lua_pushinteger(state, range.count);
     } else if (key == "at") {
@@ -191,7 +172,7 @@ void push_tag_collection(lua_State* state,
     if (owner == nullptr || !current(*owner, handle->generation)) {
         return luaL_error(state, "catalog row is stale");
     }
-    const std::string_view key = checked_key(state);
+    const std::string_view key = lua_string_view(state, 2);
     CatalogActivityOwnedKind ownedKind{};
     bool tagCollection = false;
     if (handle->kind == CatalogCollectionKind::activities
@@ -271,7 +252,7 @@ void push_tag_collection(lua_State* state,
     if (!tag_range(state, *collection, range)) {
         return luaL_error(state, "catalog binding-tag collection is stale");
     }
-    const std::string_view key = checked_key(state);
+    const std::string_view key = lua_string_view(state, 2);
     if (key == "count") {
         lua_pushinteger(state, range.count);
     } else if (key == "at") {
@@ -290,7 +271,7 @@ void push_tag_collection(lua_State* state,
     if (owner == nullptr || !current(*owner, handle->generation)) {
         return luaL_error(state, "catalog view is stale");
     }
-    const std::string_view key = checked_key(state);
+    const std::string_view key = lua_string_view(state, 2);
     if (key == "sdk_build_sha256") {
         push_digest(state, handle->generation.sdkBuildSha256);
     } else if (key == "sdk_payload_sha256") {

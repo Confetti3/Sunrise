@@ -319,7 +319,7 @@ selected_character(const state::AccountState& account) noexcept {
     return true;
 }
 
-/** Sends the owed banner retry after its delay. */
+/** Sends the banner pair the launch cinematic hold armed. */
 [[nodiscard]] bool consume_banner_repush(Session& session,
                                          Scratch& scratch,
                                          std::span<std::byte> response,
@@ -344,7 +344,6 @@ selected_character(const state::AccountState& account) noexcept {
     std::size_t framedSize = 0;
     queuez::SessionState bannerAfter{};
     bool armsRepush = false;
-    bool armsBannerRepush = false;
     push::append_queuez_notification(scratch,
                                      session.queuez,
                                      subscription,
@@ -353,8 +352,7 @@ selected_character(const state::AccountState& account) noexcept {
                                      scratch.framed,
                                      framedSize,
                                      bannerAfter,
-                                     armsRepush,
-                                     armsBannerRepush);
+                                     armsRepush);
     if (framedSize == 0 || framedSize > response.size()) {
         core::log::write(core::log::Channel::server,
                          core::log::Level::warn,
@@ -374,9 +372,7 @@ selected_character(const state::AccountState& account) noexcept {
 
 /**
  * Sends the family-two re-push the equip that moved the member record owes.
- * An emblem equip leaves the subscribe-time snapshot stale, so the body is rebuilt against the
- * root the subscribe was answered with. One attempt: the arm is spent before the frame is
- * built.
+ * The body is rebuilt against the subscribe's root. The arm is spent before the frame is built.
  * @param session Auth, nonce and queuez state owned by the connection.
  * @param scratch Transform buffers owned by the lock.
  * @param response Whole-frame storage owned by the caller.
@@ -406,7 +402,6 @@ selected_character(const state::AccountState& account) noexcept {
     std::size_t framedSize = 0;
     queuez::SessionState rosterAfter{};
     bool armsRepush = false;
-    bool armsBannerRepush = false;
     push::append_queuez_notification(scratch,
                                      session.queuez,
                                      subscription,
@@ -415,8 +410,7 @@ selected_character(const state::AccountState& account) noexcept {
                                      scratch.framed,
                                      framedSize,
                                      rosterAfter,
-                                     armsRepush,
-                                     armsBannerRepush);
+                                     armsRepush);
     if (framedSize == 0 || framedSize > response.size()) {
         core::log::write(core::log::Channel::server,
                          core::log::Level::warn,
@@ -723,7 +717,6 @@ bool consume_deferred(Session& session,
     std::size_t framedSize = 0;
     queuez::SessionState after{};
     bool armsRepush = false;
-    bool armsBannerRepush = false;
     push::append_queuez_notification(scratch,
                                      session.queuez,
                                      subscription,
@@ -732,8 +725,7 @@ bool consume_deferred(Session& session,
                                      scratch.framed,
                                      framedSize,
                                      after,
-                                     armsRepush,
-                                     armsBannerRepush);
+                                     armsRepush);
     if (framedSize == 0 || framedSize > response.size()) {
         // Neither failure clears on a retry. Holding the arm starves the keepalive, and the
         // client drops the activity session once the keepalive stops.

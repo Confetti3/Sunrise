@@ -30,6 +30,12 @@ enum class Bank : int {
                         std::string_view settingsSchema,
                         std::string_view settingsDefaults) noexcept;
 void shutdown() noexcept;
+/**
+ * Moves the session to an in-memory copy of the open save and closes the file, so no later
+ * write reaches it. The copy is gone at shutdown. Call it before any thread uses the store.
+ * @return False when the copy failed; the file handle then stays open and unchanged.
+ */
+[[nodiscard]] bool use_session_copy() noexcept;
 [[nodiscard]] bool read_account(AccountState& output) noexcept;
 [[nodiscard]] AccountState account() noexcept;
 [[nodiscard]] bool write_account(const AccountState& value) noexcept;

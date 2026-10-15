@@ -1,8 +1,16 @@
 #include <Windows.h>
 
+#include <algorithm>
+#include <memory>
 #include <string_view>
+#include <tuple>
 #include <utility>
+#include <vector>
 
+#include "../../../core/logging/log.h"
+#include "../../../middleware/content/packages/named_tags.h"
+#include "../../../state/build_data/runtime.h"
+#include "../hash_names/hash_name_build.h"
 #include "activity_sdk_generation_worker_internal.h"
 
 namespace sunrise::client::content::activity::sdk_generation::worker_internal {
@@ -160,29 +168,6 @@ append_scenario(std::vector<Scenario>& output, std::uint32_t tag, std::string_vi
     return false;
 }
 
-/** Converts the independently measured native completeness partition. */
-[[nodiscard]] bool convert_binding_completeness(const inventory::BindingCompleteness& input,
-                                                manifest::BindingCompleteness& output) noexcept {
-    manifest::BindingCompletenessStatus status{};
-    switch (input.status) {
-    case inventory::BindingCompletenessStatus::ready:
-        status = manifest::BindingCompletenessStatus::ready;
-        break;
-    case inventory::BindingCompletenessStatus::blockedUnresolvedRunnable:
-        status = manifest::BindingCompletenessStatus::blockedUnresolvedRunnable;
-        break;
-    default:
-        return false;
-    }
-    output = {input.total,
-              input.fixedScenario,
-              input.namedDefinitionUnavailable,
-              input.noDirectFixedActivityName,
-              input.unresolvedRunnable,
-              status};
-    return true;
-}
-
 /** Converts the checked native inventory into the bounded persistent catalog rows. */
 [[nodiscard]] bool build_inventory(Work& work, const package_reader::Source& source) noexcept {
     inventory::Snapshot snapshot{};
@@ -299,6 +284,102 @@ append_scenario(std::vector<Scenario>& output, std::uint32_t tag, std::string_vi
                   == completeness.total
            && completeness.unresolvedRunnable == 0
            && completeness.status == manifest::BindingCompletenessStatus::ready;
+}
+
+namespace {
+
+namespace named_tags = middleware::content::packages::named_tags;
+namespace hash_name_pass = ::sunrise::client::content::hash_names;
+
+/** Keeps one named definition, refusing a name the State catalog would refuse. */
+[[nodiscard]] bool collect_definition(void* opaque, const named_tags::Entry& entry) noexcept {
+    auto& rows = *static_cast<std::vector<state::content::Definition>*>(opaque);
+    if (entry.nameLength == 0 || entry.nameLength >= state::content::kDefinitionNameCapacity) {
+        return false;
+    }
+    state::content::Definition row{};
+    std::copy_n(entry.name.data(), entry.nameLength, row.name.data());
+    row.nameLength = entry.nameLength;
+    row.tag = entry.tag;
+    row.classId = entry.classId;
+    try {
+        rows.push_back(row);
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+/**
+ * Collects the named definitions of one package source, one row per distinct mapping.
+ * @param source Package directory and read mode.
+ * @param rows Receives the rows; empty on failure.
+ * @return True when the whole directory walk worked.
+ */
+[[nodiscard]] bool collect_definitions(const package_reader::Source& source,
+                                       std::vector<state::content::Definition>& rows) noexcept {
+    rows.clear();
+    named_tags::DirectoryResult result{};
+    if (!named_tags::extract_directory(
+            source.directory, source.installedOnly, &collect_definition, &rows, result)) {
+        rows.clear();
+        return false;
+    }
+    const auto key = [](const state::content::Definition& row) noexcept {
+        return std::tuple(row.tag, row.classId, std::string_view(row.name.data(), row.nameLength));
+    };
+    std::sort(rows.begin(), rows.end(), [&key](const auto& first, const auto& second) noexcept {
+        return key(first) < key(second);
+    });
+    // One mapping appears once per patch that carries it; the State catalog keeps it once.
+    const auto end =
+        std::unique(rows.begin(), rows.end(), [&key](const auto& first, const auto& second) {
+            return key(first) == key(second);
+        });
+    rows.erase(end, rows.end());
+    return true;
+}
+
+} // namespace
+
+/** Builds the layouts, named definitions and identifier names from installed packages only. */
+bool build_installed_tables(Work& work, const package_reader::Source& source) noexcept {
+    work.tables = {};
+    bool layouts = false;
+    try {
+        auto scratch = std::make_unique<package_reader::Scratch>();
+        work.installedLayouts =
+            std::make_unique<::sunrise::client::content::scenarios::LayoutSet>();
+        layouts = work.installedLayouts->build(source, *scratch);
+        package_reader::close_files(*scratch);
+    } catch (...) {
+        layouts = false;
+    }
+    const bool names = collect_definitions(source, work.installedDefinitions);
+    const bool hashNames = layouts
+                           && hash_name_pass::build_private(
+                               source, work.installedLayouts->rows(), work.installedHashNames);
+    // Identifier names are only a last fallback; without them the pass still builds, but never
+    // falls back to the mod-inclusive State table.
+    if (!hashNames) {
+        work.installedHashNames.clear();
+    }
+    const bool ready = layouts && names;
+    if (ready) {
+        work.tables = {
+            work.installedLayouts.get(), &work.installedDefinitions, &work.installedHashNames};
+    }
+    core::log::writef(core::log::Channel::client,
+                      !ready ? core::log::Level::error
+                             : (hashNames ? core::log::Level::info : core::log::Level::warn),
+                      "ev=activity_sdk_generation stage=installed_tables layouts=%zu names=%zu "
+                      "hash_names=%zu hash_pass=%s result=%s",
+                      work.installedLayouts != nullptr ? work.installedLayouts->rows().size() : 0U,
+                      work.installedDefinitions.size(),
+                      work.installedHashNames.size(),
+                      hashNames ? "ok" : "fail",
+                      ready ? "ok" : "fail");
+    return ready;
 }
 
 } // namespace sunrise::client::content::activity::sdk_generation::worker_internal

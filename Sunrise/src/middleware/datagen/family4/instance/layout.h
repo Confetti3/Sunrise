@@ -5,6 +5,8 @@
 #include <cstdint>
 #include <type_traits>
 
+#include "../../definitions.h"
+
 namespace sunrise::middleware::datagen::family4::instance::layout {
 
 /** Every item instance carries 12 fixed ordinary socket lanes. */
@@ -23,8 +25,7 @@ inline constexpr std::size_t kCreationEntryCapacity = 6;
 inline constexpr std::size_t kCreationDefinitionCount = 4;
 /** 8 signed lanes form the unresolved instance-record tail. */
 inline constexpr std::size_t kTailValueCount = 8;
-/** Every set bit is the native empty biased definition index. */
-inline constexpr std::uint16_t kEmptyDefinitionIndex = 0xFFFF;
+using datagen::kEmptyDefinitionIndex;
 /** The definition-hash type uses the engine no-definition sentinel. */
 inline constexpr std::uint32_t kNoDefinitionHash = 0x811C9DC5;
 /** The signed native lookup ABI exposes 32,768 nonnegative definition indices. */

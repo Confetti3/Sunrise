@@ -28,9 +28,4 @@ bool find_season_pass_package(std::uint32_t definitionHash,
     return season_pass::find_package(definitionHash, package);
 }
 
-/** @return Season pass reward rows in State. */
-std::size_t season_pass_reward_count() noexcept {
-    return season_pass::count();
-}
-
 } // namespace sunrise::state::build_data

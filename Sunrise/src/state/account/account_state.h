@@ -188,9 +188,6 @@ namespace account {
 
 [[nodiscard]] bool valid(const AccountState& state) noexcept;
 
-/** Checks settings-authored State before runtime-only profile stack SOIDs are assigned. */
-[[nodiscard]] bool valid_authored(const AccountState& state) noexcept;
-
 [[nodiscard]] std::uint64_t selected_character_soid(const AccountState& state) noexcept;
 
 /**

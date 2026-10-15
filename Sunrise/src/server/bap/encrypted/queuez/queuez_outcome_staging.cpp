@@ -98,8 +98,6 @@ bool stage_service_outcome(Scratch& scratch,
     publication = {};
     SessionState after{};
     bool armsRepush = false;
-    bool armsBannerRepush = false;
-    std::uint64_t bannerRoot = 0;
     std::uint64_t socialRosterRoot = 0;
     bool armsAbilityRefresh = false;
     const auto* changeCharacter = transaction_if<ChangeCharacter>(outcome);
@@ -129,9 +127,7 @@ bool stage_service_outcome(Scratch& scratch,
                                          written,
                                          after,
                                          armsRepush,
-                                         armsBannerRepush,
                                          outcome.subscriptionAnswered);
-        bannerRoot = outcome.subscription.familyRootSoid;
         // The subscribe is the only moment a family-two root arrives. Recorded rather than acted
         // on: the inline answer to this subscribe lands, so nothing is owed until an equip makes
         // what it published stale.
@@ -461,24 +457,11 @@ bool stage_service_outcome(Scratch& scratch,
             held.familyRootSoid = after.pendingBannerRoot;
             SessionState heldAfter{};
             bool heldRepush = false;
-            bool heldBannerRepush = false;
             const SessionState heldBefore = after;
-            push::append_queuez_notification(scratch,
-                                             heldBefore,
-                                             held,
-                                             key,
-                                             nonce,
-                                             response,
-                                             written,
-                                             heldAfter,
-                                             heldRepush,
-                                             heldBannerRepush);
+            push::append_queuez_notification(
+                scratch, heldBefore, held, key, nonce, response, written, heldAfter, heldRepush);
             if (valid(heldAfter)) {
                 after = heldAfter;
-            }
-            if (heldBannerRepush) {
-                armsBannerRepush = true;
-                bannerRoot = held.familyRootSoid;
             }
         }
     } else {
@@ -496,8 +479,6 @@ bool stage_service_outcome(Scratch& scratch,
     }
     publication.armsFamily4Repush = armsRepush;
     publication.family4RepushRoot = armsRepush ? outcome.subscription.familyRootSoid : 0;
-    publication.armsBannerRepush = armsBannerRepush && bannerRoot != 0;
-    publication.bannerRepushRoot = publication.armsBannerRepush ? bannerRoot : 0;
     publication.socialRosterRepushRoot = socialRosterRoot;
     publication.armsAbilityRefresh = armsAbilityRefresh;
     return true;

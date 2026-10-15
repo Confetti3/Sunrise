@@ -16,12 +16,11 @@ namespace sunrise::client::content::activity::sdk_generation::policy_inventory::
 /** One capability's fixed gate sets produce at most this many unique refusal reasons. */
 inline constexpr std::size_t kMaximumFailureReasonCount = 16;
 
-/** These stable strings are scalar values in canonical format-v12 policy rows. */
+/** These stable strings are scalar values in canonical policy rows. */
 inline constexpr std::string_view kExact = "exact";
 inline constexpr std::string_view kPassed = "passed";
 inline constexpr std::string_view kFailed = "failed";
 inline constexpr std::string_view kUnresolved = "unresolved";
-inline constexpr std::string_view kInspect = "inspect";
 inline constexpr std::string_view kPanelTest = "panel_test";
 inline constexpr std::string_view kScript = "script";
 inline constexpr std::string_view kCandidate = "candidate";
@@ -38,7 +37,6 @@ struct StringHash final {
     using is_transparent = void;
 
     [[nodiscard]] std::size_t operator()(std::string_view value) const noexcept;
-    [[nodiscard]] std::size_t operator()(const std::string& value) const noexcept;
 };
 
 /** Compares owned and borrowed deferred strings without temporary allocations. */
@@ -46,9 +44,6 @@ struct StringEqual final {
     using is_transparent = void;
 
     [[nodiscard]] bool operator()(std::string_view left, std::string_view right) const noexcept;
-    [[nodiscard]] bool operator()(const std::string& left, const std::string& right) const noexcept;
-    [[nodiscard]] bool operator()(const std::string& left, std::string_view right) const noexcept;
-    [[nodiscard]] bool operator()(std::string_view left, const std::string& right) const noexcept;
 };
 
 /** Collects one capability's bounded refusal reasons before canonical sorting. */

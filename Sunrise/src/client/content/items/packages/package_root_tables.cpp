@@ -67,7 +67,7 @@ bool collect_bucket_definition_tag(void* context, std::uint32_t tag) noexcept {
                                                 std::uint32_t& tag) noexcept {
     BucketDefinitionTable located{};
     reader::ScanResult scanned{};
-    if (!reader::scan_class(source.directory,
+    if (!reader::scan_class(source,
                             tables::kBucketDefinitionTableClass,
                             &collect_bucket_definition_tag,
                             &located,

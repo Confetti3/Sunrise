@@ -11,18 +11,20 @@ namespace {
 namespace generated = state::activity_sdk::generated_world;
 namespace catalog = state::build_data::scriptables;
 
+} // namespace
+
 /**
  * Reads one named field from one generated-world row.
  * @param localRow One-based row inside the collection named by kind.
  * @param key Row field name; an unknown key yields an absent value rather than a failure.
  * @return False only when the generation, row, or collection is invalid.
  */
-[[nodiscard]] bool resolve_world_field_impl(const void* context,
-                                            const lua_vm::WorldGenerationIdentity& generation,
-                                            lua_vm::WorldCollectionKind kind,
-                                            std::uint32_t localRow,
-                                            std::string_view key,
-                                            lua_vm::WorldFieldDefinition& output) noexcept {
+bool world_sdk_internal::resolve_world_field(const void* context,
+                                             const lua_vm::WorldGenerationIdentity& generation,
+                                             lua_vm::WorldCollectionKind kind,
+                                             std::uint32_t localRow,
+                                             std::string_view key,
+                                             lua_vm::WorldFieldDefinition& output) noexcept {
     output = {};
     const generated::GeneratedWorldView* const world = checked_world(context, generation);
     if (world == nullptr || localRow == 0
@@ -554,18 +556,6 @@ namespace catalog = state::build_data::scriptables;
     output = {};
     output.kind = lua_vm::WorldFieldKind::absent;
     return true;
-}
-
-} // namespace
-
-/** Resolves a one-based row only after the complete world generation still matches. */
-bool world_sdk_internal::resolve_world_field(const void* context,
-                                             const lua_vm::WorldGenerationIdentity& generation,
-                                             lua_vm::WorldCollectionKind kind,
-                                             std::uint32_t localRow,
-                                             std::string_view key,
-                                             lua_vm::WorldFieldDefinition& output) noexcept {
-    return resolve_world_field_impl(context, generation, kind, localRow, key, output);
 }
 
 } // namespace sunrise::server::activity::mission::sdk_bridge

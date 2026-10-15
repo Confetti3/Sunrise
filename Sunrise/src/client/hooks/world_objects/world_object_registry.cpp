@@ -15,12 +15,14 @@
 #include <string_view>
 
 #include "../../../core/logging/log.h"
+#include "../../../core/settings/settings.h"
 #include "../../executable/image.h"
 #include "../../hooking/detour.h"
 #include "../../memory/current_process_memory.h"
 #include "../../patterns/image_scan.h"
 #include "../../patterns/registry.h"
 #include "../../patterns/signature_text.h"
+#include "dynamic_object_registry.h"
 #include "internal.h"
 
 namespace sunrise::client::hooks::world_objects {
@@ -533,6 +535,8 @@ bool install() noexcept {
     g_entityPolicyOriginal.store(reinterpret_cast<EntityPolicy>(g_handles[6].original),
                                  std::memory_order_release);
 
+    // Only Studio reads dynamic objects, so they are tracked only when it may attach.
+    reset_dynamic_registry(core::settings::get().studioAttach);
     g_accepting.store(true, std::memory_order_release);
     ReleaseSRWLockExclusive(&g_lock);
     core::log::write(core::log::Channel::client,
@@ -548,6 +552,7 @@ bool uninstall() noexcept {
             return handle.attached;
         })) {
         clear_registry();
+        reset_dynamic_registry(false);
         ReleaseSRWLockExclusive(&g_lock);
         return true;
     }
@@ -563,7 +568,7 @@ bool uninstall() noexcept {
 
     };
     const hooking::detour::UninstallResult result =
-        hooking::detour::uninstall(g_handles, protectedEntries, &calls_idle);
+        hooking::detour::uninstall(g_handles, protectedEntries, {}, &calls_idle);
     if (result != hooking::detour::UninstallResult::removed) {
         ReleaseSRWLockExclusive(&g_lock);
         return false;
@@ -583,6 +588,7 @@ bool uninstall() noexcept {
     g_validatePair = nullptr;
     g_datumBaseStorage = nullptr;
     g_datumStrideStorage = nullptr;
+    reset_dynamic_registry(false);
     clear_registry();
     ReleaseSRWLockExclusive(&g_lock);
     return true;
@@ -592,10 +598,7 @@ bool uninstall() noexcept {
 bool is_installed() noexcept {
     AcquireSRWLockShared(&g_lock);
     const bool installed =
-        g_handles[0].attached && g_handles[1].attached && g_handles[2].attached
-        && g_handles[3].attached && g_handles[4].attached && g_handles[5].attached
-        && std::all_of(
-            g_handles.begin() + 6, g_handles.end(), [](const auto& h) { return h.attached; })
+        std::all_of(g_handles.begin(), g_handles.end(), [](const auto& h) { return h.attached; })
         && g_accepting.load(std::memory_order_acquire);
     ReleaseSRWLockShared(&g_lock);
     return installed;
@@ -635,6 +638,31 @@ Diagnostics diagnostics() noexcept {
                              g_overflowCount,
                              g_handles[0].attached && g_handles[1].attached
                                  && g_accepting.load(std::memory_order_acquire)};
+    ReleaseSRWLockShared(&g_lock);
+    return result;
+}
+
+/** Diagnostics never wait for a placement writer or call the engine while holding this lock. */
+SnapshotResult try_snapshot(std::span<Instance> output) noexcept {
+    SnapshotResult result{};
+    if (!TryAcquireSRWLockShared(&g_lock)) {
+        result.status = SnapshotStatus::busy;
+        return result;
+    }
+    if (g_accepting.load(std::memory_order_acquire) && g_handles[0].attached
+        && g_handles[1].attached) {
+        result.status = SnapshotStatus::ready;
+        result.overflow = g_overflowCount;
+        for (const RegistryEntry& entry : g_entries) {
+            if (entry.state != EntryState::live) {
+                continue;
+            }
+            ++result.total;
+            if (result.written < output.size()) {
+                output[result.written++] = entry.instance;
+            }
+        }
+    }
     ReleaseSRWLockShared(&g_lock);
     return result;
 }

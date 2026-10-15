@@ -5,10 +5,11 @@
 #include <cstdint>
 #include <type_traits>
 
+#include "../definitions.h"
+
 namespace sunrise::middleware::datagen::character_record::layout {
 
-/** An empty item slot is this sentinel; a 0 would assert definition index 0, a real item. */
-inline constexpr std::uint16_t kEmptyDefinitionIndex = 0xFFFFU;
+using datagen::kEmptyDefinitionIndex;
 /** The engine's no-hash sentinel, and the empty value for every definition-hash field. */
 inline constexpr std::uint32_t kNoHash = 0x811C9DC5U;
 /** A signed key byte is empty at -1. */

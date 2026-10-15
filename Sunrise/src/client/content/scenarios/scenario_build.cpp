@@ -2,6 +2,9 @@
 
 #include <array>
 #include <cstdio>
+#include <memory>
+#include <span>
+#include <string_view>
 
 #include "../../../core/logging/log.h"
 #include "../../../state/build_data/runtime.h"
@@ -71,14 +74,16 @@ void report(const Storage& storage,
     return published;
 }
 
-} // namespace
-
-/** Extracts every destination's bubble layout and roster from the installed packages, once. */
-bool build(const packages::reader::Source& source, packages::reader::Scratch& scratch) noexcept {
-    if (state::build_data::scenario_layouts_ready()) {
-        return true;
-    }
-    static Storage storage{};
+/**
+ * Collects the rows and reads their bubble layouts, over as many calls as the reads need.
+ * @param source Package directory and borrowed block keys.
+ * @param scratch Lock-owned block storage.
+ * @param storage Pass storage carrying the collection state between calls.
+ * @return True once the rows are compacted and the roster walk may start.
+ */
+[[nodiscard]] bool collect_layouts(const packages::reader::Source& source,
+                                   packages::reader::Scratch& scratch,
+                                   Storage& storage) noexcept {
     if (!storage.collected) {
         const char* reason = nullptr;
         if (!collect_rows(source, storage, reason)) {
@@ -106,7 +111,68 @@ bool build(const packages::reader::Source& source, packages::reader::Scratch& sc
         report(storage, storage.keptCount, 0, "collected");
         storage.compacted = true;
     }
-    return walk_rosters(source, scratch, storage);
+    return true;
+}
+
+} // namespace
+
+/** Extracts every destination's bubble layout and roster from the installed packages, once. */
+bool build(const packages::reader::Source& source, packages::reader::Scratch& scratch) noexcept {
+    if (state::build_data::scenario_layouts_ready()) {
+        return true;
+    }
+    static Storage storage{};
+    return collect_layouts(source, scratch, storage) && walk_rosters(source, scratch, storage);
+}
+
+/** Collects every row and reads each bubble layout once, without rosters or a publish. */
+bool LayoutSet::build(const packages::reader::Source& source,
+                      packages::reader::Scratch& scratch) noexcept {
+    rows_.clear();
+    try {
+        // The pass storage is large and only the kept rows outlive it.
+        const auto storage = std::make_unique<Storage>();
+        const char* reason = nullptr;
+        if (!collect_rows(source, *storage, reason)) {
+            return false;
+        }
+        resolve_all(source, scratch, *storage);
+        compact_rows(*storage);
+        rows_.assign(storage->rows.begin(),
+                     storage->rows.begin() + static_cast<std::ptrdiff_t>(storage->keptCount));
+    } catch (...) {
+        rows_.clear();
+        return false;
+    }
+    return !rows_.empty();
+}
+
+/** Finds one destination's layout among the kept rows. */
+bool LayoutSet::find(std::string_view name, layouts::Definition& definition) const noexcept {
+    definition = {};
+    if (name.empty()) {
+        return false;
+    }
+    for (const layouts::Definition& row : rows_) {
+        if (std::string_view(row.name.data(), row.nameLength) == name) {
+            definition = row;
+            return true;
+        }
+    }
+    return false;
+}
+
+/** @return The rows the last build kept. */
+std::span<const layouts::Definition> LayoutSet::rows() const noexcept {
+    return rows_;
+}
+
+/** Finds one destination's layout in a caller's set, or in State when the set is null. */
+bool find_layout(const LayoutSet* set,
+                 std::string_view name,
+                 layouts::Definition& definition) noexcept {
+    return set != nullptr ? set->find(name, definition)
+                          : state::build_data::find_scenario_layout(name, definition);
 }
 
 } // namespace sunrise::client::content::scenarios

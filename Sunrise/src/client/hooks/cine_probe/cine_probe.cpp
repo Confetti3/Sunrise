@@ -98,7 +98,7 @@ constexpr auto kPick = signature<signature_length(kPickText)>(kPickText);
 
 /** The sequence-object alive test, arm 1 of the mode-advance gate. */
 constexpr std::string_view kAliveText =
-    "83 B9 E0 00 00 00 00 7F 09 83 B9 F8 00 00 00 00 7E 0C F6 81 46 02 00 00 10 75 03 B0 01 C3 "
+    "83 B9 E0 00 00 00 00 7F ? 83 B9 F8 00 00 00 00 7E ? F6 81 46 02 00 00 10 75 ? B0 01 C3 "
     "32 C0 C3";
 /** Compiled form of the pattern above; the scan requires one match. */
 constexpr auto kAlive = signature<signature_length(kAliveText)>(kAliveText);

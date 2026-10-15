@@ -14,10 +14,9 @@ inline constexpr std::uint16_t kOpcode = 601;
 inline constexpr std::size_t kResponseSize = 27;
 
 /**
- * Reports whether this request is the loot pickup.
- * No response field reads the request body, so its width and content are not tested.
+ * Reports whether this request is one complete loot pickup.
  * @param message Parsed Web Service envelope.
- * @return True when the opcode matches.
+ * @return True when the opcode matches and the body is exactly one 133-bit request.
  */
 [[nodiscard]] bool parse_request(const Message& message) noexcept;
 

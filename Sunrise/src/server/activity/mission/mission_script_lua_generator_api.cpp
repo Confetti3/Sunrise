@@ -29,6 +29,13 @@ constexpr std::array<std::uint8_t, 3> kIntegerMasks{
 /** Integer inputs one and two have no mask bit; they apply on any value other than -1. */
 constexpr std::size_t kUnmaskedIntegerCount = 2;
 
+// The table entry of generate_map and its keys.
+constexpr const api::MemberSpec& kGenerateMap = api::slot_member("generate_map");
+constexpr const char* kAnchorsKey = optional_key(kGenerateMap, "anchors", api::ValueKind::list);
+constexpr const char* kValuesKey = optional_key(kGenerateMap, "values", api::ValueKind::list);
+constexpr const char* kRealsKey = optional_key(kGenerateMap, "reals", api::ValueKind::list);
+constexpr const api::ValueSpec& kAnchorRow = api::find_argument(kGenerateMap, "anchors").element[0];
+
 /** @return True when one live Slot row is an exact type-37 map generator. */
 [[nodiscard]] bool exact_generator_slot(const SlotDefinition& definition) noexcept {
     return definition.slotType == generator::kSlotType
@@ -48,15 +55,20 @@ signed_byte(lua_State* state, lua_Integer value, const char* name, std::int8_t& 
     return true;
 }
 
+/** @return The key of one field of an anchor row. */
+[[nodiscard]] consteval const char* anchor_key(std::string_view name) {
+    return api::find_field(kAnchorRow.fields, name).name.data();
+}
+
 /** Reads one anchor row: two authored grid selectors, a float input and an enable flag. */
 [[nodiscard]] bool read_anchor(lua_State* state, int row, generator::Anchor& anchor) {
     if (!lua_istable(state, row)) {
         return luaL_argerror(state, 2, "each anchor must be a table") == 0;
     }
-    lua_getfield(state, row, "first");
-    lua_getfield(state, row, "second");
-    lua_getfield(state, row, "value");
-    lua_getfield(state, row, "enabled");
+    lua_getfield(state, row, anchor_key("first"));
+    lua_getfield(state, row, anchor_key("second"));
+    lua_getfield(state, row, anchor_key("value"));
+    lua_getfield(state, row, anchor_key("enabled"));
     const bool typed = lua_isinteger(state, -4) && lua_isinteger(state, -3)
                        && lua_isnumber(state, -2) && lua_isboolean(state, -1);
     if (!typed) {
@@ -74,7 +86,7 @@ signed_byte(lua_State* state, lua_Integer value, const char* name, std::int8_t& 
 
 /** Reads the four anchors and sets their mask bit. */
 [[nodiscard]] bool read_anchors(lua_State* state, generator::Record& record) {
-    if (push_argument(state, "anchors") == LUA_TNIL) {
+    if (push_argument(state, kAnchorsKey) == LUA_TNIL) {
         lua_pop(state, 1);
         return true;
     }
@@ -100,7 +112,7 @@ signed_byte(lua_State* state, lua_Integer value, const char* name, std::int8_t& 
 
 /** Reads the five integer worker inputs in record order, keeping -1 where the caller is silent. */
 [[nodiscard]] bool read_integers(lua_State* state, generator::Record& record) {
-    if (push_argument(state, "values") == LUA_TNIL) {
+    if (push_argument(state, kValuesKey) == LUA_TNIL) {
         lua_pop(state, 1);
         return true;
     }
@@ -135,7 +147,7 @@ signed_byte(lua_State* state, lua_Integer value, const char* name, std::int8_t& 
 
 /** Reads the two float worker inputs; each keeps -1 until the caller names it. */
 [[nodiscard]] bool read_reals(lua_State* state, generator::Record& record) {
-    if (push_argument(state, "reals") == LUA_TNIL) {
+    if (push_argument(state, kRealsKey) == LUA_TNIL) {
         lua_pop(state, 1);
         return true;
     }
@@ -169,10 +181,7 @@ signed_byte(lua_State* state, lua_Integer value, const char* name, std::int8_t& 
 [[nodiscard]] int slot_generate_map(lua_State* state) {
     const auto* const handle =
         static_cast<const SlotHandle*>(luaL_checkudata(state, 1, kSlotMetatable));
-    // Named arguments this call accepts. Any other key is refused.
-    static constexpr std::array<std::string_view, 8> kDeclared{
-        "record", "seed", "mode", "anchors", "enabled", "values", "reals", "state_key"};
-    refuse_unknown_arguments(state, kDeclared);
+    refuse_unknown_arguments(state, kGenerateMap);
     SlotDefinition slot{};
     if (!current_slot(state, *handle, slot)) {
         return luaL_error(state, "activity slot is stale or invalid");
@@ -180,13 +189,17 @@ signed_byte(lua_State* state, lua_Integer value, const char* name, std::int8_t& 
     if (!exact_generator_slot(slot)) {
         return luaL_error(state, "activity slot is not an exact type-37 map generator");
     }
-    const lua_Integer record = optional_integer_argument(state, "record", 1);
+    const lua_Integer record =
+        optional_integer_argument(state, integer_option(kGenerateMap, "record"));
     if (record < 1 || record > static_cast<lua_Integer>(generator::kRecordCount)) {
         return luaL_error(state, "record must be 1 or 2");
     }
     generator::Body body{};
     generator::Record& target = body.records[static_cast<std::size_t>(record - 1)];
-    const lua_Integer seed = optional_integer_argument(state, "seed", -1);
+    using Kind = api::ValueKind;
+    // An absent or negative seed keeps the authored one.
+    const lua_Integer seed =
+        optional_integer_argument(state, optional_key(kGenerateMap, "seed", Kind::integer), -1);
     if (seed >= 0) {
         if (seed > static_cast<lua_Integer>((std::numeric_limits<std::uint32_t>::max)())) {
             return luaL_error(state, "seed must be a 32-bit unsigned integer");
@@ -194,7 +207,7 @@ signed_byte(lua_State* state, lua_Integer value, const char* name, std::int8_t& 
         target.seed = static_cast<std::uint32_t>(seed);
         target.overrides |= kSeedMask;
     }
-    if (push_argument(state, "mode") != LUA_TNIL) {
+    if (push_argument(state, optional_key(kGenerateMap, "mode", Kind::integer)) != LUA_TNIL) {
         if (!lua_isinteger(state, -1)) {
             return luaL_error(state, "mode must be an integer");
         }
@@ -207,7 +220,7 @@ signed_byte(lua_State* state, lua_Integer value, const char* name, std::int8_t& 
     } else {
         lua_pop(state, 1);
     }
-    if (push_argument(state, "enabled") != LUA_TNIL) {
+    if (push_argument(state, optional_key(kGenerateMap, "enabled", Kind::boolean)) != LUA_TNIL) {
         if (!lua_isboolean(state, -1)) {
             return luaL_error(state, "enabled must be a boolean");
         }
@@ -221,7 +234,8 @@ signed_byte(lua_State* state, lua_Integer value, const char* name, std::int8_t& 
         || !read_reals(state, target)) {
         return 0;
     }
-    const lua_Integer stateKey = optional_integer_argument(state, "state_key", 0);
+    const lua_Integer stateKey =
+        optional_integer_argument(state, integer_option(kGenerateMap, "state_key"));
     if (stateKey < 0
         || stateKey > static_cast<lua_Integer>((std::numeric_limits<std::uint32_t>::max)())) {
         return luaL_error(state, "state_key must be a 32-bit unsigned integer");

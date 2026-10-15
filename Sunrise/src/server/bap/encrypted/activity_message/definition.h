@@ -61,6 +61,15 @@ enum class BindingIntent : std::uint8_t {
     publicTarget,
 };
 
+/** Which membership body a join burst carries. */
+enum class JoinMembershipBody : std::uint8_t {
+    none,
+    /** The public source session's member table. */
+    publicSource,
+    /** The private session's join seed. */
+    privateSeed,
+};
+
 /** Join ingress metadata retained until its binding transaction commits. */
 struct JoinIngressDiagnostic final {
     std::uint64_t payloadFingerprint{};
@@ -142,18 +151,14 @@ struct ActivityPlan final {
     std::uint64_t joinCharacterSoid{};
     /**
      * Set when the delta moved the player to a different region.
-     * The new region has no bubble authority until the roster grants it, so waiting for the next
-     * roster tick leaves it empty for up to a whole interval.
+     * The new region has no bubble authority until a roster grants it, so the delta sends one.
      */
     bool regionMoved{};
-    /**
-     * Set when the delta moved the client's transition token, which means it is starting a load.
-     * It is the only start signal on the wire, and the roster's faster cadence runs off it.
-     */
-    bool transitionStarted{};
     Delivery delivery{};
     MutationDomain mutationDomain{};
     BindingIntent bindingIntent{};
+    /** Set by the join route; the push sends only this body. */
+    JoinMembershipBody joinMembershipBody{};
 };
 
 } // namespace sunrise::server::bap::encrypted::activity_message

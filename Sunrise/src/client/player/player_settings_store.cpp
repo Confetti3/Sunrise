@@ -14,6 +14,7 @@
 
 #include "../../core/filesystem/path.h"
 #include "../../core/logging/log.h"
+#include "../../core/settings/settings.h"
 
 namespace sunrise::client::player {
 namespace {
@@ -160,19 +161,27 @@ void shutdown() noexcept {
     ReleaseSRWLockExclusive(&g_lock);
 }
 
-/** @return One lock-consistent copy of the current configuration. */
+/** @return One lock-consistent copy; with cheats locked infinite ammo reads as off. */
 Settings get() noexcept {
     AcquireSRWLockShared(&g_lock);
-    const Settings snapshot = g_settings;
+    Settings snapshot = g_settings;
     ReleaseSRWLockShared(&g_lock);
+    if (!core::settings::get().client.cheats) {
+        snapshot.infiniteAmmoEnabled = false;
+    }
     return snapshot;
 }
 
 /** Publishes one configuration and writes it straight to disk. */
 bool publish(const Settings& settings) noexcept {
     AcquireSRWLockExclusive(&g_lock);
-    g_settings = settings;
-    const bool stored = store(settings);
+    Settings next = settings;
+    // A locked session sees the cheat as off, so it keeps the stored choice instead of saving that.
+    if (!core::settings::get().client.cheats) {
+        next.infiniteAmmoEnabled = g_settings.infiniteAmmoEnabled;
+    }
+    g_settings = next;
+    const bool stored = store(next);
     ReleaseSRWLockExclusive(&g_lock);
     if (!stored) {
         report_fail("write");

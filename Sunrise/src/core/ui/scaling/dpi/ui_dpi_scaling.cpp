@@ -51,9 +51,8 @@ bool calculate(UINT reportedDpi, UINT viewportWidth, UINT viewportHeight, Value&
     const float heightScale =
         static_cast<float>(viewportHeight) / static_cast<float>(kAuthoredViewportHeight);
     // The smaller axis stops odd aspect ratios from scaling past the space there is.
-    const float viewportScale = (std::clamp)((std::min)(widthScale, heightScale),
-                                             kMinimumViewportScale,
-                                             kMaximumViewportScale);
+    const float viewportScale = (std::clamp)(
+        (std::min)(widthScale, heightScale), kMinimumViewportScale, kMaximumViewportScale);
     // At base DPI the UI may shrink. Above it, DPI and framebuffer scale do not stack.
     const float environmentalScale =
         dpiScale <= 1.0F ? viewportScale : (std::max)(viewportScale, dpiScale);

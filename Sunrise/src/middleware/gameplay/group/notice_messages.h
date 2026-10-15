@@ -23,17 +23,6 @@ enum class NoticeMessageId : std::uint8_t {
     voiceRegistration = 41,
 };
 
-/** Declared decoded sizes the registry holds for those ids. */
-inline constexpr std::uint32_t kPeerConnectNoticeSize = 24;
-/** See kPeerConnectNoticeSize. */
-inline constexpr std::uint32_t kDelegateLeadershipSize = 94;
-/** See kPeerConnectNoticeSize. */
-inline constexpr std::uint32_t kBootMachineSize = 100;
-/** See kPeerConnectNoticeSize. */
-inline constexpr std::uint32_t kPlayerRefuseSize = 24;
-/** See kPeerConnectNoticeSize. */
-inline constexpr std::uint32_t kVoiceRegistrationSize = 16;
-
 /** The voice registration is 128 opaque bits the checked build never reads. */
 inline constexpr std::size_t kVoiceRegistrationBytes = 16;
 

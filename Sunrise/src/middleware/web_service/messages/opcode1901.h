@@ -11,11 +11,11 @@ namespace sunrise::middleware::web_service::messages::opcode1901 {
 /** Web Service opcode used by the equipped-item shader application action. */
 inline constexpr std::uint16_t kOpcode = 1901;
 
-/** The equipment selector carries only the low 62 bits of the item instance's identity. */
-inline constexpr std::uint64_t kInstanceIdentityMask = 0x3FFFFFFFFFFFFFFFULL;
-
 /** The native replacement array reserves twelve entries, which its 4-bit count can address. */
 inline constexpr std::size_t kReplacementCapacity = 12;
+
+/** Collection-backed shader sources send INT64_MIN as their auxiliary identity. */
+inline constexpr std::uint64_t kShaderAuxiliary = 0x8000000000000000ULL;
 
 /** One socket replacement: which plug goes into which socket of the named item. */
 struct Replacement {
@@ -34,30 +34,16 @@ struct Replacement {
 struct Request {
     std::array<Replacement, kReplacementCapacity> replacements{};
     std::size_t replacementCount{};
-    /** Selector exactly as the descriptor carries it, before any decode. */
-    std::uint64_t equipmentSelector{};
-    /** The item-instance identity that selector encodes, already decoded. */
-    std::uint64_t instanceIdentityToken{};
+    /** Whole item-instance identity of the target, sent unbiased. */
+    std::uint64_t targetInstanceSoid{};
 };
 
 /**
- * Answers whether one decoded selector names a given item instance.
- * The selector carries only part of the instance identity, so this compares against that part
- * rather than testing equality. Callers hold whole identities and pass them unchanged.
- * @param instanceIdentityToken Decoded selector from a parsed request.
- * @param instanceSoid Whole item-instance identity held by State.
- * @return True when the selector names that instance.
- */
-[[nodiscard]] bool identifies_instance(std::uint64_t instanceIdentityToken,
-                                       std::uint64_t instanceSoid) noexcept;
-
-/**
  * Parses the exact reflected opcode-1901 descriptor.
- * The request is a bounded replacement array followed by the target's equipment selector. Every
- * optional identity in that array and target is required.
+ * The request is a bounded replacement array followed by the target's whole instance identity.
  * @param message Parsed Web Service envelope.
- * @param request Receives the plug, socket descriptor, auxiliary identity, and equipment slot.
- * @return True only for the complete canonical 24-byte one-replacement request.
+ * @param request Receives the plug, socket descriptor, auxiliary identity, and target instance.
+ * @return True for a complete shader request of one to twelve replacements.
  */
 [[nodiscard]] bool parse_request(const Message& message, Request& request) noexcept;
 

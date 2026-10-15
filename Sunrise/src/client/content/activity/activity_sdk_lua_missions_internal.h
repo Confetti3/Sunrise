@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -34,6 +35,19 @@ void append_int(std::string& output, std::int32_t value);
 
 /** Appends the catalog-wide constant tables every mission module shares. */
 void append_catalog_constants(const Source& source, std::string& output);
+
+/**
+ * Appends one scene's inputs and outputs, named where the trigger name is known.
+ * An input is waited on and fired by no graph block; an output is fired and waited on by none.
+ * @param scene The scene's Lua key.
+ * @param gates The scene's gate rows, in graph order.
+ * @param inputs Receives the scene's block of `mission.SceneInput`, when it has inputs.
+ * @param outputs Receives the scene's block of `mission.SceneOutput`, when it has outputs.
+ */
+void append_scene_ports(std::string_view scene,
+                        std::span<const format::AuthoredSceneEventKey> gates,
+                        std::string& inputs,
+                        std::string& outputs);
 
 /** Emits one concrete mission module with no pack or resolver access. */
 [[nodiscard]] bool render_mission(const Source& source,

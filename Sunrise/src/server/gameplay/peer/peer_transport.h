@@ -238,10 +238,16 @@ open_external_common(const state::gameplay::Endpoint& endpoint,
                                                    std::uint8_t expectedEpoch,
                                                    std::uint8_t nextEpoch) noexcept;
 
-/** Reports whether all native gates permit one outbound external body. */
+/**
+ * Reports whether all native gates permit one outbound external body.
+ * TODO: no caller until the channel-2 per-type contribution builder lands.
+ */
 [[nodiscard]] bool external_outbound_eligible(std::uint64_t groupSessionId) noexcept;
 
-/** @return True once that session's link holds a bound view and has finished connecting. */
+/**
+ * @return True once that session's link holds a bound view and has finished connecting.
+ * TODO: no caller until the channel-2 per-type contribution builder lands.
+ */
 [[nodiscard]] bool view_bound(std::uint64_t sessionId) noexcept;
 
 /**

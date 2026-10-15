@@ -62,18 +62,19 @@ void clear_runtime() noexcept {
 }
 
 /** Removes one hook and points admitted calls at the restored target. */
-bool detach(HookSlot slot, void* replacement) noexcept {
+bool detach(HookSlot slot) noexcept {
     hooking::detour::Handle& handle = g_handles[index(slot)];
     if (!handle.attached) {
         return true;
     }
+    // Both replacement bodies sit in .srcfg; ingress and egress sit in .text.
     const std::array protectedEntries{
-        hooking::detour::ProtectedCodeEntry{replacement},
         hooking::detour::ProtectedCodeEntry{coordinator::ingress_entry_point()},
         hooking::detour::ProtectedCodeEntry{coordinator::egress_entry_point()},
     };
+    const std::array protectedSpans{hooking::detour::section_span(".srcfg")};
     const hooking::detour::UninstallResult result =
-        hooking::detour::uninstall(handle, protectedEntries, &coordinator::idle);
+        hooking::detour::uninstall(handle, protectedEntries, protectedSpans, &coordinator::idle);
     if (result != hooking::detour::UninstallResult::removed) {
         return false;
     }

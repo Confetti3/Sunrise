@@ -144,6 +144,48 @@ bool open(std::string_view path,
     return ready;
 }
 
+/**
+ * Copies the open save into a `:memory:` database with the backup API, then swaps the handle.
+ * Statements never outlive a locked call, so none holds the old handle across the swap.
+ * @return False when the copy failed; the file handle then stays in use.
+ */
+bool use_session_copy() noexcept {
+    // SQLite names an in-memory database by this file name, and a database's main schema so.
+    constexpr char kMemoryDatabase[] = ":memory:";
+    constexpr char kMainSchema[] = "main";
+    // A negative page count copies every page in one step.
+    constexpr int kAllPages = -1;
+    const std::lock_guard lock(g_mutex);
+    if (g_database == nullptr) {
+        return false;
+    }
+    sqlite3* memory = nullptr;
+    if (sqlite3_open_v2(kMemoryDatabase,
+                        &memory,
+                        SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX,
+                        nullptr)
+        != SQLITE_OK) {
+        sqlite3_close_v2(memory);
+        return false;
+    }
+    sqlite3_backup* const backup =
+        sqlite3_backup_init(memory, kMainSchema, g_database, kMainSchema);
+    const bool copied = backup != nullptr && sqlite3_backup_step(backup, kAllPages) == SQLITE_DONE;
+    // Finish runs for every started backup; it releases the source read lock.
+    const bool finished = sqlite3_backup_finish(backup) == SQLITE_OK;
+    // Foreign keys are a connection setting, so the copy needs them switched on again.
+    const bool ready =
+        copied && finished
+        && sqlite3_exec(memory, "PRAGMA foreign_keys=ON;", nullptr, nullptr, nullptr) == SQLITE_OK;
+    if (!ready) {
+        sqlite3_close_v2(memory);
+        return false;
+    }
+    sqlite3_close_v2(g_database);
+    g_database = memory;
+    return true;
+}
+
 /** Saves are synchronous, so shutdown only closes the handle and discards session fields. */
 void shutdown() noexcept {
     const std::lock_guard lock(g_mutex);

@@ -108,7 +108,7 @@ bool append_account_resync_notification(
  * @param written Existing byte count, updated after each complete push.
  * @param after Receives the queuez state published after caller output is copied.
  * @param armsRepush Receives whether the Family-4 companion owes its delayed second copy.
- * @param armsBannerRepush Receives whether a family-zero body owes its delayed second copy.
+ * @param ownSnapshotAnswered True when the reply already carried this subscribe's snapshot.
  */
 void append_queuez_notification(Scratch& scratch,
                                 const queuez::SessionState& before,
@@ -119,11 +119,9 @@ void append_queuez_notification(Scratch& scratch,
                                 std::size_t& written,
                                 queuez::SessionState& after,
                                 bool& armsRepush,
-                                bool& armsBannerRepush,
                                 bool ownSnapshotAnswered) noexcept {
     after = before;
     armsRepush = false;
-    armsBannerRepush = false;
     // Runs ahead of the dispatch below; inside one family's builder it would leave the other
     // families describing a different account.
     ensure_account_canonical();

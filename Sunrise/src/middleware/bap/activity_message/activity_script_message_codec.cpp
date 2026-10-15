@@ -250,10 +250,4 @@ bool decode_event(std::span<const std::byte> input, EventBody& body) noexcept {
     return true;
 }
 
-/** Checks one exact message-41 body without retaining decoded state. */
-bool validate_event(std::span<const std::byte> input) noexcept {
-    EventBody body{};
-    return decode_event(input, body);
-}
-
 } // namespace sunrise::middleware::bap::activity_message::script_messages

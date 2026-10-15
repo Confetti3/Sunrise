@@ -14,6 +14,7 @@
 
 #include "../../../core/ui/components/section/ui_section_component.h"
 #include "../../../core/ui/scaling/dpi/ui_dpi_scaling.h"
+#include "../../../middleware/content/packages/tables/authored_squad_reader.h"
 #include "../../../state/activity_sdk/runtime.h"
 #include "../../activity/activity_sdk_mission_runtime.h"
 #include "../../activity/activity_sdk_squad_runtime.h"
@@ -29,6 +30,7 @@ namespace scaling = core::ui::scaling::dpi;
 namespace sdk = state::activity_sdk;
 namespace section = core::ui::components::section;
 namespace squad_auth = middleware::bap::activity_message::squad_auth;
+namespace tables = middleware::content::packages::tables;
 
 namespace {
 mission::SceneStatus g_behaviorSceneResult{mission::SceneStatus::ready};
@@ -42,8 +44,6 @@ std::uint32_t g_nameHash{};
 std::uint32_t g_destinationRow{format::kAbsentIndex};
 /** Catalog slot row of the type-66 spawn rule override, or absent for the package rule. */
 std::uint32_t g_spawnRuleRow{format::kAbsentIndex};
-/** Package slot type of a spawn rule; the squad Auth override must name one. */
-constexpr std::uint32_t kSpawnRuleSlotType = 66;
 runtime::Status g_lastResult{runtime::Status::ready};
 bool g_hasResult{};
 
@@ -202,7 +202,7 @@ void draw_spawn_rule(const sdk::Catalog& catalog, const format::Squad& squad) no
     }
     for (std::uint32_t row = 0; row < slots.size(); ++row) {
         if (slots[row].objectIndex != squad.objectIndex
-            || slots[row].slotType != kSpawnRuleSlotType) {
+            || slots[row].slotType != tables::kAuthoredSquadRuleSlotType) {
             continue;
         }
         const SquadLabel name = slot_label(catalog, slots, row, "rule");

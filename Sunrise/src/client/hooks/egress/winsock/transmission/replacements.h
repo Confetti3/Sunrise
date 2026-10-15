@@ -4,6 +4,13 @@
 
 namespace sunrise::client::hooks::egress::winsock::transmission {
 
+/** Clears an optional send count before a denial. */
+inline void clear_bytes(LPDWORD bytes) noexcept {
+    if (bytes != nullptr) {
+        *bytes = 0;
+    }
+}
+
 /** Sends contiguous bytes only to a connected exact IPv4 redirect target. */
 int WSAAPI send_bytes(SOCKET socket, const char* buffer, int length, int flags) noexcept;
 

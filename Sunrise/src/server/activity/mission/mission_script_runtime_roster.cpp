@@ -33,20 +33,6 @@ void publish_peer_set(RuntimeInstance& instance) noexcept {
 
 } // namespace
 
-/** Reports one committed phase change to the script. */
-void queue_phase_entered(RuntimeInstance& instance, std::uint32_t previousPhase) noexcept {
-    host::Event event{};
-    event.binding = instance.view.binding;
-    event.sequence = instance.missionStateRevision;
-    event.sourceGeneration = instance.view.activityClientGeneration;
-    event.missionSequence = instance.lastMissionSequence;
-    event.stateRevision = instance.missionStateRevision;
-    event.missionPhase = instance.missionPhase;
-    event.previousMissionPhase = previousPhase;
-    event.kind = host::EventKind::phaseEntered;
-    push_script_event(instance, event);
-}
-
 /** @return The identity every host-state edge that is not a Sense edge carries. */
 [[nodiscard]] host::Event state_edge_event(const RuntimeInstance& instance) noexcept {
     host::Event event{};
@@ -55,6 +41,16 @@ void queue_phase_entered(RuntimeInstance& instance, std::uint32_t previousPhase)
     event.sourceGeneration = instance.view.activityClientGeneration;
     event.missionSequence = instance.lastMissionSequence;
     return event;
+}
+
+/** Reports one committed phase change to the script. */
+void queue_phase_entered(RuntimeInstance& instance, std::uint32_t previousPhase) noexcept {
+    host::Event event = state_edge_event(instance);
+    event.stateRevision = instance.missionStateRevision;
+    event.missionPhase = instance.missionPhase;
+    event.previousMissionPhase = previousPhase;
+    event.kind = host::EventKind::phaseEntered;
+    push_script_event(instance, event);
 }
 
 /**

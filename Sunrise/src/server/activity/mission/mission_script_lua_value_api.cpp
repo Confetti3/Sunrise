@@ -2,35 +2,40 @@
 // writes the lane the client indexes.
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
 
+#include "mission_script_lua_dispatch.h"
 #include "mission_script_lua_internal.h"
 
 namespace sunrise::server::activity::mission::lua_vm::detail {
 namespace {
 
-/** Ordinary placement and native transport reservation; other encodings have no name. */
-constexpr std::uint8_t kSquadModeReinforce = 0;
-constexpr std::uint8_t kSquadModeReplace = 2;
-constexpr std::uint8_t kSquadModeReserve = 3;
+/** Unit scalar members in table order. */
+constexpr std::array<Binding<UnitScalarHandle>, std::size(api::kUnitScalarMembers)>
+    kUnitScalarBindings{{
+        {"value",
+         nullptr,
+         [](lua_State* state, const UnitScalarHandle& handle) {
+             lua_pushnumber(state, handle.value);
+         }},
+        {"low",
+         nullptr,
+         [](lua_State* state, const UnitScalarHandle&) { lua_pushnumber(state, kUnitLaneLow); }},
+        {"high",
+         nullptr,
+         [](lua_State* state, const UnitScalarHandle&) { lua_pushnumber(state, kUnitLaneHigh); }},
+    }};
+static_assert(bound_to<UnitScalarHandle>(api::kUnitScalarMembers, kUnitScalarBindings));
 
 /** Lua index for a unit scalar: its value and the device lane bounds. */
 [[nodiscard]] int unit_scalar_index(lua_State* state) {
     const auto* const handle =
         static_cast<const UnitScalarHandle*>(luaL_checkudata(state, 1, kUnitScalarMetatable));
-    const std::string_view key = lua_string_view(state, 2);
-    if (key == "value") {
-        lua_pushnumber(state, handle->value);
-    } else if (key == "low") {
-        lua_pushnumber(state, kUnitLaneLow);
-    } else if (key == "high") {
-        lua_pushnumber(state, kUnitLaneHigh);
-    } else {
-        lua_pushnil(state);
-    }
-    return 1;
+    return dispatch<UnitScalarHandle>(
+        state, kUnitScalarBindings, lua_string_view(state, 2), *handle);
 }
 
 /** Mints one channel value; the client owns the meaning of the float. */
@@ -43,37 +48,54 @@ constexpr std::uint8_t kSquadModeReserve = 3;
     return 1;
 }
 
+/** Squad mode members in table order. */
+constexpr std::array<Binding<SquadModeHandle>, std::size(api::kSquadModeMembers)>
+    kSquadModeBindings{{
+        {"name",
+         nullptr,
+         [](lua_State* state, const SquadModeHandle& handle) {
+             const std::string_view name = squad_mode_name(handle.mode);
+             lua_pushlstring(state, name.data(), name.size());
+         }},
+        {"value",
+         nullptr,
+         [](lua_State* state, const SquadModeHandle& handle) {
+             lua_pushinteger(state, handle.mode);
+         }},
+    }};
+static_assert(bound_to<SquadModeHandle>(api::kSquadModeMembers, kSquadModeBindings));
+
 /** Lua index for one squad mode: its name and wire value. */
 [[nodiscard]] int squad_mode_index(lua_State* state) {
     const auto* const handle =
         static_cast<const SquadModeHandle*>(luaL_checkudata(state, 1, kSquadModeMetatable));
-    const std::string_view key = lua_string_view(state, 2);
-    if (key == "name") {
-        const std::string_view name = squad_mode_name(handle->mode);
-        lua_pushlstring(state, name.data(), name.size());
-    } else if (key == "value") {
-        lua_pushinteger(state, handle->mode);
-    } else {
-        lua_pushnil(state);
-    }
-    return 1;
+    return dispatch<SquadModeHandle>(state, kSquadModeBindings, lua_string_view(state, 2), *handle);
 }
+
+/** Squad mode collection members in table order; mode names are served after them. */
+constexpr std::array<Binding<NoSubject>, std::size(api::kSquadModesMembers)> kSquadModesBindings{{
+    {"count",
+     nullptr,
+     [](lua_State* state, const NoSubject&) {
+         lua_pushinteger(state, static_cast<lua_Integer>(std::size(api::kSquadModeEntries)));
+     }},
+}};
+static_assert(bound_to<NoSubject>(api::kSquadModesMembers, kSquadModesBindings));
 
 /** Lua index for the squad mode collection: `count` or a mode name, else nil. */
 [[nodiscard]] int squad_mode_collection_index(lua_State* state) {
     static_cast<void>(luaL_checkudata(state, 1, kSquadModeCollectionMetatable));
     const std::string_view key = lua_string_view(state, 2);
-    if (key == "reinforce") {
-        push_squad_mode(state, kSquadModeReinforce);
-    } else if (key == "replace") {
-        push_squad_mode(state, kSquadModeReplace);
-    } else if (key == "reserve") {
-        push_squad_mode(state, kSquadModeReserve);
-    } else if (key == "count") {
-        lua_pushinteger(state, 3);
-    } else {
-        lua_pushnil(state);
+    if (serve<NoSubject>(state, kSquadModesBindings, key, NoSubject{})) {
+        return 1;
     }
+    for (const api::EnumEntry& entry : api::kSquadModeEntries) {
+        if (entry.name == key) {
+            push_squad_mode(state, static_cast<std::uint8_t>(entry.value));
+            return 1;
+        }
+    }
+    lua_pushnil(state);
     return 1;
 }
 
@@ -116,37 +138,40 @@ vector_squad(lua_State* state, const SquadCountVectorHandle& handle, SquadDefini
     return 0;
 }
 
+/** Count vector members in table order. */
+constexpr std::array<Binding<SquadCountVectorHandle>, std::size(api::kCountVectorMembers)>
+    kCountVectorBindings{{
+        {"count",
+         nullptr,
+         [](lua_State* state, const SquadCountVectorHandle& handle) {
+             lua_pushinteger(state, handle.count);
+         }},
+        {"capacity",
+         nullptr,
+         [](lua_State* state, const SquadCountVectorHandle&) {
+             lua_pushinteger(state, static_cast<lua_Integer>(kSquadCountCapacity));
+         }},
+        {"at", &squad_count_vector_at},
+        {"set", &squad_count_vector_set},
+    }};
+static_assert(bound_to<SquadCountVectorHandle>(api::kCountVectorMembers, kCountVectorBindings));
+
 /** Lua index for a squad count vector: its used count, capacity and lanes. */
 [[nodiscard]] int squad_count_vector_index(lua_State* state) {
     const auto* const handle = static_cast<const SquadCountVectorHandle*>(
         luaL_checkudata(state, 1, kSquadCountVectorMetatable));
-    const std::string_view key = lua_string_view(state, 2);
-    if (key == "count") {
-        lua_pushinteger(state, handle->count);
-    } else if (key == "capacity") {
-        lua_pushinteger(state, static_cast<lua_Integer>(kSquadCountCapacity));
-    } else if (key == "at") {
-        lua_pushcfunction(state, &squad_count_vector_at);
-    } else if (key == "set") {
-        lua_pushcfunction(state, &squad_count_vector_set);
-    } else {
-        lua_pushnil(state);
-    }
-    return 1;
+    return dispatch<SquadCountVectorHandle>(
+        state, kCountVectorBindings, lua_string_view(state, 2), *handle);
 }
 
 } // namespace
 
 /** @return The stable Lua name of one squad mode. */
 std::string_view squad_mode_name(std::uint8_t mode) noexcept {
-    if (mode == kSquadModeReinforce) {
-        return "reinforce";
-    }
-    if (mode == kSquadModeReplace) {
-        return "replace";
-    }
-    if (mode == kSquadModeReserve) {
-        return "reserve";
+    for (const api::EnumEntry& entry : api::kSquadModeEntries) {
+        if (entry.value == mode) {
+            return entry.name;
+        }
     }
     return "unknown";
 }

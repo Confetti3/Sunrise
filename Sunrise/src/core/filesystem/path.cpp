@@ -9,6 +9,8 @@ namespace {
 
 /** One owned folder prevents generated files from accumulating beside game binaries. */
 constexpr std::wstring_view kArtifactDirectorySuffix = L"Sunrise";
+/** A full path that starts with two backslashes is a UNC path. */
+constexpr std::wstring_view kUncPrefix = L"\\\\";
 
 } // namespace
 
@@ -106,6 +108,35 @@ bool append(Buffer& path, std::wstring_view suffix) noexcept {
     path.length += suffix.size();
     path.chars[path.length] = L'\0';
     return true;
+}
+
+/** Resolves the path the way Win32 would, then adds the extended prefix. */
+std::wstring extended(const wchar_t* path) noexcept {
+    if (path == nullptr || path[0] == L'\0') {
+        return {};
+    }
+    const std::wstring_view input(path);
+    try {
+        if (input.starts_with(kExtendedPrefix) || input.starts_with(kDevicePrefix)) {
+            return std::wstring(input);
+        }
+        const DWORD needed = GetFullPathNameW(path, 0, nullptr, nullptr);
+        if (needed == 0) {
+            return {};
+        }
+        std::wstring full(needed, L'\0');
+        const DWORD written = GetFullPathNameW(path, needed, full.data(), nullptr);
+        if (written == 0 || written >= needed) {
+            return {};
+        }
+        full.resize(written);
+        if (full.starts_with(kUncPrefix)) {
+            return std::wstring(kExtendedUncPrefix).append(full, kUncPrefix.size());
+        }
+        return std::wstring(kExtendedPrefix).append(full);
+    } catch (...) {
+        return {};
+    }
 }
 
 } // namespace sunrise::core::path

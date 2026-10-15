@@ -242,7 +242,6 @@ void copy_diagnostics(const RuntimeInstance& instance, InstanceDiagnostics& outp
     output.lastVmStatus = instance.lastVmStatus;
     output.eventsSeen = instance.eventsSeen;
     output.eventsCommitted = instance.eventsCommitted;
-    output.lastEventSequence = instance.lastEventSequence;
     output.lastMissionSequence = instance.lastMissionSequence;
     output.missionStateRevision = instance.missionStateRevision;
     output.activityStateRevision = instance.activityStateRevision;
@@ -254,10 +253,8 @@ void copy_diagnostics(const RuntimeInstance& instance, InstanceDiagnostics& outp
     output.intentAttempts = instance.intentAttempts;
     output.startAttempts = instance.startAttempts;
     output.pendingEvents = pending_event_count(instance.view.binding);
-    output.publicTarget = instance.publicTarget;
     output.missionStateBound = instance.missionStateBound;
     output.missionStarted = instance.missionStarted;
-    output.startPending = instance.startPending;
 
     lua_vm::Snapshot vm{};
     lua_vm::snapshot(instance.vm, vm);

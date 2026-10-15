@@ -76,10 +76,4 @@ enum class ActorEntityApplyResult : std::uint8_t {
 /** Clears the registry in place without a full-table stack temporary. */
 void reset_actor_entity_registry(ActorEntityRegistry& registry) noexcept;
 
-/** Copies current entity tokens for one SDK actor class into caller-owned storage. */
-[[nodiscard]] bool actor_entity_targets(const ActorEntityRegistry& registry,
-                                        std::uint32_t actorClassIndex,
-                                        std::span<EntityToken> output,
-                                        std::size_t& count) noexcept;
-
 } // namespace sunrise::middleware::gameplay::external

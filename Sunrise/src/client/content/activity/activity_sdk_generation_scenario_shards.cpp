@@ -117,11 +117,10 @@ void report_shard_diagnostics(const Scenario& scenario,
                                 std::shared_ptr<const catalog::Snapshot>& output,
                                 std::array<char, kDetailCapacity>& detailScratch,
                                 const char*& detail) {
-    // Every arm below reported the same word, so a failure named the step it reached and nothing
-    // about which of five things went wrong. Each one now says which.
+    // Each failure arm reports its own detail token.
     const std::string_view name(scenario.name.data(), scenario.nameLength);
     const auto snapshot = builder::build_scenario_catalog(
-        source, containers, scratch, analyses, scenario.tag, name, &cancel_requested);
+        source, containers, scratch, analyses, work.tables, scenario.tag, name, &cancel_requested);
     if (cancel_requested()) {
         detail = "shard_cancelled";
         return false;
@@ -154,6 +153,11 @@ void report_shard_diagnostics(const Scenario& scenario,
         detailScratch = {};
         (void)std::snprintf(detailScratch.data(), detailScratch.size(), "%s:%s", stage, reason);
         detail = detailScratch.data();
+        return false;
+    }
+    if (!snapshot->containerPlacementDiagnostics.identityOwnerInventoryComplete) {
+        detail = "shard_container_inventory_incomplete";
+        report_shard_diagnostics(scenario, *snapshot);
         return false;
     }
     generated::PreparedShard prepared{};
@@ -253,12 +257,14 @@ void publish_parallel_progress(ScenarioBuildBatch& batch, const Scenario& scenar
     ReleaseSRWLockExclusive(&batch.progressLock);
 }
 
-/** A cache made before the layout catalogue was ready omitted whole placement domains. */
-[[nodiscard]] bool placement_context_ready(const Scenario& scenario,
+/** A cached shard of a laid-out scenario is reusable only when its placement contexts resolved. */
+[[nodiscard]] bool placement_context_ready(const Work& work,
+                                           const Scenario& scenario,
                                            const catalog::Snapshot& snapshot) noexcept {
     state::build_data::scenarios::Definition layout{};
     const std::string_view name(scenario.name.data(), scenario.nameLength);
-    if (!state::build_data::find_scenario_layout(name, layout) || layout.spawnStemLength == 0) {
+    if (!::sunrise::client::content::scenarios::find_layout(work.tables.layouts, name, layout)
+        || layout.spawnStemLength == 0) {
         return true;
     }
     return snapshot.containerPlacementDiagnostics.contextResolved
@@ -297,7 +303,7 @@ void run_scenario_worker(ScenarioBuildBatch& batch) noexcept {
                                                 scenario,
                                                 *existing,
                                                 result.snapshot);
-                if (kept && !placement_context_ready(scenario, *result.snapshot)) {
+                if (kept && !placement_context_ready(*batch.work, scenario, *result.snapshot)) {
                     kept = false;
                 }
                 if (kept

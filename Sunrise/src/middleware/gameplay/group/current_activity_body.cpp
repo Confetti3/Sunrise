@@ -16,11 +16,7 @@ struct Field {
     bool present;
 };
 
-/**
- * Fields 0 through 15 of the definition, minus the nonce, which the writer places itself.
- * Biased fields take zero, which decodes to the value one below their bias and is the absent
- * encoding every index field in this descriptor uses.
- */
+/** Whether the field walker reads a presence bit before the field. */
 constexpr std::uint8_t kNoPresenceBit = 0;
 constexpr std::uint8_t kHasPresenceBit = 1;
 

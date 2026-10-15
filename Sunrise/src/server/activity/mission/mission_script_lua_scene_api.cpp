@@ -1,6 +1,8 @@
+#include <array>
 #include <string_view>
 
 #include "../../../middleware/bap/activity_message/scene_events_auth.h"
+#include "mission_script_lua_dispatch.h"
 #include "mission_script_lua_internal.h"
 #include "mission_script_lua_names.h"
 #include "mission_script_lua_resolve.h"
@@ -8,6 +10,32 @@
 #include "mission_script_vm_internal.h"
 
 namespace sunrise::server::activity::mission::lua_vm::detail {
+namespace {
+
+// Table entries of the scene members this file implements.
+constexpr const api::MemberSpec& kActivate = api::member(api::Receiver::scene, "activate");
+constexpr const api::MemberSpec& kSendEvent = api::member(api::Receiver::scene, "send_event");
+constexpr const api::MemberSpec& kStop = api::member(api::Receiver::scene, "stop");
+
+/** Scene members in table order. */
+constexpr std::array<Binding<SceneDefinition>, std::size(api::kSceneMembers)> kSceneBindings{{
+    {"row",
+     nullptr,
+     [](lua_State* state, const SceneDefinition& scene) {
+         lua_pushinteger(state, scene.localRow);
+     }},
+    {"id",
+     nullptr,
+     [](lua_State* state, const SceneDefinition& scene) {
+         lua_pushlstring(state, scene.id.data(), scene.idLength);
+     }},
+    {"activate", &scene_activate},
+    {"stop", &scene_stop},
+    {"send_event", &scene_send_event},
+}};
+static_assert(bound_to<SceneDefinition>(api::kSceneMembers, kSceneBindings));
+
+} // namespace
 
 /** Lua index for a scene handle: its named fields. Errors when the scene is stale. */
 [[nodiscard]] int scene_index(lua_State* state) {
@@ -17,21 +45,7 @@ namespace sunrise::server::activity::mission::lua_vm::detail {
     if (!current_scene(state, *handle, definition)) {
         return luaL_error(state, "authored scene is stale");
     }
-    const std::string_view key = lua_string_view(state, 2);
-    if (key == "row") {
-        lua_pushinteger(state, definition.localRow);
-    } else if (key == "id") {
-        lua_pushlstring(state, definition.id.data(), definition.idLength);
-    } else if (key == "activate") {
-        lua_pushcfunction(state, &scene_activate);
-    } else if (key == "stop") {
-        lua_pushcfunction(state, &scene_stop);
-    } else if (key == "send_event") {
-        lua_pushcfunction(state, &scene_send_event);
-    } else {
-        lua_pushnil(state);
-    }
-    return 1;
+    return dispatch<SceneDefinition>(state, kSceneBindings, lua_string_view(state, 2), definition);
 }
 
 /** Scene creation records exact SDK sources before native preparation can change them. */
@@ -42,21 +56,22 @@ namespace sunrise::server::activity::mission::lua_vm::detail {
     if (!current_scene(state, *handle, definition)) {
         return luaL_error(state, "authored scene is stale or invalid");
     }
-    // Only these named arguments belong to this API.
-    static constexpr std::array<std::string_view, 1> kDeclared{"spawn"};
-    refuse_unknown_arguments(state, kDeclared);
+    refuse_unknown_arguments(state, kActivate);
     CallFrame& frame = active_frame(state);
     Intent intent{};
     intent.kind = IntentKind::activateAuthoredScene;
     intent.firstRow = definition.occurrenceRow;
     intent.secondRow = definition.slotRow;
-    intent.active = optional_boolean_argument(state, "spawn", false);
+    intent.active = optional_boolean_argument(state, boolean_option(kActivate, "spawn"));
     if (intent.active) {
-        const auto& api = impl_from_state(state)->definitions;
+        const auto& definitions = impl_from_state(state)->definitions;
         std::size_t count = 0;
-        if (api.resolveSceneSpawnSources == nullptr
-            || !api.resolveSceneSpawnSources(
-                api.context, definition.occurrenceRow, definition.slotRow, intent.burstRows, count)
+        if (definitions.resolveSceneSpawnSources == nullptr
+            || !definitions.resolveSceneSpawnSources(definitions.context,
+                                                     definition.occurrenceRow,
+                                                     definition.slotRow,
+                                                     intent.burstRows,
+                                                     count)
             || count > intent.burstRows.size()) {
             return luaL_error(state, "scene has no unambiguous authored spawn cast");
         }
@@ -73,10 +88,9 @@ namespace sunrise::server::activity::mission::lua_vm::detail {
     if (!current_scene(state, *handle, definition)) {
         return luaL_error(state, "authored scene is stale or invalid");
     }
-    // Only these named arguments belong to this API.
-    static constexpr std::array<std::string_view, 1> kDeclared{"key"};
-    refuse_unknown_arguments(state, kDeclared);
-    const lua_Integer key = checked_integer_argument(state, "key");
+    refuse_unknown_arguments(state, kSendEvent);
+    const lua_Integer key =
+        checked_integer_argument(state, required_key(kSendEvent, "key", api::ValueKind::integer));
     if (key <= 0
         || key >= static_cast<lua_Integer>(
                middleware::bap::activity_message::scene_events::kInvalidEventKey)) {
@@ -98,7 +112,7 @@ namespace sunrise::server::activity::mission::lua_vm::detail {
     if (!current_scene(state, *handle, definition)) {
         return luaL_error(state, "authored scene is stale or invalid");
     }
-    refuse_unknown_arguments(state, {});
+    refuse_unknown_arguments(state, kStop);
     Intent intent{};
     intent.kind = IntentKind::stopAuthoredScene;
     intent.firstRow = definition.occurrenceRow;

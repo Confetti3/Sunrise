@@ -315,19 +315,6 @@ void retain_cached(std::wstring_view scenarioDirectory,
     return BindStatus::ready;
 }
 
-#if !defined(SUNRISE_ACTIVITY_SDK_TESTING)
-/** Copies the live installed-content identity while State owns its manifest view. */
-[[nodiscard]] bool copy_live_fingerprint(void* opaque,
-                                         const state::content_manifest::View& view) noexcept {
-    if (opaque == nullptr || view.buildFingerprint.size() != Digest{}.size()) {
-        return false;
-    }
-    auto& output = *static_cast<Digest*>(opaque);
-    std::copy(view.buildFingerprint.begin(), view.buildFingerprint.end(), output.begin());
-    return output != Digest{};
-}
-#endif
-
 } // namespace
 
 /** @return The stable log name of one bind status. */
@@ -410,7 +397,8 @@ BindStatus resolve(const activity_sdk::BoundView& activitySdkView,
         return BindStatus::invalidBoundView;
     }
     Digest sourceFingerprint{};
-    if (!state::content_manifest::visit_snapshot(&copy_live_fingerprint, &sourceFingerprint)) {
+    if (!state::content_manifest::installed_fingerprint(sourceFingerprint)
+        || sourceFingerprint == Digest{}) {
         return BindStatus::contentManifestUnavailable;
     }
     core::path::Buffer manifestPath;

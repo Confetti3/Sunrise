@@ -105,8 +105,6 @@ plan_from(const sdk::MissionSeedSummary& summary) noexcept {
 
 namespace {
 
-/** Materializes into static lock-owned storage so UI stack size stays bounded. */
-
 /** Checks the exact enabled and published mission-seed lease for one scene state. */
 [[nodiscard]] SceneStatus scene_lease_status(const sdk::BoundView& view,
                                              const server::bap::ActivityLinkView& link,
@@ -145,6 +143,63 @@ namespace {
     if (lease.publicationPending || lease.publishedRevision != lease.revision) {
         return SceneStatus::missionSeedPending;
     }
+    return SceneStatus::ready;
+}
+
+/**
+ * Checks the state's lease, then routes one validated slot to its live state-local target.
+ * @param expectedSlotType Slot type the routed target must carry.
+ * @param expectedAuthSchema Auth schema the routed target must carry.
+ * @param output Receives the target and its route; other fields are left as they are.
+ * @return ready, or the refusal that stopped the lease or the route.
+ */
+[[nodiscard]] SceneStatus route_prepared(const sdk::BoundView& view,
+                                         const server::bap::ActivityLinkView& link,
+                                         const sdk::format::Scenario& scenario,
+                                         const sdk::format::Object& object,
+                                         const sdk::format::Occurrence& occurrence,
+                                         const sdk::format::Slot& slot,
+                                         std::uint32_t expectedSlotType,
+                                         std::uint32_t expectedAuthSchema,
+                                         PreparedScene& output) noexcept {
+    const SceneStatus lease = scene_lease_status(view, link, occurrence.stateIndex);
+    if (lease != SceneStatus::ready) {
+        return lease;
+    }
+    sdk_route::SourceIdentity source{};
+    source.scenarioTag = scenario.tag;
+    source.objectTag = object.objectTag;
+    source.registryKey = object.objectKey;
+    source.authSchema = slot.authSchema;
+    source.objectRow = occurrence.objectIndex;
+    source.stateRow = occurrence.stateIndex;
+    source.slotIndex = static_cast<std::uint16_t>(slot.slotIndex);
+    source.slotType = static_cast<std::uint8_t>(slot.slotType);
+    sdk_route::Resolution resolved{};
+    switch (sdk_route::resolve(view, source, link.effectiveRegion, resolved)) {
+    case sdk_route::Status::ready:
+        break;
+    case sdk_route::Status::invalidView:
+        return SceneStatus::invalidView;
+    case sdk_route::Status::invalidSource:
+        return SceneStatus::invalidSlot;
+    case sdk_route::Status::missingSource:
+        return SceneStatus::targetUnavailable;
+    case sdk_route::Status::ambiguousSource:
+        return SceneStatus::ambiguousTarget;
+    }
+    if (resolved.scenarioRow != view.scenarioRow || resolved.stateRow != occurrence.stateIndex
+        || resolved.region != link.effectiveRegion || !resolved.target.stateLocalRoster
+        || resolved.target.slotType != expectedSlotType
+        || resolved.target.authSchema != expectedAuthSchema) {
+        return SceneStatus::invalidSlot;
+    }
+    output.target = resolved.target;
+    output.rosterGroup = resolved.rosterGroup;
+    output.activityClientGeneration = link.activityClientGeneration;
+    output.scenarioRow = resolved.scenarioRow;
+    output.stateRow = resolved.stateRow;
+    output.effectiveRegion = resolved.region;
     return SceneStatus::ready;
 }
 
@@ -362,49 +417,15 @@ namespace {
         return SceneStatus::dependencyCapacity;
     }
     output.omittedParticipants = cast.omitted;
-
-    const SceneStatus lease = scene_lease_status(view, link, occurrence.stateIndex);
-    if (lease != SceneStatus::ready) {
-        return lease;
-    }
-
-    sdk_route::SourceIdentity source{};
-    source.scenarioTag = scenario->tag;
-    source.objectTag = object.objectTag;
-    source.registryKey = object.objectKey;
-    source.authSchema = slot.authSchema;
-    source.objectRow = occurrence.objectIndex;
-    source.stateRow = occurrence.stateIndex;
-    source.slotIndex = static_cast<std::uint16_t>(slot.slotIndex);
-    source.slotType = static_cast<std::uint8_t>(slot.slotType);
-
-    sdk_route::Resolution resolved{};
-    switch (sdk_route::resolve(view, source, link.effectiveRegion, resolved)) {
-    case sdk_route::Status::ready:
-        break;
-    case sdk_route::Status::invalidView:
-        return SceneStatus::invalidView;
-    case sdk_route::Status::invalidSource:
-        return SceneStatus::invalidSlot;
-    case sdk_route::Status::missingSource:
-        return SceneStatus::targetUnavailable;
-    case sdk_route::Status::ambiguousSource:
-        return SceneStatus::ambiguousTarget;
-    }
-    if (resolved.scenarioRow != view.scenarioRow || resolved.stateRow != occurrence.stateIndex
-        || resolved.region != link.effectiveRegion || !resolved.target.stateLocalRoster
-        || resolved.target.slotType != sdk::format::kAuthoredSceneSlotType
-        || resolved.target.authSchema != sdk::format::kAuthoredSceneAuthSchema) {
-        return SceneStatus::invalidSlot;
-    }
-
-    output.target = resolved.target;
-    output.rosterGroup = resolved.rosterGroup;
-    output.activityClientGeneration = link.activityClientGeneration;
-    output.scenarioRow = resolved.scenarioRow;
-    output.stateRow = resolved.stateRow;
-    output.effectiveRegion = resolved.region;
-    return SceneStatus::ready;
+    return route_prepared(view,
+                          link,
+                          *scenario,
+                          object,
+                          occurrence,
+                          slot,
+                          sdk::format::kAuthoredSceneSlotType,
+                          sdk::format::kAuthoredSceneAuthSchema,
+                          output);
 }
 
 /** Resolves one exact SDK-bounded type-53 cue without changing transport state. */
@@ -460,45 +481,15 @@ namespace {
         return SceneStatus::invalidSlot;
     }
     authoredCueCount = static_cast<std::uint16_t>(slot.reserved);
-    const SceneStatus lease = scene_lease_status(view, link, occurrence.stateIndex);
-    if (lease != SceneStatus::ready) {
-        return lease;
-    }
-    sdk_route::SourceIdentity source{};
-    source.scenarioTag = scenario->tag;
-    source.objectTag = object.objectTag;
-    source.registryKey = object.objectKey;
-    source.authSchema = slot.authSchema;
-    source.objectRow = occurrence.objectIndex;
-    source.stateRow = occurrence.stateIndex;
-    source.slotIndex = static_cast<std::uint16_t>(slot.slotIndex);
-    source.slotType = static_cast<std::uint8_t>(slot.slotType);
-    sdk_route::Resolution resolved{};
-    switch (sdk_route::resolve(view, source, link.effectiveRegion, resolved)) {
-    case sdk_route::Status::ready:
-        break;
-    case sdk_route::Status::invalidView:
-        return SceneStatus::invalidView;
-    case sdk_route::Status::invalidSource:
-        return SceneStatus::invalidSlot;
-    case sdk_route::Status::missingSource:
-        return SceneStatus::targetUnavailable;
-    case sdk_route::Status::ambiguousSource:
-        return SceneStatus::ambiguousTarget;
-    }
-    if (resolved.scenarioRow != view.scenarioRow || resolved.stateRow != occurrence.stateIndex
-        || resolved.region != link.effectiveRegion || !resolved.target.stateLocalRoster
-        || resolved.target.slotType != sdk::format::kDialogueSlotType
-        || resolved.target.authSchema != sdk::format::kDialogueAuthSchema) {
-        return SceneStatus::invalidSlot;
-    }
-    output.target = resolved.target;
-    output.rosterGroup = resolved.rosterGroup;
-    output.activityClientGeneration = link.activityClientGeneration;
-    output.scenarioRow = resolved.scenarioRow;
-    output.stateRow = resolved.stateRow;
-    output.effectiveRegion = resolved.region;
-    return SceneStatus::ready;
+    return route_prepared(view,
+                          link,
+                          *scenario,
+                          object,
+                          occurrence,
+                          slot,
+                          sdk::format::kDialogueSlotType,
+                          sdk::format::kDialogueAuthSchema,
+                          output);
 }
 
 /** Resolves one exact fixed-schema behavior slot without changing transport state. */
@@ -552,45 +543,15 @@ namespace {
         || slot.slotIndex > (std::numeric_limits<std::uint16_t>::max)()) {
         return SceneStatus::invalidSlot;
     }
-    const SceneStatus lease = scene_lease_status(view, link, occurrence.stateIndex);
-    if (lease != SceneStatus::ready) {
-        return lease;
-    }
-    sdk_route::SourceIdentity source{};
-    source.scenarioTag = scenario->tag;
-    source.objectTag = object.objectTag;
-    source.registryKey = object.objectKey;
-    source.authSchema = slot.authSchema;
-    source.objectRow = occurrence.objectIndex;
-    source.stateRow = occurrence.stateIndex;
-    source.slotIndex = static_cast<std::uint16_t>(slot.slotIndex);
-    source.slotType = static_cast<std::uint8_t>(slot.slotType);
-    sdk_route::Resolution resolved{};
-    switch (sdk_route::resolve(view, source, link.effectiveRegion, resolved)) {
-    case sdk_route::Status::ready:
-        break;
-    case sdk_route::Status::invalidView:
-        return SceneStatus::invalidView;
-    case sdk_route::Status::invalidSource:
-        return SceneStatus::invalidSlot;
-    case sdk_route::Status::missingSource:
-        return SceneStatus::targetUnavailable;
-    case sdk_route::Status::ambiguousSource:
-        return SceneStatus::ambiguousTarget;
-    }
-    if (resolved.scenarioRow != view.scenarioRow || resolved.stateRow != occurrence.stateIndex
-        || resolved.region != link.effectiveRegion || !resolved.target.stateLocalRoster
-        || resolved.target.slotType != expectedSlotType
-        || resolved.target.authSchema != expectedAuthSchema) {
-        return SceneStatus::invalidSlot;
-    }
-    output.target = resolved.target;
-    output.rosterGroup = resolved.rosterGroup;
-    output.activityClientGeneration = link.activityClientGeneration;
-    output.scenarioRow = resolved.scenarioRow;
-    output.stateRow = resolved.stateRow;
-    output.effectiveRegion = resolved.region;
-    return SceneStatus::ready;
+    return route_prepared(view,
+                          link,
+                          *scenario,
+                          object,
+                          occurrence,
+                          slot,
+                          expectedSlotType,
+                          expectedAuthSchema,
+                          output);
 }
 
 /** Resolves one exact SDK-linked type-38 task without changing transport state. */

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <vector>
 
 #include "parallel.h"
@@ -11,6 +12,16 @@ namespace {
 
 /** Cores left to the game, which is drawing frames while the batch reads. */
 constexpr std::size_t kReservedCores = 2;
+
+/** Guards every global below. Only a Lease takes it. */
+SRWLOCK g_lease{SRWLOCK_INIT};
+/** Thread that holds the lease, or zero. Written only by that thread while it holds the lock. */
+std::atomic<DWORD> g_owner{};
+
+/** @return True when the calling thread holds the lease. */
+[[nodiscard]] bool owned() noexcept {
+    return g_owner.load(std::memory_order_acquire) == GetCurrentThreadId();
+}
 
 /** One reader's share of a batch. Nothing here is shared with another reader. */
 struct Share {
@@ -42,6 +53,8 @@ struct KeptRow {
 struct Keep {
     std::vector<std::byte> store;
     std::vector<KeptRow> rows;
+    /** Set when a blob could not be stored; the batch is then refused. */
+    bool failed{};
 };
 
 std::vector<Keep> g_keep{};
@@ -77,8 +90,12 @@ void keep_blob(void*,
     }
     Keep& keep = g_keep[worker];
     const std::size_t offset = keep.store.size();
-    keep.store.insert(keep.store.end(), blob.begin(), blob.end());
-    keep.rows.push_back(KeptRow{tag, offset, blob.size()});
+    try {
+        keep.store.insert(keep.store.end(), blob.begin(), blob.end());
+        keep.rows.push_back(KeptRow{tag, offset, blob.size()});
+    } catch (...) {
+        keep.failed = true;
+    }
 }
 
 /** @param workers Readers wanted. @return True when storage for that many is ready. */
@@ -87,12 +104,44 @@ void keep_blob(void*,
         return true;
     }
     // Growing moves the scratches, so it only ever happens before any file is open.
-    g_scratch.resize(workers);
-    g_bytes.resize(workers);
-    return g_scratch.size() >= workers && g_bytes.size() >= workers;
+    try {
+        g_scratch.resize(workers);
+        g_bytes.resize(workers);
+    } catch (...) {
+        return false;
+    }
+    return true;
 }
 
 } // namespace
+
+/** Waits for the reader, unless this thread already holds it. */
+Lease::Lease() noexcept {
+    if (owned()) {
+        return;
+    }
+    AcquireSRWLockExclusive(&g_lease);
+    g_owner.store(GetCurrentThreadId(), std::memory_order_release);
+    held_ = true;
+}
+
+/** Takes the reader only if it is free. */
+Lease::Lease(TryAcquire) noexcept {
+    if (TryAcquireSRWLockExclusive(&g_lease) == FALSE) {
+        return;
+    }
+    g_owner.store(GetCurrentThreadId(), std::memory_order_release);
+    held_ = true;
+}
+
+/** Gives the reader back. Kept blobs are no longer this thread's to read. */
+Lease::~Lease() noexcept {
+    if (!held_) {
+        return;
+    }
+    g_owner.store(0, std::memory_order_release);
+    ReleaseSRWLockExclusive(&g_lease);
+}
 
 /** @return Reader count, at least one. */
 std::size_t worker_count() noexcept {
@@ -108,7 +157,7 @@ bool read_tags(const Source& source,
                std::span<const std::uint32_t> tags,
                Visitor visitor,
                void* context) noexcept {
-    if (visitor == nullptr) {
+    if (visitor == nullptr || !owned()) {
         return false;
     }
     if (tags.empty()) {
@@ -172,32 +221,47 @@ bool read_kept(const Source& source,
                std::span<const std::uint32_t> tags,
                std::vector<Held>& kept) noexcept {
     kept.clear();
-    const std::size_t workers = worker_count();
-    if (g_keep.size() < workers) {
-        g_keep.resize(workers);
+    if (!owned()) {
+        return false;
     }
-    if (g_keep.size() < workers) {
+    const std::size_t workers = worker_count();
+    try {
+        if (g_keep.size() < workers) {
+            g_keep.resize(workers);
+        }
+    } catch (...) {
         return false;
     }
     for (Keep& keep : g_keep) {
         keep.store.clear();
         keep.rows.clear();
+        keep.failed = false;
     }
-    if (!read_tags(source, tags, &keep_blob, nullptr)) {
+    if (!read_tags(source, tags, &keep_blob, nullptr)
+        || std::any_of(
+            g_keep.begin(), g_keep.end(), [](const Keep& keep) { return keep.failed; })) {
         return false;
     }
     // Each reader took one run of tags in order, so reading the readers in order returns the
     // blobs in the order the caller asked for them.
-    for (const Keep& keep : g_keep) {
-        for (const KeptRow& row : keep.rows) {
-            kept.push_back(Held{row.tag, {keep.store.data() + row.offset, row.size}});
+    try {
+        for (const Keep& keep : g_keep) {
+            for (const KeptRow& row : keep.rows) {
+                kept.push_back(Held{row.tag, {keep.store.data() + row.offset, row.size}});
+            }
         }
+    } catch (...) {
+        kept.clear();
+        return false;
     }
     return true;
 }
 
 /** Closes every reader's files and frees the batch storage. */
 void release() noexcept {
+    if (!owned()) {
+        return;
+    }
     for (Scratch& scratch : g_scratch) {
         close_files(scratch);
     }

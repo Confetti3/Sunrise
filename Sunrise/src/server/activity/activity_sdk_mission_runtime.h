@@ -52,6 +52,8 @@ enum class SceneStatus : std::uint8_t {
     outputBusy,
     /** The cast has more squads than the eight dependencies the Auth schema carries. */
     dependencyCapacity,
+    /** No graph block of the scene waits on the event key. */
+    unknownEvent,
     refused,
 };
 
@@ -88,10 +90,14 @@ select_state(const state::activity_sdk::BoundView& view,
                                                       std::uint32_t occurrenceRow,
                                                       std::uint32_t slotRow) noexcept;
 
-/** Queues the next generation for one exact state-local authored scene. */
+/**
+ * Queues the next generation for one exact state-local authored scene, or, with an event key,
+ * fires that trigger in the scene's current generation.
+ */
 [[nodiscard]] SceneStatus activate_authored_scene(const state::activity_sdk::BoundView& view,
                                                   std::uint32_t occurrenceRow,
-                                                  std::uint32_t slotRow) noexcept;
+                                                  std::uint32_t slotRow,
+                                                  std::uint32_t eventKey = 0) noexcept;
 
 /** Checks one exact SDK-bounded type-53 authored dialogue cue. */
 [[nodiscard]] SceneStatus dialogue_cue_availability(const state::activity_sdk::BoundView& view,
@@ -109,13 +115,6 @@ select_state(const state::activity_sdk::BoundView& view,
 [[nodiscard]] SceneStatus directives_availability(const state::activity_sdk::BoundView& view,
                                                   std::uint32_t occurrenceRow,
                                                   std::uint32_t slotRow) noexcept;
-
-/** Checks one exact generated type-68 HUD directive element. */
-[[nodiscard]] SceneStatus directive_availability(const state::activity_sdk::BoundView& view,
-                                                 std::uint32_t occurrenceRow,
-                                                 std::uint32_t slotRow,
-                                                 std::uint32_t nameHash,
-                                                 std::int32_t elementIndex) noexcept;
 
 /** Shows or hides one exact generated type-68 HUD directive. */
 [[nodiscard]] SceneStatus set_directive(const state::activity_sdk::BoundView& view,
@@ -135,11 +134,6 @@ select_state(const state::activity_sdk::BoundView& view,
 [[nodiscard]] SceneStatus reset_objectives(const state::activity_sdk::BoundView& view,
                                            std::uint32_t occurrenceRow,
                                            std::uint32_t slotRow) noexcept;
-
-/** Checks the current occurrence for one exact type-3 objective-reset Slot row. */
-[[nodiscard]] SceneStatus
-objective_reset_slot_availability(const state::activity_sdk::BoundView& view,
-                                  std::uint32_t slotRow) noexcept;
 
 /** Queues one type-3 objective reset against an already assigned Host output revision. */
 [[nodiscard]] SceneStatus
@@ -192,14 +186,10 @@ set_cinematic_active_reserved(const state::activity_sdk::BoundView& view,
                               const host::ScriptableOutputReservation& reservation) noexcept;
 
 /** Lua-slot variant: resolves the unique occurrence in the currently published mission state. */
-[[nodiscard]] SceneStatus sequence_slot_availability(const state::activity_sdk::BoundView& view,
-                                                     std::uint32_t slotRow) noexcept;
 [[nodiscard]] SceneStatus
 play_sequence_slot_reserved(const state::activity_sdk::BoundView& view,
                             std::uint32_t slotRow,
                             const host::ScriptableOutputReservation& reservation) noexcept;
-[[nodiscard]] SceneStatus cinematic_slot_availability(const state::activity_sdk::BoundView& view,
-                                                      std::uint32_t slotRow) noexcept;
 [[nodiscard]] SceneStatus
 set_cinematic_slot_active_reserved(const state::activity_sdk::BoundView& view,
                                    std::uint32_t slotRow,
@@ -216,15 +206,10 @@ play_performance_slot_reserved(const state::activity_sdk::BoundView& view,
                                std::uint32_t stateNameHash,
                                const host::ScriptableOutputReservation& reservation) noexcept;
 
-[[nodiscard]] SceneStatus task_slot_availability(const state::activity_sdk::BoundView& view,
-                                                 std::uint32_t slotRow) noexcept;
 [[nodiscard]] SceneStatus
 activate_task_slot_reserved(const state::activity_sdk::BoundView& view,
                             std::uint32_t slotRow,
                             const host::ScriptableOutputReservation& reservation) noexcept;
-[[nodiscard]] SceneStatus dialogue_cue_slot_availability(const state::activity_sdk::BoundView& view,
-                                                         std::uint32_t slotRow,
-                                                         std::uint16_t cueIndex) noexcept;
 [[nodiscard]] SceneStatus
 play_dialogue_cue_slot_reserved(const state::activity_sdk::BoundView& view,
                                 std::uint32_t slotRow,

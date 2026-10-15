@@ -12,8 +12,8 @@ namespace sunrise::server::bap::encrypted::push::activity {
 
 /**
  * Appends one world-globals-state svc9 notification and advances its local nonce.
- * The body carries the activity-clock enable. Only the sign of its real32 is read, and a zero or
- * negative value freezes the client's activity clock at its base, so this sends a fixed positive.
+ * The body's real32 is the sim tick period in milliseconds. Zero or negative freezes the client's
+ * activity clock at its base, so this sends the client's default of 30 ticks per second.
  * @param scratch Lock-owned transform buffers.
  * @param sessionId Activity session echoed in the svc9 envelope.
  * @param key Active AES-GCM session key.

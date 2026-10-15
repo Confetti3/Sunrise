@@ -21,7 +21,7 @@ void clear_rich_presence() noexcept;
 
 /**
  * @param key Exact key to look up.
- * @return Retained value, or an empty string. It stays valid until the table changes.
+ * @return Retained value, or an empty string. It stays valid until this thread calls again.
  */
 [[nodiscard]] const char* rich_presence_value(std::string_view key) noexcept;
 
@@ -30,7 +30,7 @@ void clear_rich_presence() noexcept;
 
 /**
  * @param index Zero-based position in the retained table.
- * @return Retained key, or an empty string. It stays valid until the table changes.
+ * @return Retained key, or an empty string. It stays valid until this thread calls again.
  */
 [[nodiscard]] const char* rich_presence_key(int index) noexcept;
 

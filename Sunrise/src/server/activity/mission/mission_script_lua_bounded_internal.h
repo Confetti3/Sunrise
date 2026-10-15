@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <string_view>
 
+#include "mission_api_values.h"
 #include "mission_script_lua_types.h"
 #include "mission_script_vm_internal.h"
 
@@ -17,36 +18,26 @@ inline constexpr char kCountListMetatable[] = "sunrise.sdk.count_list";
 inline constexpr char kObjectRefListMetatable[] = "sunrise.sdk.object_ref_list";
 inline constexpr char kWorldPositionMetatable[] = "sunrise.sdk.world_position";
 
-/** What a lane's elements are: plain counted values, or references to installed objects. */
-enum class BoundedLaneKind : std::uint8_t {
-    count,
-    objectRef,
-};
+using BoundedLaneKind = api::BoundedLaneKind;
+using BoundedLane = api::BoundedLane;
+using api::kBoundedLanes;
 
-/** One fixed client array a body's count or index lane reaches. */
-struct BoundedLane final {
-    std::string_view name{};
-    BoundedLaneKind kind{};
-    std::uint16_t capacity{};
-};
-
-/**
- * Every lane whose array size is proved. The bound is the array the client indexes, never the
- * width of the wire lane; a lane with no proved array size is absent from this table.
- */
-inline constexpr std::array<BoundedLane, 7> kBoundedLanes{{
-    {"gameplay_switches", BoundedLaneKind::count, 50},
-    {"nav_nodes", BoundedLaneKind::count, 96},
-    {"nav_node_links", BoundedLaneKind::count, 16},
-    {"type8_field_1_0", BoundedLaneKind::count, 32},
-    {"type8_field_2_0", BoundedLaneKind::count, 16},
-    {"type8_object_refs", BoundedLaneKind::objectRef, 16},
-    {"type53_object_refs", BoundedLaneKind::objectRef, 129},
-}};
+/** @return The widest lane of one kind; a list's storage must hold it. */
+[[nodiscard]] consteval std::size_t widest_lane(BoundedLaneKind kind) {
+    std::size_t widest = 0;
+    for (const BoundedLane& lane : kBoundedLanes) {
+        if (lane.kind == kind && lane.capacity > widest) {
+            widest = lane.capacity;
+        }
+    }
+    return widest;
+}
 
 /** Storage for the widest count lane and the widest object-reference lane. */
-inline constexpr std::size_t kCountListCapacity = 96;
-inline constexpr std::size_t kObjectRefListCapacity = 129;
+inline constexpr std::size_t kCountListCapacity = widest_lane(BoundedLaneKind::count);
+inline constexpr std::size_t kObjectRefListCapacity = widest_lane(BoundedLaneKind::objectRef);
+static_assert(kCountListCapacity <= 255 && kObjectRefListCapacity <= 255,
+              "a list count is one byte");
 
 struct BoundedLaneCollectionHandle final {
     std::uint8_t marker{};

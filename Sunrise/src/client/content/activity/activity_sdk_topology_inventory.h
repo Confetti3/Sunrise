@@ -14,7 +14,7 @@
 
 namespace sunrise::client::content::activity::sdk_generation::topology_inventory {
 
-/** A partial source walk leaves every format-v12 object count pending. */
+/** A partial source walk leaves every object count pending. */
 inline constexpr std::uint32_t kObjectConfigCountPending = 0x01U;
 inline constexpr std::uint32_t kObjectPlacedSubblockCountPending = 0x02U;
 inline constexpr std::uint32_t kObjectPlacedLeafCountPending = 0x04U;

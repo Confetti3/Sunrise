@@ -13,11 +13,8 @@ inline constexpr std::size_t kBucketHashCapacity = 16;
 /** The flat overflow bank holds 32 hashes no bucket category claims. */
 inline constexpr std::size_t kOverflowCapacity = 32;
 /**
- * One row per distinct subclass and ability selection the configured characters use. Each
- * character publishes a row for every subclass it owns at the default selection, plus one for
- * every one of those subclasses whose remembered picks differ, since the picks are kept per
- * subclass item rather than only for the equipped one: 3 characters by 3 owned subclasses by 2
- * rows.
+ * One row per subclass and selection in use: 3 characters by 3 owned subclasses by 2 rows, the
+ * default selection and the remembered picks, which are kept per subclass item.
  */
 inline constexpr std::size_t kDefinitionCapacity = 18;
 /** All bits set marks a bucket no entry claimed. */

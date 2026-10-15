@@ -15,8 +15,6 @@ inline constexpr std::uint8_t kParameterUpdateId = 38;
 inline constexpr std::uint8_t kParameterRequestId = 39;
 /** Declared decoded size of a parameter update. */
 inline constexpr std::uint32_t kParameterUpdateSize = 44064;
-/** Declared decoded size of a parameter request. */
-inline constexpr std::uint32_t kParameterRequestSize = 44056;
 /** The registry holds 25 parameters, so only the low 25 bitmap bits are meaningful. */
 inline constexpr std::uint8_t kParameterCount = 25;
 

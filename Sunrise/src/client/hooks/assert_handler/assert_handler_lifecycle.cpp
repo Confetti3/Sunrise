@@ -70,12 +70,4 @@ bool uninstall() noexcept {
     return restored;
 }
 
-/** @return True while Sunrise's handler owns the slot. */
-bool is_installed() noexcept {
-    AcquireSRWLockShared(&g_lock);
-    const bool installed = g_installed;
-    ReleaseSRWLockShared(&g_lock);
-    return installed;
-}
-
 } // namespace sunrise::client::hooks::assert_handler

@@ -17,7 +17,8 @@ namespace sunrise::client::content::activity::sdk_generation::lua_artifacts::int
 struct Value final {
     using Array = std::vector<Value>;
     using Object = std::vector<std::pair<std::string, Value>>;
-    using Data = std::variant<std::monostate, bool, std::uint64_t, std::string, Array, Object>;
+    using Data =
+        std::variant<std::monostate, bool, std::uint64_t, std::int64_t, std::string, Array, Object>;
 
     Data data{};
 };
@@ -25,10 +26,28 @@ struct Value final {
 [[nodiscard]] Value null_value();
 [[nodiscard]] Value boolean(bool value);
 [[nodiscard]] Value number(std::uint64_t value);
+[[nodiscard]] Value signed_number(std::int64_t value);
 [[nodiscard]] Value string(std::string_view value);
 [[nodiscard]] Value array(Value::Array values);
 [[nodiscard]] Value object(Value::Object values);
 [[nodiscard]] Value string_array(std::initializer_list<std::string_view> values);
+
+/** One declared field: its name and its contract type. */
+using Field = std::pair<std::string_view, std::string_view>;
+
+/** Sorts object members by key. */
+void sort_keys(Value::Object& value);
+
+/** @return One object mapping each field name to its type string. */
+[[nodiscard]] Value field_map(std::initializer_list<Field> source);
+
+/** Builds one view's declared fields, expanding each prefix into its seven name lanes. */
+[[nodiscard]] Value named_view(std::initializer_list<Field> source,
+                               std::initializer_list<std::string_view> prefixes,
+                               std::string_view rowScope);
+
+/** Builds one immutable view of plain fields that throws on a stale read. */
+[[nodiscard]] Value view(std::initializer_list<Field> fields, std::string_view rowScope);
 
 /** Renders one deterministic pretty JSON value without adding a final newline. */
 [[nodiscard]] bool
@@ -43,6 +62,10 @@ render_lua(const Value& value, std::uint32_t initialDepth, std::string& output) 
 void append_world_core_views(Value::Object& output);
 void append_world_spatial_views(Value::Object& output);
 [[nodiscard]] bool build_world_sdk_contract_value(Value& output) noexcept;
+/** Builds the mission Lua API schema published as sunrise/mission_api.json. */
+[[nodiscard]] bool build_mission_api_value(Value& output) noexcept;
+/** Appends the LuaLS classes of every mission API receiver, event and program entry. */
+void append_mission_api_luals(std::string& output);
 [[nodiscard]] bool render_activity_files(const Source& source, Bundle& output) noexcept;
 [[nodiscard]] bool render_contract_files(const Source& source, Bundle& output) noexcept;
 void append_actor_sequence_contract(const Source& source, std::string& output);

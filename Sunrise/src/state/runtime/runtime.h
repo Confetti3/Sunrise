@@ -55,7 +55,6 @@ struct PendingSubclassSelection {
     std::uint64_t accountSoid{};
     std::uint64_t characterSoid{};
     std::uint64_t subclassInstanceSoid{};
-    std::uint32_t subclassDefinitionHash{};
     std::size_t characterIndex{};
     std::uint16_t subclassDefinitionIndex{};
     std::uint16_t socketEntryListIndex{};
@@ -106,7 +105,6 @@ struct PendingEquipmentSwap {
     std::size_t characterIndex{};
     std::size_t equipmentSlotIndex{};
     std::size_t inventoryIndex{};
-    std::size_t movedItemCount{};
     std::uint8_t nativeEquipmentSlot{};
     EquipmentMutationKind kind{};
     bool prepared{};
@@ -676,19 +674,17 @@ commit_profile_item_acquisition(PendingProfileItemAcquisition& mutation) noexcep
                                        PendingSocketPlug& mutation) noexcept;
 
 /**
- * Prepares one ordinary-socket selection for an exact character-screen item selector.
- * The resolved instance runs through the same checked transition as an instance-addressed action,
- * so acquired and unequipped items do not depend on a coincidental menu-row ordinal.
- * @param instanceIdentityToken Item-instance identity decoded from the opcode-1901 selector.
+ * Prepares one ordinary-socket selection for the item instance opcode 1901 names.
+ * @param targetInstanceSoid Whole item-instance identity carried by opcode 1901.
  * @param requestedSocketLane Native socket action lane; compatibility resolves the physical lane.
  * @param plugDefinitionIndex Installed plug-definition row selected by the Client.
  * @param mutation Gets the checked before/after images without changing account State.
  * @return True when one item matches, the plug resolves to that lane, and the transition is valid.
  */
-[[nodiscard]] bool prepare_character_selector_socket_plug(std::uint64_t instanceIdentityToken,
-                                                          std::uint8_t requestedSocketLane,
-                                                          std::uint16_t plugDefinitionIndex,
-                                                          PendingSocketPlug& mutation) noexcept;
+[[nodiscard]] bool prepare_equipped_socket_plug(std::uint64_t targetInstanceSoid,
+                                                std::uint8_t requestedSocketLane,
+                                                std::uint16_t plugDefinitionIndex,
+                                                PendingSocketPlug& mutation) noexcept;
 
 /** Produces the complete uncommitted account after-image for a prepared socket transaction. */
 [[nodiscard]] bool preview_socket_plug(const PendingSocketPlug& mutation,

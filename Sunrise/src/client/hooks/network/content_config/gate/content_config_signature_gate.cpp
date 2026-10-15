@@ -54,7 +54,7 @@ bool reassert(Ownership& ownership) noexcept {
                  expected, kDisabledValue, std::memory_order_acq_rel, std::memory_order_acquire)) {
         return false;
     }
-    // Keep the first value we replaced, so detach puts back what the Client last set.
+    // Keep the first value we replaced; detach puts that one back.
     if (!ownership.owned) {
         ownership.previous = previous;
         ownership.owned = true;

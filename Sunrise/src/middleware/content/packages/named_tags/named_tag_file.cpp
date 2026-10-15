@@ -3,6 +3,7 @@
 #include <limits>
 
 #include "../../../../core/filesystem/path.h"
+#include "../reader/overlay.h"
 #include "internal.h"
 
 namespace sunrise::middleware::content::packages::named_tags {
@@ -77,12 +78,14 @@ bool extract_file(const wchar_t* path, Visitor visitor, void* context, Result& r
 /**
  * Walks each package and streams its extracted entries to one visitor.
  * @param directory Package directory with or without a trailing separator.
+ * @param installedOnly Skips every file a mod serves.
  * @param visitor Required non-owning entry consumer.
  * @param context Caller context passed to the visitor.
  * @param result Receives file and entry totals.
  * @return True when every file handle and the walk handle close cleanly.
  */
 bool extract_directory(std::wstring_view directory,
+                       bool installedOnly,
                        Visitor visitor,
                        void* context,
                        DirectoryResult& result) noexcept {
@@ -131,7 +134,24 @@ bool extract_directory(std::wstring_view directory,
 
     const DWORD enumerationError = GetLastError();
     const bool closed = FindClose(enumeration) != FALSE;
-    return complete && enumerationError == ERROR_NO_MORE_FILES && closed;
+    complete = complete && enumerationError == ERROR_NO_MORE_FILES && closed;
+    if (installedOnly || !complete) {
+        return complete;
+    }
+    // Mod-served generations live outside the packages directory and may not follow its names.
+    for (const reader::overlay::File& served : reader::overlay::files()) {
+        Result fileResult{};
+        stamp.inner = visitor;
+        stamp.context = context;
+        stamp.patchIndex = served.patchIndex;
+        if (!extract_file(served.path.chars.data(), &stamp_patch, &stamp, fileResult)
+            || fileResult.entries > (std::numeric_limits<std::size_t>::max)() - result.entries) {
+            return false;
+        }
+        ++result.files;
+        result.entries += fileResult.entries;
+    }
+    return true;
 }
 
 } // namespace sunrise::middleware::content::packages::named_tags

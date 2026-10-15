@@ -154,7 +154,7 @@ struct SliceEntry {
  * Reads the index and registry of one slice-set entry.
  * @param blob Whole slice-set entry bytes.
  * @param output Receives the entry fields.
- * @return True when both fields are inside the blob.
+ * @return True when both fields fit and the scaled index stays in range.
  */
 [[nodiscard]] bool slice_entry(std::span<const std::byte> blob, SliceEntry& output) noexcept;
 

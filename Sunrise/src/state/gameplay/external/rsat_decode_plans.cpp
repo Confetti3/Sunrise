@@ -22,9 +22,6 @@ constexpr std::size_t kHeaderSize = 136;
 constexpr std::size_t kMaximumBytes = 16 * 1024 * 1024;
 /** An extraction manifest cannot exceed 1 MiB. */
 constexpr std::size_t kMaximumManifestBytes = 1024 * 1024;
-/** Both artifacts sit in the SDK directory; the manifest adds its suffix to the cache name. */
-constexpr std::wstring_view kCacheSuffix = L"\\rsat_decode_plans.cache";
-constexpr std::wstring_view kManifestSuffix = L".json";
 /** A digest is written as two lowercase or uppercase hex digits per byte. */
 constexpr std::size_t kDigestHexLength = 64;
 
@@ -187,6 +184,18 @@ bool Cache::load_installed(std::wstring_view artifactDirectory, const Digest& sd
     return manifest_digest(text, "\"sdkBuildHash\"", declaredSdk) && declaredSdk == sdkBuild
            && manifest_digest(text, "\"evidenceFingerprint\"", evidence)
            && load(path.chars.data(), sdkBuild, evidence);
+}
+
+/** SDK reuse requires a complete decoder pair before generation can be skipped. */
+bool valid_installed_pair(const activity_sdk::Catalog& catalog) noexcept {
+    Digest sdk{};
+    const auto identity = catalog.sdk_build_sha256();
+    if (identity.size() != sdk.size()) {
+        return false;
+    }
+    std::copy(identity.begin(), identity.end(), sdk.begin());
+    Cache pending;
+    return pending.load_installed(catalog.artifact_directory(), sdk);
 }
 
 /**

@@ -10,7 +10,7 @@ namespace sunrise::client {
  */
 [[nodiscard]] bool initialize(void* module) noexcept;
 
-/** Resolves main-image targets, installs game hooks, and attempts optional graphics hooks once. */
+/** Resolves main-image targets and installs the game hooks once. */
 [[nodiscard]] bool activate_main_once() noexcept;
 
 /** Installs the presentation hooks once, independently of the game image sweep. */

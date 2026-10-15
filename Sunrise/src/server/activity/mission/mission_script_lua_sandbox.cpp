@@ -58,7 +58,7 @@ namespace {
     return 1;
 }
 
-/** Preserves base pcall semantics while making the instruction-budget error uncatchable. */
+/** Failures that invalidate the whole callback cannot be caught by script pcall. */
 [[nodiscard]] int safe_pcall(lua_State* state) {
     const int arguments = lua_gettop(state) - 1;
     luaL_checktype(state, 1, LUA_TFUNCTION);
@@ -67,9 +67,12 @@ namespace {
     if (status == LUA_ERRMEM || status == LUA_ERRERR) {
         frame.memoryExceeded = true;
     }
-    if (frame.instructionExceeded || frame.memoryExceeded || frame.intentAllocationFailed) {
+    if (frame.instructionExceeded || frame.memoryExceeded || frame.intentAllocationFailed
+        || frame.moduleOwnershipFailed) {
         if (status == LUA_OK) {
-            lua_pushliteral(state, "instruction_budget");
+            lua_pushstring(state,
+                           frame.moduleOwnershipFailed ? "module source ownership unavailable"
+                                                       : "instruction_budget");
         }
         return lua_error(state);
     }
@@ -83,7 +86,38 @@ void remove_global(lua_State* state, const char* name) {
     lua_setglobal(state, name);
 }
 
-/** Allows only generated dotted module names below the one configured SDK directory. */
+/** Records the mod that owns the file require just loaded; raises when attribution fails. */
+void retain_module_owner(lua_State* state) {
+    Impl& impl = *impl_from_state(state);
+    if (impl.identity.readModuleOwner == nullptr || lua_gettop(state) < 2
+        || lua_type(state, 2) != LUA_TSTRING) {
+        return;
+    }
+    std::size_t length = 0;
+    const char* path = lua_tolstring(state, 2, &length);
+    std::array<char, state::mods::kIdCapacity> owner{};
+    if (!impl.identity.readModuleOwner({path, length}, owner) || owner.back() != '\0') {
+        active_frame(state).moduleOwnershipFailed = true;
+        luaL_error(state, "module source ownership unavailable");
+        return;
+    }
+    if (owner.front() == '\0') {
+        return;
+    }
+    for (std::size_t index = 0; index < impl.moduleOwnerCount; ++index) {
+        if (impl.moduleOwners[index] == owner) {
+            return;
+        }
+    }
+    if (impl.moduleOwnerCount == impl.moduleOwners.size()) {
+        active_frame(state).moduleOwnershipFailed = true;
+        luaL_error(state, "module source owner capacity exceeded");
+        return;
+    }
+    impl.moduleOwners[impl.moduleOwnerCount++] = owner;
+}
+
+/** Checks the module name, then runs the wrapped require and records the file's mod. */
 [[nodiscard]] int safe_require(lua_State* state) {
     std::size_t length = 0;
     const char* const name = luaL_checklstring(state, 1, &length);
@@ -103,10 +137,11 @@ void remove_global(lua_State* state, const char* name) {
     lua_pushvalue(state, lua_upvalueindex(1));
     lua_insert(state, 1);
     lua_call(state, 1, LUA_MULTRET);
+    retain_module_owner(state);
     return lua_gettop(state);
 }
 
-/** Opens only the Lua-file package searcher and hides package mutation from authored code. */
+/** Opens only the Lua-file searcher and keeps the package table out of script reach. */
 void configure_generated_require(lua_State* state, const ProgramIdentity& identity) {
     if (identity.sdkLuaSearchPath[0] == '\0') {
         return;
@@ -126,6 +161,11 @@ void configure_generated_require(lua_State* state, const ProgramIdentity& identi
         lua_rawseti(state, -2, 4);
     }
     lua_pop(state, 2);
+    // require returns a LOADED entry before any searcher runs, so drop the package table there.
+    lua_getfield(state, LUA_REGISTRYINDEX, LUA_LOADED_TABLE);
+    lua_pushnil(state);
+    lua_setfield(state, -2, LUA_LOADLIBNAME);
+    lua_pop(state, 1);
 
     lua_getglobal(state, "require");
     lua_pushcclosure(state, &safe_require, 1);
@@ -220,7 +260,7 @@ void push_state(lua_State* state) {
 }
 
 void push_event(lua_State* state, const host::Event& source) {
-    push_handle(state, event_metatable(source.kind), EventHandle{source});
+    push_handle(state, kEventMetatable, EventHandle{source});
 }
 
 } // namespace
@@ -289,6 +329,7 @@ void destroy_state(Impl& impl) noexcept {
         lua_close(impl.state);
         impl.arenaBytesAfterClose = impl.arena.used;
     }
+    impl.attempt = {};
     impl.identity = {};
     impl.definitions = {};
     std::vector<state::activity::mission::DeviceRequestReport>{}.swap(impl.deviceRequests);
@@ -301,10 +342,13 @@ void destroy_state(Impl& impl) noexcept {
     impl.timers = {};
     impl.peers = {};
     impl.peerCount = 0;
+    impl.moduleOwners = {};
+    impl.moduleOwnerCount = 0;
     impl.outboxRead = 0;
     impl.variableCount = 0;
     impl.timerCount = 0;
     impl.nextTimerSequence = state::activity::mission::kFirstTimerSequence;
+    impl.nextIntentKey = state::activity::mission::kFirstIntentKey;
     impl.stateRevision = 0;
     impl.callbacks = 0;
     impl.committedCallbacks = 0;
@@ -313,10 +357,11 @@ void destroy_state(Impl& impl) noexcept {
     impl.phase = 0;
     impl.initialStateRegion = -1;
     impl.initialStateSpawnSet = 0;
+    impl.initialStateOmissions = {};
+    impl.initialStateOmissionCount = 0;
     impl.lastError = {};
     impl.state = nullptr;
     impl.frame = nullptr;
-    impl.programReference = LUA_NOREF;
     impl.startReference = LUA_NOREF;
     impl.eventReferences.fill(LUA_NOREF);
     impl.loadReference = LUA_NOREF;

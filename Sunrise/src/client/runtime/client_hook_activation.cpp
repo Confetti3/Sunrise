@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include "../../core/logging/log.h"
+#include "../../core/settings/settings.h"
 #include "../../core/ui/busy/busy.h"
 #include "../../core/ui/notice/ui_notice_overlay.h"
 #include "../../server/bap/runtime.h"
@@ -14,6 +15,7 @@
 #include "../content/activity/scriptable_catalog_worker.h"
 #include "../content/bootstrap/bootstrap_token_publish.h"
 #include "../content/investment/worker.h"
+#include "../content/items/packages/build.h"
 #include "../executable/image.h"
 #include "../hooks/assert_handler/assert_handler_lifecycle.h"
 #include "../hooks/async_io/async_io_lifetime_guard.h"
@@ -27,6 +29,7 @@
 #include "../hooks/infinite_ammo/infinite_ammo.h"
 #include "../hooks/network/runtime.h"
 #include "../hooks/noclip/runtime.h"
+#include "../hooks/package_path/package_path_redirect.h"
 #include "../hooks/package_trust/package_trust_bypass.h"
 #include "../hooks/polled_input/runtime.h"
 #include "../hooks/retail_log/retail_log_lifecycle.h"
@@ -167,6 +170,7 @@ void clear_game_targets() noexcept {
                      packageKeys ? core::log::Level::info : core::log::Level::warn,
                      packageKeys ? "ev=activate stage=package_keys result=ok"
                                  : "ev=activate stage=package_keys result=fail");
+    content::items::packages::export_keys_if_requested();
     // Diagnostic capture reports its own outcome and never demotes this stage.
     (void)hooks::retail_log::install();
     (void)hooks::assert_handler::install();
@@ -180,17 +184,20 @@ void clear_game_targets() noexcept {
     // legitimate teardown/recreate null window. This optional guard keeps the owner it pumped.
     (void)hooks::async_io::install();
     (void)hooks::config_getter::install();
-    // Boot-step fixes scan for their own single-site targets; each reports its own outcome.
+    // Mods publish before this sweep. A failure raises a notice; the mod rows stay in the manifest.
+    (void)hooks::package_path::install();
+    // Boot-step and slice-set accessors plus the lifetime gate probe; each reports its own outcome.
     (void)hooks::bootflow::install();
     // The launcher calls the Director's own selection entry points; nothing is detoured.
     (void)activity::mission_launch::install();
-    // The teleport hooks attach whether or not the feature is on, so the interface can enable it
-    // without a restart. Both replacements return immediately while nothing is requested.
+    // Always attached: its hooks also carry fly, sword skate and the frame polls.
     (void)hooks::teleport::install();
-    // Noclip owns its Havok-step target, so a patch-specific miss cannot disable teleport.
-    (void)hooks::noclip::install();
-    // Attaches whether or not the feature is on, so the interface can enable it without a restart.
-    (void)hooks::infinite_ammo::install();
+    // Cheat hooks attach only when cheats are on; the flag is fixed for the session.
+    if (core::settings::get().client.cheats) {
+        // Noclip owns its Havok-step target, so a patch-specific miss cannot disable teleport.
+        (void)hooks::noclip::install();
+        (void)hooks::infinite_ammo::install();
+    }
     // Resolves the activity config getter here; the hold itself runs on the frame tick.
     (void)hooks::inactivity::install();
     // Read-only. While the prologue-filler boot task runs, it logs once per second which

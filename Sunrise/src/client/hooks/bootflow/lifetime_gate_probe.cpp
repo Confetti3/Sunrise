@@ -61,9 +61,18 @@ struct Sample {
     std::uint8_t hasBlock{};
     std::int32_t state{};
     std::uint8_t host{};
-
-    bool operator==(const Sample&) const noexcept = default;
 };
+
+/** Bit set in every packed sample, so zero means none taken yet. */
+constexpr std::uint64_t kSampleTaken = 1ULL << 63U;
+
+/** @return The sample in one word, so the last one is swapped atomically. */
+[[nodiscard]] std::uint64_t pack(const Sample& value) noexcept {
+    return kSampleTaken | static_cast<std::uint64_t>(value.byte2)
+           | (static_cast<std::uint64_t>(value.hasBlock) << 8U)
+           | (static_cast<std::uint64_t>(value.host) << 16U)
+           | (static_cast<std::uint64_t>(static_cast<std::uint32_t>(value.state)) << 24U);
+}
 
 hooking::detour::Handle g_handle{};
 hooking::detour::Handle g_applyHandle{};
@@ -74,16 +83,14 @@ std::atomic<Block> g_block{nullptr};
 std::atomic<State> g_state{nullptr};
 std::atomic<HostTest> g_host{nullptr};
 std::atomic<unsigned> g_reported{0};
-Sample g_last{};
-std::atomic_bool g_hasLast{false};
+std::atomic<std::uint64_t> g_last{0};
 
 /** Writes one line when the sample changed, within the per-run budget. */
 void report(const Sample& value) noexcept {
-    if (g_hasLast.load(std::memory_order_acquire) && value == g_last) {
+    const std::uint64_t packed = pack(value);
+    if (g_last.exchange(packed, std::memory_order_acq_rel) == packed) {
         return;
     }
-    g_last = value;
-    g_hasLast.store(true, std::memory_order_release);
     if (g_reported.fetch_add(1, std::memory_order_relaxed) >= kMaxReports) {
         return;
     }
@@ -213,19 +220,21 @@ bool install_lifetime_gate_probe() noexcept {
     return true;
 }
 
-/** Detaches the probe. */
+/** Detaches the probe. A detour that fails to detach keeps its original, so it still forwards. */
 void uninstall_lifetime_gate_probe() noexcept {
-    if (g_applyHandle.attached) {
-        (void)hooking::detour::uninstall(g_applyHandle);
+    if (!g_applyHandle.attached || hooking::detour::uninstall(g_applyHandle)) {
+        g_applyOriginal.store(nullptr, std::memory_order_release);
+        g_applyReported.store(0, std::memory_order_release);
+    } else {
+        report_failure("detach_apply");
     }
-    g_applyOriginal.store(nullptr, std::memory_order_release);
-    g_applyReported.store(0, std::memory_order_release);
-    if (g_handle.attached) {
-        (void)hooking::detour::uninstall(g_handle);
+    if (!g_handle.attached || hooking::detour::uninstall(g_handle)) {
+        g_original.store(nullptr, std::memory_order_release);
+        g_last.store(0, std::memory_order_release);
+        g_reported.store(0, std::memory_order_release);
+    } else {
+        report_failure("detach");
     }
-    g_original.store(nullptr, std::memory_order_release);
-    g_hasLast.store(false, std::memory_order_release);
-    g_reported.store(0, std::memory_order_release);
 }
 
 } // namespace sunrise::client::hooks::bootflow

@@ -122,90 +122,6 @@ constexpr std::size_t kProgramGenerationBytes =
     return false;
 }
 
-/** @return Row count of one world collection kind, or 0 when the generation is stale. */
-[[nodiscard]] std::size_t world_count_impl(const void* context,
-                                           const lua_vm::WorldGenerationIdentity& generation,
-                                           lua_vm::WorldCollectionKind kind) noexcept {
-    const generated::GeneratedWorldView* const world = checked_world(context, generation);
-    if (world == nullptr) {
-        return 0;
-    }
-    const catalog::Snapshot& snapshot = *world->snapshot();
-    switch (kind) {
-    case lua_vm::WorldCollectionKind::squadAnchors:
-        return scenario_anchor_count(world->activity_sdk_view());
-    case lua_vm::WorldCollectionKind::bubbles:
-        return snapshot.bubbles.size();
-    case lua_vm::WorldCollectionKind::states:
-        return snapshot.states.size();
-    case lua_vm::WorldCollectionKind::objects:
-        return snapshot.objects.size();
-    case lua_vm::WorldCollectionKind::slots:
-        return snapshot.slots.size();
-    case lua_vm::WorldCollectionKind::descriptors:
-        return snapshot.descriptors.size();
-    case lua_vm::WorldCollectionKind::embeddedPlacementLinks:
-        return snapshot.embeddedPlacementLinks.size();
-    case lua_vm::WorldCollectionKind::authoredPlacements:
-        return snapshot.authoredPlacements.size();
-    case lua_vm::WorldCollectionKind::embeddedPlacements:
-        return snapshot.embeddedPlacements.size();
-    case lua_vm::WorldCollectionKind::typedReferences:
-        return snapshot.references.size();
-    case lua_vm::WorldCollectionKind::containerPlacementLists:
-        return snapshot.containerPlacementLists.size();
-    case lua_vm::WorldCollectionKind::containerPlacementOwners:
-        return snapshot.containerPlacementOwners.size();
-    case lua_vm::WorldCollectionKind::containerPlacements:
-        return snapshot.containerPlacements.size();
-    case lua_vm::WorldCollectionKind::containerPlacementConfigs:
-        return snapshot.containerPlacementConfigs.size();
-    case lua_vm::WorldCollectionKind::containerPlacementComponents:
-        return snapshot.containerPlacementComponents.size();
-    case lua_vm::WorldCollectionKind::type23PlacementLinks:
-        return snapshot.type23PlacementLinks.size();
-    case lua_vm::WorldCollectionKind::type23PlacementCandidates:
-        return snapshot.type23PlacementCandidates.size();
-    case lua_vm::WorldCollectionKind::staticSpatialTables:
-        return snapshot.staticSpatialTables.size();
-    case lua_vm::WorldCollectionKind::staticSpatialOwners:
-        return snapshot.staticSpatialOwners.size();
-    case lua_vm::WorldCollectionKind::staticSpatialInstances:
-        return snapshot.staticSpatialInstances.size();
-    case lua_vm::WorldCollectionKind::triggerVolumeTables:
-        return snapshot.triggerVolumeTables.size();
-    case lua_vm::WorldCollectionKind::triggerVolumeOwners:
-        return snapshot.triggerVolumeOwners.size();
-    case lua_vm::WorldCollectionKind::triggerVolumeIncomingReferences:
-        return snapshot.triggerVolumeIncomingReferences.size();
-    case lua_vm::WorldCollectionKind::triggerVolumes:
-        return snapshot.triggerVolumeInstances.size();
-    case lua_vm::WorldCollectionKind::triggerVolumeVertices:
-        return snapshot.triggerVolumeVertices.size();
-    case lua_vm::WorldCollectionKind::triggerVolumeTriangles:
-        return snapshot.triggerVolumeTriangles.size();
-    case lua_vm::WorldCollectionKind::names:
-        return snapshot.names.size();
-    case lua_vm::WorldCollectionKind::tagNames:
-        return snapshot.tagNames.size();
-    case lua_vm::WorldCollectionKind::nameCandidates:
-        return snapshot.nameCandidates.size();
-    case lua_vm::WorldCollectionKind::inlineNameCandidates:
-        return snapshot.inlineNameCandidates.size();
-    case lua_vm::WorldCollectionKind::authoredSquadConfigContexts:
-        return snapshot.authoredSquadConfigContexts.size();
-    case lua_vm::WorldCollectionKind::authoredSquadPlacementContexts:
-        return snapshot.authoredSquadPlacementContexts.size();
-    case lua_vm::WorldCollectionKind::authoredSquadPointContexts:
-        return snapshot.authoredSquadPointContexts.size();
-    case lua_vm::WorldCollectionKind::authoredSquadPointPlacementMatches:
-        return snapshot.authoredSquadPointPlacementMatches.size();
-    case lua_vm::WorldCollectionKind::authoredSquadEdgeContexts:
-        return snapshot.authoredSquadEdgeContexts.size();
-    }
-    return 0;
-}
-
 /** Copies one 1-based authored placement row into its Lua-facing definition. */
 [[nodiscard]] bool copy_authored(const catalog::Snapshot& snapshot,
                                  std::uint32_t localRow,
@@ -419,7 +335,8 @@ constexpr std::size_t kProgramGenerationBytes =
     case lua_vm::WorldCollectionKind::triggerVolumes:
         return copy_trigger(snapshot, localRow, output.triggerVolume);
     default:
-        return localRow != 0 && localRow <= world_count_impl(context, generation, kind);
+        return localRow != 0
+               && localRow <= world_sdk_internal::world_count(context, generation, kind);
     }
 }
 
@@ -634,10 +551,88 @@ coverage_count(const void* context, const lua_vm::WorldGenerationIdentity& gener
 
 } // namespace
 
+/** @return Row count of one world collection kind, or 0 when the generation is stale. */
 std::size_t world_sdk_internal::world_count(const void* context,
                                             const lua_vm::WorldGenerationIdentity& generation,
                                             lua_vm::WorldCollectionKind kind) noexcept {
-    return world_count_impl(context, generation, kind);
+    const generated::GeneratedWorldView* const world = checked_world(context, generation);
+    if (world == nullptr) {
+        return 0;
+    }
+    const catalog::Snapshot& snapshot = *world->snapshot();
+    switch (kind) {
+    case lua_vm::WorldCollectionKind::squadAnchors:
+        return scenario_anchor_count(world->activity_sdk_view());
+    case lua_vm::WorldCollectionKind::bubbles:
+        return snapshot.bubbles.size();
+    case lua_vm::WorldCollectionKind::states:
+        return snapshot.states.size();
+    case lua_vm::WorldCollectionKind::objects:
+        return snapshot.objects.size();
+    case lua_vm::WorldCollectionKind::slots:
+        return snapshot.slots.size();
+    case lua_vm::WorldCollectionKind::descriptors:
+        return snapshot.descriptors.size();
+    case lua_vm::WorldCollectionKind::embeddedPlacementLinks:
+        return snapshot.embeddedPlacementLinks.size();
+    case lua_vm::WorldCollectionKind::authoredPlacements:
+        return snapshot.authoredPlacements.size();
+    case lua_vm::WorldCollectionKind::embeddedPlacements:
+        return snapshot.embeddedPlacements.size();
+    case lua_vm::WorldCollectionKind::typedReferences:
+        return snapshot.references.size();
+    case lua_vm::WorldCollectionKind::containerPlacementLists:
+        return snapshot.containerPlacementLists.size();
+    case lua_vm::WorldCollectionKind::containerPlacementOwners:
+        return snapshot.containerPlacementOwners.size();
+    case lua_vm::WorldCollectionKind::containerPlacements:
+        return snapshot.containerPlacements.size();
+    case lua_vm::WorldCollectionKind::containerPlacementConfigs:
+        return snapshot.containerPlacementConfigs.size();
+    case lua_vm::WorldCollectionKind::containerPlacementComponents:
+        return snapshot.containerPlacementComponents.size();
+    case lua_vm::WorldCollectionKind::type23PlacementLinks:
+        return snapshot.type23PlacementLinks.size();
+    case lua_vm::WorldCollectionKind::type23PlacementCandidates:
+        return snapshot.type23PlacementCandidates.size();
+    case lua_vm::WorldCollectionKind::staticSpatialTables:
+        return snapshot.staticSpatialTables.size();
+    case lua_vm::WorldCollectionKind::staticSpatialOwners:
+        return snapshot.staticSpatialOwners.size();
+    case lua_vm::WorldCollectionKind::staticSpatialInstances:
+        return snapshot.staticSpatialInstances.size();
+    case lua_vm::WorldCollectionKind::triggerVolumeTables:
+        return snapshot.triggerVolumeTables.size();
+    case lua_vm::WorldCollectionKind::triggerVolumeOwners:
+        return snapshot.triggerVolumeOwners.size();
+    case lua_vm::WorldCollectionKind::triggerVolumeIncomingReferences:
+        return snapshot.triggerVolumeIncomingReferences.size();
+    case lua_vm::WorldCollectionKind::triggerVolumes:
+        return snapshot.triggerVolumeInstances.size();
+    case lua_vm::WorldCollectionKind::triggerVolumeVertices:
+        return snapshot.triggerVolumeVertices.size();
+    case lua_vm::WorldCollectionKind::triggerVolumeTriangles:
+        return snapshot.triggerVolumeTriangles.size();
+    case lua_vm::WorldCollectionKind::names:
+        return snapshot.names.size();
+    case lua_vm::WorldCollectionKind::tagNames:
+        return snapshot.tagNames.size();
+    case lua_vm::WorldCollectionKind::nameCandidates:
+        return snapshot.nameCandidates.size();
+    case lua_vm::WorldCollectionKind::inlineNameCandidates:
+        return snapshot.inlineNameCandidates.size();
+    case lua_vm::WorldCollectionKind::authoredSquadConfigContexts:
+        return snapshot.authoredSquadConfigContexts.size();
+    case lua_vm::WorldCollectionKind::authoredSquadPlacementContexts:
+        return snapshot.authoredSquadPlacementContexts.size();
+    case lua_vm::WorldCollectionKind::authoredSquadPointContexts:
+        return snapshot.authoredSquadPointContexts.size();
+    case lua_vm::WorldCollectionKind::authoredSquadPointPlacementMatches:
+        return snapshot.authoredSquadPointPlacementMatches.size();
+    case lua_vm::WorldCollectionKind::authoredSquadEdgeContexts:
+        return snapshot.authoredSquadEdgeContexts.size();
+    }
+    return 0;
 }
 
 /** Builds the identity that pins a world view. @return False when the view is not fully bound. */

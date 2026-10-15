@@ -18,16 +18,20 @@ constexpr std::int64_t kSocketTransportKind = 1;
 /** SDR transport, which the unmodified Client picks. */
 constexpr std::int64_t kSdrTransportKind = 2;
 
+#pragma code_seg(push, platform_guard, ".srguard")
+
 /** @return Original transport kind with SDR redirected to direct sockets. */
 __declspec(noinline) std::int64_t __fastcall transport_kind_body() noexcept {
-    coordinator::CallLease lease{};
+    coordinator::CallLease lease;
     coordinator::g_callIngress(lease, HookSlot::transportKind, coordinator::ConsumerKind::none);
-    const std::int64_t result = [&]() noexcept {
+    std::int64_t result{};
+    __try {
         const auto call = reinterpret_cast<TransportKind>(lease.original);
         const std::int64_t value = call != nullptr ? call() : kSocketTransportKind;
-        return lease.accepting && value == kSdrTransportKind ? kSocketTransportKind : value;
-    }();
-    coordinator::g_callEgress();
+        result = lease.accepting && value == kSdrTransportKind ? kSocketTransportKind : value;
+    } __finally {
+        coordinator::g_callEgress();
+    }
     return result;
 }
 
@@ -38,15 +42,17 @@ __declspec(noinline) std::int64_t __fastcall transport_kind_body() noexcept {
  * @return The original availability, except the missing-certificate state we handle.
  */
 __declspec(noinline) int __fastcall authentication_status_body(void* self, void* details) noexcept {
-    coordinator::CallLease lease{};
+    coordinator::CallLease lease;
     coordinator::g_callIngress(
         lease, HookSlot::authenticationStatus, coordinator::ConsumerKind::none);
-    const int result = [&]() noexcept {
+    int result{};
+    __try {
         const auto call = reinterpret_cast<AuthenticationStatus>(lease.original);
         const int value = call != nullptr ? call(self, details) : kAvailabilityFailed;
-        return lease.accepting && value == kAvailabilityFailed ? kAvailabilityCurrent : value;
-    }();
-    coordinator::g_callEgress();
+        result = lease.accepting && value == kAvailabilityFailed ? kAvailabilityCurrent : value;
+    } __finally {
+        coordinator::g_callEgress();
+    }
     return result;
 }
 
@@ -62,19 +68,22 @@ __declspec(noinline) bool __fastcall set_certificate_body(void* self,
                                                           const void* certificate,
                                                           int certificateSize,
                                                           char* error) noexcept {
-    coordinator::CallLease lease{};
+    coordinator::CallLease lease;
     coordinator::g_callIngress(lease, HookSlot::setCertificate, coordinator::ConsumerKind::none);
-    const bool result = [&]() noexcept {
+    bool result{};
+    __try {
         const auto call = reinterpret_cast<SetCertificate>(lease.original);
-        if (call == nullptr) {
-            return false;
+        if (call != nullptr) {
+            const bool accepted = call(self, certificate, certificateSize, error);
+            result = lease.accepting ? true : accepted;
         }
-        const bool accepted = call(self, certificate, certificateSize, error);
-        return lease.accepting ? true : accepted;
-    }();
-    coordinator::g_callEgress();
+    } __finally {
+        coordinator::g_callEgress();
+    }
     return result;
 }
+
+#pragma code_seg(pop, platform_guard)
 
 } // namespace
 

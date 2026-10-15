@@ -1,7 +1,7 @@
 #include <algorithm>
-#include <cstring>
 
 #include "definition_index_table.h"
+#include "internal.h"
 #include "items.h"
 
 namespace sunrise::middleware::content::packages::tables::items {
@@ -66,17 +66,6 @@ constexpr std::size_t kPlugMemberStride = 32;
 constexpr std::size_t kPlugMemberIndexOffset = 0;
 /** Native arrays use 16-bit definition indices even though their serialized field is 32-bit. */
 constexpr std::uint64_t kMaximumPlugMemberCount = 65535;
-
-/** @param blob Source bytes. @param offset Field offset. @param value Receives the field. */
-template <typename Value>
-[[nodiscard]] bool
-read(std::span<const std::byte> blob, std::size_t offset, Value& value) noexcept {
-    if (offset > blob.size() || blob.size() - offset < sizeof value) {
-        return false;
-    }
-    std::memcpy(&value, blob.data() + offset, sizeof value);
-    return true;
-}
 
 /**
  * Reads the socket entry list index a definition declares.

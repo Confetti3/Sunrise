@@ -175,6 +175,9 @@ enum class LoadStatus : std::uint8_t {
     versionMismatch,
 };
 
+/** @return The stable log name of one catalog load result. */
+[[nodiscard]] const char* status_name(LoadStatus value) noexcept;
+
 /** Loads and validates one explicit generated SDK catalog path. */
 [[nodiscard]] bool load(const wchar_t* path,
                         const Digest& expectedSourceFingerprint,

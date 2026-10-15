@@ -64,7 +64,4 @@ void clear() noexcept;
 /** @return The reward row count, read under the lock. */
 [[nodiscard]] std::size_t count() noexcept;
 
-/** @return The wrapper package count, read under the lock. */
-[[nodiscard]] std::size_t package_count() noexcept;
-
 } // namespace sunrise::state::build_data::season_pass

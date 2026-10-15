@@ -20,7 +20,7 @@ inline constexpr std::int32_t kMaximumGrantSliceSetIndex = 511;
 inline constexpr std::uint8_t kSliceSetToBubbleShift = 3;
 /** The client's cleared mirror changes when the first nonzero token arrives. */
 inline constexpr std::uint16_t kInitialGrantToken = 1;
-/** The token rides a 16-bit field, so it saturates here rather than wrapping onto a live value. */
+/** The token rides a 16-bit field; the next grant wraps to the first nonzero token. */
 inline constexpr std::uint16_t kMaximumGrantToken = 0xFFFF;
 /** The cleared grant slot uses a value outside the 65-entry authority table. */
 inline constexpr std::uint8_t kInvalidBubble = 0xFF;
@@ -35,10 +35,7 @@ struct Grant final {
 struct AuthorityState final {
     /** Token in force per bubble. Zero means the bubble is owed a grant. */
     std::array<std::uint16_t, kAuthoritySlotCount> grantTokens{};
-    /**
-     * Highest token ever issued per bubble, which a release does not clear.
-     * The client ignores a token its mirror already holds, so a re-grant must exceed this.
-     */
+    /** Last issued token per bubble; a release retains it so renewal chooses a different value. */
     std::array<std::uint16_t, kAuthoritySlotCount> issuedTokens{};
     /** True while the client holds the bubble. An abdication clears it. */
     std::array<bool, kAuthoritySlotCount> held{};

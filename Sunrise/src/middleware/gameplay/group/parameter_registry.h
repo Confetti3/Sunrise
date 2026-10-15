@@ -35,12 +35,6 @@ enum class Parameter : std::uint8_t {
 };
 
 /**
- * @param index Registry index, 0 through 24.
- * @return The registry's own name, or "unknown" outside the range.
- */
-[[nodiscard]] const char* parameter_name(std::uint8_t index) noexcept;
-
-/**
  * Names the parameters one mask selects, as a comma-separated list.
  * @param mask Parameter mask; only its low 25 bits are read.
  * @param output Destination buffer.

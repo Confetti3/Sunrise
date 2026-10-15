@@ -217,9 +217,7 @@ void mutate_equipped_socket_plug(const middleware::web_service::Message& message
     const opcode1901::Replacement& replacement = request.replacements.front();
     if (!parsed || request.replacementCount != 1
         || replacement.modelSocketKind != kEquippedShaderModelSocketKind
-        || replacement.auxiliary != 0
-        || replacement.socketIndex >= state::account::inventory::kPlugCapacity
-        || request.instanceIdentityToken == 0) {
+        || replacement.socketIndex >= state::account::inventory::kPlugCapacity) {
         core::log::write(core::log::Channel::server,
                          core::log::Level::warn,
                          "ev=ws1901 stage=parse result=fail");
@@ -230,11 +228,10 @@ void mutate_equipped_socket_plug(const middleware::web_service::Message& message
     if (mutation == nullptr) {
         return;
     }
-    if (!state::prepare_character_selector_socket_plug(
-            request.instanceIdentityToken,
-            static_cast<std::uint8_t>(replacement.socketIndex),
-            replacement.plugDefinitionIndex,
-            *mutation)) {
+    if (!state::prepare_equipped_socket_plug(request.targetInstanceSoid,
+                                             static_cast<std::uint8_t>(replacement.socketIndex),
+                                             replacement.plugDefinitionIndex,
+                                             *mutation)) {
         clear_mutation(outcome);
         core::log::write(core::log::Channel::server,
                          core::log::Level::warn,

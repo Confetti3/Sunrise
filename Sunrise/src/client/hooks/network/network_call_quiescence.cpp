@@ -68,11 +68,6 @@ bool consume_arm(PauseGate& gate) noexcept {
     (void)InterlockedExchange(&gate.entered, 1);
     return true;
 }
-
-/** @param gate Gate being held. @return True while the holder must keep spinning. */
-bool held(const PauseGate& gate) noexcept {
-    return gate.released == 0;
-}
 #endif
 
 } // namespace sunrise::client::hooks::network::quiescence

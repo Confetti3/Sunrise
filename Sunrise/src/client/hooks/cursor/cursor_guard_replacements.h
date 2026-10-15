@@ -50,11 +50,4 @@ BOOL WINAPI set_cursor_pos(int x, int y) noexcept;
 /** Frees the pointer while the interface is open and remembers the game's own bounds. */
 BOOL WINAPI clip_cursor(const RECT* bounds) noexcept;
 
-/**
- * Applies one interface-visibility edge to the pointer.
- * Must run outside every presentation lock because it calls Win32.
- * @param visible Current Core visibility state.
- */
-void apply_policy(bool visible) noexcept;
-
 } // namespace sunrise::client::hooks::cursor

@@ -126,7 +126,7 @@ struct Definition {
     /** Item row that supplies the completed catalyst's native perks and stat changes. */
     std::uint16_t effectDefinitionIndex{};
     /** Family-5 acquired-state slot that makes the catalyst socket visible. */
-    std::uint16_t acquisitionDefinitionIndex{kUnavailableAcquisitionIndex};
+    std::uint16_t acquisitionFlag{kUnavailableAcquisitionIndex};
     /** Account rows for the completion flags, or unavailable for override-only slots. */
     std::array<std::uint16_t, kCompletionFlagCapacity> completionAccountFlagIndices{
         kUnavailableCompletionFlagIndex,
@@ -163,7 +163,7 @@ struct CompletedCatalyst {
     std::uint16_t completedPlugDefinitionIndex{};
     std::uint16_t progressPlugDefinitionIndex{};
     std::uint16_t effectDefinitionIndex{};
-    std::uint16_t acquisitionDefinitionIndex{kUnavailableAcquisitionIndex};
+    std::uint16_t acquisitionFlag{kUnavailableAcquisitionIndex};
     CompletionRequirements completion{};
     ObjectiveCompletion objective{};
 };
@@ -194,7 +194,8 @@ enum class AcquisitionState : std::uint8_t {
 /** One socket type's build-derived Family-5 acquisition gate. */
 struct AcquisitionGate {
     std::uint16_t socketType{};
-    std::uint16_t definitionIndex{kUnavailableAcquisitionIndex};
+    /** Unlock flag slot the socket type's insertion expression reads. */
+    std::uint16_t flag{kUnavailableAcquisitionIndex};
     AcquisitionState state{AcquisitionState::absent};
 };
 

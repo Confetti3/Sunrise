@@ -13,6 +13,7 @@
 
 #include "../../../core/filesystem/temporary_sibling.h"
 #include "../../../core/logging/log.h"
+#include "../../../state/gameplay/external/rsat_decode_plans.h"
 #include "activity_sdk_decode_plans_internal.h"
 
 namespace sunrise::client::content::activity::sdk_generation::decode_plans {
@@ -25,9 +26,8 @@ constexpr std::string_view kMagic = "SRRSATP2";
 constexpr std::uint32_t kVersion = 2;
 constexpr std::uint32_t kClientBuild = 86657;
 constexpr std::size_t kHeaderSize = 136;
-/** Identity of this builder in the evidence; the Python reference hashes the same text. */
+/** Identity of this builder; its text is hashed into the evidence. */
 constexpr std::string_view kGeneratorId = "sunrise-rsat-decode-plans-builder-1";
-constexpr std::wstring_view kManifestSuffix = L".json";
 constexpr std::wstring_view kTemporarySuffix = L".tmp";
 /** Per-pair refusals logged before the rest are only counted. */
 constexpr std::uint32_t kLoggedErrorLimit = 16;
@@ -80,7 +80,7 @@ void put_field(std::vector<std::byte>& bytes, const Field& field) {
 }
 
 void append_hex(std::string& text, std::span<const std::byte> bytes) {
-    // Digests are lowercase hex in the evidence and the manifest, as the reference writes them.
+    // Digests are lowercase hex in the evidence and the manifest.
     constexpr std::string_view digits = "0123456789abcdef";
     for (const std::byte value : bytes) {
         text.push_back(digits[static_cast<std::size_t>(value) >> 4U]);
@@ -94,7 +94,7 @@ void append_handle(std::string& text, std::uint32_t handle) {
     text.append(buffer.data(), written > 0 ? static_cast<std::size_t>(written) : 0U);
 }
 
-/** Compact JSON of the evidence, in key order, exactly as the reference hashes it. */
+/** Compact JSON of the evidence in key order; its exact bytes are hashed into the fingerprint. */
 void append_evidence(std::string& text,
                      const Digest& executable,
                      const Digest& generator,
@@ -116,7 +116,7 @@ void append_evidence(std::string& text,
     text.append("}}");
 }
 
-/** Two-space indented manifest in key order, exactly as the reference writes it. */
+/** Two-space indented manifest in key order. */
 void append_manifest(std::string& text,
                      const Digest& sdk,
                      const Digest& fingerprint,
@@ -258,7 +258,7 @@ void log_pair_error(std::uint32_t component, std::uint32_t schema, const char* d
     return request.cancel != nullptr && request.cancel(request.cancelContext);
 }
 
-/** Compiles every pair; refused pairs are counted and left out, as the reference does. */
+/** Compiles every pair; refused pairs are counted and left out. */
 [[nodiscard]] Status
 compile_pairs(const Request& request, Store& store, std::vector<Plan>& plans, Result& output) {
     std::set<std::pair<std::uint32_t, std::uint32_t>> pairs;
@@ -427,7 +427,8 @@ struct ScratchOwner final {
     append_manifest(
         manifest, sdk, fingerprint, executable, generator, payloadDigest, store.package_hashes());
     const std::wstring manifestPath =
-        std::wstring(request.cachePath) + std::wstring(kManifestSuffix);
+        std::wstring(request.cachePath)
+        + std::wstring(state::gameplay::rsat_decode_plans::kManifestSuffix);
     if (!write_file(request.cachePath, cache)
         || !write_file(
             manifestPath,

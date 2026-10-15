@@ -4,16 +4,6 @@
 #include "replacements.h"
 
 namespace sunrise::client::hooks::egress::winsock::transmission {
-namespace {
-
-/** Clears an optional send count before a policy denial. */
-void clear_bytes(LPDWORD bytes) noexcept {
-    if (bytes != nullptr) {
-        *bytes = 0;
-    }
-}
-
-} // namespace
 
 /** Redirects one message destination to the IPv4 redirect target. */
 INT PASCAL send_message(SOCKET socket,

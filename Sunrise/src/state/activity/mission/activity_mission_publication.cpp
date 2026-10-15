@@ -21,9 +21,8 @@ bool project_for_publication(const Snapshot& snapshot,
     for (std::size_t index = 0; index < state.timerCount; ++index) {
         const std::uint64_t deadline = state.timers[index].deadlineTick;
         const std::uint64_t remaining = deadline > now ? deadline - now : 0;
-        output.timerRemainingMs[index] = static_cast<std::uint32_t>(
-            (std::min)(remaining,
-                       static_cast<std::uint64_t>((std::numeric_limits<std::uint32_t>::max)())));
+        output.timerRemainingMs[index] = static_cast<std::uint32_t>((std::min)(
+            remaining, static_cast<std::uint64_t>((std::numeric_limits<std::uint32_t>::max)())));
     }
     output.revision = state.revision;
     output.variableCount = state.variableCount;

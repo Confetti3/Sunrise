@@ -54,11 +54,6 @@ void append(char* output, std::size_t capacity, std::size_t& used, const char* t
 
 } // namespace
 
-/** Reports one registry name. */
-const char* parameter_name(std::uint8_t index) noexcept {
-    return index < kNames.size() ? kNames[index] : "unknown";
-}
-
 /** Names the parameters one mask selects. */
 const char* parameter_names(std::uint64_t mask, char* output, std::size_t capacity) noexcept {
     if (output == nullptr || capacity == 0) {

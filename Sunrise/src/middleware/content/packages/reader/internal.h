@@ -75,14 +75,16 @@ void slot_index_erase(SlotIndex& index, std::uint64_t key, std::size_t slot) noe
                               std::uint32_t& patchIndex) noexcept;
 
 /**
- * Finds the highest-patch file for one package id.
+ * Finds the highest patch of one package id, installed or served by a mod.
  * @param directory Installed packages directory.
+ * @param installedOnly Ignores every generation a mod serves.
  * @param packageId Package id from the tag handle.
  * @param stem Receives the file stem without its patch suffix and extension.
  * @param patchIndex Receives the highest patch index found.
  * @return True when at least one matching package exists.
  */
 [[nodiscard]] bool find_latest(std::wstring_view directory,
+                               bool installedOnly,
                                std::uint16_t packageId,
                                Path& stem,
                                std::uint32_t& patchIndex) noexcept;
@@ -90,25 +92,32 @@ void slot_index_erase(SlotIndex& index, std::uint64_t key, std::size_t slot) noe
 /**
  * Resolves one package through storage owned by this reader.
  * The first package read reaches the shared directory catalog; later reads are lock-free.
+ * A change of read mode drops every cache the Scratch holds for the old mode.
  * @param scratch Reader-local location storage.
- * @param directory Installed packages directory, immutable while this Scratch is in use.
+ * @param source Installed packages directory and read mode.
  * @param packageId Package id from the tag handle.
  * @param output Receives the cached location on success.
  * @return True when at least one matching package exists.
  */
 [[nodiscard]] bool resolve_latest(Scratch& scratch,
-                                  std::wstring_view directory,
+                                  const Source& source,
                                   std::uint16_t packageId,
                                   const PackageLocation*& output) noexcept;
 
 /**
- * Builds the full path of one patch of a package stem.
+ * Builds the full path of one patch of a package.
  * @param stem Stem produced by find_latest.
+ * @param packageId Package the stem names; a mod-served generation of it wins.
  * @param patchIndex Requested patch index.
+ * @param installedOnly Ignores every generation a mod serves, so the installed file is read.
  * @param path Receives the full path.
  * @return True when the path fits fixed storage.
  */
-[[nodiscard]] bool build_path(const Path& stem, std::uint32_t patchIndex, Path& path) noexcept;
+[[nodiscard]] bool build_path(const Path& stem,
+                              std::uint16_t packageId,
+                              std::uint32_t patchIndex,
+                              bool installedOnly,
+                              Path& path) noexcept;
 
 /** @param scratch Reader whose held package locations are dropped. */
 void release_locations(Scratch& scratch) noexcept;

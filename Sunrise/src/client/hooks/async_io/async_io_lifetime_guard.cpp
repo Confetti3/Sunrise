@@ -20,19 +20,18 @@ using patterns::signature;
 using patterns::signature_length;
 
 /**
- * Post-pump tail of the native async-I/O manager wrapper. The RIP-relative and call displacements
- * are ASLR-stable bytes in this build and separate this wrapper from two identical manager tails.
- * A different executable fails closed rather than accepting a structurally similar owner.
+ * Native async-I/O manager wrapper, from its prologue through the post-pump tail.
+ * Its null test on the cached manager separates it from two wrappers with the same tail.
  */
 constexpr std::string_view kTailText =
-    "48 8B 1D E6 3C 30 02 48 8B CB E8 66 89 00 00 48 8B 05 D7 3C 30 02 "
-    "80 B8 62 6C 04 00 00 74 15 "
-    "8B 08 33 D2 C6 80 62 6C 04 00 00";
+    "40 53 48 83 EC 20 48 8B 1D ? ? ? ? 48 85 DB 74 ? 80 BB 61 6C 04 00 00 75 ? 8B 0B 33 D2 "
+    "E8 ? ? ? ? C6 83 62 6C 04 00 01 48 8B 1D ? ? ? ? 48 8B CB E8 ? ? ? ? 48 8B 05 ? ? ? ? "
+    "80 B8 62 6C 04 00 00 74 ? 8B 08 33 D2 C6 80 62 6C 04 00 00";
 /** Compiled form of the pattern above; the scan requires one match. */
 constexpr auto kTail = signature<signature_length(kTailText)>(kTailText);
 
-/** The post-pump global reload begins after MOV RBX, MOV RCX, and CALL. */
-constexpr std::size_t kReloadOffset = 15;
+/** The post-pump global reload begins after the second MOV RBX, MOV RCX, and CALL. */
+constexpr std::size_t kReloadOffset = 58;
 /** `mov rax, rbx` followed by one four-byte architectural NOP. */
 constexpr std::array<std::byte, 7> kCachedOwner{std::byte{0x48},
                                                 std::byte{0x89},
@@ -41,16 +40,12 @@ constexpr std::array<std::byte, 7> kCachedOwner{std::byte{0x48},
                                                 std::byte{0x1F},
                                                 std::byte{0x40},
                                                 std::byte{0x00}};
-/** `mov rax, [rip+disp32]`, the first three bytes of the untouched native reload. */
-constexpr std::array<std::byte, 3> kNativeReloadPrefix{
-    std::byte{0x48}, std::byte{0x8B}, std::byte{0x05}};
 /** Freeze retries before the patch is abandoned; a thread inside the bytes blocks the write. */
 constexpr std::size_t kHoldAttempts = 8;
 
 std::byte* g_reload{};
 std::array<std::byte, kCachedOwner.size()> g_original{};
 bool g_installed{};
-bool g_ownsPatch{};
 
 /** @return True when a suspended thread would resume inside the bytes being replaced. */
 [[nodiscard]] bool thread_inside_patch(const process::freeze::Held& held,
@@ -125,18 +120,6 @@ bool install() noexcept {
         return false;
     }
     g_reload = tail + kReloadOffset;
-    if (std::memcmp(g_reload, kCachedOwner.data(), kCachedOwner.size()) == 0) {
-        g_installed = true;
-        g_ownsPatch = false;
-        return true;
-    }
-    if (std::memcmp(g_reload, kNativeReloadPrefix.data(), kNativeReloadPrefix.size()) != 0) {
-        g_reload = nullptr;
-        core::log::write(core::log::Channel::client,
-                         core::log::Level::warn,
-                         "ev=async_io_guard stage=verify result=fail");
-        return false;
-    }
     std::memcpy(g_original.data(), g_reload, g_original.size());
     const bool patchWriteComplete = write_code(g_reload, kCachedOwner);
     if (!patchWriteComplete
@@ -149,7 +132,6 @@ bool install() noexcept {
         return false;
     }
     g_installed = true;
-    g_ownsPatch = true;
     core::log::write(core::log::Channel::client,
                      patchWriteComplete ? core::log::Level::info : core::log::Level::warn,
                      "ev=async_io_guard stage=patch result=ok mode=cached_manager_owner");
@@ -161,22 +143,14 @@ bool uninstall() noexcept {
     if (!g_installed) {
         return true;
     }
-    if (g_ownsPatch) {
-        const bool restoreComplete = write_code(g_reload, g_original);
-        if (!restoreComplete && std::memcmp(g_reload, g_original.data(), g_original.size()) != 0) {
-            return false;
-        }
+    const bool restoreComplete = write_code(g_reload, g_original);
+    if (!restoreComplete && std::memcmp(g_reload, g_original.data(), g_original.size()) != 0) {
+        return false;
     }
     g_reload = nullptr;
     g_original = {};
     g_installed = false;
-    g_ownsPatch = false;
     return true;
-}
-
-/** @return True while the guarded instruction sequence is present. */
-bool is_installed() noexcept {
-    return g_installed;
 }
 
 } // namespace sunrise::client::hooks::async_io

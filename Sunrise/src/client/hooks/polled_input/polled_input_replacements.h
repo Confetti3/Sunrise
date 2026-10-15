@@ -65,10 +65,4 @@ SHORT WINAPI get_async_key_state(int virtualKey) noexcept;
 /** Drops the game image range. */
 void clear_game_range() noexcept;
 
-/**
- * Records an interface visibility change for the polled reads.
- * @param visible Current Core visibility state.
- */
-void apply_policy(bool visible) noexcept;
-
 } // namespace sunrise::client::hooks::polled_input

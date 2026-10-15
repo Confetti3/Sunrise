@@ -13,6 +13,7 @@
 namespace sunrise::client::content::activity::sdk_generation::topology_inventory {
 using detail::build_object;
 using detail::build_occurrence;
+using detail::content_hash;
 using detail::format_text;
 using detail::kActivityTopologyJoinMask;
 using detail::merge_object;
@@ -119,15 +120,6 @@ struct ObjectUpdate final {
         return false;
     }
     return true;
-}
-
-/** Returns the compact FNV-1 hash used by package-inline names. */
-[[nodiscard]] std::uint32_t content_hash(std::string_view value) noexcept {
-    std::uint32_t hash = 2166136261U;
-    for (const unsigned char byte : value) {
-        hash = (hash * 16777619U) ^ byte;
-    }
-    return hash;
 }
 
 /** Finds one scenario index in the inventory's strict tag order. */

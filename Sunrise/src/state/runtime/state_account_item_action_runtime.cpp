@@ -5,7 +5,6 @@
 #include <cstdint>
 
 #include "../../middleware/datagen/family4/loadout/loadout_resolver.h"
-#include "../../middleware/web_service/messages/opcode1901.h"
 #include "../build_data/runtime.h"
 #include "../investment/store_internal.h"
 #include "runtime.h"
@@ -18,7 +17,6 @@ using namespace runtime::detail;
 namespace authored_inventory = account::inventory;
 namespace item_details = build_data::items::details;
 namespace family4_loadout = middleware::datagen::family4::loadout;
-namespace opcode1901 = middleware::web_service::messages::opcode1901;
 
 /** Prepares one checked ordinary-socket selection without publishing account State. */
 bool prepare_socket_plug(std::uint64_t targetInstanceSoid,
@@ -72,11 +70,11 @@ bool prepare_socket_plug(std::uint64_t targetInstanceSoid,
     return true;
 }
 
-/** Prepares a socket transition for the exact instance identity carried by opcode 1901. */
-bool prepare_character_selector_socket_plug(std::uint64_t instanceIdentityToken,
-                                            std::uint8_t requestedSocketLane,
-                                            std::uint16_t plugDefinitionIndex,
-                                            PendingSocketPlug& mutation) noexcept {
+/** Prepares a socket transition for the whole instance identity carried by opcode 1901. */
+bool prepare_equipped_socket_plug(std::uint64_t targetInstanceSoid,
+                                  std::uint8_t requestedSocketLane,
+                                  std::uint16_t plugDefinitionIndex,
+                                  PendingSocketPlug& mutation) noexcept {
     mutation = {};
     const AccountState snapshot = account_snapshot();
     std::size_t characterIndex = snapshot.characterCount;
@@ -89,20 +87,20 @@ bool prepare_character_selector_socket_plug(std::uint64_t instanceIdentityToken,
         }
     }
 
-    if (characterIndex >= snapshot.characterCount || instanceIdentityToken == 0
+    if (characterIndex >= snapshot.characterCount || targetInstanceSoid == 0
         || requestedSocketLane >= authored_inventory::kPlugCapacity) {
-        report_socket_plug("prepare_location",
+        report_socket_plug("prepare_equipped",
                            "fail",
                            "selection_or_slot",
                            0,
-                           0,
+                           targetInstanceSoid,
                            0,
                            requestedSocketLane,
                            plugDefinitionIndex,
                            0,
                            0,
                            false,
-                           static_cast<std::size_t>(instanceIdentityToken));
+                           0);
         return false;
     }
 
@@ -113,7 +111,7 @@ bool prepare_character_selector_socket_plug(std::uint64_t instanceIdentityToken,
     const family4_loadout::ResolvedItem* resolvedTarget = nullptr;
     for (std::size_t index = 0; index < resolvedLoadout.itemCount; ++index) {
         const family4_loadout::ResolvedItem& item = resolvedLoadout.items[index];
-        if (!opcode1901::identifies_instance(instanceIdentityToken, item.instance.instanceSoid)) {
+        if (item.instance.instanceSoid != targetInstanceSoid) {
             continue;
         }
         if (resolvedTarget != nullptr) {
@@ -167,23 +165,23 @@ bool prepare_character_selector_socket_plug(std::uint64_t instanceIdentityToken,
                               plugDefinitionIndex,
                               mutation)
         || mutation.targetEquipped != expectedEquipped) {
-        report_socket_plug("prepare_location",
+        report_socket_plug("prepare_equipped",
                            "fail",
                            "equipment_or_compatibility",
                            snapshot.characters[characterIndex].soid,
-                           resolvedTarget != nullptr ? resolvedTarget->instance.instanceSoid : 0,
+                           targetInstanceSoid,
                            0,
                            resolvedSocketLane,
                            plugDefinitionIndex,
                            0,
                            0,
                            expectedEquipped,
-                           static_cast<std::size_t>(instanceIdentityToken));
+                           0);
         mutation = {};
         return false;
     }
 
-    report_socket_plug("prepare_location",
+    report_socket_plug("prepare_equipped",
                        "ok",
                        "ready",
                        mutation.characterSoid,

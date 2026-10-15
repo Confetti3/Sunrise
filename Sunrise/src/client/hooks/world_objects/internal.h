@@ -24,7 +24,6 @@ inline constexpr std::size_t kDynamicHandleCapacity = 256;
 inline constexpr std::size_t kPurgeTraceCapacity = 64;
 
 /** Datum field offsets the game's own layout fixes; the trace reads them by address. */
-inline constexpr std::size_t kDatumFlagsOffset = 0x04;
 inline constexpr std::size_t kDatumSelfHandleOffset = 0x0C;
 inline constexpr std::size_t kDatumObjectListTagOffset = 0x88;
 inline constexpr std::size_t kDatumEntryIndexOffset = 0x8C;

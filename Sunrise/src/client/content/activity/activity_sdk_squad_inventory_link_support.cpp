@@ -19,32 +19,18 @@ namespace {
 namespace tables = middleware::content::packages::tables;
 namespace topology = topology_inventory;
 
-/** @return True when one topology text owns exactly its declared bytes. */
-[[nodiscard]] bool text_view(const topology::Text& text, std::string_view& output) noexcept {
-    output = {};
-    if (text.length >= text.value.size()) {
-        return false;
-    }
-    output = std::string_view(text.value.data(), text.length);
-    return text.value[text.length] == '\0';
-}
+} // namespace
 
-/** Formats one bounded identity string. */
-template <typename... Values>
-[[nodiscard]] bool format_text(std::string& output, const char* pattern, Values... values) {
-    std::array<char, 192> bytes{};
-    const int count = std::snprintf(bytes.data(), bytes.size(), pattern, values...);
-    if (count < 0 || static_cast<std::size_t>(count) >= bytes.size()) {
-        return false;
-    }
-    output.assign(bytes.data(), static_cast<std::size_t>(count));
-    return true;
-}
-
-/** Derives one descriptor identity from its exact object and slot tuple. */
-[[nodiscard]] bool descriptor_id(const topology::Snapshot& topology,
-                                 const DescriptorFact& descriptor,
-                                 std::string& output) {
+/**
+ * Derives one descriptor identity from its exact object and slot tuple.
+ * @param topology Topology the descriptor indexes.
+ * @param descriptor Descriptor to name.
+ * @param output Receives the identity.
+ * @return False when the descriptor does not name a matching object and slot.
+ */
+bool descriptor_id(const topology::Snapshot& topology,
+                   const DescriptorFact& descriptor,
+                   std::string& output) {
     if (descriptor.objectIndex >= topology.objects.size()
         || descriptor.slotIndex >= topology.slots.size()) {
         return false;
@@ -62,8 +48,6 @@ template <typename... Values>
                        static_cast<unsigned>(slot.slotIndex),
                        static_cast<unsigned>(slot.slotType));
 }
-
-} // namespace
 
 /** Checks the topology rows needed by the squad inventory. */
 [[nodiscard]] bool valid_topology(const topology::Snapshot& source) noexcept {

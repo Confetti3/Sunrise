@@ -123,7 +123,7 @@ void draw_data(ImDrawData* drawData) noexcept {
 
 } // namespace
 
-/** Runs one Dear ImGui frame. Draw data is sent only while the Core UI is visible. */
+/** Runs one Dear ImGui frame. Sends draw data only when an overlay or the surface drew. */
 void render_frame_locked() noexcept {
     if (!fully_active_locked()) {
         return;

@@ -38,9 +38,6 @@ struct Result final {
     std::uint64_t packBytes{};
 };
 
-/** @return Stable diagnostic name for one retained-result lookup. */
-[[nodiscard]] const char* status_name(Status value) noexcept;
-
 /** Retains one successful generation result without reopening its output tree. */
 [[nodiscard]] bool remember(std::wstring_view artifactDirectory,
                             const Digest& sourceFingerprint,

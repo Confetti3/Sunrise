@@ -271,34 +271,6 @@ make_runtime_event_payload_codec(const RuntimeEventPayloadCodecContext& context)
             kMaximumSimulationEventPayloadBits};
 }
 
-/** Resolves a unique named event from the pinned catalog. */
-bool resolve_runtime_event(const ActorCommandCatalog& catalog,
-                           std::string_view name,
-                           RuntimeEventIdentity& output) noexcept {
-    output = {};
-    if (catalog.owner == nullptr || name.empty()) {
-        return false;
-    }
-    const format::SimulationEventDefinition* found = nullptr;
-    std::uint32_t foundIndex = format::kAbsentIndex;
-    for (std::size_t index = 0; index < catalog.events.size(); ++index) {
-        const format::SimulationEventDefinition& row = catalog.events[index];
-        if (catalog.owner->string(row.name) != name) {
-            continue;
-        }
-        if (found != nullptr || !valid_event(catalog, static_cast<std::uint32_t>(index), found)) {
-            return false;
-        }
-        found = &row;
-        foundIndex = static_cast<std::uint32_t>(index);
-    }
-    if (found == nullptr) {
-        return false;
-    }
-    output = {foundIndex, found->eventType, found->primarySchema, found->secondarySchema};
-    return true;
-}
-
 /** Encodes the event wrapper and its selected actor-command body. */
 bool encode_actor_message_event(const ActorCommandCatalog& catalog,
                                 std::uint32_t eventIndex,
@@ -314,7 +286,7 @@ bool encode_actor_message_event(const ActorCommandCatalog& catalog,
     const format::SimulationEventDefinition* event = nullptr;
     if (!valid_event(catalog, eventIndex, event) || event->primarySchema == format::kAbsentIndex
         || event->secondarySchema == format::kAbsentIndex || messageIndex >= catalog.messages.size()
-        || target.slot > kMaximumEntitySlot || target.incarnation > kMaximumEntityIncarnation) {
+        || !valid_token(target)) {
         status = wire::CodecStatus::unsupportedField;
         return false;
     }

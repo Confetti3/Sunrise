@@ -20,12 +20,14 @@
 #include "../../../middleware/content/packages/tables/component_container_reader.h"
 #include "../../../middleware/content/packages/tables/static_spatial_candidate_reader.h"
 #include "../../../state/build_data/runtime.h"
+#include "../scenarios/scenario_build.h"
 #include "../spawn_sets/spawn_set_catalog_builder.h"
 #include "scriptable_catalog_inline_names.h"
 
 namespace sunrise::client::content::activity::scriptables::internal {
 
 namespace catalog = state::build_data::scriptables;
+namespace scenario_layouts = ::sunrise::client::content::scenarios;
 
 // Fixed capacities bound one cached table's rows and inline bytes.
 constexpr std::size_t kCachedTableCapacity = 2'048;
@@ -683,6 +685,7 @@ namespace {
                                                          package_reader::Scratch& scratch,
                                                          StaticSpatialCache* cache,
                                                          const ContainerIndex& containers,
+                                                         const scenario_layouts::LayoutSet* layouts,
                                                          std::string_view scenarioName,
                                                          catalog::Snapshot& output,
                                                          SpatialCancelCheck cancel) noexcept {
@@ -690,7 +693,7 @@ namespace {
     output.staticSpatialNotApplicable = false;
     output.staticSpatialComplete = false;
     state::build_data::scenarios::Definition scenario{};
-    if (!state::build_data::find_scenario_layout(scenarioName, scenario)) {
+    if (!scenario_layouts::find_layout(layouts, scenarioName, scenario)) {
         ++output.staticSpatialUnresolvedReads;
         return true;
     }
@@ -748,11 +751,12 @@ StaticSpatialCache::~StaticSpatialCache() = default;
 bool append_static_spatial_candidates(const package_reader::Source& source,
                                       package_reader::Scratch& scratch,
                                       const ContainerIndex& containers,
+                                      const scenario_layouts::LayoutSet* layouts,
                                       std::string_view scenarioName,
                                       catalog::Snapshot& output,
                                       SpatialCancelCheck cancel) noexcept {
     return append_static_spatial_candidates_impl(
-        source, scratch, nullptr, containers, scenarioName, output, cancel);
+        source, scratch, nullptr, containers, layouts, scenarioName, output, cancel);
 }
 
 /** Appends package spatial candidates with pass-local table reuse. */
@@ -760,11 +764,12 @@ bool append_static_spatial_candidates(const package_reader::Source& source,
                                       package_reader::Scratch& scratch,
                                       StaticSpatialCache& cache,
                                       const ContainerIndex& containers,
+                                      const scenario_layouts::LayoutSet* layouts,
                                       std::string_view scenarioName,
                                       catalog::Snapshot& output,
                                       SpatialCancelCheck cancel) noexcept {
     return append_static_spatial_candidates_impl(
-        source, scratch, &cache, containers, scenarioName, output, cancel);
+        source, scratch, &cache, containers, layouts, scenarioName, output, cancel);
 }
 
 } // namespace sunrise::client::content::activity::scriptables::internal

@@ -36,15 +36,13 @@ using patterns::signature_length;
 constexpr std::string_view kStepTimeoutText =
     "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 20 B9 03 00 00 00 C7 02 12 00 00 "
     "00 48 8B FA E8 ? ? ? ? 84 C0 0F 84 ? ? ? ? E8 ? ? ? ? 8B D8 E8 ? ? ? ? 48 8B E8 E8 ? ? ? ? "
-    "83 F8 FF 74 0C 8B C8 E8 ? ? ? ? 48 8B F0 EB 02 33 F6 8D 43 E5 A9 FD FF FF FF 74 6F 83 FB "
-    "26 75 4D E8 ? ? ? ?";
+    "83 F8 FF 74 ? 8B C8 E8 ? ? ? ? 48 8B F0 EB ? 33 F6 8D 43 E5 A9 FD FF FF FF 74 ? 83 FB "
+    "26 75 ? E8 ? ? ? ?";
 /** Compiled pattern bytes of the step-timeout signature. */
 constexpr auto kStepTimeout = signature<signature_length(kStepTimeoutText)>(kStepTimeoutText);
-/** The getter call inside that body: its E8, its operand, and the instruction after it. */
-constexpr std::size_t kGetterCall = 0x65;
+/** The getter call inside that body: its operand, and the instruction after it. */
 constexpr std::size_t kGetterOperand = 0x66;
 constexpr std::size_t kGetterNext = 0x6A;
-constexpr std::byte kCallOpcode{0xE8};
 
 /** Activity lanes the Client keeps a separate inactivity timeout for. */
 constexpr std::size_t kActivityCount = 14;
@@ -171,9 +169,8 @@ bool install() noexcept {
     }
     std::byte* const match = scan_main_image_unique(kStepTimeout, "inactivity_step_timeout");
     std::byte* const getter =
-        match != nullptr && match[kGetterCall] == kCallOpcode
-            ? patterns::resolve_relative(match + kGetterOperand, match + kGetterNext)
-            : nullptr;
+        match != nullptr ? patterns::resolve_relative(match + kGetterOperand, match + kGetterNext)
+                         : nullptr;
     if (getter == nullptr) {
         ReleaseSRWLockExclusive(&g_lock);
         core::log::write(core::log::Channel::client,

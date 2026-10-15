@@ -13,7 +13,7 @@ namespace {
 
 namespace evidence = state::build_data::scriptables::inline_name_evidence;
 
-/** Object/scenario binding keys store each format-v12 index in one 32-bit half. */
+/** Object/scenario binding keys store each index in one 32-bit half. */
 constexpr std::size_t kObjectBindingShift = 32;
 
 /**
@@ -53,24 +53,8 @@ std::size_t StringHash::operator()(std::string_view value) const noexcept {
     return std::hash<std::string_view>{}(value);
 }
 
-std::size_t StringHash::operator()(const std::string& value) const noexcept {
-    return (*this)(std::string_view(value));
-}
-
 bool StringEqual::operator()(std::string_view left, std::string_view right) const noexcept {
     return left == right;
-}
-
-bool StringEqual::operator()(const std::string& left, const std::string& right) const noexcept {
-    return left == right;
-}
-
-bool StringEqual::operator()(const std::string& left, std::string_view right) const noexcept {
-    return std::string_view(left) == right;
-}
-
-bool StringEqual::operator()(std::string_view left, const std::string& right) const noexcept {
-    return left == std::string_view(right);
 }
 
 /**
@@ -124,7 +108,7 @@ bool can_add(std::size_t current, std::size_t count, std::size_t maximum) noexce
  * Converts one owned interval while retaining the cursor for an empty range.
  * @param first The current child-row cursor.
  * @param count The number of owned rows.
- * @param output Receives the format-v12 range.
+ * @param output Receives the range.
  * @return True when both scalars fit the packed fields.
  */
 bool make_range(std::size_t first, std::size_t count, format::Range& output) noexcept {

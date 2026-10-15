@@ -16,6 +16,13 @@ namespace auth_fields = middleware::bap::activity_message::auth_fields;
 
 namespace {
 
+// Table entries of the actor members this file implements.
+constexpr const api::MemberSpec& kActorPath = api::slot_member("play_actor_path");
+constexpr const api::MemberSpec& kActorAction = api::slot_member("play_actor_action");
+constexpr const api::MemberSpec& kRetireActor = api::slot_member("retire_actor");
+constexpr const api::MemberSpec& kBindCombatant = api::slot_member("bind_combatant_to_squad");
+constexpr const api::MemberSpec& kRunAtoms = api::slot_member("run_atoms");
+
 /** Native state replaces the template counters before publishing an actor program. */
 [[nodiscard]] int queue_actor_template(lua_State* state,
                                        const SlotDefinition& actor,
@@ -55,10 +62,9 @@ namespace {
 [[nodiscard]] int slot_play_actor_path(lua_State* state) {
     namespace combatant = middleware::bap::activity_message::combatant_auth;
     const auto* handle = static_cast<const SlotHandle*>(luaL_checkudata(state, 1, kSlotMetatable));
-    // Only these named arguments belong to this API.
-    static constexpr std::array<std::string_view, 2> kDeclared{"path", "spawn"};
-    refuse_unknown_arguments(state, kDeclared);
-    const auto reference = checked_argument<SlotHandle>(state, "path", kSlotMetatable);
+    refuse_unknown_arguments(state, kActorPath);
+    const auto reference = checked_argument<SlotHandle>(
+        state, required_key(kActorPath, "path", api::ValueKind::handle), kSlotMetatable);
     SlotDefinition actor{}, path{};
     if (!current_slot(state, *handle, actor) || !exact_combatant_slot(actor)
         || !current_slot(state, reference, path) || path.slotType != combatant::kPathSlotType
@@ -82,33 +88,35 @@ namespace {
          static_cast<std::int16_t>(path.slotIndex)},
         static_cast<std::uint8_t>(combatant::kPathDestinationMarker),
         true};
-    return queue_actor_template(state,
-                                actor,
-                                program,
-                                IntentKind::runActorProgram,
-                                optional_boolean_argument(state, "spawn", false));
+    return queue_actor_template(
+        state,
+        actor,
+        program,
+        IntentKind::runActorProgram,
+        optional_boolean_argument(state, boolean_option(kActorPath, "spawn")));
 }
 
 /** Runs one extracted actor ability through the shared native program constructor. */
 [[nodiscard]] int slot_play_actor_action(lua_State* state) {
-    // Only these named arguments belong to this API.
-    static constexpr std::array<std::string_view, 3> kDeclared{"ability", "target", "spawn"};
-    refuse_unknown_arguments(state, kDeclared);
+    refuse_unknown_arguments(state, kActorAction);
+    using Kind = api::ValueKind;
+    // The one-atom program carries this call's spawn, ability and target unchanged.
+    constexpr const api::AtomKindSpec& kAbilityAtom = api::find_atom_kind("ability");
     lua_createtable(state, 0, 2);
     const int arguments = lua_gettop(state);
-    lua_getfield(state, 2, "spawn");
-    lua_setfield(state, arguments, "spawn");
+    lua_getfield(state, 2, optional_key(kActorAction, "spawn", Kind::boolean));
+    lua_setfield(state, arguments, optional_key(kRunAtoms, "spawn", Kind::boolean));
     lua_createtable(state, 1, 0);
     const int atoms = lua_gettop(state);
     lua_createtable(state, 0, 3);
-    lua_pushliteral(state, "ability");
-    lua_setfield(state, -2, "kind");
-    for (const char* field : {"ability", "target"}) {
-        lua_getfield(state, 2, field);
-        lua_setfield(state, -2, field);
-    }
+    lua_pushlstring(state, kAbilityAtom.name.data(), kAbilityAtom.name.size());
+    lua_setfield(state, -2, api::kAtomKindField.name.data());
+    lua_getfield(state, 2, required_key(kActorAction, "ability", Kind::missionRow));
+    lua_setfield(state, -2, api::find_field(kAbilityAtom.fields, "ability").name.data());
+    lua_getfield(state, 2, optional_key(kActorAction, "target", Kind::handle));
+    lua_setfield(state, -2, api::find_field(kAbilityAtom.fields, "target").name.data());
     lua_rawseti(state, atoms, 1);
-    lua_setfield(state, arguments, "atoms");
+    lua_setfield(state, arguments, required_key(kRunAtoms, "atoms", Kind::list));
     lua_replace(state, 2);
     lua_settop(state, 2);
     return slot_run_atoms(state);
@@ -117,9 +125,7 @@ namespace {
 /** Retires one named actor without accepting a script-owned generation. */
 [[nodiscard]] int slot_retire_actor(lua_State* state) {
     const auto* handle = static_cast<const SlotHandle*>(luaL_checkudata(state, 1, kSlotMetatable));
-    // Only these named arguments belong to this API.
-    static constexpr std::array<std::string_view, 0> kDeclared{};
-    refuse_unknown_arguments(state, kDeclared);
+    refuse_unknown_arguments(state, kRetireActor);
     SlotDefinition actor{};
     if (!current_slot(state, *handle, actor) || !exact_combatant_slot(actor)) {
         return luaL_error(state, "actor retirement requires an exact actor slot");
@@ -136,9 +142,7 @@ namespace {
 [[nodiscard]] int slot_bind_combatant_to_squad(lua_State* state) {
     const auto* const handle =
         static_cast<const SlotHandle*>(luaL_checkudata(state, 1, kSlotMetatable));
-    // Named arguments this call accepts. Any other key is refused.
-    static constexpr std::array<std::string_view, 0> kDeclared{};
-    refuse_unknown_arguments(state, kDeclared);
+    refuse_unknown_arguments(state, kBindCombatant);
     SlotDefinition definition{};
     if (!current_slot(state, *handle, definition) || !exact_combatant_slot(definition)) {
         return luaL_error(state, "activity slot is not an exact type-2 combatant");

@@ -47,9 +47,11 @@ constexpr std::uint32_t kAbilityTargetComponentClass = 0x80807D9BU;
     const auto slots = catalog.slots();
     for (std::size_t index = 0; index < keys.size(); ++index) {
         const format::AuthoredSceneEventKey& row = keys[index];
-        if (row.sceneSlotIndex >= slots.size() || row.flags != format::kAuthoredSceneEventKeyExact
-            || row.reserved != 0 || row.key == 0 || row.key == format::kAbsentIndex
-            || row.graphTag == 0 || row.graphTag == format::kAbsentIndex) {
+        if (row.sceneSlotIndex >= slots.size()
+            || (row.flags & format::kAuthoredSceneEventKeyExact) == 0
+            || (row.flags & ~format::kAuthoredSceneEventKeyFlagMask) != 0 || row.reserved != 0
+            || row.key == 0 || row.key == format::kAbsentIndex || row.graphTag == 0
+            || row.graphTag == format::kAbsentIndex) {
             return false;
         }
         const format::Slot& slot = slots[row.sceneSlotIndex];

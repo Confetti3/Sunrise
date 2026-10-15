@@ -1,9 +1,5 @@
 #include "unlocks_runtime.h"
 
-#include <limits>
-#include <mutex>
-#include <shared_mutex>
-
 #include "../investment/store_internal.h"
 
 namespace sunrise::state::unlocks {
@@ -86,18 +82,6 @@ bool set_account_flag(std::uint16_t index, std::uint8_t value) noexcept {
            && store::write_unlock(store::Bank::accountFlags, index, value);
 }
 
-/** Saves one bounded objectiveValues entry. */
-bool set_objective_value(std::uint16_t index, std::int32_t value) noexcept {
-    return index < kObjectiveValueCapacity
-           && store::write_unlock(store::Bank::objectiveValues, index, value);
-}
-
-/** Saves one bounded characterObjectFlags entry. */
-bool set_character_object_flag(std::uint16_t index, std::uint8_t value) noexcept {
-    return index < kCharacterObjectFlagCapacity
-           && store::write_unlock(store::Bank::characterObjectFlags, index, value);
-}
-
 /** Saves one bounded characterObjectValues entry. */
 bool set_character_object_value(std::uint16_t index, std::int32_t value) noexcept {
     return index < kCharacterObjectValueCapacity
@@ -108,20 +92,6 @@ bool set_character_object_value(std::uint16_t index, std::int32_t value) noexcep
 bool set_account_progression(std::uint16_t definitionIndex, std::int32_t value) noexcept {
     return definitionIndex < build_data::progressions::kDefinitionCapacity
            && store::write_unlock(store::Bank::accountProgressions, definitionIndex, value);
-}
-
-/** Adds to an objective under the same transaction that guards overflow. */
-bool add_objective_value(std::uint16_t index, std::int32_t amount) noexcept {
-    store::Transaction transaction;
-    std::int32_t value = 0;
-    if (!transaction.ready() || index >= kObjectiveValueCapacity
-        || !store::read_unlock(store::Bank::objectiveValues, index, value)
-        || (amount > 0 && value > (std::numeric_limits<std::int32_t>::max)() - amount)
-        || (amount < 0 && value < (std::numeric_limits<std::int32_t>::min)() - amount)) {
-        return false;
-    }
-    return store::write_unlock(store::Bank::objectiveValues, index, value + amount)
-           && transaction.commit();
 }
 
 } // namespace sunrise::state::unlocks

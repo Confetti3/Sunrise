@@ -13,16 +13,10 @@ namespace {
 
 namespace bits = encoding::bits;
 
-/** The protocol version is a 16-bit value field. */
-constexpr std::uint8_t kProtocolWidth = 16;
 /** The join sequence is a 32-bit value field. */
 constexpr std::uint8_t kSequenceWidth = 32;
 /** Single-bit flags. */
 constexpr std::uint8_t kFlagWidth = 1;
-/** The boot kind is three bits. */
-constexpr std::uint8_t kBootKindWidth = 3;
-/** The boot reason is five bits. */
-constexpr std::uint8_t kBootReasonWidth = 5;
 /** Time samples are 64-bit value fields. */
 constexpr std::uint8_t kSampleWidth = 64;
 
@@ -248,26 +242,12 @@ write_peer_delta(bits::Writer& writer, std::size_t index, const MembershipMember
 
 } // namespace
 
-/** Writes a peer-connect body. */
-bool write_peer_connect(bits::Writer& writer, const PeerConnect& body) noexcept {
-    return writer.write(body.protocolVersion, kProtocolWidth)
-           && bits::write_raw_u64(writer, body.machineId)
-           && bits::write_raw_u64(writer, body.sessionId);
-}
-
-/** Writes a join-complete body. */
-bool write_join_complete(bits::Writer& writer, const JoinComplete& body) noexcept {
-    return bits::write_raw_u64(writer, body.sessionId)
-           && bits::write_raw_u64(writer, body.machineId)
-           && writer.write(body.joinSequence, kSequenceWidth);
-}
-
 /** Reads a join-complete body. */
 bool read_join_complete(bits::Reader& reader, JoinComplete& output) noexcept {
     JoinComplete candidate{};
     std::uint64_t sequence = 0;
     if (!bits::read_raw_u64(reader, candidate.sessionId)
-        || !bits::read_raw_u64(reader, candidate.machineId)
+        || !bits::read_raw_u64(reader, candidate.joinId)
         || !reader.read(kSequenceWidth, sequence)) {
         return false;
     }
@@ -297,20 +277,6 @@ bool read_session_only(bits::Reader& reader, std::uint64_t& output) noexcept {
 /** Writes a session-identity-only body. */
 bool write_session_only(bits::Writer& writer, std::uint64_t sessionId) noexcept {
     return bits::write_raw_u64(writer, sessionId);
-}
-
-/** Writes a session-disband body. */
-bool write_session_disband(bits::Writer& writer, const SessionNotice& body) noexcept {
-    return bits::write_raw_u64(writer, body.sessionId)
-           && bits::write_raw_u64(writer, body.machineId)
-           && writer.write(body.flag ? 1U : 0U, kFlagWidth);
-}
-
-/** Writes a session-boot body. */
-bool write_session_boot(bits::Writer& writer, const SessionBoot& body) noexcept {
-    return bits::write_raw_u64(writer, body.sessionId) && writer.write(body.kind, kBootKindWidth)
-           && writer.write(body.reason, kBootReasonWidth)
-           && bits::write_raw_u64(writer, body.machineId);
 }
 
 /** Reads a time-synchronize body. */

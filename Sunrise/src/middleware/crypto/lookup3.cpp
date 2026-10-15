@@ -1,5 +1,7 @@
 #include "lookup3.h"
 
+#include "../encoding/byte_order.h"
+
 namespace sunrise::middleware::crypto::lookup3 {
 
 namespace {
@@ -7,11 +9,9 @@ namespace {
 /** Words one main round consumes. */
 constexpr std::size_t kRoundWords = 3;
 /** Bytes in one word. */
-constexpr std::size_t kWordBytes = 4;
+constexpr std::size_t kWordBytes = encoding::kU32Size;
 /** Bits in one word. */
 constexpr unsigned kWordBits = 32;
-/** Bits in one byte. */
-constexpr unsigned kByteBits = 8;
 
 /** @return Value rotated left by count. */
 [[nodiscard]] constexpr std::uint32_t rotate(std::uint32_t value, unsigned count) noexcept {
@@ -60,35 +60,6 @@ constexpr void finish(std::uint32_t& a, std::uint32_t& b, std::uint32_t& c) noex
 
 } // namespace
 
-/** Hashes a run of 32-bit words. */
-std::uint32_t hash_words(std::span<const std::uint32_t> words, std::uint32_t initial) noexcept {
-    std::uint32_t a = initial;
-    std::uint32_t b = initial;
-    std::uint32_t c = initial;
-    std::size_t index = 0;
-    // The main rounds stop with one to three words left, unless the input is empty.
-    while (words.size() - index > kRoundWords) {
-        a += words[index];
-        b += words[index + 1];
-        c += words[index + 2];
-        mix(a, b, c);
-        index += kRoundWords;
-    }
-    const std::size_t remaining = words.size() - index;
-    if (remaining == 0) {
-        return c;
-    }
-    if (remaining == kRoundWords) {
-        c += words[index + 2];
-    }
-    if (remaining >= 2) {
-        b += words[index + 1];
-    }
-    a += words[index];
-    finish(a, b, c);
-    return c;
-}
-
 /** Hashes a byte buffer as little-endian words. */
 std::uint32_t hash_bytes(std::span<const std::byte> bytes, std::uint32_t initial) noexcept {
     if (bytes.size() % kWordBytes != 0) {
@@ -101,15 +72,12 @@ std::uint32_t hash_bytes(std::span<const std::byte> bytes, std::uint32_t initial
 
     // Bytes are assembled, not reinterpreted: the span has no alignment guarantee.
     auto word = [bytes](std::size_t position) noexcept {
-        std::uint32_t value = 0;
-        for (std::size_t offset = 0; offset < kWordBytes; ++offset) {
-            value |= std::to_integer<std::uint32_t>(bytes[position * kWordBytes + offset])
-                     << (offset * kByteBits);
-        }
-        return value;
+        return encoding::read_u32_le(
+            bytes.subspan(position * kWordBytes).first<encoding::kU32Size>());
     };
 
     std::size_t index = 0;
+    // The main rounds stop with one to three words left, unless the input is empty.
     while (count - index > kRoundWords) {
         a += word(index);
         b += word(index + 1);

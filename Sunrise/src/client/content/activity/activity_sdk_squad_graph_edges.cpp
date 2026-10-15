@@ -13,6 +13,7 @@
 #include "../../../middleware/content/packages/tables/authored_squad_reader.h"
 #include "../../../middleware/crypto/sha256.h"
 #include "activity_sdk_squad_graph_internal.h"
+#include "activity_sdk_squad_inventory_internal.h"
 
 namespace sunrise::client::content::activity::sdk_generation::squad_inventory::detail {
 namespace {
@@ -79,57 +80,6 @@ struct PendingEdge final {
     std::vector<std::uint32_t> scenarios{};
     bool associationExact{};
 };
-
-/** @return True when one topology text owns exactly its declared bytes. */
-[[nodiscard]] bool text_view(const topology::Text& text, std::string_view& output) noexcept {
-    output = {};
-    if (text.length >= text.value.size()) {
-        return false;
-    }
-    output = std::string_view(text.value.data(), text.length);
-    return text.value[text.length] == '\0';
-}
-
-template <typename... Values>
-[[nodiscard]] bool format_text(std::string& output, const char* pattern, Values... values) {
-    std::array<char, 192> bytes{};
-    const int count = std::snprintf(bytes.data(), bytes.size(), pattern, values...);
-    if (count < 0 || static_cast<std::size_t>(count) >= bytes.size()) {
-        return false;
-    }
-    output.assign(bytes.data(), static_cast<std::size_t>(count));
-    return true;
-}
-
-/**
- * Appends one unsigned value in little-endian order.
- * @tparam Value Unsigned type whose whole width is appended.
- * @return False when the buffer cannot grow.
- */
-template <typename Value>
-[[nodiscard]] bool append_little(std::vector<std::byte>& output, Value value) {
-    static_assert(std::is_unsigned_v<Value>);
-    if (output.size() > (std::numeric_limits<std::size_t>::max)() - sizeof(Value)) {
-        return false;
-    }
-    for (std::size_t index = 0; index < sizeof(Value); ++index) {
-        output.push_back(static_cast<std::byte>((value >> (index * 8U)) & Value{0xFFU}));
-    }
-    return true;
-}
-
-/** Appends one length-prefixed hash input part. @return False when the buffer cannot grow. */
-[[nodiscard]] bool append_hash_part(std::vector<std::byte>& output, std::string_view value) {
-    if (!append_little(output, static_cast<std::uint64_t>(value.size()))
-        || value.size() > (std::numeric_limits<std::size_t>::max)() - output.size()) {
-        return false;
-    }
-    output.reserve(output.size() + value.size());
-    for (const unsigned char byte : value) {
-        output.push_back(static_cast<std::byte>(byte));
-    }
-    return true;
-}
 
 /** Hashes one domain and its parts to lowercase hex. @return False when hashing fails. */
 [[nodiscard]] bool
@@ -228,10 +178,7 @@ template <typename Index> void canonicalize_scenarios(Index& index) {
     }
 }
 
-/**
- * Indexes the exact rule contexts once. The former edge loop rescanned every config context and,
- * for every candidate, every rule point and point context.
- */
+/** Indexes once, by rule and object, the scenarios where every rule point matches exactly. */
 [[nodiscard]] bool build_exact_rule_scenarios(
     const GraphSnapshot& graph,
     std::unordered_map<RuleObjectKey, std::vector<std::uint32_t>, RuleObjectKeyHash>& output) {

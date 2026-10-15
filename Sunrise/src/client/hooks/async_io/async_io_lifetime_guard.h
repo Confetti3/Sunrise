@@ -8,7 +8,4 @@ namespace sunrise::client::hooks::async_io {
 /** Restores the exact original instruction bytes when this module installed the guard. */
 [[nodiscard]] bool uninstall() noexcept;
 
-/** @return True while the guarded instruction sequence is present. */
-[[nodiscard]] bool is_installed() noexcept;
-
 } // namespace sunrise::client::hooks::async_io

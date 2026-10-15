@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cstdio>
 #include <cstring>
 #include <limits>
 #include <span>
@@ -73,12 +72,8 @@ constexpr std::array<std::uint32_t, format::kSectionCount> kSectionStrides{
     sizeof(format::ActorAbilityTarget),
     sizeof(format::AuthoredSceneEventKey),
 };
-/** Writer-owned siblings use the cleanup service's final.process.thread.sequence.tmp shape. */
-constexpr std::wstring_view kTemporarySuffix = L".%08lX.%08lX.%08lX.tmp";
 /** Bounded retries handle a stale sibling with the same process-local sequence. */
 constexpr std::size_t kTemporaryAttempts = 16;
-
-volatile LONG g_temporarySequence{};
 
 /** One type-erased section keeps its row count separate from its byte view. */
 struct RawSection final {
@@ -271,29 +266,6 @@ void copy_sections(const std::array<RawSection, format::kSectionCount>& inputs,
 }
 
 /**
- * Appends one fixed writer identity suffix to a final path.
- * @param finalPath Null-terminated final pack path.
- * @param output Receives the complete sibling path on success.
- * @return True when the complete path fits fixed storage.
- */
-[[nodiscard]] bool make_temporary_path(const wchar_t* finalPath,
-                                       core::path::Buffer& output) noexcept {
-    /** The fixed suffix is shorter than this local buffer on every Windows target. */
-    constexpr std::size_t kSuffixCapacity = 64;
-    std::array<wchar_t, kSuffixCapacity> suffix{};
-    const DWORD sequence = static_cast<DWORD>(InterlockedIncrement(&g_temporarySequence));
-    const int length = std::swprintf(suffix.data(),
-                                     suffix.size(),
-                                     kTemporarySuffix.data(),
-                                     GetCurrentProcessId(),
-                                     GetCurrentThreadId(),
-                                     sequence);
-    return length > 0 && static_cast<std::size_t>(length) < suffix.size()
-           && core::path::assign(output, finalPath)
-           && core::path::append(output, std::wstring_view(suffix.data(), length));
-}
-
-/**
  * Writes all bytes and refuses a short successful Windows write.
  * @param file Open writer-owned file.
  * @param bytes Complete file image.
@@ -325,7 +297,7 @@ void copy_sections(const std::array<RawSection, format::kSectionCount>& inputs,
                                    core::path::Buffer& temporaryPath) noexcept {
     core::path::remove_stale_siblings(finalPath);
     for (std::size_t attempt = 0; attempt < kTemporaryAttempts; ++attempt) {
-        if (!make_temporary_path(finalPath, temporaryPath)) {
+        if (!core::path::temporary_sibling(finalPath, temporaryPath)) {
             return false;
         }
         const HANDLE raw = CreateFileW(temporaryPath.chars.data(),

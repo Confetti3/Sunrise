@@ -89,23 +89,6 @@ bool g_hasResult{};
 
 } // namespace
 
-/** @return The stable log name of one estate validation status. */
-const char* status_name(Status value) noexcept {
-    switch (value) {
-    case Status::ready:
-        return "ready";
-    case Status::cancelled:
-        return "cancelled";
-    case Status::invalidInput:
-        return "invalid_input";
-    case Status::notGenerated:
-        return "not_generated";
-    case Status::publication:
-        return "publication";
-    }
-    return "not_generated";
-}
-
 /** Records one validation result for an artifact tree. @return False when an input is bad. */
 bool remember(std::wstring_view artifactDirectory,
               const Digest& sourceFingerprint,

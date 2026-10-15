@@ -84,9 +84,8 @@ bool append_join_notifications(Scratch& scratch,
                                                   response,
                                                   written);
     }
-    // Order is fixed. 4 goes first, the only message the router's pre-join arm accepts. Then 1,
-    // because step 33 reads the activity name from it. Then 2, to enable the clock the client
-    // freezes without. Then 54, to close the set with its empty host table.
+    // Order is fixed: 4 (the only message the pre-join router accepts), the 0 slot grant, 1 (step
+    // 33 reads the activity name), 2 (enables the clock the client freezes without), then 54.
     if (encoded) {
         encoded = append_global_state_notification(
                       scratch, activity.targetBinding, key, nonce, response, written)
@@ -113,11 +112,13 @@ bool append_join_notifications(Scratch& scratch,
     // Retail answers a join with one burst: result, grant mask, then membership. A private
     // link's body carries the join descriptor, so it is held only while that row is missing.
     if (encoded && activity.membershipMutation.hasSnapshot) {
-        if (activity.bindingIntent == activity_message::BindingIntent::publicTarget) {
+        const bool publicJoin =
+            activity.joinMembershipBody == activity_message::JoinMembershipBody::publicSource;
+        if (publicJoin) {
             encoded = append_join_membership_notification(
                 scratch, session, activity, key, nonce, response, written);
             session.activityJoinMembershipStaged = encoded;
-        } else if (activity.bindingIntent == activity_message::BindingIntent::preserveCurrent
+        } else if (activity.joinMembershipBody == activity_message::JoinMembershipBody::privateSeed
                    && region_advertisement(session, effective_region(session.activity.source).index)
                           != server::gameplay::AdvertisementState::pending) {
             encoded = append_membership_notification(

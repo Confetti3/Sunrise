@@ -157,6 +157,14 @@ collect_rows(const reader::Source& source, Storage& storage, const char*& reason
 resolve_pending(const reader::Source& source, reader::Scratch& scratch, Storage& storage) noexcept;
 
 /**
+ * Reads the bubble layout of every row once, with no budget and no retry window.
+ * @param source Package directory and block keys, which must already be known.
+ * @param scratch Lock-owned block storage.
+ * @param storage Pass storage whose rows are marked as they read.
+ */
+void resolve_all(const reader::Source& source, reader::Scratch& scratch, Storage& storage) noexcept;
+
+/**
  * Moves every resolved row to the front of the row array.
  * @param storage Pass storage whose kept count is set here.
  */
@@ -219,12 +227,6 @@ struct Candidate {
     bool bindsPlayer{};
     bool reportsLifetime{};
     bool primaryRegistry{};
-};
-
-/** One group a destination publishes per bubble, and the bubbles it is published in. */
-struct BubbleCandidate {
-    std::uint16_t group{};
-    std::uint64_t mask{};
 };
 
 /** @return True when both groups carry the same registry key and full wire slot layout. */

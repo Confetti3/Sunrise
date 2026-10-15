@@ -6,6 +6,7 @@
 
 #include "../../../middleware/bap/activity_message/scriptable_auth_body.h"
 #include "../host_runtime.h"
+#include "mission_api.h"
 #include "mission_script_lua_types.h"
 #include "mission_script_lua_value_internal.h"
 #include "mission_script_vm_internal.h"
@@ -29,18 +30,24 @@ struct DeviceTransition final {
     float value{};
 };
 
-/** The closed transition vocabulary. Each word names one lane and one of its two endpoints. */
-inline constexpr std::array<DeviceTransition, 6> kDeviceTransitions{{
-    {"open", scriptable_auth::Type23Channel::devicePosition, kUnitLaneHigh},
-    {"close", scriptable_auth::Type23Channel::devicePosition, kUnitLaneLow},
-    {"power_on", scriptable_auth::Type23Channel::devicePower, kUnitLaneHigh},
-    {"power_off", scriptable_auth::Type23Channel::devicePower, kUnitLaneLow},
-    {"lock", scriptable_auth::Type23Channel::deviceLock, kUnitLaneHigh},
-    {"unlock", scriptable_auth::Type23Channel::deviceLock, kUnitLaneLow},
-}};
+/** The closed transition vocabulary, built from the table: one lane and one of its endpoints. */
+inline constexpr std::array<DeviceTransition, std::size(api::kDeviceTransitionEntries)>
+    kDeviceTransitions = []() consteval {
+        std::array<DeviceTransition, std::size(api::kDeviceTransitionEntries)> rows{};
+        for (std::size_t index = 0; index < rows.size(); ++index) {
+            const api::EnumEntry& entry = api::kDeviceTransitionEntries[index];
+            rows[index] = {entry.name,
+                           static_cast<scriptable_auth::Type23Channel>(
+                               api::device_channel_value(entry.detail)),
+                           entry.value != 0 ? kUnitLaneHigh : kUnitLaneLow};
+        }
+        return rows;
+    }();
 
 /** Lifetime states 11 to 14 index past the client jump table, so only these have a spelling. */
 inline constexpr std::uint8_t kLifetimeStateCount = host::kMaximumLifetimeState + 1U;
+static_assert(api::kMaximumLifetimeState == host::kMaximumLifetimeState
+              && api::kDefaultLifetimeState == host::kDefaultLifetimeState);
 
 struct DeviceChannelHandle final {
     std::uint8_t channel{};

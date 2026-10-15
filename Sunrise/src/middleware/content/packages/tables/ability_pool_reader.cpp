@@ -1,20 +1,12 @@
 #include "ability_pool_reader.h"
 
-#include <cstring>
-
 #include "definition_index_table.h"
+#include "internal.h"
 
 namespace sunrise::middleware::content::packages::tables::abilities {
 namespace {
 
-/** A socket-entry-list definition holds its entry array descriptor here. */
-constexpr std::size_t kEntryDescriptor = 16;
-/** One socket-entry-list entry is 64 bytes. */
-constexpr std::size_t kEntryStride = 64;
-/** Entry field offsets. */
-constexpr std::size_t kEntryPlugSource = 8;
-constexpr std::size_t kEntryGroup = 12;
-constexpr std::size_t kEntryKind = 13;
+/** Entry field offsets this pass reads beyond the shared socket entry layout. */
 constexpr std::size_t kEntrySelector = 32;
 constexpr std::size_t kEntryPool = 56;
 
@@ -54,17 +46,6 @@ constexpr std::size_t kRecordLinkSubgroup = 9;
 constexpr std::size_t kRecordLinkElement = 10;
 constexpr std::size_t kRecordKind = 11;
 constexpr std::size_t kRecordDestination = 12;
-
-/** @param blob Source bytes. @param offset Field offset. @param value Receives the field. */
-template <typename Value>
-[[nodiscard]] bool
-read(std::span<const std::byte> blob, std::size_t offset, Value& value) noexcept {
-    if (offset > blob.size() || blob.size() - offset < sizeof value) {
-        return false;
-    }
-    std::memcpy(&value, blob.data() + offset, sizeof value);
-    return true;
-}
 
 /**
  * Turns a self-relative offset into an absolute blob offset.
@@ -107,16 +88,16 @@ active_variant(std::int64_t groupCount, std::int32_t variantCount, const Entry& 
 /** Reads every entry of one socket-entry-list definition blob. */
 std::size_t read_entries(std::span<const std::byte> blob, std::span<Entry> output) noexcept {
     Array entries{};
-    if (!find_array_at(blob, kEntryDescriptor, entries)) {
+    if (!find_array_at(blob, kSocketEntryArrayDescriptor, entries)) {
         return 0;
     }
     std::size_t count = 0;
     while (count < entries.count && count < output.size()) {
-        const std::size_t base = entries.dataOffset + count * kEntryStride;
+        const std::size_t base = entries.dataOffset + count * kSocketEntrySize;
         Entry entry{};
-        if (!read(blob, base + kEntryPlugSource, entry.plugSource)
-            || !read(blob, base + kEntryGroup, entry.group)
-            || !read(blob, base + kEntryKind, entry.kind)
+        if (!read(blob, base + kSocketEntryPlugSource, entry.plugSource)
+            || !read(blob, base + kSocketEntryGroup, entry.group)
+            || !read(blob, base + kSocketEntryKind, entry.kind)
             || !read(blob, base + kEntryPool, entry.poolTag)) {
             break;
         }

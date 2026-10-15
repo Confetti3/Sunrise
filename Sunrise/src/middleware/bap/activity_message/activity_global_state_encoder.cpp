@@ -219,6 +219,7 @@ bool encode_global_activity_state(const GlobalActivityState& state,
     }
 
     encoding::bits::Writer writer(output.first(bodySize));
+    // Bit 0 arms the initial slice set; clear, the client never reads the slice-set pair.
     // The arm bit is the last of six sources the client tries, so setting it disturbs nothing.
     if (!writer.write(1, 1) || !pad_to(writer, kBubbleCountBit)) {
         return false;

@@ -344,13 +344,11 @@ enum class CharacterRefreshScope : std::uint8_t { none, records, recordsAndRoste
 
 /** Mutable transport state owned by one BAP connection. */
 struct Session {
-    std::uint64_t activityAdvertisementHostGeneration{};
     std::uint64_t acquisitionPresentationUntilTick{};
     std::array<encrypted::queuez::AcquisitionPresentationRow,
                encrypted::queuez::kAcquisitionPresentationRowCapacity>
         acquisitionPresentationRows{};
     std::uint32_t id{};
-    std::uint32_t activityRosterGroups{};
     std::int32_t pendingSeasonalExperienceAmount{};
     std::uint32_t pendingSeasonalExperienceMutationSerial{};
     bool authenticated{};
@@ -428,11 +426,7 @@ struct Session {
      * The client reported it is leaving, so no later roster may go out on that link.
      */
     std::uint64_t activityLeftGeneration{};
-    /**
-     * Region-rebuild epoch, folded into every group's identity. It advances once per region
-     * transition so every group's revision byte moves and the client re-registers the groups for
-     * the region it entered. Without that move, object intents into the new bubble are refused.
-     */
+    /** Region-rebuild epoch. Nothing advances it, so it stays zero and moves no group. */
     std::uint8_t activityRosterRegionEpoch{};
     /** Bubble the epoch was stamped for; a change in it is the region transition. */
     std::int32_t activityRosterRegionBubble{-1};
@@ -456,11 +450,7 @@ struct Session {
     AdvertisementRetains activityAdvertisementHeld{};
     /** Host rows retained by a staged membership body until publication is known. */
     AdvertisementPublication activityAdvertisementStaged{};
-    /**
-     * Reason code of the last logged roster outcome.
-     * The push runs every second, so a refusal is logged only when the reason changes. One flag
-     * for every reason hides the second failure behind the first.
-     */
+    /** Reason code of the last logged roster outcome; a refusal logs only when it changes. */
     std::uint8_t activityRosterReason{};
     /** What one staged roster body owes, and what to put back if it never reaches the caller. */
     RosterPublication activityRosterStaged{};
@@ -478,7 +468,7 @@ struct Session {
     std::uint64_t family4RepushRoot{};
     /** True while one Family-4 re-push is still owed to this peer. */
     bool family4RepushArmed{};
-    /** Tick count after which the owed banner re-push may go out. */
+    /** Tick count after which the banner re-push the cinematic hold armed may go out. */
     std::uint64_t bannerRepushDueTick{};
     /** Root the owed banner re-push must use. */
     std::uint64_t bannerRepushRoot{};
@@ -488,10 +478,6 @@ struct Session {
     std::uint64_t socialRosterRepushRoot{};
     /** True while one family-two re-push is still owed to this peer. */
     bool socialRosterRepushArmed{};
-    /** Latest shared-account generation this peer has received. */
-    std::uint64_t accountGeneration{};
-    /** Newest shared-account generation owed as a full cross-peer refresh. */
-    std::uint64_t accountResyncGeneration{};
     /** Set by encrypted processing only after one account mutation commits and is copied out. */
     bool accountMutationPublished{};
     /** True while another peer's account mutation still needs a full local refresh. */
@@ -619,13 +605,13 @@ namespace encrypted {
                            std::size_t& written) noexcept;
 
 /**
- * Sends the owed Family-4 re-push once its delay has passed.
+ * Publishes the next due reward, refresh, re-push or keepalive, at most one per call.
  * @param session Auth, nonce and queuez state owned by the connection.
  * @param scratch Transform buffers owned by the lock, kept off the Client thread stack.
  * @param response Whole-frame storage owned by the caller.
  * @param written Gets the encoded notification size in bytes.
  * @param touchesScratch Set before any scratch buffer is used.
- * @return True when a whole Family-4 notification is published.
+ * @return True when one whole notification is published.
  */
 [[nodiscard]] bool consume_deferred(Session& session,
                                     Scratch& scratch,

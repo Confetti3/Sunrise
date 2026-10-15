@@ -1,16 +1,14 @@
 #include "bit_writer.h"
 
 #include <algorithm>
-#include <climits>
+
+#include "byte_order.h"
 
 namespace sunrise::middleware::encoding::bits {
 namespace {
 
 /** Writer values are limited to the width of the unsigned 64-bit source type. */
 constexpr std::uint8_t kMaximumWriteWidth = 64;
-/** Windows wire formats require 8-bit bytes. */
-constexpr std::size_t kBitsPerByte = CHAR_BIT;
-static_assert(kBitsPerByte == 8);
 
 } // namespace
 

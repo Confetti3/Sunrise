@@ -11,16 +11,15 @@
 namespace sunrise::client::hooks::bootflow::spawn {
 namespace {
 
-/** The player spawn gate. The head alone is not unique, so the pattern runs to the cookie store. */
+/** The player spawn gate, from its prologue through the four slice-set calls it makes first. */
 constexpr std::string_view kSpawnGateSignatureText =
     "40 53 57 41 57 48 81 EC ? ? ? ? 48 8B 05 ? ? ? ? 48 33 C4 48 89 84 24 ? ? ? ? 8B D9 "
-    "40 B7 01";
+    "40 B7 01 E8 ? ? ? ? 48 8B C8 E8 ? ? ? ? 45 33 FF 84 C0 75 ? 40 32 FF EB ? E8 ? ? ? ? "
+    "48 8B C8 48 8D 54 24 ? E8 ? ? ? ? 48 8B C8 E8 ? ? ? ? 84 C0";
 /** Compiled pattern bytes of the signature text above. */
 constexpr auto kSpawnGateSignature =
     signature<signature_length(kSpawnGateSignatureText)>(kSpawnGateSignatureText);
 
-/** Every site must hold a near call, or the offset is stale. */
-constexpr std::byte kCallOpcode{0xE8};
 /** Length of a near call, and the offset of its displacement. */
 constexpr std::size_t kCallLength = 5;
 constexpr std::size_t kCallOperand = 1;
@@ -36,7 +35,7 @@ std::atomic<PointerPredicate> g_worldPresent{nullptr};
 std::atomic<SliceSetIndexGetter> g_currentSliceSet{nullptr};
 std::atomic<PointerPredicate> g_sliceSetAddressable{nullptr};
 
-/** Byte offsets of each call from the gate's base. A site without a near call refuses. */
+/** Byte offsets of each call from the gate's base, all inside the gate signature. */
 struct Site {
     /** The slice-set manager accessor both world conditions start from. */
     static constexpr std::size_t sliceSetManager = 0x23;
@@ -52,13 +51,10 @@ struct Site {
  * Decodes one call target.
  * @param gate Base of the spawn gate.
  * @param offset Byte offset of the call from the gate base.
- * @return The called address, or null when the site is not a near call.
+ * @return The called address.
  */
 [[nodiscard]] void* call_target(const std::byte* gate, std::size_t offset) noexcept {
     const std::byte* const site = gate + offset;
-    if (*site != kCallOpcode) {
-        return nullptr;
-    }
     return resolve_relative(site + kCallOperand, site + kCallLength);
 }
 
@@ -80,12 +76,6 @@ bool install_targets() noexcept {
         reinterpret_cast<SliceSetIndexGetter>(call_target(gate, Site::currentSliceSet));
     const auto addressable =
         reinterpret_cast<PointerPredicate>(call_target(gate, Site::sliceSetAddressable));
-    if (manager == nullptr || present == nullptr || current == nullptr || addressable == nullptr) {
-        core::log::write(core::log::Channel::client,
-                         core::log::Level::warn,
-                         "ev=bootflow stage=current_slice result=fail reason=calls");
-        return false;
-    }
     g_sliceSetManager.store(manager, std::memory_order_release);
     g_worldPresent.store(present, std::memory_order_release);
     g_currentSliceSet.store(current, std::memory_order_release);

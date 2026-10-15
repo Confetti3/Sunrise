@@ -40,12 +40,19 @@ namespace sunrise::state::build_data {
 void invalidate_cache() noexcept;
 
 /**
+ * Names the package content the mappings come from, so a changed mod set rebuilds the cache.
+ * Call before initialize; zero stands for a host with no content manifest.
+ * @param contentHash Leading bytes of the combined installed and mod fingerprint.
+ */
+void bind_content(std::uint64_t contentHash) noexcept;
+
+/**
  * Loads the one build-data cache next to the module, when there is one.
  * Once a snapshot is on disk, later replacements are refused until State restarts. A failed first
  * commit withdraws that publication and restores nothing. Keep readers out until this returns.
  * @param module Loaded Sunrise DLL module, or null to turn off disk saving.
  * @param configuredEquipmentHash Hash of the authored equipment. Not a secret.
- * @return True when the cache is missing, stale, or passes every check.
+ * @return True when a valid cache loads or extraction can safely rebuild it.
  */
 [[nodiscard]] bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept;
 
@@ -415,9 +422,6 @@ publish_progression_definitions(std::span<const progressions::Definition> defini
  */
 [[nodiscard]] bool find_season_pass_package(std::uint32_t definitionHash,
                                             season_pass::Package& package) noexcept;
-
-/** @return Season pass reward rows in State. */
-[[nodiscard]] std::size_t season_pass_reward_count() noexcept;
 
 /** @return True when the repeatable bounty table is in State. */
 [[nodiscard]] bool repeatable_bounties_ready() noexcept;

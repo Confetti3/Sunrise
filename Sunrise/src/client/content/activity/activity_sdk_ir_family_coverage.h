@@ -8,6 +8,8 @@
 
 namespace sunrise::client::content::activity::sdk_generation::ir_family_coverage {
 
+// TODO: the native pack pipeline must declare every family and gate publication on close().
+
 /** Canonical native order of every normalized SDK family. Keep this in lockstep with IR v5. */
 enum class Family : std::uint8_t {
     sources,

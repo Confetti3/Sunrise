@@ -11,7 +11,4 @@ namespace sunrise::client::hooks::assert_handler {
 /** Restores the game's own handler. */
 [[nodiscard]] bool uninstall() noexcept;
 
-/** @return True while Sunrise's handler owns the slot. */
-[[nodiscard]] bool is_installed() noexcept;
-
 } // namespace sunrise::client::hooks::assert_handler

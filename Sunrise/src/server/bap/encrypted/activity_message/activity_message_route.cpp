@@ -168,13 +168,16 @@ void report_arrival(const service::Request& request) noexcept {
         plan.targetBinding = binding.session;
         // The join burst carries the membership body, so its logical host must already be ready.
         // Private activities use one stable Bubble Host. Public regions use their citizen host.
-        const std::int32_t arrival = push::activity::effective_region(binding.session).index;
-        if (push::activity::private_region(binding.session, binding.bindingGeneration, arrival)) {
-            if (!server::gameplay::complete_private_host_session(binding.session, arrival)) {
-                return false;
+        if (binding.role == ActivityClientRole::privateCurrent) {
+            const std::int32_t arrival = push::activity::effective_region(binding.session).index;
+            if (push::activity::private_region(
+                    binding.session, binding.bindingGeneration, arrival)) {
+                if (!server::gameplay::complete_private_host_session(binding.session, arrival)) {
+                    return false;
+                }
+            } else {
+                server::gameplay::complete_host_session(binding.session, arrival);
             }
-        } else {
-            server::gameplay::complete_host_session(binding.session, arrival);
         }
     } else if (server::gameplay::group::host_session_for_activity(parsed.sessionId, plan.publicHost)
                && state::activity::binding_matches(plan.publicHost.target)) {
@@ -200,15 +203,20 @@ void report_arrival(const service::Request& request) noexcept {
     // Read, never committed: the domain above is what the commit acts on, so this cannot move the
     // private session's membership revision. The body is that session's member table, sent
     // verbatim, because only it names a member the client recognises as the local player.
-    if (plan.bindingIntent == BindingIntent::publicTarget
-        && state::activity::binding_matches(plan.publicHost.source)) {
-        static_cast<void>(
-            state::activity::membership::prepare_refresh(plan.publicHost.source.sessionId,
-                                                         kCurrentRevision,
-                                                         kNoBubble,
-                                                         plan.membershipMutation));
-    } else if (plan.bindingIntent == BindingIntent::preserveCurrent) {
+    const state::activity::SessionBinding* source = nullptr;
+    if (plan.bindingIntent == BindingIntent::publicTarget) {
+        source = &plan.publicHost.source;
+    } else if (binding.role == ActivityClientRole::publicTarget) {
+        source = &binding.source;
+    }
+    if (source != nullptr && state::activity::binding_matches(*source)) {
+        plan.joinMembershipBody = JoinMembershipBody::publicSource;
+        static_cast<void>(state::activity::membership::prepare_refresh(
+            source->sessionId, kCurrentRevision, kNoBubble, plan.membershipMutation));
+    } else if (plan.bindingIntent == BindingIntent::preserveCurrent
+               && binding.role == ActivityClientRole::privateCurrent) {
         // A private join's burst carries the seed membership; the commit lands the same seed.
+        plan.joinMembershipBody = JoinMembershipBody::privateSeed;
         static_cast<void>(
             push::activity::prepare_join_seed_snapshot(plan.targetBinding.createdRevision,
                                                        parsed.memberKey,

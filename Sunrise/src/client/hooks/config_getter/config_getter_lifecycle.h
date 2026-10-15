@@ -11,7 +11,4 @@ namespace sunrise::client::hooks::config_getter {
 /** Restores both thunks. */
 [[nodiscard]] bool uninstall() noexcept;
 
-/** @return True while both thunks answer. */
-[[nodiscard]] bool is_installed() noexcept;
-
 } // namespace sunrise::client::hooks::config_getter

@@ -209,22 +209,4 @@ std::size_t count() noexcept {
     return g_definitions.count();
 }
 
-/** @return The objective bank row count, read under the lock. */
-std::size_t objective_count() noexcept {
-    const std::shared_lock guard(g_lock);
-    return g_objectives.count();
-}
-
-/** @return The interval bank row count, read under the lock. */
-std::size_t interval_count() noexcept {
-    const std::shared_lock guard(g_lock);
-    return g_intervals.count();
-}
-
-/** @return The reward bank row count, read under the lock. */
-std::size_t reward_count() noexcept {
-    const std::shared_lock guard(g_lock);
-    return g_rewards.count();
-}
-
 } // namespace sunrise::state::build_data::records

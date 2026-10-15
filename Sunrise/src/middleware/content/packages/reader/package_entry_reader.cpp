@@ -2,10 +2,8 @@
 
 #include <algorithm>
 #include <array>
-#include <cstdio>
 #include <vector>
 
-#include "../../../../core/logging/log.h"
 #include "../../../compression/oodle/runtime.h"
 #include "../../../crypto/aes_gcm_decrypt.h"
 #include "block_cache.h"
@@ -49,6 +47,7 @@ package_nonce(std::span<const std::byte, crypto::aes_gcm::kNonceSize> base,
  * Loads one block, from the block cache when it is already decoded.
  * @param stem Package stem used to reach any patch file.
  * @param packageId Package id from the tag handle.
+ * @param installedOnly Reads the installed patch file even when a mod serves the same patch.
  * @param record Block-table record.
  * @param keys Borrowed block keys.
  * @param nonce Package nonce.
@@ -58,6 +57,7 @@ package_nonce(std::span<const std::byte, crypto::aes_gcm::kNonceSize> base,
  */
 [[nodiscard]] bool load_block(const Path& stem,
                               std::uint16_t packageId,
+                              bool installedOnly,
                               const layout::BlockRecord& record,
                               const BlockKeys& keys,
                               std::span<const std::byte, crypto::aes_gcm::kNonceSize> nonce,
@@ -72,7 +72,8 @@ package_nonce(std::span<const std::byte, crypto::aes_gcm::kNonceSize> base,
     }
     Path path{};
     const auto stored = std::span(scratch.ciphertext).first(record.size);
-    if (!build_path(stem, record.patchId, path) || !read_at(scratch, path, record.offset, stored)) {
+    if (!build_path(stem, packageId, record.patchId, installedOnly, path)
+        || !read_at(scratch, path, record.offset, stored)) {
         return false;
     }
     std::span<const std::byte> decoded = stored;
@@ -102,6 +103,45 @@ package_nonce(std::span<const std::byte, crypto::aes_gcm::kNonceSize> base,
     block_cache::store(
         scratch, blockKey, std::span(scratch.decompressed).first(produced), plaintext);
     return true;
+}
+
+/** One tag resolved to its package file, header and entry record. */
+struct LocatedEntry final {
+    std::uint16_t packageId{};
+    const PackageLocation* location{};
+    Header header{};
+    layout::EntryRecord entry{};
+};
+
+/**
+ * Resolves one tag to its entry record without reading its body.
+ * @param source Installed package source.
+ * @param scratch Reader caches.
+ * @param tag Definition tag.
+ * @param output Receives the package, file, header and entry record.
+ * @return True when the tag names an entry inside its package.
+ */
+[[nodiscard]] bool locate_entry(const Source& source,
+                                Scratch& scratch,
+                                std::uint32_t tag,
+                                LocatedEntry& output) noexcept {
+    output = {};
+    if (tag < layout::kTagBase) {
+        return false;
+    }
+    const std::uint32_t handle = tag - layout::kTagBase;
+    output.packageId = static_cast<std::uint16_t>(handle >> layout::kTagEntryBits);
+    const std::uint32_t entryIndex = handle & layout::kTagEntryMask;
+    return resolve_latest(scratch, source, output.packageId, output.location)
+           && output.location != nullptr
+           && block_cache::load_header(output.location->latestPath,
+                                       output.packageId,
+                                       output.location->patchIndex,
+                                       scratch,
+                                       output.header)
+           && entryIndex < output.header.entryCount
+           && table_cache::entry_record(
+               scratch, output.location->latestPath, output.header, entryIndex, output.entry);
 }
 
 } // namespace
@@ -134,29 +174,11 @@ bool read_tag_class(const Source& source,
                     std::uint32_t tag,
                     std::uint32_t& classId) noexcept {
     classId = 0;
-    if (tag < layout::kTagBase) {
+    LocatedEntry located{};
+    if (!locate_entry(source, scratch, tag, located)) {
         return false;
     }
-    const std::uint32_t handle = tag - layout::kTagBase;
-    const auto packageId = static_cast<std::uint16_t>(handle >> layout::kTagEntryBits);
-    const std::uint32_t entryIndex = handle & layout::kTagEntryMask;
-
-    const PackageLocation* location = nullptr;
-    if (!resolve_latest(scratch, source.directory, packageId, location) || location == nullptr) {
-        return false;
-    }
-    Header header{};
-    if (!block_cache::load_header(
-            location->latestPath, packageId, location->patchIndex, scratch, header)
-        || entryIndex >= header.entryCount) {
-        return false;
-    }
-
-    layout::EntryRecord entry{};
-    if (!table_cache::entry_record(scratch, location->latestPath, header, entryIndex, entry)) {
-        return false;
-    }
-    classId = entry.reference;
+    classId = located.entry.reference;
     return true;
 }
 
@@ -167,23 +189,19 @@ bool read_tag(const Source& source,
               std::vector<std::byte>& output,
               std::uint32_t& classId) noexcept {
     output.clear();
-    if (source.keys == nullptr || !read_tag_class(source, scratch, tag, classId)) {
+    if (source.keys == nullptr) {
         return false;
     }
-    const std::uint32_t handle = tag - layout::kTagBase;
-    const auto packageId = static_cast<std::uint16_t>(handle >> layout::kTagEntryBits);
-    const std::uint32_t entryIndex = handle & layout::kTagEntryMask;
-    const PackageLocation* location = nullptr;
-    Header header{};
-    layout::EntryRecord entry{};
-    if (!resolve_latest(scratch, source.directory, packageId, location) || location == nullptr
-        || !block_cache::load_header(
-            location->latestPath, packageId, location->patchIndex, scratch, header)
-        || entryIndex >= header.entryCount
-        || !table_cache::entry_record(scratch, location->latestPath, header, entryIndex, entry)) {
+    classId = 0;
+    LocatedEntry located{};
+    if (!locate_entry(source, scratch, tag, located)) {
         return false;
     }
-    const layout::EntryPlacement placement = layout::placement(entry);
+    classId = located.entry.reference;
+    const std::uint16_t packageId = located.packageId;
+    const PackageLocation* location = located.location;
+    const Header& header = located.header;
+    const layout::EntryPlacement placement = layout::placement(located.entry);
     if (placement.size == 0) {
         return false;
     }
@@ -203,8 +221,14 @@ bool read_tag(const Source& source,
             return false;
         }
         std::span<const std::byte> plaintext;
-        const bool decoded =
-            load_block(location->stem, packageId, record, *source.keys, nonce, scratch, plaintext);
+        const bool decoded = load_block(location->stem,
+                                        packageId,
+                                        source.installedOnly,
+                                        record,
+                                        *source.keys,
+                                        nonce,
+                                        scratch,
+                                        plaintext);
         if (!decoded) {
             return false;
         }

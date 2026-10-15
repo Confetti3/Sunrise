@@ -6,8 +6,6 @@
 namespace sunrise::client::content::activity::sdk_generation::decode_plans::internal {
 namespace {
 
-/** Candidate offsets of the block chain marker inside a reflection record. */
-constexpr std::array<std::uint32_t, 4> kMarkerOffsets{0x58, 0x60, 0x68, 0x70};
 /** Reflection record header: length at 0, struct size at 20, alignment, kind, generic flag. */
 constexpr std::uint64_t kSizeAt = 20;
 constexpr std::uint64_t kAlignmentAt = 24;
@@ -21,44 +19,6 @@ constexpr std::size_t kPackagePropertiesAt = 80;
 constexpr std::size_t kPackageCodecHeader = 32;
 constexpr std::size_t kPackagePropertyHeader = 24;
 constexpr std::size_t kPropertyRowSize = 12;
-
-/** Header size and row stride of each reflection block class. */
-struct BlockLayout final {
-    std::uint32_t header{};
-    std::uint32_t stride{};
-};
-
-/**
- * Looks up the header size and row stride of one reflection block class.
- * @return False for an unknown block class.
- */
-[[nodiscard]] bool block_layout(std::uint32_t kind, BlockLayout& output) noexcept {
-    switch (kind) {
-    case kCodecBlock:
-        output = {0x28, 0x28};
-        return true;
-    case kPropertyBlock:
-        output = {0x20, 0x0C};
-        return true;
-    case kMethodBlock:
-        output = {0x10, 0x08};
-        return true;
-    case kTailBlock:
-        output = {0x18, 0x00};
-        return true;
-    default:
-        return false;
-    }
-}
-
-template <typename T>
-[[nodiscard]] bool read_at(std::span<const std::byte> bytes, std::size_t at, T& value) noexcept {
-    if (at > bytes.size() || bytes.size() - at < sizeof(T)) {
-        return false;
-    }
-    std::memcpy(&value, bytes.data() + at, sizeof(T));
-    return true;
-}
 
 /** Reads one 40-byte field descriptor from the executable. */
 [[nodiscard]] bool read_field(const Image& image, std::uint64_t at, Field& field) noexcept {
@@ -136,20 +96,17 @@ read_property(std::span<const std::byte> blob, std::size_t at, Property& propert
 /**
  * Parses one bound reflection record: header, generic argument, codec and property blocks.
  * @param image Mapped executable.
- * @param handle Bound handle the record belongs to.
  * @param address Record address from the slot index.
  * @param output Receives the record on success.
  * @param error Receives the refusal name on failure.
  * @return False when the record is malformed or unreadable.
  */
 bool parse_native(const Image& image,
-                  std::uint32_t handle,
                   std::uint64_t address,
                   Metadata& output,
                   const char*& error) noexcept {
     try {
         Metadata record{};
-        record.handle = handle;
         std::uint32_t length = 0;
         std::uint8_t genericFlag = 0;
         if (!image.u32(address, length) || !image.u32(address + kSizeAt, record.size)
@@ -208,7 +165,6 @@ bool parse_native(const Image& image,
                 }
                 Codec& codec = record.codec;
                 codec.present = true;
-                codec.handle = handle;
                 if (!image.u32(address + cursor + 20, codec.original)
                     || !image.u32(address + cursor + 24, codec.serialized)
                     || !image.u32(address + cursor + 28, codec.flags)
@@ -278,7 +234,6 @@ bool parse_package(std::uint32_t handle,
     try {
         Metadata record{};
         record.package = true;
-        record.handle = handle;
         std::uint8_t genericFlag = 0;
         if (blob.size() < kPackageMinimumSize || !read_at(blob, kSizeAt, record.size)
             || !read_at(blob, kAlignmentAt, record.alignment)
@@ -320,7 +275,6 @@ bool parse_package(std::uint32_t handle,
                 return false;
             }
             codec.present = true;
-            codec.handle = handle;
             codec.fields.resize(static_cast<std::size_t>(count));
             for (std::size_t index = 0; index < codec.fields.size(); ++index) {
                 if (!read_field(blob,
@@ -386,7 +340,7 @@ const Metadata* Store::get(std::uint32_t handle, const char*& error) noexcept {
         Metadata record{};
         const auto slot = image_.slots().find(handle);
         if (slot != image_.slots().end()) {
-            if (!parse_native(image_, handle, slot->second, record, error)) {
+            if (!parse_native(image_, slot->second, record, error)) {
                 return nullptr;
             }
         } else {
@@ -445,7 +399,7 @@ namespace {
         }
         repeat = codec.array;
     }
-    const std::uint64_t table = store.image().image_base() + kPrimitiveSizeTableRva;
+    const std::uint64_t table = store.image().primitive_sizes();
     for (std::uint64_t index = 0; index < repeat; ++index) {
         for (std::size_t fieldIndex = 0; fieldIndex < codec.fields.size(); ++fieldIndex) {
             const Field& field = codec.fields[fieldIndex];

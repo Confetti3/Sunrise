@@ -4,7 +4,7 @@
 
 namespace sunrise::client::hooks::egress::dns {
 
-/** Blocks an ANSI DNS query. */
+/** Answers an ANSI DNS query from the local loopback name; address literals pass through. */
 DNS_STATUS WINAPI query_a(PCSTR name,
                           WORD type,
                           DWORD options,
@@ -12,7 +12,7 @@ DNS_STATUS WINAPI query_a(PCSTR name,
                           PDNS_RECORD* results,
                           PVOID* reserved) noexcept;
 
-/** Blocks a wide DNS query. */
+/** Answers a wide DNS query from the local loopback name; address literals pass through. */
 DNS_STATUS WINAPI query_w(PCWSTR name,
                           WORD type,
                           DWORD options,
@@ -20,7 +20,7 @@ DNS_STATUS WINAPI query_w(PCWSTR name,
                           PDNS_RECORD* results,
                           PVOID* reserved) noexcept;
 
-/** Blocks a UTF-8 DNS query. */
+/** Answers a UTF-8 DNS query from the local loopback name; address literals pass through. */
 DNS_STATUS WINAPI query_utf8(PCSTR name,
                              WORD type,
                              DWORD options,
@@ -28,7 +28,7 @@ DNS_STATUS WINAPI query_utf8(PCSTR name,
                              PDNS_RECORD* results,
                              PVOID* reserved) noexcept;
 
-/** Blocks an extended DNS query. */
+/** Answers an extended DNS query from the local loopback name; address literals pass through. */
 DNS_STATUS WINAPI query_ex(PDNS_QUERY_REQUEST request,
                            PDNS_QUERY_RESULT results,
                            PDNS_QUERY_CANCEL cancel) noexcept;

@@ -69,11 +69,6 @@ struct RuntimeEventPayloadCodecContext final {
 [[nodiscard]] SimulationEventPayloadCodec
 make_runtime_event_payload_codec(const RuntimeEventPayloadCodecContext& context) noexcept;
 
-/** Finds one unique named event in the pinned published SDK. */
-[[nodiscard]] bool resolve_runtime_event(const ActorCommandCatalog& catalog,
-                                         std::string_view name,
-                                         RuntimeEventIdentity& output) noexcept;
-
 /** Encodes a command event, including the target EntityToken and selected command body. */
 [[nodiscard]] bool
 encode_actor_message_event(const ActorCommandCatalog& catalog,

@@ -9,24 +9,6 @@
 namespace sunrise::client::content::activity::sdk_generation::lua_artifacts::internal {
 namespace {
 
-using Field = std::pair<std::string_view, std::string_view>;
-
-void sort_keys(Value::Object& value) {
-    std::sort(value.begin(), value.end(), [](const auto& first, const auto& second) {
-        return first.first < second.first;
-    });
-}
-
-[[nodiscard]] Value field_map(std::initializer_list<Field> source) {
-    Value::Object output;
-    output.reserve(source.size());
-    for (const auto& [name, type] : source) {
-        output.push_back({std::string(name), string(type)});
-    }
-    sort_keys(output);
-    return object(std::move(output));
-}
-
 /** Builds one projection row: its surface, view, artifact, sections and coverage. */
 [[nodiscard]] Value projection(std::string_view surface,
                                std::string_view viewName,

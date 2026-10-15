@@ -13,6 +13,7 @@ std::string_view g_lastFailedSignature{};
 /** Clears the content commit marker before invalidating any target table. */
 void clear_groups() noexcept {
     config_getter::clear();
+    package_path::clear();
     packages::clear();
     assert_handler::clear();
     retail_log::clear();
@@ -104,6 +105,12 @@ bool resolve(std::span<const patterns::ImageRange> image) noexcept {
     config_getter::Targets configGetterTargets;
     if (config_getter::derive(image, configGetterTargets)) {
         config_getter::publish(configGetterTargets);
+    }
+    // Only mod packages need it. When a mod serves a file,
+    // package_path::install reports a missing target.
+    package_path::Targets packagePathTargets;
+    if (package_path::derive(image, packagePathTargets)) {
+        package_path::publish(packagePathTargets);
     }
     return true;
 }

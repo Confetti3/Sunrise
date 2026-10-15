@@ -362,8 +362,9 @@ Status publish(const wchar_t* stage,
         }
         return Status::rollbackFailure;
     }
-    if ((!hadOutput || remove_tree(backup)) && DeleteFileW(committed.c_str()) != FALSE) {
-        return Status::ready;
+    // The commit is done. A leftover backup or marker is finished by `recover` next time.
+    if (!hadOutput || remove_tree(backup)) {
+        (void)DeleteFileW(committed.c_str());
     }
     return Status::ready;
 }

@@ -47,15 +47,12 @@ void release(PauseGate& gate) noexcept;
 inline constexpr unsigned kIngressPauseAttempts = 1'000'000'000;
 
 /**
- * Takes an armed gate and says whether this call must pause. The spin must stay in the caller:
- * detour removal refuses while a thread sits inside the protected body, and the test needs that,
- * so parking the thread in another function would let removal succeed.
+ * Takes an armed gate and says whether this call must pause. The spin must stay in the caller and
+ * read `released` inline: detour removal refuses only while a thread sits inside the protected
+ * body, so a spin that calls out of it lets removal succeed.
  * @return True when this call is the one to hold.
  */
 [[nodiscard]] bool consume_arm(PauseGate& gate) noexcept;
-
-/** @param gate Gate being held. @return True while the holder must keep spinning. */
-[[nodiscard]] bool held(const PauseGate& gate) noexcept;
 #endif
 
 } // namespace sunrise::client::hooks::network::quiescence

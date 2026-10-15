@@ -4,19 +4,6 @@
 #include "replacements.h"
 
 namespace sunrise::client::hooks::egress::winsock::transmission {
-namespace {
-
-/**
- * Sets a fixed byte count before a blocked overlapped send returns.
- * @param bytes Optional caller-owned byte count.
- */
-void clear_bytes(LPDWORD bytes) noexcept {
-    if (bytes != nullptr) {
-        *bytes = 0;
-    }
-}
-
-} // namespace
 
 /** Sends contiguous bytes to a connected exact IPv4 redirect target. */
 int WSAAPI send_bytes(SOCKET socket, const char* buffer, int length, int flags) noexcept {

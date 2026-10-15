@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "activity_sdk_generation_worker_internal.h"
+#include "activity_sdk_lua_artifacts_internal.h"
 
 namespace sunrise::client::content::activity::sdk_generation::worker_internal {
 namespace {
@@ -71,30 +72,6 @@ void append_format(std::string& output, const char* format, auto... values) {
         output.append(buffer.data(),
                       (std::min)(static_cast<std::size_t>(length), buffer.size() - 1));
     }
-}
-
-/** Converts an extracted trigger name into a declaration key. */
-[[nodiscard]] std::string lua_constant(std::string_view value) {
-    std::string output;
-    bool separator = false;
-    for (const unsigned char byte : value) {
-        if (std::isalnum(byte) != 0) {
-            if (separator && !output.empty()) {
-                output.push_back('_');
-            }
-            output.push_back(static_cast<char>(std::toupper(byte)));
-            separator = false;
-        } else {
-            separator = true;
-        }
-    }
-    if (output.empty()) {
-        output = "UNNAMED";
-    }
-    if (std::isdigit(static_cast<unsigned char>(output.front())) != 0) {
-        output.insert(output.begin(), '_');
-    }
-    return output;
 }
 
 } // namespace
@@ -206,7 +183,7 @@ bool build_world_source(const catalog::Snapshot& snapshot,
                           instance.shapeIndex,
                           static_cast<unsigned>(instance.active));
             for (const std::string_view name : instanceNames) {
-                std::string key = lua_constant(name);
+                std::string key = lua_artifacts::internal::identifier(name, true);
                 const std::string base = key;
                 std::uint32_t suffix = 1;
                 while (std::any_of(constants.begin(), constants.end(), [&key](const auto& entry) {

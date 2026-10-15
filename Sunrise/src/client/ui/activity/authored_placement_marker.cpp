@@ -69,13 +69,6 @@ std::shared_ptr<const PublishedRows> published_rows() noexcept {
     return copy;
 }
 
-/** Replaces the published rows. A null value drops them. */
-void set_published_rows(std::shared_ptr<const PublishedRows> rows) noexcept {
-    AcquireSRWLockExclusive(&g_lock);
-    g_publishedRows = std::move(rows);
-    ReleaseSRWLockExclusive(&g_lock);
-}
-
 /** @return The selected page and whether a marker-owning page drew in this ImGui frame. */
 PageVisibility page_visibility(int frame) noexcept {
     PageVisibility output{};

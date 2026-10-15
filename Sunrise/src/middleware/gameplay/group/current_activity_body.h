@@ -9,14 +9,6 @@ namespace sunrise::middleware::gameplay::group::current_activity {
 
 /** Bits one non-empty body occupies. Nothing after the last field is written. */
 inline constexpr std::size_t kBodyBits = 117;
-/** First bit of the biased launch reason, counted from the body's root bit. */
-inline constexpr std::size_t kReasonBitOffset = 1;
-/** First bit of the biased actual-activity index, counted from the body's root bit. */
-inline constexpr std::size_t kActualActivityIndexBitOffset = 5;
-/** First bit of the biased active-activity index, counted from the body's root bit. */
-inline constexpr std::size_t kActivityIndexBitOffset = 17;
-/** First bit of the 64-bit nonce, counted from the body's own root bit. */
-inline constexpr std::size_t kNonceBitOffset = 32;
 /** Logical sentinel encoded as zero in the bias-1 activity-index field. */
 inline constexpr std::int16_t kAbsentActivityIndex = -1;
 /** Largest logical activity index the 12-bit bias-1 field can carry. */

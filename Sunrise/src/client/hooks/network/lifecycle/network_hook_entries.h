@@ -8,9 +8,9 @@ namespace sunrise::client::hooks::network::lifecycle {
 
 using GameSpecs = std::array<hooking::detour::Spec, kGameSlots.size()>;
 using PlatformSpecs = std::array<hooking::detour::Spec, kPlatformSlots.size()>;
-using GameProtectedEntries = std::array<hooking::detour::ProtectedCodeEntry, kGameSlots.size() + 2>;
-using PlatformProtectedEntries =
-    std::array<hooking::detour::ProtectedCodeEntry, kPlatformSlots.size() + 2>;
+/** Ingress and egress; the replacement bodies are guarded as the .srguard span. */
+using GameProtectedEntries = std::array<hooking::detour::ProtectedCodeEntry, 2>;
+using PlatformProtectedEntries = std::array<hooking::detour::ProtectedCodeEntry, 2>;
 
 /** @return Game target and body pairs, in slot order. */
 [[nodiscard]] GameSpecs game_specs() noexcept;
@@ -18,10 +18,10 @@ using PlatformProtectedEntries =
 /** @return Platform target and body pairs, in slot order. */
 [[nodiscard]] PlatformSpecs platform_specs() noexcept;
 
-/** @return The game replacement, ingress and egress bodies kept safe at detach. */
+/** @return The ingress and egress bodies kept safe at detach. */
 [[nodiscard]] GameProtectedEntries game_protected_entries() noexcept;
 
-/** @return The platform replacement, ingress and egress bodies kept safe at detach. */
+/** @return The ingress and egress bodies kept safe at detach. */
 [[nodiscard]] PlatformProtectedEntries platform_protected_entries() noexcept;
 
 } // namespace sunrise::client::hooks::network::lifecycle

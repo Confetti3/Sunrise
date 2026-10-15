@@ -2,7 +2,9 @@
 
 #include <Windows.h>
 
+#include <array>
 #include <cstddef>
+#include <cstdio>
 #include <cstring>
 #include <limits>
 #include <string_view>
@@ -47,6 +49,13 @@ constexpr ULONGLONG kFileTimeTicksPerSecond = 10'000'000ULL;
 constexpr ULONGLONG kMinimumStaleAgeSeconds = 60ULL * 60ULL;
 /** The age threshold is converted once into the native FILETIME tick unit. */
 constexpr ULONGLONG kMinimumStaleAgeTicks = kMinimumStaleAgeSeconds * kFileTimeTicksPerSecond;
+/** Writer suffix; parse_owner reads the same three uppercase ids. */
+constexpr wchar_t kWriterSuffixFormat[] = L".%08lX.%08lX.%08lX.tmp";
+/** Holds the 31-character writer suffix and its terminator. */
+constexpr std::size_t kWriterSuffixCapacity = 64;
+
+/** Keeps sibling names from one thread distinct. */
+volatile LONG g_sequence{};
 
 /**
  * Converts one uppercase hex path character to its value.
@@ -214,6 +223,20 @@ parse_owner(std::wstring_view finalName, std::wstring_view candidate, DWORD& pro
 }
 
 } // namespace
+
+/** Builds a writer-owned sibling name: final.process.thread.sequence.tmp. */
+bool temporary_sibling(std::wstring_view finalPath, Buffer& output) noexcept {
+    std::array<wchar_t, kWriterSuffixCapacity> suffix{};
+    const int length = std::swprintf(suffix.data(),
+                                     suffix.size(),
+                                     kWriterSuffixFormat,
+                                     GetCurrentProcessId(),
+                                     GetCurrentThreadId(),
+                                     static_cast<unsigned long>(InterlockedIncrement(&g_sequence)));
+    return length > 0 && static_cast<std::size_t>(length) < suffix.size()
+           && assign(output, finalPath)
+           && append(output, std::wstring_view(suffix.data(), static_cast<std::size_t>(length)));
+}
 
 /** Publishes one complete sibling while open delete-sharing readers keep the old file. */
 bool publish_sibling(const wchar_t* temporaryPath, const wchar_t* finalPath) noexcept {

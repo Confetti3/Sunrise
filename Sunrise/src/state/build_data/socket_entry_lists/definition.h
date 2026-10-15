@@ -10,13 +10,6 @@ namespace sunrise::state::build_data::socket_entry_lists {
 inline constexpr std::size_t kDefinitionCapacity = 32768;
 /** One item-instance record has 36 socket-entry state lanes. */
 inline constexpr std::size_t kEntryCapacity = 36;
-/** Native state 0 marks a socket entry whose plug source is absent. */
-inline constexpr std::uint8_t kAbsentEntryState = 0;
-/** Native state 16 marks an initial socket entry whose plug source is available. */
-inline constexpr std::uint8_t kReadyEntryState = 16;
-
-/** Native state 18 marks a socket entry the character has selected. */
-inline constexpr std::uint8_t kActiveEntryState = 18;
 /** Entry kind of the super lane, which is active although it carries no plug source. */
 inline constexpr std::uint8_t kSuperEntryKind = 34;
 /** Group value of an entry that competes in no bucket. */

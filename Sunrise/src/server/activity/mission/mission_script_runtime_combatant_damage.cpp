@@ -8,34 +8,6 @@ namespace sunrise::server::activity::mission {
 namespace {
 
 /**
- * Retains each combatant under its complete authored slot identity.
- * @param rows Watch table the source belongs to.
- * @param key Exact accepted source.
- * @return The matching or newly allocated observation, or null at capacity.
- */
-[[nodiscard]] CombatantDamageObservation*
-find_combatant_damage(std::span<CombatantDamageObservation> rows,
-                      const host::SenseObservationKey& key) noexcept {
-    CombatantDamageObservation* spare = nullptr;
-    for (auto& row : rows) {
-        if (row.used && row.registryKey == key.registryKey && row.objectTag == key.objectTag
-            && row.slotIndex == key.slotIndex) {
-            return &row;
-        }
-        if (!row.used && spare == nullptr) {
-            spare = &row;
-        }
-    }
-    if (spare != nullptr) {
-        spare->registryKey = key.registryKey;
-        spare->objectTag = key.objectTag;
-        spare->slotIndex = key.slotIndex;
-        spare->used = true;
-    }
-    return spare;
-}
-
-/**
  * Raises one damageState event for a level that just changed, and logs it.
  * @param key Row identity; an entity-sourced row has no object tag or Sense schema to publish.
  * @param source "sense" or "entity", for the log only.
@@ -106,8 +78,7 @@ void push_combatant_damage_edges(RuntimeInstance& instance,
             || observation.valueCount > sense.valueCount - observation.firstValue) {
             continue;
         }
-        auto* const row =
-            find_combatant_damage(instance.combatantDamageObservations, observation.key);
+        auto* const row = find_slot_row(instance.combatantDamageObservations, observation.key);
         if (row == nullptr) {
             log_line(core::log::Level::warn, &instance, "combatant_damage", "watch_capacity");
             continue;
@@ -140,7 +111,7 @@ void push_entity_damage(RuntimeInstance& instance,
     key.senseSchema = 0;
     key.slotIndex = slotIndex;
     key.slotType = slotType;
-    auto* const row = find_combatant_damage(instance.entityDamageObservations, key);
+    auto* const row = find_slot_row(instance.entityDamageObservations, key);
     if (row == nullptr) {
         log_line(core::log::Level::warn, &instance, "combatant_damage", "watch_capacity");
         return;

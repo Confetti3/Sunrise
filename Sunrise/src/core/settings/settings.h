@@ -37,6 +37,11 @@ struct Settings {
      * Completes released exotic weapon catalysts while resolving client item state.
      */
     bool completeExoticCatalysts{true};
+    /**
+     * Lets Sunrise Studio attach. Its links are shared memory in the session namespace, so only a
+     * process in this Windows session can reach them; there is no network path.
+     */
+    bool studioAttach{false};
     /** Core-owned sink and channel policy. */
     log::Settings logging;
     /** Core-owned boot gate for activity SDK generation. */

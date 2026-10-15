@@ -7,8 +7,12 @@
 #include "retail_log_enqueue_observer.h"
 
 namespace sunrise::client::hooks::retail_log {
+namespace {
 
 SRWLOCK g_lock{SRWLOCK_INIT};
+
+} // namespace
+
 hooking::detour::Handle g_handle{};
 
 /** Installs the game retail-log capture hook. */

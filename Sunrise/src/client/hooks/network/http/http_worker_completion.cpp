@@ -11,8 +11,6 @@ namespace {
 
 /** Request state 2 makes the worker report a finished HTTP result. */
 constexpr LONG kRequestComplete = 2;
-/** Returning 5 makes the worker skip the native external operation. */
-constexpr std::int64_t kSkipNativeOperation = 5;
 /** HTTP 503 finishes a blocked request without contacting a server. */
 constexpr std::uint32_t kHttpUnavailable = 503;
 

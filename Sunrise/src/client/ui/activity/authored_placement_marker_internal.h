@@ -27,9 +27,6 @@ struct PageVisibility final {
 /** @return The rows the active browser page published, or null when it published none. */
 [[nodiscard]] std::shared_ptr<const PublishedRows> published_rows() noexcept;
 
-/** Replaces the published rows. A null value drops them. */
-void set_published_rows(std::shared_ptr<const PublishedRows> rows) noexcept;
-
 /** @return The selected page and whether a marker-owning page drew in this ImGui frame. */
 [[nodiscard]] PageVisibility page_visibility(int frame) noexcept;
 

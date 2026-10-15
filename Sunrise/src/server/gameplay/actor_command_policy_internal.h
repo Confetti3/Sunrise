@@ -17,7 +17,7 @@ decode_event(const middleware::gameplay::external::ActorCommandCatalog& catalog,
              const middleware::gameplay::external::SimulationEventRecord& record,
              middleware::gameplay::external::DecodedRuntimeEvent& output) noexcept;
 
-/** @return True after the session-aware entity transport owns a valid SDK catalog. */
+/** @return True while the transport owns the current SDK catalog and its decoder cache. */
 [[nodiscard]] bool entity_transport_ready() noexcept;
 
 /** Removes peer callbacks and clears every retained channel-2 baseline. */

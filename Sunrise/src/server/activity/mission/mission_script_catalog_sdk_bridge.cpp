@@ -519,6 +519,30 @@ activity_owned_range(const format::Activity& activity,
 }
 
 /**
+ * Maps one owned tag kind to the shared tag section it reads.
+ * @param output Receives the shared kind; the first kind when the owned kind is unknown.
+ * @return False for binding locators, which are not tags.
+ */
+[[nodiscard]] bool shared_tag_kind(lua_vm::CatalogActivityOwnedKind kind,
+                                   lua_vm::ActivityBindingTagKind& output) noexcept {
+    output = {};
+    switch (kind) {
+    case lua_vm::CatalogActivityOwnedKind::activityRootCandidateTags:
+        output = lua_vm::ActivityBindingTagKind::activityRootCandidates;
+        break;
+    case lua_vm::CatalogActivityOwnedKind::scenarioNameCandidateTags:
+        output = lua_vm::ActivityBindingTagKind::scenarioNameCandidates;
+        break;
+    case lua_vm::CatalogActivityOwnedKind::evidenceRootTags:
+        output = lua_vm::ActivityBindingTagKind::evidenceRoots;
+        break;
+    case lua_vm::CatalogActivityOwnedKind::bindingLocators:
+        return false;
+    }
+    return true;
+}
+
+/**
  * Bounds-checks one owned activity range against the section it indexes.
  * @param output Receives the range; cleared when the generation is stale or the range is invalid.
  * @return False when the row, the kind or the range does not fit the bound catalog.
@@ -548,17 +572,7 @@ resolve_activity_owned_range(const void* context,
     }
     if (kind != lua_vm::CatalogActivityOwnedKind::bindingLocators) {
         lua_vm::ActivityBindingTagKind sharedKind{};
-        switch (kind) {
-        case lua_vm::CatalogActivityOwnedKind::activityRootCandidateTags:
-            sharedKind = lua_vm::ActivityBindingTagKind::activityRootCandidates;
-            break;
-        case lua_vm::CatalogActivityOwnedKind::scenarioNameCandidateTags:
-            sharedKind = lua_vm::ActivityBindingTagKind::scenarioNameCandidates;
-            break;
-        case lua_vm::CatalogActivityOwnedKind::evidenceRootTags:
-            sharedKind = lua_vm::ActivityBindingTagKind::evidenceRoots;
-            break;
-        case lua_vm::CatalogActivityOwnedKind::bindingLocators:
+        if (!shared_tag_kind(kind, sharedKind)) {
             return false;
         }
         const auto tags = activity_binding_tags(*view->catalog, *activity, sharedKind);
@@ -588,20 +602,7 @@ resolve_activity_owned_range(const void* context,
     const format::Activity* const activity =
         view == nullptr ? nullptr : selected_row(view->catalog->activities(), activityRow);
     lua_vm::ActivityBindingTagKind sharedKind{};
-    switch (kind) {
-    case lua_vm::CatalogActivityOwnedKind::activityRootCandidateTags:
-        sharedKind = lua_vm::ActivityBindingTagKind::activityRootCandidates;
-        break;
-    case lua_vm::CatalogActivityOwnedKind::scenarioNameCandidateTags:
-        sharedKind = lua_vm::ActivityBindingTagKind::scenarioNameCandidates;
-        break;
-    case lua_vm::CatalogActivityOwnedKind::evidenceRootTags:
-        sharedKind = lua_vm::ActivityBindingTagKind::evidenceRoots;
-        break;
-    case lua_vm::CatalogActivityOwnedKind::bindingLocators:
-        return false;
-    }
-    if (activity == nullptr) {
+    if (!shared_tag_kind(kind, sharedKind) || activity == nullptr) {
         return false;
     }
     const auto tags = activity_binding_tags(*view->catalog, *activity, sharedKind);

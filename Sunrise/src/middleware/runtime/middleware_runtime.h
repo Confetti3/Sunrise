@@ -2,10 +2,10 @@
 
 namespace sunrise::middleware {
 
-/** Initializes protocol middleware state. */
+/** Loads the named package catalog on first boot when State has no complete cache. */
 [[nodiscard]] bool initialize() noexcept;
 
-/** Clears protocol middleware state. */
+/** Releases nothing; State owns the generated content cache. */
 void shutdown() noexcept;
 
 } // namespace sunrise::middleware

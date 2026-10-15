@@ -96,13 +96,4 @@ rewards(const Definition& definition, std::span<Reward> output, std::size_t& cou
 /** @return Number of generated record definitions, read under the lock. */
 [[nodiscard]] std::size_t count() noexcept;
 
-/** @return The objective bank row count, read under the lock. */
-[[nodiscard]] std::size_t objective_count() noexcept;
-
-/** @return The interval bank row count, read under the lock. */
-[[nodiscard]] std::size_t interval_count() noexcept;
-
-/** @return The reward bank row count, read under the lock. */
-[[nodiscard]] std::size_t reward_count() noexcept;
-
 } // namespace sunrise::state::build_data::records

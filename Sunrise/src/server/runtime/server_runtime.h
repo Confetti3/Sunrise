@@ -7,6 +7,9 @@ namespace sunrise::server {
 /** Starts the in-process server surface. */
 [[nodiscard]] bool initialize() noexcept;
 
+/** Starts the server clock after the game activates its network hooks. */
+void start_service() noexcept;
+
 /** Runs one bounded server service slice. @param now Monotonic tick count. */
 void service(std::uint64_t now) noexcept;
 

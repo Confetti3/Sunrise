@@ -19,6 +19,7 @@
 #include "../../../core/filesystem/path.h"
 #include "../../../core/logging/log.h"
 #include "../../../core/ui/busy/busy.h"
+#include "../../../middleware/content/packages/reader/overlay.h"
 #include "../../../state/activity_sdk/generated_world/catalog_manifest.h"
 #include "../../../state/activity_sdk/generated_world/codec.h"
 #include "../../../state/activity_sdk/generated_world/store.h"
@@ -27,6 +28,7 @@
 #include "../../../state/activity_sdk/runtime.h"
 #include "../../../state/build_data/runtime.h"
 #include "../../../state/content_manifest/content_manifest_state_runtime.h"
+#include "../../../state/gameplay/external/rsat_decode_plans.h"
 #include "../items/packages/internal.h"
 #include "../scenarios/scenario_build.h"
 #include "activity_sdk_activity_inventory.h"
@@ -56,27 +58,24 @@ constexpr std::wstring_view kSdkDirectorySuffix = L"\\sdk";
 constexpr std::wstring_view kScenarioDirectorySuffix = L"\\sdk\\scenarios";
 constexpr std::wstring_view kCatalogFileSuffix = L"\\sdk\\catalog.bin";
 constexpr std::wstring_view kPackFileSuffix = L"\\activity_sdk.pack";
-constexpr std::wstring_view kShardExtension = L".pack";
 // Wait this long before probing package data again.
 constexpr ULONGLONG kPackageWaitMs = 1'000;
 /** A small batch bounds complete snapshots retained while parallel work finishes. */
 constexpr std::size_t kScenarioBatchSize = 24;
 
 using worker::binding_ready;
+using worker::build_installed_tables;
 using worker::build_inventory;
 using worker::build_scenarios;
 using worker::build_world_source;
-using worker::convert_binding_completeness;
 using worker::find_record;
 using worker::kDetailCapacity;
-using worker::load_full_record;
 using worker::load_record;
 using worker::publish_estate;
 using worker::publish_progress;
 using worker::record_name_matches;
 using worker::Scenario;
 using worker::ScenarioBuildResult;
-using worker::shard_path;
 using worker::Work;
 
 SRWLOCK g_lock{SRWLOCK_INIT};
@@ -137,17 +136,6 @@ void log_stage_duration(std::string_view stage,
     }
 }
 
-/** Copies the selected installed-content identity while the manifest owns its view. */
-[[nodiscard]] bool copy_fingerprint(void* opaque,
-                                    const state::content_manifest::View& view) noexcept {
-    if (opaque == nullptr || view.buildFingerprint.size() != generated::Digest{}.size()) {
-        return false;
-    }
-    auto& output = *static_cast<generated::Digest*>(opaque);
-    std::copy(view.buildFingerprint.begin(), view.buildFingerprint.end(), output.begin());
-    return true;
-}
-
 /** Accepts an existing directory or creates one exact owned child. */
 [[nodiscard]] bool ensure_directory(const std::wstring& path) noexcept {
     if (path.empty()) {
@@ -201,17 +189,13 @@ void log_stage_duration(std::string_view stage,
 /** Copies the package-reader inputs into one work item. */
 [[nodiscard]] bool prepare_work(Work& work) noexcept {
     try {
-        return state::content_manifest::visit_snapshot(&copy_fingerprint, &work.sourceFingerprint)
+        // The installed identity; mods never change it.
+        return state::content_manifest::installed_fingerprint(work.sourceFingerprint)
                && items::packages::collect_keys(work.keys);
     } catch (...) {
         SecureZeroMemory(&work.keys, sizeof work.keys);
         return false;
     }
-}
-
-/** Adapts the process-wide cancellation flag to the inventory builder callback. */
-[[nodiscard]] bool inventory_cancelled(void*) noexcept {
-    return cancelled();
 }
 
 /** Copies one terminal pass result before worker-owned storage is released. */
@@ -245,17 +229,21 @@ DWORD WINAPI thread_main(void* opaque) noexcept {
     // Outlives the shard build, because the reported detail can point into it.
     std::array<char, kDetailCapacity> detailScratch{};
     try {
-        const package_reader::Source source{work->packageDirectory, &work->keys};
+        // The SDK is built from installed packages only. Mods ship their own Lua bindings.
+        const package_reader::Source source{work->packageDirectory, &work->keys, true};
         publish_progress(state::activity_sdk::generation::Status::preparing,
                          0,
                          static_cast<std::uint32_t>(
                              middleware::content::packages::tables::kActivityDefinitionCount),
                          0,
                          "building installed activity inventory");
+        // The layouts and names State publishes include mod packages whenever a mod serves one.
+        const bool modded = !package_reader::overlay::files().empty();
+        bool layoutsReady = modded ? build_installed_tables(*work, source)
+                                   : state::build_data::scenario_layouts_ready();
         // The game normally publishes these layouts during boot. An isolated generation
         // process has no boot worker, but container and spatial extraction still need them.
-        bool layoutsReady = state::build_data::scenario_layouts_ready();
-        if (work->offline && !layoutsReady) {
+        if (!modded && work->offline && !layoutsReady) {
             auto scratch = std::make_unique<package_reader::Scratch>();
             // Offline layout extraction has a finite work limit.
             constexpr std::size_t kMaximumLayoutSteps = 10'000;
@@ -267,7 +255,9 @@ DWORD WINAPI thread_main(void* opaque) noexcept {
         }
         bool inventoried = layoutsReady && build_inventory(*work, source);
         if (!inventoried) {
-            failureDetail = layoutsReady ? "inventory_incomplete" : "scenario_layouts_unavailable";
+            failureDetail = layoutsReady ? "inventory_incomplete"
+                                         : (modded ? "installed_tables_failed"
+                                                   : "scenario_layouts_unavailable");
         }
 
         const std::uint32_t total = static_cast<std::uint32_t>(work->scenarios.size());
@@ -279,9 +269,9 @@ DWORD WINAPI thread_main(void* opaque) noexcept {
         // The container sweep does not depend on the scenario. Sweeping it inside the loop read
         // the whole install once per scenario and kept one stem's worth of it.
         builder::ContainerIndex containers{};
-        // Shards built against an empty index drop every container placement, so a failed
-        // sweep must fail the pass instead of silently degrading the output.
-        const bool containersReady = builder::build_container_index(source, containers, &cancelled);
+        // Missing containers must not become a complete authoritative SDK.
+        const bool containersReady =
+            builder::build_complete_container_index(source, containers, &cancelled);
         publish_progress(state::activity_sdk::generation::Status::building,
                          0,
                          total,
@@ -327,8 +317,9 @@ DWORD WINAPI thread_main(void* opaque) noexcept {
                 if (!result.attempted || !result.ready || result.snapshot == nullptr) {
                     complete = false;
                     failureScenario = scenario.tag;
+                    detailScratch = result.detail;
                     failureDetail =
-                        result.detail[0] != '\0' ? result.detail.data() : "shard_build_failed";
+                        detailScratch[0] != '\0' ? detailScratch.data() : "shard_build_failed";
                     break;
                 }
                 built += result.reused ? 0U : 1U;
@@ -625,10 +616,10 @@ void service() noexcept {
         const state::activity_sdk::Snapshot loaded = state::activity_sdk::snapshot();
         generated::Digest fingerprint{};
         manifest::SdkIdentity identity{};
-        const bool hasIdentity =
-            loaded && loaded->sdk_build_sha256().size() == identity.buildSha256.size()
-            && loaded->payload_sha256().size() == identity.payloadSha256.size()
-            && state::content_manifest::visit_snapshot(&copy_fingerprint, &fingerprint);
+        const bool hasIdentity = loaded
+                                 && loaded->sdk_build_sha256().size() == identity.buildSha256.size()
+                                 && loaded->payload_sha256().size() == identity.payloadSha256.size()
+                                 && state::content_manifest::installed_fingerprint(fingerprint);
         if (hasIdentity) {
             std::copy(loaded->sdk_build_sha256().begin(),
                       loaded->sdk_build_sha256().end(),
@@ -637,12 +628,27 @@ void service() noexcept {
                       loaded->payload_sha256().end(),
                       identity.payloadSha256.begin());
         }
-        const bool current =
-            hasIdentity
+        // compatible_catalog names its own refusal and clears the name when it accepts.
+        const char* rejected = "identity";
+        bool preserveCurrent = false;
+        const bool currentIdentity = hasIdentity && final_sdk_identity(fingerprint, identity)
+                                     && std::equal(fingerprint.begin(),
+                                                   fingerprint.end(),
+                                                   loaded->content_key_sha256().begin(),
+                                                   loaded->content_key_sha256().end());
+        if (currentIdentity
             && shard_store::compatible_catalog(
-                g_catalogPath.c_str(), g_scenarioDirectory, fingerprint, identity)
-            && (!g_luaDeclarations || lua::is_current(g_sdkDirectory.c_str(), *loaded));
-        if (current) {
+                g_catalogPath.c_str(), g_scenarioDirectory, fingerprint, identity, rejected)) {
+            rejected = g_luaDeclarations && !lua::is_current(g_sdkDirectory.c_str(), *loaded)
+                           ? "lua_stale"
+                           : nullptr;
+            if (rejected == nullptr
+                && !state::gameplay::rsat_decode_plans::valid_installed_pair(*loaded)) {
+                rejected = "decoder_stale";
+                preserveCurrent = true;
+            }
+        }
+        if (rejected == nullptr) {
             g_started = true;
             publish_progress(state::activity_sdk::generation::Status::ready,
                              0,
@@ -652,7 +658,13 @@ void service() noexcept {
             ReleaseSRWLockExclusive(&g_lock);
             return;
         }
-        state::activity_sdk::shutdown();
+        core::log::writef(core::log::Channel::client,
+                          core::log::Level::info,
+                          "ev=activity_sdk_generation stage=reuse result=rejected reason=%s",
+                          rejected);
+        if (!preserveCurrent) {
+            state::activity_sdk::shutdown();
+        }
     }
     auto* work = new (std::nothrow) Work();
     if (work == nullptr) {
@@ -689,10 +701,12 @@ void service() noexcept {
         return;
     }
     core::path::Buffer packageDirectory;
-    const bool ready = work->module != nullptr && !work->sdkDirectory.empty()
-                       && !work->packPath.empty() && state::build_data::scenario_layouts_ready()
-                       && items::packages::package_directory(packageDirectory)
-                       && prepare_work(*work);
+    // Shards keep identifier names, so wait for layouts, spawn sets and the hash-name table.
+    const bool ready =
+        work->module != nullptr && !work->sdkDirectory.empty() && !work->packPath.empty()
+        && state::build_data::scenario_layouts_ready() && state::build_data::spawn_sets_ready()
+        && state::build_data::hash_names_ready()
+        && items::packages::package_directory(packageDirectory) && prepare_work(*work);
     if (ready) {
         try {
             work->packageDirectory.assign(packageDirectory.chars.data(), packageDirectory.length);
@@ -782,7 +796,7 @@ bool load_cached_scenario(std::uint32_t scenarioTag,
         return false;
     }
     generated::Digest fingerprint{};
-    if (!state::content_manifest::visit_snapshot(&copy_fingerprint, &fingerprint)) {
+    if (!state::content_manifest::installed_fingerprint(fingerprint)) {
         return false;
     }
     try {

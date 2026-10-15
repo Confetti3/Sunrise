@@ -10,6 +10,7 @@
 #include "../../../middleware/bap/activity_message/mission_effect_auth.h"
 #include "../../../middleware/bap/activity_message/squad_attachment_auth.h"
 #include "../../../middleware/bap/activity_message/volume_toggle_auth.h"
+#include "mission_script_lua_dispatch.h"
 #include "mission_script_lua_internal.h"
 
 namespace sunrise::server::activity::mission::lua_vm::detail {
@@ -90,6 +91,7 @@ namespace auth_catalog = middleware::bap::activity_message::auth_schema_catalog;
     try {
         intent.authBody.assign(body.begin(), body.end());
     } catch (const std::bad_alloc&) {
+        frame.intentAllocationFailed = true;
         return luaL_error(state, "mission Auth body allocation failed");
     }
     return queue_intent(state, frame, intent);
@@ -103,20 +105,32 @@ namespace auth_catalog = middleware::bap::activity_message::auth_schema_catalog;
     return value;
 }
 
+namespace {
+
+constexpr const api::MemberSpec& kVolumeActive = api::slot_member("set_volume_active");
+constexpr const api::MemberSpec& kSquadAttachment = api::slot_member("set_squad_attachment");
+constexpr const api::MemberSpec& kMissionEffect = api::slot_member("set_mission_effect");
+
+/** Reads one required boolean argument; any other type is an error. */
+[[nodiscard]] bool required_boolean(lua_State* state, const char* name) {
+    lua_getfield(state, 2, name);
+    if (!lua_isboolean(state, -1)) {
+        luaL_error(state, "%s must be a boolean", name);
+    }
+    const bool value = lua_toboolean(state, -1) != 0;
+    lua_pop(state, 1);
+    return value;
+}
+
 /** Turns one authored type-60 volume of the same object on or off through its type-32 toggle. */
 [[nodiscard]] int slot_set_volume_active(lua_State* state) {
     const auto* const handle =
         static_cast<const SlotHandle*>(luaL_checkudata(state, 1, kSlotMetatable));
-    // Only these named arguments belong to this API.
-    static constexpr std::array<std::string_view, 2> kDeclared{"volume", "active"};
-    refuse_unknown_arguments(state, kDeclared);
-    const SlotHandle target = checked_argument<SlotHandle>(state, "volume", kSlotMetatable);
-    lua_getfield(state, 2, "active");
-    if (!lua_isboolean(state, -1)) {
-        return luaL_error(state, "active must be a boolean");
-    }
-    const bool active = lua_toboolean(state, -1) != 0;
-    lua_pop(state, 1);
+    refuse_unknown_arguments(state, kVolumeActive);
+    const SlotHandle target = checked_argument<SlotHandle>(
+        state, required_key(kVolumeActive, "volume", api::ValueKind::handle), kSlotMetatable);
+    const bool active =
+        required_boolean(state, required_key(kVolumeActive, "active", api::ValueKind::boolean));
     SlotDefinition source{}, volume{};
     if (!current_slot(state, *handle, source) || !current_slot(state, target, volume)) {
         return luaL_error(state, "toggle or volume is stale or invalid");
@@ -152,18 +166,13 @@ namespace auth_catalog = middleware::bap::activity_message::auth_schema_catalog;
 [[nodiscard]] int slot_set_squad_attachment(lua_State* state) {
     const auto* const handle =
         static_cast<const SlotHandle*>(luaL_checkudata(state, 1, kSlotMetatable));
-    // Only these named arguments belong to this API.
-    static constexpr std::array<std::string_view, 3> kDeclared{
-        "source", "spawn_generation", "active"};
-    refuse_unknown_arguments(state, kDeclared);
-    const SlotHandle sourceHandle = checked_argument<SlotHandle>(state, "source", kSlotMetatable);
-    const lua_Integer generation = checked_integer_argument(state, "spawn_generation");
-    lua_getfield(state, 2, "active");
-    if (!lua_isboolean(state, -1)) {
-        return luaL_error(state, "active must be a boolean");
-    }
-    const bool active = lua_toboolean(state, -1) != 0;
-    lua_pop(state, 1);
+    refuse_unknown_arguments(state, kSquadAttachment);
+    const SlotHandle sourceHandle = checked_argument<SlotHandle>(
+        state, required_key(kSquadAttachment, "source", api::ValueKind::handle), kSlotMetatable);
+    const lua_Integer generation = checked_integer_argument(
+        state, required_key(kSquadAttachment, "spawn_generation", api::ValueKind::integer));
+    const bool active =
+        required_boolean(state, required_key(kSquadAttachment, "active", api::ValueKind::boolean));
     SlotDefinition target{}, source{};
     if (!current_slot(state, *handle, target) || !current_slot(state, sourceHandle, source)) {
         return luaL_error(state, "attachment or squad source is stale or invalid");
@@ -195,27 +204,28 @@ namespace auth_catalog = middleware::bap::activity_message::auth_schema_catalog;
     namespace effect = middleware::bap::activity_message::mission_effect;
     const auto* const handle =
         static_cast<const SlotHandle*>(luaL_checkudata(state, 1, kSlotMetatable));
-    // Only these named arguments belong to this API.
-    static constexpr std::array<std::string_view, 3> kDeclared{"filter", "enabled", "revision"};
-    refuse_unknown_arguments(state, kDeclared);
+    refuse_unknown_arguments(state, kMissionEffect);
     SlotDefinition slot{};
     if (!current_slot(state, *handle, slot) || slot.slotType != effect::kSlotType
         || slot.authSchema != effect::kSchema) {
         return luaL_error(state, "mission effect requires an authored type-26 hop-on");
     }
-    const bool enabled = optional_boolean_argument(state, "enabled", true);
+    const bool enabled =
+        optional_boolean_argument(state, boolean_option(kMissionEffect, "enabled"));
+    const char* const filterKey = optional_key(kMissionEffect, "filter", api::ValueKind::handle);
     scriptable_auth::Type2LaneClientRef filter{};
     if (enabled) {
-        lua_getfield(state, 2, "filter");
+        lua_getfield(state, 2, filterKey);
         const bool present = !lua_isnil(state, -1);
         lua_pop(state, 1);
         if (!present
             || !optional_slot_reference(
-                state, "filter", scriptable_auth::kType34SlotType, filter)) {
+                state, filterKey, scriptable_auth::kType34SlotType, filter)) {
             return luaL_error(state, "mission effect requires a type-34 filter");
         }
     }
-    const lua_Integer revision = optional_integer_argument(state, "revision", 1);
+    const lua_Integer revision =
+        optional_integer_argument(state, integer_option(kMissionEffect, "revision"));
     if (!valid_counter(revision)) {
         return luaL_error(state, "effect revision must be positive");
     }
@@ -227,6 +237,160 @@ namespace auth_catalog = middleware::bap::activity_message::auth_schema_catalog;
     return queue_slot_auth(state, slot, effect::kSchema, effect::kBits, body);
 }
 
+/** Pushes one property of the slot's Auth catalog entry, or nil when it has none. */
+template <typename Push> void push_auth(lua_State* state, const SlotDefinition& slot, Push push) {
+    const auth_catalog::Type* const auth =
+        auth_catalog::find(static_cast<std::uint8_t>(slot.slotType), slot.authSchema);
+    if (auth == nullptr) {
+        lua_pushnil(state);
+    } else {
+        push(*auth);
+    }
+}
+
+/** Pushes one fixed-size text field of a slot row. */
+template <typename Text> void push_text(lua_State* state, const Text& text) {
+    lua_pushlstring(state, text.data(), text.size());
+}
+
+using SlotBinding = Binding<SlotDefinition>;
+
+/** Slot members in table order. play_sequence takes the actor form on an exact combatant. */
+constexpr std::array<SlotBinding, std::size(api::kSlotMembers)> kSlotBindings{{
+    {"row",
+     nullptr,
+     [](lua_State* state, const SlotDefinition& slot) { lua_pushinteger(state, slot.localRow); }},
+    {"applied", &slot_applied},
+    {"id",
+     nullptr,
+     [](lua_State* state, const SlotDefinition& slot) { push_text(state, slot.id); }},
+    {"name",
+     nullptr,
+     [](lua_State* state, const SlotDefinition& slot) { push_text(state, slot.name); }},
+    {"object_id",
+     nullptr,
+     [](lua_State* state, const SlotDefinition& slot) { push_text(state, slot.objectId); }},
+    {"object_tag",
+     nullptr,
+     [](lua_State* state, const SlotDefinition& slot) { lua_pushinteger(state, slot.objectTag); }},
+    {"registry_key",
+     nullptr,
+     [](lua_State* state, const SlotDefinition& slot) {
+         lua_pushinteger(state, slot.registryKey);
+     }},
+    {"slot_index",
+     nullptr,
+     [](lua_State* state, const SlotDefinition& slot) { lua_pushinteger(state, slot.slotIndex); }},
+    {"slot_type",
+     nullptr,
+     [](lua_State* state, const SlotDefinition& slot) { lua_pushinteger(state, slot.slotType); }},
+    {"component_class",
+     nullptr,
+     [](lua_State* state, const SlotDefinition& slot) {
+         lua_pushinteger(state, slot.componentClass);
+     }},
+    {"sense_schema",
+     nullptr,
+     [](lua_State* state, const SlotDefinition& slot) {
+         lua_pushinteger(state, slot.senseSchema);
+     }},
+    {"auth_schema",
+     nullptr,
+     [](lua_State* state, const SlotDefinition& slot) { lua_pushinteger(state, slot.authSchema); }},
+    {"sense_schema_id",
+     nullptr,
+     [](lua_State* state, const SlotDefinition& slot) { push_text(state, slot.senseSchemaId); }},
+    {"auth_schema_id",
+     nullptr,
+     [](lua_State* state, const SlotDefinition& slot) { push_text(state, slot.authSchemaId); }},
+    {"auth_type",
+     nullptr,
+     [](lua_State* state, const SlotDefinition& slot) {
+         push_auth(state, slot, [state](const auth_catalog::Type& auth) {
+             lua_pushlstring(state, auth.name.data(), auth.name.size());
+         });
+     }},
+    {"auth_min_bits",
+     nullptr,
+     [](lua_State* state, const SlotDefinition& slot) {
+         push_auth(state, slot, [state](const auth_catalog::Type& auth) {
+             lua_pushinteger(state, auth.minimumBits);
+         });
+     }},
+    {"auth_max_bits",
+     nullptr,
+     [](lua_State* state, const SlotDefinition& slot) {
+         push_auth(state, slot, [state](const auth_catalog::Type& auth) {
+             lua_pushinteger(state, auth.maximumBits);
+         });
+     }},
+    {"auth_component_offset",
+     nullptr,
+     [](lua_State* state, const SlotDefinition& slot) {
+         push_auth(state, slot, [state](const auth_catalog::Type& auth) {
+             if (auth.hasContiguousMirror) {
+                 lua_pushinteger(state, auth.componentOffset);
+             } else {
+                 lua_pushnil(state);
+             }
+         });
+     }},
+    {"auth_dynamic",
+     nullptr,
+     [](lua_State* state, const SlotDefinition& slot) {
+         push_auth(state, slot, [state](const auth_catalog::Type& auth) {
+             lua_pushboolean(state, auth.hasDynamicBody);
+         });
+     }},
+    {"auth_writable",
+     nullptr,
+     [](lua_State* state, const SlotDefinition& slot) {
+         push_auth(state, slot, [state](const auth_catalog::Type& auth) {
+             lua_pushboolean(state, auth.writable);
+         });
+     }},
+    {"flags",
+     nullptr,
+     [](lua_State* state, const SlotDefinition& slot) { lua_pushinteger(state, slot.flags); }},
+    {"set_object_filter", &slot_set_object_filter},
+    {"set_volume_active", &slot_set_volume_active},
+    {"set_squad_attachment", &slot_set_squad_attachment},
+    {"set_mission_effect", &slot_set_mission_effect},
+    {"watch_damage", &slot_watch_damage},
+    {"set_object_active", &slot_set_object_active},
+    {"set_channel", &slot_set_channel},
+    {"transition", &slot_transition},
+    {"set_occupancy_condition", &slot_set_occupancy_condition},
+    {"generate_map", &slot_generate_map},
+    {"set_directive", &slot_set_directive},
+    {"clear_directives", &slot_clear_directives},
+    {"set_darkness_zone", &slot_set_darkness_zone},
+    {"set_music_section", &slot_set_music_section},
+    {"set_interactable_object", &slot_set_interactable_object},
+    {"set_ghost_link", &slot_set_ghost_link},
+    {"ghost_link", &slot_ghost_link},
+    {"set_public_event_state", &slot_set_public_event_state},
+    {"assign_combat_objective", &slot_assign_combat_objective},
+    {"play_actor_path", &slot_play_actor_path},
+    {"play_actor_action", &slot_play_actor_action},
+    {"retire_actor", &slot_retire_actor},
+    {"bind_combatant_to_squad", &slot_bind_combatant_to_squad},
+    {"run_atoms", &slot_run_atoms},
+    {"fire_trigger", &slot_fire_trigger},
+    {"disarm_trigger", &slot_disarm_trigger},
+    {"play_sequence", &slot_play_actor_sequence, nullptr, &exact_combatant_slot},
+    {"play_sequence", &slot_play_sequence},
+    {"sequences", &slot_actor_sequences},
+    {"set_cinematic_active", &slot_set_cinematic_active},
+    {"reset_objectives", &slot_reset_objectives},
+    {"advance_task", &slot_advance_task},
+    {"play_dialogue_cue", &slot_play_dialogue_cue},
+    {"play_performance", &slot_play_performance},
+}};
+static_assert(bound_to<SlotDefinition>(api::kSlotMembers, kSlotBindings));
+
+} // namespace
+
 /** Reads one Slot row member, its syntax methods, and its authorized actions. */
 [[nodiscard]] int slot_index(lua_State* state) {
     const auto* const handle =
@@ -235,133 +399,7 @@ namespace auth_catalog = middleware::bap::activity_message::auth_schema_catalog;
     if (!current_slot(state, *handle, definition)) {
         return luaL_error(state, "activity slot is stale");
     }
-    const std::string_view key = lua_string_view(state, 2);
-    if (key == "row") {
-        lua_pushinteger(state, definition.localRow);
-    } else if (key == "applied") {
-        lua_pushcfunction(state, &slot_applied);
-    } else if (key == "id") {
-        lua_pushlstring(state, definition.id.data(), definition.id.size());
-    } else if (key == "name") {
-        lua_pushlstring(state, definition.name.data(), definition.name.size());
-    } else if (key == "object_id") {
-        lua_pushlstring(state, definition.objectId.data(), definition.objectId.size());
-    } else if (key == "object_tag") {
-        lua_pushinteger(state, definition.objectTag);
-    } else if (key == "registry_key") {
-        lua_pushinteger(state, definition.registryKey);
-    } else if (key == "slot_index") {
-        lua_pushinteger(state, definition.slotIndex);
-    } else if (key == "slot_type") {
-        lua_pushinteger(state, definition.slotType);
-    } else if (key == "component_class") {
-        lua_pushinteger(state, definition.componentClass);
-    } else if (key == "sense_schema") {
-        lua_pushinteger(state, definition.senseSchema);
-    } else if (key == "auth_schema") {
-        lua_pushinteger(state, definition.authSchema);
-    } else if (key == "sense_schema_id") {
-        lua_pushlstring(state, definition.senseSchemaId.data(), definition.senseSchemaId.size());
-    } else if (key == "auth_schema_id") {
-        lua_pushlstring(state, definition.authSchemaId.data(), definition.authSchemaId.size());
-    } else if (key == "auth_type" || key == "auth_min_bits" || key == "auth_max_bits"
-               || key == "auth_component_offset" || key == "auth_dynamic"
-               || key == "auth_writable") {
-        const auth_catalog::Type* const auth = auth_catalog::find(
-            static_cast<std::uint8_t>(definition.slotType), definition.authSchema);
-        if (auth == nullptr) {
-            lua_pushnil(state);
-        } else if (key == "auth_type") {
-            lua_pushlstring(state, auth->name.data(), auth->name.size());
-        } else if (key == "auth_min_bits") {
-            lua_pushinteger(state, auth->minimumBits);
-        } else if (key == "auth_max_bits") {
-            lua_pushinteger(state, auth->maximumBits);
-        } else if (key == "auth_component_offset") {
-            if (auth->hasContiguousMirror) {
-                lua_pushinteger(state, auth->componentOffset);
-            } else {
-                lua_pushnil(state);
-            }
-        } else if (key == "auth_dynamic") {
-            lua_pushboolean(state, auth->hasDynamicBody);
-        } else {
-            lua_pushboolean(state, auth->writable);
-        }
-    } else if (key == "flags") {
-        lua_pushinteger(state, definition.flags);
-    } else if (key == "set_object_filter") {
-        lua_pushcfunction(state, &slot_set_object_filter);
-    } else if (key == "set_volume_active") {
-        lua_pushcfunction(state, &slot_set_volume_active);
-    } else if (key == "set_squad_attachment") {
-        lua_pushcfunction(state, &slot_set_squad_attachment);
-    } else if (key == "set_mission_effect") {
-        lua_pushcfunction(state, &slot_set_mission_effect);
-    } else if (key == "watch_damage") {
-        lua_pushcfunction(state, &slot_watch_damage);
-    } else if (key == "set_object_active") {
-        lua_pushcfunction(state, &slot_set_object_active);
-    } else if (key == "set_channel") {
-        lua_pushcfunction(state, &slot_set_channel);
-    } else if (key == "transition") {
-        lua_pushcfunction(state, &slot_transition);
-    } else if (key == "set_occupancy_condition") {
-        lua_pushcfunction(state, &slot_set_occupancy_condition);
-    } else if (key == "generate_map") {
-        lua_pushcfunction(state, &slot_generate_map);
-    } else if (key == "set_directive") {
-        lua_pushcfunction(state, &slot_set_directive);
-    } else if (key == "clear_directives") {
-        lua_pushcfunction(state, &slot_clear_directives);
-    } else if (key == "set_darkness_zone") {
-        lua_pushcfunction(state, &slot_set_darkness_zone);
-    } else if (key == "set_music_section") {
-        lua_pushcfunction(state, &slot_set_music_section);
-    } else if (key == "set_interactable_object") {
-        lua_pushcfunction(state, &slot_set_interactable_object);
-    } else if (key == "set_ghost_link") {
-        lua_pushcfunction(state, &slot_set_ghost_link);
-    } else if (key == "ghost_link") {
-        lua_pushcfunction(state, &slot_ghost_link);
-    } else if (key == "set_public_event_state") {
-        lua_pushcfunction(state, &slot_set_public_event_state);
-    } else if (key == "assign_combat_objective") {
-        lua_pushcfunction(state, &slot_assign_combat_objective);
-    } else if (key == "play_actor_path") {
-        lua_pushcfunction(state, &slot_play_actor_path);
-    } else if (key == "play_actor_action") {
-        lua_pushcfunction(state, &slot_play_actor_action);
-    } else if (key == "retire_actor") {
-        lua_pushcfunction(state, &slot_retire_actor);
-    } else if (key == "bind_combatant_to_squad") {
-        lua_pushcfunction(state, &slot_bind_combatant_to_squad);
-    } else if (key == "run_atoms") {
-        lua_pushcfunction(state, &slot_run_atoms);
-    } else if (key == "fire_trigger") {
-        lua_pushcfunction(state, &slot_fire_trigger);
-    } else if (key == "disarm_trigger") {
-        lua_pushcfunction(state, &slot_disarm_trigger);
-    } else if (key == "play_sequence") {
-        lua_pushcfunction(state,
-                          exact_combatant_slot(definition) ? &slot_play_actor_sequence
-                                                           : &slot_play_sequence);
-    } else if (key == "sequences") {
-        lua_pushcfunction(state, &slot_actor_sequences);
-    } else if (key == "set_cinematic_active") {
-        lua_pushcfunction(state, &slot_set_cinematic_active);
-    } else if (key == "reset_objectives") {
-        lua_pushcfunction(state, &slot_reset_objectives);
-    } else if (key == "advance_task") {
-        lua_pushcfunction(state, &slot_advance_task);
-    } else if (key == "play_dialogue_cue") {
-        lua_pushcfunction(state, &slot_play_dialogue_cue);
-    } else if (key == "play_performance") {
-        lua_pushcfunction(state, &slot_play_performance);
-    } else {
-        lua_pushnil(state);
-    }
-    return 1;
+    return dispatch<SlotDefinition>(state, kSlotBindings, lua_string_view(state, 2), definition);
 }
 
 void register_slot_metatables(lua_State* state) {

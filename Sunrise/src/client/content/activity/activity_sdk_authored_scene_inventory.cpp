@@ -4,8 +4,10 @@
 #include <array>
 #include <cstdio>
 #include <cstring>
+#include <span>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "../../../core/logging/log.h"
 #include "../../../middleware/content/packages/tables/slot_descriptor_reader.h"
@@ -48,7 +50,7 @@ read_value(std::span<const std::byte> blob, std::size_t offset, Value& output) n
     return true;
 }
 
-/** Names the guard that refused one type-42 sensor, so one run can say why an idle has no state. */
+/** Logs the outcome of one type-42 sensor edge: the refusing guard, or `ready`. */
 void log_performance_edge(const squad::DescriptorFact& descriptor, const char* result) noexcept {
     std::array<char, 176> line{};
     const int written =
@@ -143,6 +145,71 @@ read_gate_table(std::span<const std::byte> blob, std::size_t& rows, std::uint64_
     }
     rows = header + 16U;
     return rows <= blob.size() && count <= (blob.size() - rows) / format::kAuthoredSceneGateRowSize;
+}
+
+/**
+ * Collects every port a graph block fires, ascending and unique.
+ * @param blob Graph bytes.
+ * @param graphTag Tag every connection list of the graph opens with.
+ * @param gateLists Offsets of the gates' own connection lists, which name waiting blocks instead.
+ * @param output Receives the fired ports.
+ * @return False when a connection list does not fit the graph.
+ */
+[[nodiscard]] bool fired_ports(std::span<const std::byte> blob,
+                               std::uint32_t graphTag,
+                               std::span<const std::size_t> gateLists,
+                               std::vector<std::uint32_t>& output) {
+    output.clear();
+    for (std::size_t offset = 0; contains(
+             blob, offset, format::kAuthoredSceneConnectionSingleOffset + sizeof(std::int32_t));
+         offset += sizeof(std::uint32_t)) {
+        std::uint32_t owner = 0;
+        std::uint32_t classId = 0;
+        if (!read_value(blob, offset, owner) || owner != graphTag
+            || !read_value(blob, offset + 4U, classId)
+            || classId != format::kAuthoredSceneConnectionClass
+            || std::find(gateLists.begin(), gateLists.end(), offset) != gateLists.end()) {
+            continue;
+        }
+        std::int32_t single = 0;
+        std::uint64_t count = 0;
+        std::int64_t relative = 0;
+        const std::size_t field = offset + format::kAuthoredSceneConnectionListOffset;
+        if (!read_value(blob, offset + format::kAuthoredSceneConnectionSingleOffset, single)
+            || !read_value(blob, offset + format::kAuthoredSceneConnectionCountOffset, count)
+            || !read_value(blob, field, relative)) {
+            return false;
+        }
+        // One target sits inline; -1 means the list carries them.
+        if (single != -1) {
+            output.push_back(static_cast<std::uint32_t>(single));
+            continue;
+        }
+        if (count == 0) {
+            continue;
+        }
+        const auto header = static_cast<std::int64_t>(field) + relative;
+        std::uint64_t repeated = 0;
+        std::uint32_t elementClass = 0;
+        if (header < 0 || !read_value(blob, static_cast<std::size_t>(header), repeated)
+            || repeated != count
+            || !read_value(blob, static_cast<std::size_t>(header) + 8U, elementClass)
+            || elementClass != format::kPackageU32ArrayClass
+            || count > blob.size() / sizeof(std::uint32_t)) {
+            return false;
+        }
+        const std::size_t values = static_cast<std::size_t>(header) + 16U;
+        for (std::uint64_t index = 0; index < count; ++index) {
+            std::uint32_t port = 0;
+            if (!read_value(blob, values + static_cast<std::size_t>(index) * 4U, port)) {
+                return false;
+            }
+            output.push_back(port);
+        }
+    }
+    std::sort(output.begin(), output.end());
+    output.erase(std::unique(output.begin(), output.end()), output.end());
+    return true;
 }
 
 /** Reads one tag once and retains the physical class beside its bytes. */
@@ -278,6 +345,7 @@ read_gate_table(std::span<const std::byte> blob, std::size_t& rows, std::uint64_
         log_scene_graph(descriptor, graphTag, "capacity", core::log::Level::warn);
         return true;
     }
+    std::vector<std::size_t> gateLists;
     for (std::uint64_t gate = 0; gate < count; ++gate) {
         const std::size_t tableRow =
             rows + static_cast<std::size_t>(gate) * format::kAuthoredSceneGateRowSize;
@@ -299,10 +367,12 @@ read_gate_table(std::span<const std::byte> blob, std::size_t& rows, std::uint64_
         std::uint32_t bodyClass = 0;
         std::uint32_t key = 0;
         std::int32_t ordinal = 0;
+        std::uint64_t listeners = 0;
         if (!read_value(blob, element, owner)
             || !read_value(blob, element + format::kAuthoredSceneGateClassOffset, bodyClass)
             || !read_value(blob, element + format::kAuthoredSceneGateKeyOffset, key)
             || !read_value(blob, element + format::kAuthoredSceneGateOrdinalOffset, ordinal)
+            || !read_value(blob, element + format::kAuthoredSceneGateListenerCountOffset, listeners)
             || owner != graphTag || bodyClass != format::kAuthoredSceneGateRowClass || key == 0
             || key == format::kAbsentIndex) {
             output.resize(start);
@@ -320,8 +390,25 @@ read_gate_table(std::span<const std::byte> blob, std::size_t& rows, std::uint64_
         row.gateOffset = static_cast<std::uint32_t>(element);
         row.ordinal = ordinal;
         row.key = key;
-        row.flags = format::kAuthoredSceneEventKeyExact;
+        row.flags = format::kAuthoredSceneEventKeyExact
+                    | (listeners != 0 ? format::kAuthoredSceneEventKeyListened : 0U);
         output.push_back(row);
+        gateLists.push_back(element + format::kAuthoredSceneGateConnectionOffset);
+    }
+    std::vector<std::uint32_t> fired;
+    if (!fired_ports(blob, graphTag, gateLists, fired)) {
+        output.resize(start);
+        log_scene_graph(descriptor, graphTag, "connections", core::log::Level::warn);
+        return true;
+    }
+    // Port k is gate ordinal k, so a block firing port k fires that gate.
+    for (std::size_t index = start; index < output.size(); ++index) {
+        EventKey& row = output[index];
+        if (row.ordinal >= 0
+            && std::binary_search(
+                fired.begin(), fired.end(), static_cast<std::uint32_t>(row.ordinal))) {
+            row.flags |= format::kAuthoredSceneEventKeyFired;
+        }
     }
     return true;
 }

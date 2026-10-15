@@ -440,22 +440,6 @@ bool consume(const client::network::BapRequest& request,
     return success;
 }
 
-/** Checks whether one ActivityClient can accept state-local output for its published roster. */
-ActivityMissionSeedLeaseStatus
-activity_mission_seed_available(const state::activity::SessionBinding& binding,
-                                std::uint32_t scenarioRow,
-                                std::uint64_t expectedGeneration) noexcept {
-    const std::lock_guard lock(g_lock);
-    Session* session = nullptr;
-    std::size_t matchingLinks = 0;
-    ActivityMissionSeedLeaseStatus status =
-        mission_seed_link_locked(binding, scenarioRow, expectedGeneration, session, matchingLinks);
-    if (status == ActivityMissionSeedLeaseStatus::ready && session->activityRosterStaged.staged) {
-        status = ActivityMissionSeedLeaseStatus::outputBusy;
-    }
-    return status;
-}
-
 /** Reads one exact ActivityClient's connection-scoped SDK selected-state roster lease. */
 ActivityMissionSeedLeaseStatus
 activity_mission_seed_lease(const state::activity::SessionBinding& binding,
@@ -649,13 +633,6 @@ activity_authority_reset_snapshot(const state::activity::SessionBinding& binding
                      : ActivityAuthorityResetStatus::staleActivityClient;
     }
     return status;
-}
-
-/** Cancels a pending raw incident while excluding activity-link publication. */
-bool cancel_activity_host_incident(const state::activity::SessionBinding& binding) noexcept {
-    const std::lock_guard lock(g_lock);
-    const bool canceled = server::activity::host::cancel_pending_incident(binding);
-    return canceled;
 }
 
 #if defined(SUNRISE_BAP_FRAME_TEST)

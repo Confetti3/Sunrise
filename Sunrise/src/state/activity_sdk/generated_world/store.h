@@ -27,11 +27,15 @@ enum class RecordLoadStatus : std::uint8_t {
 [[nodiscard]] const manifest::Record* find_record(std::span<const manifest::Record> records,
                                                   std::uint32_t scenarioTag) noexcept;
 
-/** Requires every manifest-owned shard to match the loaded SDK and current extraction format. */
+/**
+ * Requires every manifest-owned shard to match the loaded SDK and current extraction format.
+ * @param reason Receives the log name of the check that refused, or stays null.
+ */
 [[nodiscard]] bool compatible_catalog(const wchar_t* manifestPath,
                                       std::wstring_view scenarioDirectory,
                                       const Digest& expectedSourceFingerprint,
-                                      const manifest::SdkIdentity& expectedSdk) noexcept;
+                                      const manifest::SdkIdentity& expectedSdk,
+                                      const char*& reason) noexcept;
 
 /** Builds the content-addressed path owned by one exact manifest record. */
 [[nodiscard]] bool shard_path(std::wstring_view scenarioDirectory,
@@ -40,7 +44,7 @@ enum class RecordLoadStatus : std::uint8_t {
                               core::path::Buffer& output) noexcept;
 
 /**
- * Reopens one exact manifest record without publishing it through another State namespace.
+ * Reopens one authoritative manifest record with a complete container identity inventory.
  * The returned snapshot is immutable and owns every decoded section for its full lifetime.
  */
 [[nodiscard]] bool load_record(std::wstring_view scenarioDirectory,

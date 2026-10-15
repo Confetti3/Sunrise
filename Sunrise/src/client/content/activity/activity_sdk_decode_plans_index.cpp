@@ -1,50 +1,14 @@
-#include <array>
-
 #include "activity_sdk_decode_plans_internal.h"
 
 namespace sunrise::client::content::activity::sdk_generation::decode_plans::internal {
 namespace {
 
-/** Candidate offsets of the block chain marker inside a reflection record. */
-constexpr std::array<std::uint32_t, 4> kMarkerOffsets{0x58, 0x60, 0x68, 0x70};
 /** Codec block: bound handle at +0x10, serialized size at +0x18, field rows from +0x28. */
 constexpr std::uint64_t kCodecHandleAt = 0x10;
 constexpr std::uint64_t kCodecSerializedAt = 0x18;
 constexpr std::uint64_t kCodecFieldsAt = 0x28;
 /** Bit offset of one field inside its 40-byte row. */
 constexpr std::uint64_t kFieldBitAt = 8;
-
-/**
- * Sizes one reflection block from its class and row count.
- * @param size Receives header plus rows.
- * @return False for an unknown block class.
- */
-[[nodiscard]] bool
-block_size(std::uint32_t kind, std::uint32_t count, std::uint64_t& size) noexcept {
-    std::uint64_t header = 0;
-    std::uint64_t stride = 0;
-    switch (kind) {
-    case kCodecBlock:
-        header = 0x28;
-        stride = 0x28;
-        break;
-    case kPropertyBlock:
-        header = 0x20;
-        stride = 0x0C;
-        break;
-    case kMethodBlock:
-        header = 0x10;
-        stride = 0x08;
-        break;
-    case kTailBlock:
-        header = 0x18;
-        break;
-    default:
-        return false;
-    }
-    size = header + stride * count;
-    return true;
-}
 
 } // namespace
 
@@ -84,16 +48,17 @@ bool build_codec_index(const Image& image,
             while (cursor < length) {
                 std::uint32_t kind = 0;
                 std::uint32_t count = 0;
-                std::uint64_t size = 0;
+                BlockLayout layout{};
                 if (!image.u32(address + cursor + 4, kind)
                     || !image.u32(address + cursor + 8, count)) {
                     error = "record_read";
                     return false;
                 }
-                if (!block_size(kind, count, size)) {
+                if (!block_layout(kind, layout)) {
                     error = "reflection_block_unknown";
                     return false;
                 }
+                const std::uint64_t size = layout.header + std::uint64_t{layout.stride} * count;
                 if (cursor + size > length) {
                     error = "reflection_block_extent";
                     return false;

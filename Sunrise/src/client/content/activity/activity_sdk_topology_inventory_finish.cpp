@@ -63,6 +63,7 @@ bool valid_open_prefix(const Snapshot& output) noexcept {
 namespace {
 
 using detail::byte_less;
+using detail::content_hash;
 using detail::kActivityTopologyJoinMask;
 using detail::kActivityTopologyReadyMask;
 using detail::text_view;
@@ -75,15 +76,6 @@ struct InlineValue final {
     std::uint32_t hash{};
     const std::string* value{};
 };
-
-/** Returns the compact FNV-1 hash used by package-inline names. */
-[[nodiscard]] std::uint32_t content_hash(std::string_view value) noexcept {
-    std::uint32_t hash = 2166136261U;
-    for (const unsigned char byte : value) {
-        hash = (hash * 16777619U) ^ byte;
-    }
-    return hash;
-}
 
 /** Builds the sorted unique inline bank once after every scenario was read. */
 [[nodiscard]] bool build_inline_bank(const Snapshot& source,

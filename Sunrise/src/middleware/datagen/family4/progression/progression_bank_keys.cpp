@@ -5,14 +5,13 @@
 
 #include "../../../../state/build_data/runtime.h"
 #include "../../../../state/unlocks/unlocks_runtime.h"
+#include "../../definitions.h"
 
 namespace sunrise::middleware::datagen::family4::progression {
 namespace {
 
 /** Both replicated banks hold 127 rows. */
 constexpr std::size_t kBankCapacity = 127;
-/** All bits set is the only value the record enumerator treats as an empty slot. */
-constexpr std::uint16_t kEmptyDefinitionIndex = 0xFFFF;
 
 // One lane type serves the authored bank and the native row, so no conversion can lose a lane.
 static_assert(std::is_same_v<layout::Values, state::unlocks::ProgressionLanes>);

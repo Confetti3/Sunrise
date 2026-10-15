@@ -2,6 +2,7 @@
 #include <array>
 #include <cstdint>
 
+#include "mission_script_lua_dispatch.h"
 #include "mission_script_lua_internal.h"
 #include "mission_script_lua_resolve.h"
 #include "mission_script_lua_types.h"
@@ -9,15 +10,52 @@
 namespace sunrise::server::activity::mission::lua_vm::detail {
 namespace {
 
-/** One optional mission cohort holds at most 64 distinct authored squads. */
-constexpr std::size_t kCohortCapacity = 64;
+// One cohort holds the squad count the table allows; the metatable locks its shape.
+constexpr std::size_t kCohortCapacity = static_cast<std::size_t>(api::kCohortCapacity);
 constexpr char kCohortMetatable[] = "sunrise.mission.cohort";
+// The table entry of context:cohort.
+constexpr const api::MemberSpec& kCohort = api::member(api::Receiver::context, "cohort");
 
 /** The handle stores SDK rows, while native Mission State owns all population facts. */
 struct CohortHandle final {
     std::array<std::uint32_t, kCohortCapacity> rows{};
     std::uint8_t count{};
 };
+
+/** The aggregate every cohort member reads. */
+struct CohortTotals final {
+    std::int64_t alive{};
+    bool known{true};
+    bool full{true};
+    std::uint8_t size{};
+};
+
+/** Cohort members in table order. */
+constexpr std::array<Binding<CohortTotals>, std::size(api::kCohortMembers)> kCohortBindings{{
+    {"alive_count",
+     nullptr,
+     [](lua_State* state, const CohortTotals& totals) {
+         if (totals.known) {
+             lua_pushinteger(state, totals.alive);
+         } else {
+             lua_pushnil(state);
+         }
+     }},
+    {"observed_full",
+     nullptr,
+     [](lua_State* state, const CohortTotals& totals) {
+         lua_pushboolean(state, totals.known && totals.full);
+     }},
+    {"cleared",
+     nullptr,
+     [](lua_State* state, const CohortTotals& totals) {
+         lua_pushboolean(state, totals.known && totals.full && totals.alive == 0);
+     }},
+    {"size",
+     nullptr,
+     [](lua_State* state, const CohortTotals& totals) { lua_pushinteger(state, totals.size); }},
+}};
+static_assert(bound_to<CohortTotals>(api::kCohortMembers, kCohortBindings));
 
 /** Aggregates only the current attempt's exact transported squad generations. */
 int cohort_index(lua_State* state) {
@@ -72,23 +110,8 @@ int cohort_index(lua_State* state) {
                && (found->maximumObservedAlive >= found->expectedAlive
                    || found->maximumObservedCreated >= found->expectedAlive);
     }
-    const std::string_view key = lua_string_view(state, 2);
-    if (key == "alive_count") {
-        if (known) {
-            lua_pushinteger(state, alive);
-        } else {
-            lua_pushnil(state);
-        }
-    } else if (key == "observed_full") {
-        lua_pushboolean(state, known && full);
-    } else if (key == "cleared") {
-        lua_pushboolean(state, known && full && alive == 0);
-    } else if (key == "size") {
-        lua_pushinteger(state, handle->count);
-    } else {
-        lua_pushnil(state);
-    }
-    return 1;
+    const CohortTotals totals{alive, known, full, handle->count};
+    return dispatch<CohortTotals>(state, kCohortBindings, lua_string_view(state, 2), totals);
 }
 
 } // namespace
@@ -96,15 +119,14 @@ int cohort_index(lua_State* state) {
 /** Resolves a nonempty group of SDK squads without exposing count bookkeeping to Lua. */
 int context_cohort(lua_State* state) {
     static_cast<void>(luaL_checkudata(state, 1, kContextMetatable));
-    // Only these named arguments belong to this API.
-    static constexpr std::array<std::string_view, 1> kDeclared{"squads"};
-    refuse_unknown_arguments(state, kDeclared);
-    lua_getfield(state, 2, "squads");
+    refuse_unknown_arguments(state, kCohort);
+    lua_getfield(state, 2, required_key(kCohort, "squads", api::ValueKind::list));
     luaL_checktype(state, -1, LUA_TTABLE);
     const int list = lua_gettop(state);
     const std::size_t count = lua_rawlen(state, list);
     if (count == 0 || count > kCohortCapacity) {
-        return luaL_error(state, "cohort needs one to 64 squads");
+        return luaL_error(
+            state, "cohort needs one to %d squads", static_cast<int>(kCohortCapacity));
     }
     std::size_t entries = 0;
     lua_pushnil(state);

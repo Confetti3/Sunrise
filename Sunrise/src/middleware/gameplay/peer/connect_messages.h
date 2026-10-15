@@ -20,7 +20,6 @@ enum class ConnectId : std::uint8_t {
     packetsDiscarded = 4,
     request = 5,
     response = 6,
-    refuse = 7,
     establish = 8,
     closed = 9,
     /** Bounded recovery diagnostic. It sits with the control ids rather than the session ones. */
@@ -28,15 +27,9 @@ enum class ConnectId : std::uint8_t {
 };
 
 /** Declared decoded sizes the registry holds for those ids. Each header must carry its own. */
-inline constexpr std::uint32_t kRequestSize = 96;
 inline constexpr std::uint32_t kResponseSize = 104;
-inline constexpr std::uint32_t kRefuseSize = 12;
 inline constexpr std::uint32_t kEstablishSize = 8;
-inline constexpr std::uint32_t kClosedSize = 12;
-inline constexpr std::uint32_t kPingSize = 24;
 inline constexpr std::uint32_t kPongSize = 24;
-inline constexpr std::uint32_t kPacketsDiscardedSize = 4;
-inline constexpr std::uint32_t kMaydaySize = 10;
 
 /** The pong response kind is two bits wide and its largest named value is 2. */
 inline constexpr std::uint8_t kPongResponseKind = 2;
@@ -94,7 +87,7 @@ struct ConnectEstablish {
     std::uint32_t channelId{};
 };
 
-/** Body of a connect refuse or a connect closed. Only the reason width differs. */
+/** Body of a connect closed. */
 struct ConnectEnd {
     /** Channel id the requester sent. */
     std::uint32_t remoteChannelId{};
@@ -110,19 +103,9 @@ struct ConnectEnd {
 [[nodiscard]] bool write_response(encoding::bits::Writer& writer,
                                   const ConnectResponse& body) noexcept;
 
-/** Reads a connect establish body. @return True when every field was present. */
-[[nodiscard]] bool read_establish(encoding::bits::Reader& reader,
-                                  ConnectEstablish& output) noexcept;
-
 /** Writes a connect establish body. @return True when every field fit. */
 [[nodiscard]] bool write_establish(encoding::bits::Writer& writer,
                                    const ConnectEstablish& body) noexcept;
-
-/** Writes a connect refuse body. @return True when every field fit. */
-[[nodiscard]] bool write_refuse(encoding::bits::Writer& writer, const ConnectEnd& body) noexcept;
-
-/** Writes a connect closed body. @return True when every field fit. */
-[[nodiscard]] bool write_closed(encoding::bits::Writer& writer, const ConnectEnd& body) noexcept;
 
 /** Reads a connect closed body. @return True when every field was present. */
 [[nodiscard]] bool read_closed(encoding::bits::Reader& reader, ConnectEnd& output) noexcept;

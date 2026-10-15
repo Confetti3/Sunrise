@@ -9,6 +9,7 @@ namespace bindings = state::account::settings::bindings;
 
 /** Native keybinding halves use input code 0x74 as the unbound sentinel. */
 constexpr std::uint16_t kUnboundInputCode = 0x0074;
+// TODO: the post-processing seed takes this until its three values have a source.
 /** Seed version 0 lets the client set up local mirrors once after sign-in. */
 constexpr std::int32_t kOpenSeedVersion = 0;
 /**

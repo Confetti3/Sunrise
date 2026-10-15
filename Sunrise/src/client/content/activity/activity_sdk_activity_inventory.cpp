@@ -24,7 +24,6 @@ constexpr std::uint32_t kAbsentTag = 0xFFFFFFFFU;
 /** One effective class-scan identity. */
 struct LiveRoot final {
     std::uint32_t tag{};
-    std::uint32_t classId{};
     std::uint32_t patchIndex{};
 };
 
@@ -70,7 +69,7 @@ private:
     }
     auto& rows = *static_cast<std::vector<LiveRoot>*>(opaque);
     try {
-        rows.push_back({entry.tag, 0, entry.patchIndex});
+        rows.push_back({entry.tag, entry.patchIndex});
         return true;
     } catch (...) {
         return false;
@@ -116,12 +115,9 @@ read_u32(std::span<const std::byte> bytes, std::size_t offset, std::uint32_t& ou
     return true;
 }
 
-[[nodiscard]] bool same_name(const ActivityRoot& root, std::string_view name) noexcept {
-    return root.nameStatus == NameStatus::exact && root.nameLength == name.size()
-           && std::equal(root.name.begin(), root.name.begin() + root.nameLength, name.begin());
-}
-
-[[nodiscard]] bool same_name(const ScenarioRoot& root, std::string_view name) noexcept {
+/** @return True when the root's exact selected name equals `name`. */
+template <typename Root>
+[[nodiscard]] bool same_name(const Root& root, std::string_view name) noexcept {
     return root.nameStatus == NameStatus::exact && root.nameLength == name.size()
            && std::equal(root.name.begin(), root.name.begin() + root.nameLength, name.begin());
 }
@@ -186,17 +182,14 @@ template <typename Root>
     }
 }
 
-/** Scans one exact class and stamps the class omitted by the visitor shape. */
-[[nodiscard]] bool scan_live(std::wstring_view directory,
+/** Scans one exact class and requires every match to be copied. */
+[[nodiscard]] bool scan_live(const reader::Source& source,
                              std::uint32_t classId,
                              std::vector<LiveRoot>& rows) noexcept {
     const std::size_t first = rows.size();
     reader::ScanResult result{};
-    if (!reader::scan_class_entries(directory, classId, &collect_live_root, &rows, result)) {
+    if (!reader::scan_class_entries(source, classId, &collect_live_root, &rows, result)) {
         return false;
-    }
-    for (std::size_t index = first; index < rows.size(); ++index) {
-        rows[index].classId = classId;
     }
     return result.matches == rows.size() - first;
 }
@@ -484,16 +477,16 @@ bool build(const reader::Source& source,
         std::vector<LiveRoot> liveScenarios{};
         std::vector<NamedCandidate> names{};
         reader::release_caches();
-        if (!scan_live(source.directory, kActivityRootClass, liveActivityRoots)
+        if (!scan_live(source, kActivityRootClass, liveActivityRoots)
             || is_cancelled(cancel, cancelContext)
-            || !scan_live(source.directory, tables::kScenarioClass, liveScenarios)
+            || !scan_live(source, tables::kScenarioClass, liveScenarios)
             || !unique_sorted_live(liveActivityRoots) || !unique_sorted_live(liveScenarios)
             || is_cancelled(cancel, cancelContext)) {
             return false;
         }
         named_tags::DirectoryResult namedResult{};
         if (!named_tags::extract_directory(
-                source.directory, &collect_named_root, &names, namedResult)
+                source.directory, source.installedOnly, &collect_named_root, &names, namedResult)
             || is_cancelled(cancel, cancelContext)) {
             return false;
         }
